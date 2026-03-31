@@ -1,0 +1,231 @@
+# ─────────────────────────────────────────────
+# api-deployment.yaml
+# Kubernetes manifest for Sandbox FastAPI App
+#
+# Apply:  kubectl apply -f api-deployment.yaml
+# Delete: kubectl delete -f api-deployment.yaml
+# ─────────────────────────────────────────────
+
+---
+# 1. Namespace — isolate all resources
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: sandbox
+  labels:
+    app: sandbox-api
+
+---
+# 2. ConfigMap — non-sensitive environment config
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sandbox-api-config
+  namespace: sandbox
+data:
+  PYTHONUNBUFFERED: "1"
+  APP_ENV: "production"
+  PORT: "8000"
+
+---
+# 3. Secret — sensitive credentials (base64 encoded)
+#    Encode value:  echo -n "your_key_here" | base64
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sandbox-api-secret
+  namespace: sandbox
+type: Opaque
+data:
+  E2B_API_KEY: ""   # echo -n "your_e2b_key" | base64
+
+---
+# 4. Deployment — runs the FastAPI app
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sandbox-api
+  namespace: sandbox
+  labels:
+    app: sandbox-api
+    version: "1.0.0"
+spec:
+  replicas: 1                          # run 2 pods for high availability
+  selector:
+    matchLabels:
+      app: sandbox-api
+  strategy:
+    type: RollingUpdate                # zero-downtime deploys
+    rollingUpdate:
+      maxSurge: 1                      # one extra pod during update
+      maxUnavailable: 0                # never go below desired replicas
+  template:
+    metadata:
+      labels:
+        app: sandbox-api
+        version: "1.0.0"
+    spec:
+      # ── Security context ──────────────────
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+
+      # ── Containers ────────────────────────
+      containers:
+        - name: sandbox-api
+          image: fastapi:1.0.0         # your local Docker image
+          imagePullPolicy: Never       # use local image, never pull from registry
+
+          ports:
+            - containerPort: 8000
+              protocol: TCP
+
+          # ── Environment variables ──────────
+          envFrom:
+            - configMapRef:
+                name: sandbox-api-config
+          env:
+            - name: E2B_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: sandbox-api-secret
+                  key: E2B_API_KEY
+                  optional: true       # won't crash if secret is empty
+
+          # ── Health checks ──────────────────
+          livenessProbe:               # restart pod if app hangs
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 5
+            failureThreshold: 3
+
+          readinessProbe:              # only send traffic when ready
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+
+          startupProbe:                # give app time to start up
+            httpGet:
+              path: /health
+              port: 8000
+            failureThreshold: 10
+            periodSeconds: 5
+
+          # ── Resource limits ────────────────
+          resources:
+            requests:
+              cpu: "100m"              # 0.1 CPU core
+              memory: "128Mi"
+            limits:
+              cpu: "500m"              # 0.5 CPU core
+              memory: "256Mi"
+
+          # ── Security ───────────────────────
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          # ── Writable tmp volume ────────────
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
+      # ── Restart policy ────────────────────
+      restartPolicy: Always
+
+      # ── Spread pods across nodes ──────────
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: kubernetes.io/hostname
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              app: sandbox-api
+
+---
+# 5. Service — stable internal ClusterIP endpoint
+apiVersion: v1
+kind: Service
+metadata:
+  name: sandbox-api-service
+  namespace: sandbox
+  labels:
+    app: sandbox-api
+spec:
+  selector:
+    app: sandbox-api
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80                         # external port
+      targetPort: 8000                 # container port
+  type: ClusterIP
+
+---
+# 6. Ingress — expose API to the outside world
+#    Requires an ingress controller (e.g. nginx):
+#    kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/cloud/deploy.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: sandbox-api-ingress
+  namespace: sandbox
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: sandbox-api.local          # replace with your actual domain
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: sandbox-api-service
+                port:
+                  number: 80
+
+---
+# 7. HorizontalPodAutoscaler — auto-scale on CPU load
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: sandbox-api-hpa
+  namespace: sandbox
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: sandbox-api
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70       # scale up when CPU > 70%
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80       # scale up when memory > 80%
