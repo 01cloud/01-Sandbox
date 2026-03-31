@@ -1,0 +1,17 @@
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: example-pool
+spec:
+  template:
+    spec:
+      containers:
+      - name: sandbox-container
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+  capacitySpec:
+    bufferMax: 10
+    bufferMin: 2
+    poolMax: 20
+    poolMin: 5

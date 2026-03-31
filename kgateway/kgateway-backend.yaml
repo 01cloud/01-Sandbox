@@ -1,0 +1,13 @@
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayBackend
+metadata:
+  name: openai
+  namespace: agentgateway-system
+spec:
+  ai:
+    provider:
+      openai:
+        model: gpt-3.5-turbo 
+  policies:
+    auth:
+      key: $TOKEN
