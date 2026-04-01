@@ -26,6 +26,8 @@ data:
   PYTHONUNBUFFERED: "1"
   APP_ENV: "production"
   PORT: "8000"
+  BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"
+  # BACKEND_URL_PYTHON: "http://python-sandbox-service.sandbox.svc.cluster.local"
 
 ---
 # 3. Secret — sensitive credentials (base64 encoded)
@@ -151,7 +153,7 @@ spec:
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: kubernetes.io/hostname
-          whenUnsatisfiable: DoNotSchedule
+          whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
               app: sandbox-api

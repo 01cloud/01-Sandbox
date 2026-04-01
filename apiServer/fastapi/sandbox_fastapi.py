@@ -26,9 +26,11 @@ from contextlib import asynccontextmanager
 from enum import Enum
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, status, Request, Response
 from fastapi.responses import JSONResponse
+from fastapi.openapi.docs import get_swagger_ui_html
 from pydantic import BaseModel, Field
+import httpx
 
 
 # ─────────────────────────────────────────────
@@ -279,6 +281,59 @@ class E2BBackend(SandboxBackend):
 
 
 # ─────────────────────────────────────────────
+
+class GenericHTTPBackend(SandboxBackend):
+    def __init__(self, name: str, url: str):
+        self._name = name
+        self._url = url
+
+    @property
+    def name(self): return self._name
+
+    def run(self, code, language, timeout):
+        # Generic payload for remote execution
+        payload = {
+            "code": code,
+            "language": language,
+            "timeout": timeout
+        }
+        t0 = time.perf_counter()
+        try:
+            # Using synchronous httpx client for simplicity within this backend's structure
+            with httpx.Client(timeout=timeout + 5) as client:
+                r = client.post(self._url, json=payload)
+                r.raise_for_status()
+                data = r.json()
+                return RunResponse(
+                    stdout=data.get("stdout", ""),
+                    stderr=data.get("stderr", ""),
+                    exit_code=data.get("exit_code", 0),
+                    duration_ms=(time.perf_counter() - t0) * 1000,
+                    sandbox_id=data.get("sandbox_id", str(uuid.uuid4())),
+                    backend=self.name,
+                )
+        except Exception as e:
+            return RunResponse(stdout="", stderr=f"Generic HTTP Backend Error ({self.name}): {str(e)}",
+                               exit_code=1, duration_ms=0,
+                               sandbox_id="", backend=self.name)
+
+    def open_session(self):
+        return SessionResponse(session_id=str(uuid.uuid4()), backend=self.name)
+
+    def close_session(self, session_id):
+        pass
+
+    def health_check(self):
+        try:
+            # Try to hit the endpoint with a GET (standard health check pattern)
+            with httpx.Client(timeout=3) as client:
+                r = client.get(self._url)
+                return r.status_code < 500
+        except Exception:
+            return False
+
+
+# ─────────────────────────────────────────────
 # 4.  Registry + factory
 # ─────────────────────────────────────────────
 
@@ -295,10 +350,19 @@ def register_backend(name: str, cls: type[SandboxBackend]) -> None:
 
 
 def create_backend(name: str) -> SandboxBackend:
+    # 1. Check registry first
     cls = _REGISTRY.get(name)
-    if not cls:
-        raise ValueError(f"Unknown backend '{name}'. Available: {list(_REGISTRY)}")
-    return cls()
+    if cls:
+        return cls()
+    
+    # 2. Check environment variables for dynamic GenericHTTPBackend
+    # Lookup BACKEND_URL_OPENSANDBOX, BACKEND_URL_PYTHON, etc.
+    env_key = f"BACKEND_URL_{name.upper()}"
+    url = os.environ.get(env_key)
+    if url:
+        return GenericHTTPBackend(name, url)
+
+    raise ValueError(f"Unknown backend '{name}'. Available: {list(_REGISTRY.keys()) + [k.replace('BACKEND_URL_', '').lower() for k in os.environ if k.startswith('BACKEND_URL_')]}")
 
 
 # ─────────────────────────────────────────────
@@ -421,7 +485,116 @@ def current_backend():
 )
 def list_backends():
     """Returns all available backend names."""
-    return {"backends": list(_REGISTRY.keys())}
+    dynamic = [k.replace('BACKEND_URL_', '').lower() for k in os.environ if k.startswith('BACKEND_URL_')]
+    return {"backends": list(_REGISTRY.keys()) + dynamic}
+
+
+@app.post(
+    "/backend/{backend_name}",
+    response_model=RunResponse,
+    summary="Execute code in a specific backend directly",
+    tags=["Execution"],
+)
+def run_in_backend(backend_name: str, req: RunRequest):
+    """
+    Directly trigger a specific sandbox backend (e.g. /backend/opensandbox).
+    Useful when you want to bypass the globally selected backend.
+    """
+    try:
+        backend = create_backend(backend_name)
+        return backend.run(req.code, req.language.value, req.timeout)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@app.get(
+    "/backend/{backend_name}/docs",
+    include_in_schema=False
+)
+def get_backend_docs(backend_name: str):
+    """
+    Returns a custom Swagger UI that correctly points to the backend's OpenAPI spec.
+    """
+    # Verify the backend exists
+    if f"BACKEND_URL_{backend_name.upper()}" not in os.environ and backend_name not in _REGISTRY:
+        raise HTTPException(status_code=404, detail=f"Backend '{backend_name}' not found")
+    
+    return get_swagger_ui_html(
+        openapi_url=f"/backend/{backend_name}/openapi.json",
+        title=f"{backend_name.capitalize()} API Documentation",
+        swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
+        swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
+    )
+
+
+@app.get(
+    "/backend/{backend_name}",
+    summary="Get info about a specific backend",
+    tags=["Management"],
+)
+def get_backend_info(backend_name: str):
+    """
+    Returns the registration info and health status of a specific backend.
+    Useful for verifying connectivity without executing code.
+    """
+    try:
+        backend = create_backend(backend_name)
+        return {
+            "backend": backend_name,
+            "healthy": backend.health_check(),
+            "type": type(backend).__name__,
+            "message": "Use POST to this endpoint to execute code.",
+            "api_proxy": f"/backend/{backend_name}/..."
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@app.api_route(
+    "/backend/{backend_name}/{proxy_path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+    summary="Transparently proxy requests to the backend",
+    tags=["Management"],
+)
+async def proxy_backend(backend_name: str, proxy_path: str, request: Request):
+    """
+    Proxies all HTTP methods and paths to the target backend service.
+    Example: GET /backend/opensandbox/sandboxes -> GET http://opensandbox-server/sandboxes
+    """
+    # 1. Lookup the backend URL from environment
+    env_key = f"BACKEND_URL_{backend_name.upper()}"
+    base_url = os.environ.get(env_key)
+    if not base_url:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Backend '{backend_name}' not configured")
+    
+    # 2. Construct the target URL
+    target_url = f"{base_url.rstrip('/')}/{proxy_path}"
+    
+    # 3. Forward the request using httpx
+    async with httpx.AsyncClient() as client:
+        # Get query params, body and filtered headers
+        params = dict(request.query_params)
+        body = await request.body()
+        headers = {k: v for k, v in request.headers.items() if k.lower() not in ["host", "content-length"]}
+        
+        try:
+            resp = await client.request(
+                method=request.method,
+                url=target_url,
+                params=params,
+                content=body,
+                headers=headers,
+                timeout=60.0
+            )
+            
+            # 4. Return the response from the backend
+            return Response(
+                content=resp.content,
+                status_code=resp.status_code,
+                headers={k: v for k, v in resp.headers.items() if k.lower() not in ["content-encoding", "transfer-encoding"]}
+            )
+        except Exception as e:
+             raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=f"Proxy error to {target_url}: {str(e)}")
 
 
 # ── Session endpoints ────────────────────────
