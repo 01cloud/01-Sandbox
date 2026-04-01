@@ -1,7 +1,0 @@
-apiVersion: sandbox.opensandbox.io/v1alpha1
-kind: BatchSandbox
-metadata:
-  name: example-batch-sandbox
-spec:
-  replicas: 3
-  poolRef: example-pool
