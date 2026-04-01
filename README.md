@@ -546,3 +546,32 @@ For issues and questions:
 - Check the troubleshooting section
 - Review component-specific READMEs
 - Open an issue on GitHub
+
+
+
+
+
+
+
+curl -X POST http://localhost:8080/v1/sandboxes \
+  -H "Content-Type: application/json" \
+  -H "OPEN-SANDBOX-API-KEY: your-secure-api-key" \
+  -d '{
+    "image": {
+      "uri": "opensandbox/code-interpreter:v1.0.2"
+    },
+    "entrypoint": ["/opt/opensandbox/code-interpreter.sh"],
+    "timeout": 600,
+    "env": {
+      "PYTHON_VERSION": "3.11"
+    },
+    "resourceLimits": {
+      "cpu": "1",
+      "memory": "2Gi"
+    },
+    "metadata": {
+      "project": "my-ai-agent",
+      "environment": "production"
+    }
+  }'
+
