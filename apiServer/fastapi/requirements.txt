@@ -1,0 +1,25 @@
+# ─────────────────────────────────────────────
+# Sandbox API – Python dependencies
+# Install: pip install -r requirements.txt
+# ─────────────────────────────────────────────
+ 
+# Web framework & ASGI server
+fastapi==0.115.12
+uvicorn[standard]==0.34.0
+ 
+# Data validation (used by FastAPI)
+pydantic==2.11.1
+ 
+# ── Optional backends ────────────────────────
+ 
+# E2B cloud sandbox backend (uncomment if using E2BBackend)
+# e2b-code-interpreter==1.5.0
+ 
+# ── Development / testing ────────────────────
+ 
+# HTTP client for testing FastAPI endpoints
+httpx==0.28.1
+ 
+# Testing framework
+pytest==8.3.5
+pytest-asyncio==0.26.0
