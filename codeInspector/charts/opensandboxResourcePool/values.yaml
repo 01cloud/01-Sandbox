@@ -1,0 +1,15 @@
+# Default values for opensandboxResourcePool
+namespace: opensandbox-system
+
+pool:
+  name: my-sandbox-pool
+  container:
+    image: opensandbox/code-interpreter:v1.0.2
+    ports:
+      - containerPort: 44772
+      - containerPort: 54321
+  capacitySpec:
+    bufferMin: 3
+    bufferMax: 10
+    poolMin: 1
+    poolMax: 50

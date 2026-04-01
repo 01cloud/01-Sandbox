@@ -1,0 +1,19 @@
+# pool.yaml
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: my-sandbox-pool
+spec:
+  template:
+    spec:
+      containers:
+      - name: sandbox-container
+        image: opensandbox/code-interpreter:v1.0.2
+        ports:
+        - containerPort: 44772   # execd port
+        - containerPort: 54321   # Jupyter port
+  capacitySpec:
+    bufferMin: 1      # Always keep 3 warm
+    bufferMax: 1      # Pre-warm up to 10
+    poolMin: 1
+    poolMax: 1

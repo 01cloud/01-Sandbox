@@ -1,0 +1,32 @@
+apiVersion: v2
+name: codeInspector
+description: All-in-one Helm chart for deploying CodeInspector components
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - codeinspector
+  - kubernetes
+  - sandbox
+  - api
+maintainers:
+  - name: CodeInspector Team
+dependencies:
+  - name: agentgateway
+    version: 0.1.0
+    condition: agentgateway.enabled
+  - name: apiServer
+    version: 0.1.0
+    condition: apiServer.enabled
+  - name: metallb
+    version: 0.1.0
+    condition: metallb.enabled
+  - name: kindCluster
+    version: 0.1.0
+    condition: kindCluster.enabled
+  - name: opensandboxResourcePool
+    version: 0.1.0
+    condition: opensandboxResourcePool.enabled
+  - name: opensandbox
+    version: 0.1.0
+    condition: opensandbox.enabled

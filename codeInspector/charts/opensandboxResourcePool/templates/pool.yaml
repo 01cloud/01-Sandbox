@@ -1,0 +1,20 @@
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: Pool
+metadata:
+  name: {{ .Values.pool.name }}
+  namespace: {{ .Values.namespace }}
+spec:
+  template:
+    spec:
+      containers:
+      - name: sandbox-container
+        image: {{ .Values.pool.container.image }}
+        ports:
+        {{- range .Values.pool.container.ports }}
+        - containerPort: {{ .containerPort }}
+        {{- end }}
+  capacitySpec:
+    bufferMin: {{ .Values.pool.capacitySpec.bufferMin }}
+    bufferMax: {{ .Values.pool.capacitySpec.bufferMax }}
+    poolMin: {{ .Values.pool.capacitySpec.poolMin }}
+    poolMax: {{ .Values.pool.capacitySpec.poolMax }}

@@ -1,0 +1,6 @@
+# Default values for kindCluster
+namespace: kind-cluster
+
+runtimeClass:
+  name: gvisor
+  handler: runsc

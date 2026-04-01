@@ -1,0 +1,23 @@
+# Default values for agentgateway
+namespace: agentgateway-system
+
+httproute:
+  hostnames:
+    - test.sandbox.com
+  backendService:
+    name: sandbox-api-service
+    port: 80
+
+gateway:
+  gatewayClassName: agentgateway
+  listeners:
+    - protocol: HTTP
+      port: 80
+      name: http
+
+policy:
+  apiKeyAuthentication:
+    mode: Strict
+
+secret:
+  apiKey: N2YwMDIxZTEtNGUzNS1jNzgzLTRkYjAtYjE2YzRkZGVmNjcy

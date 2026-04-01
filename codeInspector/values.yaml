@@ -1,0 +1,135 @@
+# Default values for codeInspector (all-in-one chart).
+# This chart aggregates values from all sub-charts.
+
+# Agent Gateway component values
+agentgateway:
+  enabled: true
+  namespace: agentgateway-system
+  httproute:
+    hostnames:
+      - test.sandbox.com
+    backendService:
+      name: sandbox-api-service
+      port: 80
+  gateway:
+    gatewayClassName: agentgateway
+    listeners:
+      - protocol: HTTP
+        port: 80
+        name: http
+  policy:
+    apiKeyAuthentication:
+      mode: Strict
+  secret:
+    apiKey: N2YwMDIxZTEtNGUzNS1jNzgzLTRkYjAtYjE2YzRkZGVmNjcy
+
+# API Server component values
+apiServer:
+  enabled: true
+  namespace: sandbox
+  configMap:
+    PYTHONUNBUFFERED: "1"
+    APP_ENV: "production"
+    PORT: "8000"
+    BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"
+  secret:
+    E2B_API_KEY: ""
+  deployment:
+    replicaCount: 1
+    image:
+      repository: fastapi
+      tag: "1.0.0"
+      pullPolicy: Never
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 1000
+  service:
+    type: ClusterIP
+    port: 80
+    targetPort: 8000
+  ingress:
+    enabled: true
+    className: nginx
+    host: sandbox-api.local
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: /
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "120"
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+# MetalLB component values
+metallb:
+  enabled: true
+  namespace: metallb-system
+  ipAddressPool:
+    addresses:
+      - 172.18.0.200-172.18.0.250
+  l2Advertisement:
+    enabled: true
+
+# Kind Cluster component values
+kindCluster:
+  enabled: false
+  namespace: kind-cluster
+  runtimeClass:
+    name: gvisor
+    handler: runsc
+
+# OpenSandbox Resource Pool component values
+opensandboxResourcePool:
+  enabled: false
+  namespace: opensandbox-system
+  pool:
+    name: my-sandbox-pool
+    container:
+      image: opensandbox/code-interpreter:v1.0.2
+      ports:
+        - containerPort: 44772
+        - containerPort: 54321
+    capacitySpec:
+      bufferMin: 3
+      bufferMax: 10
+      poolMin: 1
+      poolMax: 50
+
+# OpenSandbox component values
+opensandbox:
+  enabled: true
+  namespace: opensandbox-system
+  controller:
+    replicaCount: 1
+    image:
+      repository: opensandbox/controller
+      tag: v1.0.0
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  server:
+    replicaCount: 1
+    image:
+      repository: opensandbox/server
+      tag: v1.0.0
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi

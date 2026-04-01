@@ -1,0 +1,12 @@
+apiVersion: v2
+name: opensandboxResourcePool
+description: Helm chart for OpenSandbox Resource Pool components
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - opensandbox
+  - resourcepool
+  - kubernetes
+maintainers:
+  - name: CodeInspector Team

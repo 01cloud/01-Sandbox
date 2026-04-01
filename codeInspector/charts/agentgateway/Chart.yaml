@@ -1,0 +1,12 @@
+apiVersion: v2
+name: agentgateway
+description: Helm chart for Agent Gateway components
+type: application
+version: 0.1.0
+appVersion: "1.0.0"
+keywords:
+  - agentgateway
+  - gateway
+  - kubernetes
+maintainers:
+  - name: CodeInspector Team
