@@ -231,3 +231,28 @@ spec:
         target:
           type: Utilization
           averageUtilization: 80       # scale up when memory > 80%
+
+─────────────────────────────────────────────────────────────────────────────
+api-deployment.yaml
+Kubernetes manifest for Sandbox FastAPI Gateway (multi-backend routing)
+
+Apply:  kubectl apply -f api-deployment.yaml
+Delete: kubectl delete -f api-deployment.yaml
+
+─── ADDING A NEW BACKEND ────────────────────────────────────────────────────
+ 1. Add three lines to the ConfigMap below:
+      SANDBOX_<ID>_URL:    http://your-service.namespace.svc.cluster.local
+      SANDBOX_<ID>_NAME:   Human Readable Name    (optional)
+      SANDBOX_<ID>_WEIGHT: "10"                   (optional, for weighted routing)
+ 2. kubectl apply -f api-deployment.yaml
+ 3. The gateway picks up the new backend on next pod start, OR call:
+      POST /backends/reload   (zero-downtime, no restart needed)
+
+─── ROUTING MODES ───────────────────────────────────────────────────────────
+ Set SANDBOX_ROUTING_MODE in the ConfigMap to one of:
+   round_robin  (default) - cycle through healthy backends
+   weighted               - pick by WEIGHT ratio
+   least_used             - pick backend with fewest in-flight requests
+   explicit               - caller must supply ?backend_id=<ID>
+─────────────────────────────────────────────────────────────────────────────
+
