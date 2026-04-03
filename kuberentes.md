@@ -95,12 +95,14 @@ curl -X POST "http://localhost:8080/v1/sandboxes" \
     "image": {
       "uri": "ghcr.io/agent-infra/sandbox:latest"
     },
+    "entrypoint": ["/bin/sh"],
     "timeout": 3600,
     "resourceLimits": {
       "cpu": "500m",
       "memory": "512Mi"
     }
   }'
+
 ```
 
 **What is happening behind the scenes:**
@@ -145,3 +147,30 @@ kubectl get batchsandbox my-aio-sandbox -w
 ### Summary
 - If you use **Method A (API route)**, the server handles mapping everything dynamically.
 - If you use **Method B (Declarative route)**, you manage everything explicitly telling Kubernetes your desired state.
+
+
+## 🖥️ Step 5: Viewing the Sandbox GUI in your Web Browser!
+
+Once you have successfully provisioned your AIO sandbox (via either Method A or Method B), the sandbox container is alive, running a mini graphical web portal on port `8080` internally.
+
+However, because that Sandbox container is trapped inside the "Kind" Kubernetes cluster network, your laptop cannot browse its internal IP! We need to punch a hole through the network exactly like we did for the Server.
+
+**1. Find your Sandbox Pod Name:**
+Run this command to find the exact name of the pod running your new sandbox.
+```bash
+kubectl get pods
+```
+*(Look for a pod with a name that looks generated, like `pod/my-aio-sandbox-xxxx` or a random `id` string generated from the API).*
+
+**2. Create a Port-Forward to the Sandbox:**
+Take the exact pod name you just copied, and map its internal port 8080 to your computer's port 8081 (since 8080 is already being used by the server).
+```bash
+kubectl port-forward pod/<insert-your-pod-name> 8081:8080
+```
+
+**3. Open Your Browser!**
+Now, open Google Chrome, Safari, or Edge and go to this address:
+
+👉 `http://localhost:8081`
+
+You will immediately see the All-in-One Sandbox GUI Interface loaded right onto your screen, straight from the Kubernetes cluster!

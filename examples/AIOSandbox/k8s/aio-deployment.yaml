@@ -1,388 +1,400 @@
-# ============================================================
-# aio-sandbox — Complete Kubernetes Manifests
-# ============================================================
+# # ============================================================
+# # aio-sandbox — Complete Kubernetes Manifests
+# # ============================================================
 
----
-# 1. Namespace
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: aio-sandbox
-  labels:
-    app.kubernetes.io/name: aio-sandbox
-    environment: sandbox
+# ---
+# # 1. Namespace
+# apiVersion: v1
+# kind: Namespace
+# metadata:
+#   name: aio-sandbox
+#   labels:
+#     app.kubernetes.io/name: aio-sandbox
+#     environment: sandbox
 
----
-# 2. ConfigMap
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: aio-sandbox-config
-  namespace: aio-sandbox
-data:
-  APP_ENV: "sandbox"
-  APP_PORT: "8080"
-  LOG_LEVEL: "info"
+# ---
+# # 2. ConfigMap
+# apiVersion: v1
+# kind: ConfigMap
+# metadata:
+#   name: aio-sandbox-config
+#   namespace: aio-sandbox
+# data:
+#   APP_ENV: "sandbox"
+#   APP_PORT: "8080"
+#   LOG_LEVEL: "info"
 
----
-# 3. Secret (base64-encoded placeholders)
-apiVersion: v1
-kind: Secret
-metadata:
-  name: aio-sandbox-secret
-  namespace: aio-sandbox
-type: Opaque
-data:
-  # echo -n 'your-value' | base64
-  API_KEY: Y2hhbmdlbWU=        # "changeme"
-  DB_PASSWORD: Y2hhbmdlbWU=   # "changeme"
+# ---
+# # 3. Secret (base64-encoded placeholders)
+# apiVersion: v1
+# kind: Secret
+# metadata:
+#   name: aio-sandbox-secret
+#   namespace: aio-sandbox
+# type: Opaque
+# data:
+#   # echo -n 'your-value' | base64
+#   API_KEY: Y2hhbmdlbWU=        # "changeme"
+#   DB_PASSWORD: Y2hhbmdlbWU=   # "changeme"
 
----
-# 4. ServiceAccount
-apiVersion: v1
-kind: ServiceAccount
-metadata:
-  name: aio-sandbox-sa
-  namespace: aio-sandbox
-  labels:
-    app: aio-sandbox
+# ---
+# # 4. ServiceAccount
+# apiVersion: v1
+# kind: ServiceAccount
+# metadata:
+#   name: aio-sandbox-sa
+#   namespace: aio-sandbox
+#   labels:
+#     app: aio-sandbox
 
----
-# 5. Deployment  (fixed: replicas: 1t → 1)
-apiVersion: apps/v1
-kind: Deployment
+# ---
+# # 5. Deployment  (fixed: replicas: 1t → 1)
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: aio-sandbox
+#   namespace: aio-sandbox
+#   labels:
+#     app: aio-sandbox
+#     version: latest
+# spec:
+#   replicas: 1
+#   selector:
+#     matchLabels:
+#       app: aio-sandbox
+#   strategy:
+#     type: RollingUpdate
+#     rollingUpdate:
+#       maxSurge: 1
+#       maxUnavailable: 0
+#   template:
+#     metadata:
+#       labels:
+#         app: aio-sandbox
+#         version: latest
+#       annotations:
+#         prometheus.io/scrape: "true"
+#         prometheus.io/port: "8080"
+#         prometheus.io/path: "/metrics"
+#     spec:
+#       serviceAccountName: aio-sandbox-sa
+#       terminationGracePeriodSeconds: 30
+#       securityContext:
+#         runAsNonRoot: true
+#         runAsUser: 1000
+#         fsGroup: 2000
+#       containers:
+#         - name: aio-sandbox
+#           image: ghcr.io/agent-infra/sandbox:latest
+#           imagePullPolicy: Always
+#           ports:
+#             - name: http
+#               containerPort: 8080
+#               protocol: TCP
+#           envFrom:
+#             - configMapRef:
+#                 name: aio-sandbox-config
+#           env:
+#             - name: API_KEY
+#               valueFrom:
+#                 secretKeyRef:
+#                   name: aio-sandbox-secret
+#                   key: API_KEY
+#             - name: DB_PASSWORD
+#               valueFrom:
+#                 secretKeyRef:
+#                   name: aio-sandbox-secret
+#                   key: DB_PASSWORD
+#             - name: POD_NAME
+#               valueFrom:
+#                 fieldRef:
+#                   fieldPath: metadata.name
+#             - name: POD_NAMESPACE
+#               valueFrom:
+#                 fieldRef:
+#                   fieldPath: metadata.namespace
+#           resources:
+#             requests:
+#               memory: "512Mi"
+#               cpu: "250m"
+#             limits:
+#               memory: "2Gi"
+#               cpu: "1000m"
+#           # Health probes disabled - container may not have /healthz or /ready endpoints
+#           # Uncomment and adjust paths if your container supports health checks
+#           # livenessProbe:
+#           #   httpGet:
+#           #     path: /healthz
+#           #     port: http
+#           #   initialDelaySeconds: 15
+#           #   periodSeconds: 20
+#           #   failureThreshold: 3
+#           # readinessProbe:
+#           #   httpGet:
+#           #     path: /ready
+#           #     port: http
+#           #   initialDelaySeconds: 5
+#           #   periodSeconds: 10
+#           #   failureThreshold: 3
+#           # startupProbe:
+#           #   httpGet:
+#           #     path: /healthz
+#           #     port: http
+#           #   failureThreshold: 30
+#           #   periodSeconds: 5
+#           securityContext:
+#             allowPrivilegeEscalation: false
+#             # readOnlyRootFilesystem: true  # Disabled - container may need write access
+#             capabilities:
+#               drop:
+#                 - ALL
+#           volumeMounts:
+#             - name: tmp
+#               mountPath: /tmp
+#             - name: config-volume
+#               mountPath: /etc/config
+#               readOnly: true
+#       volumes:
+#         - name: tmp
+#           emptyDir: {}
+#         - name: config-volume
+#           configMap:
+#             name: aio-sandbox-config
+
+# ---
+# # 6. Service — ClusterIP (internal)
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: aio-sandbox
+#   namespace: aio-sandbox
+#   labels:
+#     app: aio-sandbox
+# spec:
+#   type: ClusterIP
+#   selector:
+#     app: aio-sandbox
+#   ports:
+#     - name: http
+#       port: 80
+#       targetPort: http
+#       protocol: TCP
+
+# ---
+# # 7. Service — NodePort (optional external access without Ingress)
+# apiVersion: v1
+# kind: Service
+# metadata:
+#   name: aio-sandbox-nodeport
+#   namespace: aio-sandbox
+#   labels:
+#     app: aio-sandbox
+# spec:
+#   type: NodePort
+#   selector:
+#     app: aio-sandbox
+#   ports:
+#     - name: http
+#       port: 80
+#       targetPort: http
+#       nodePort: 30080
+#       protocol: TCP
+
+# ---
+# # 8. Ingress
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: aio-sandbox-ingress
+#   namespace: aio-sandbox
+#   annotations:
+#     nginx.ingress.kubernetes.io/rewrite-target: /
+#     nginx.ingress.kubernetes.io/ssl-redirect: "true"
+#     cert-manager.io/cluster-issuer: "letsencrypt-prod"
+# spec:
+#   ingressClassName: nginx
+#   tls:
+#     - hosts:
+#         - sandbox.example.com
+#       secretName: aio-sandbox-tls
+#   rules:
+#     - host: sandbox.example.com
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: aio-sandbox
+#                 port:
+#                   name: http
+
+# ---
+# # 9. HorizontalPodAutoscaler
+# apiVersion: autoscaling/v2
+# kind: HorizontalPodAutoscaler
+# metadata:
+#   name: aio-sandbox-hpa
+#   namespace: aio-sandbox
+# spec:
+#   scaleTargetRef:
+#     apiVersion: apps/v1
+#     kind: Deployment
+#     name: aio-sandbox
+#   minReplicas: 1
+#   maxReplicas: 5
+#   metrics:
+#     - type: Resource
+#       resource:
+#         name: cpu
+#         target:
+#           type: Utilization
+#           averageUtilization: 70
+#     - type: Resource
+#       resource:
+#         name: memory
+#         target:
+#           type: Utilization
+#           averageUtilization: 80
+
+# ---
+# # 10. PodDisruptionBudget
+# apiVersion: policy/v1
+# kind: PodDisruptionBudget
+# metadata:
+#   name: aio-sandbox-pdb
+#   namespace: aio-sandbox
+# spec:
+#   minAvailable: 1
+#   selector:
+#     matchLabels:
+#       app: aio-sandbox
+
+# ---
+# # 11. NetworkPolicy — restrict ingress/egress
+# apiVersion: networking.k8s.io/v1
+# kind: NetworkPolicy
+# metadata:
+#   name: aio-sandbox-netpol
+#   namespace: aio-sandbox
+# spec:
+#   podSelector:
+#     matchLabels:
+#       app: aio-sandbox
+#   policyTypes:
+#     - Ingress
+#     - Egress
+#   ingress:
+#     - from:
+#         - namespaceSelector:
+#             matchLabels:
+#               kubernetes.io/metadata.name: ingress-nginx
+#       ports:
+#         - protocol: TCP
+#           port: 8080
+#   egress:
+#     - ports:
+#         - protocol: TCP
+#           port: 53
+#         - protocol: UDP
+#           port: 53
+#     - ports:
+#         - protocol: TCP
+#           port: 443
+
+# ---
+# # 12. ResourceQuota for the namespace
+# apiVersion: v1
+# kind: ResourceQuota
+# metadata:
+#   name: aio-sandbox-quota
+#   namespace: aio-sandbox
+# spec:
+#   hard:
+#     pods: "10"
+#     requests.cpu: "2"
+#     requests.memory: 4Gi
+#     limits.cpu: "4"
+#     limits.memory: 8Gi
+#     services: "5"
+#     persistentvolumeclaims: "3"
+
+# ---
+# # 13. LimitRange — default container constraints
+# apiVersion: v1
+# kind: LimitRange
+# metadata:
+#   name: aio-sandbox-limitrange
+#   namespace: aio-sandbox
+# spec:
+#   limits:
+#     - type: Container
+#       default:
+#         cpu: "500m"
+#         memory: "512Mi"
+#       defaultRequest:
+#         cpu: "100m"
+#         memory: "128Mi"
+#       max:
+#         cpu: "1000m"
+#         memory: "2Gi"
+#       min:
+#         cpu: "50m"
+#         memory: "64Mi"
+
+# ---
+# # 14. PersistentVolumeClaim (if stateful storage is needed)
+# apiVersion: v1
+# kind: PersistentVolumeClaim
+# metadata:
+#   name: aio-sandbox-pvc
+#   namespace: aio-sandbox
+# spec:
+#   accessModes:
+#     - ReadWriteOnce
+#   storageClassName: standard
+#   resources:
+#     requests:
+#       storage: 5Gi
+
+# ---
+# # 15. Role & RoleBinding — least-privilege RBAC
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: Role
+# metadata:
+#   name: aio-sandbox-role
+#   namespace: aio-sandbox
+# rules:
+#   - apiGroups: [""]
+#     resources: ["configmaps", "secrets"]
+#     verbs: ["get", "list", "watch"]
+#   - apiGroups: [""]
+#     resources: ["pods"]
+#     verbs: ["get", "list"]
+
+# ---
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: RoleBinding
+# metadata:
+#   name: aio-sandbox-rolebinding
+#   namespace: aio-sandbox
+# subjects:
+#   - kind: ServiceAccount
+#     name: aio-sandbox-sa
+#     namespace: aio-sandbox
+# roleRef:
+#   kind: Role
+#   apiGroup: rbac.authorization.k8s.io
+#   name: aio-sandbox-role
+
+apiVersion: sandbox.opensandbox.io/v1alpha1
+kind: BatchSandbox
 metadata:
-  name: aio-sandbox
-  namespace: aio-sandbox
-  labels:
-    app: aio-sandbox
-    version: latest
+  name: opensandbox
 spec:
   replicas: 1
-  selector:
-    matchLabels:
-      app: aio-sandbox
-  strategy:
-    type: RollingUpdate
-    rollingUpdate:
-      maxSurge: 1
-      maxUnavailable: 0
   template:
-    metadata:
-      labels:
-        app: aio-sandbox
-        version: latest
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "8080"
-        prometheus.io/path: "/metrics"
     spec:
-      serviceAccountName: aio-sandbox-sa
-      terminationGracePeriodSeconds: 30
-      securityContext:
-        runAsNonRoot: true
-        runAsUser: 1000
-        fsGroup: 2000
       containers:
-        - name: aio-sandbox
-          image: ghcr.io/agent-infra/sandbox:latest
-          imagePullPolicy: Always
-          ports:
-            - name: http
-              containerPort: 8080
-              protocol: TCP
-          envFrom:
-            - configMapRef:
-                name: aio-sandbox-config
-          env:
-            - name: API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: aio-sandbox-secret
-                  key: API_KEY
-            - name: DB_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: aio-sandbox-secret
-                  key: DB_PASSWORD
-            - name: POD_NAME
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.name
-            - name: POD_NAMESPACE
-              valueFrom:
-                fieldRef:
-                  fieldPath: metadata.namespace
-          resources:
-            requests:
-              memory: "512Mi"
-              cpu: "250m"
-            limits:
-              memory: "2Gi"
-              cpu: "1000m"
-          # Health probes disabled - container may not have /healthz or /ready endpoints
-          # Uncomment and adjust paths if your container supports health checks
-          # livenessProbe:
-          #   httpGet:
-          #     path: /healthz
-          #     port: http
-          #   initialDelaySeconds: 15
-          #   periodSeconds: 20
-          #   failureThreshold: 3
-          # readinessProbe:
-          #   httpGet:
-          #     path: /ready
-          #     port: http
-          #   initialDelaySeconds: 5
-          #   periodSeconds: 10
-          #   failureThreshold: 3
-          # startupProbe:
-          #   httpGet:
-          #     path: /healthz
-          #     port: http
-          #   failureThreshold: 30
-          #   periodSeconds: 5
-          securityContext:
-            allowPrivilegeEscalation: false
-            # readOnlyRootFilesystem: true  # Disabled - container may need write access
-            capabilities:
-              drop:
-                - ALL
-          volumeMounts:
-            - name: tmp
-              mountPath: /tmp
-            - name: config-volume
-              mountPath: /etc/config
-              readOnly: true
-      volumes:
-        - name: tmp
-          emptyDir: {}
-        - name: config-volume
-          configMap:
-            name: aio-sandbox-config
-
----
-# 6. Service — ClusterIP (internal)
-apiVersion: v1
-kind: Service
-metadata:
-  name: aio-sandbox
-  namespace: aio-sandbox
-  labels:
-    app: aio-sandbox
-spec:
-  type: ClusterIP
-  selector:
-    app: aio-sandbox
-  ports:
-    - name: http
-      port: 80
-      targetPort: http
-      protocol: TCP
-
----
-# 7. Service — NodePort (optional external access without Ingress)
-apiVersion: v1
-kind: Service
-metadata:
-  name: aio-sandbox-nodeport
-  namespace: aio-sandbox
-  labels:
-    app: aio-sandbox
-spec:
-  type: NodePort
-  selector:
-    app: aio-sandbox
-  ports:
-    - name: http
-      port: 80
-      targetPort: http
-      nodePort: 30080
-      protocol: TCP
-
----
-# 8. Ingress
-apiVersion: networking.k8s.io/v1
-kind: Ingress
-metadata:
-  name: aio-sandbox-ingress
-  namespace: aio-sandbox
-  annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
-    nginx.ingress.kubernetes.io/ssl-redirect: "true"
-    cert-manager.io/cluster-issuer: "letsencrypt-prod"
-spec:
-  ingressClassName: nginx
-  tls:
-    - hosts:
-        - sandbox.example.com
-      secretName: aio-sandbox-tls
-  rules:
-    - host: sandbox.example.com
-      http:
-        paths:
-          - path: /
-            pathType: Prefix
-            backend:
-              service:
-                name: aio-sandbox
-                port:
-                  name: http
-
----
-# 9. HorizontalPodAutoscaler
-apiVersion: autoscaling/v2
-kind: HorizontalPodAutoscaler
-metadata:
-  name: aio-sandbox-hpa
-  namespace: aio-sandbox
-spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: aio-sandbox
-  minReplicas: 1
-  maxReplicas: 5
-  metrics:
-    - type: Resource
-      resource:
-        name: cpu
-        target:
-          type: Utilization
-          averageUtilization: 70
-    - type: Resource
-      resource:
-        name: memory
-        target:
-          type: Utilization
-          averageUtilization: 80
-
----
-# 10. PodDisruptionBudget
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: aio-sandbox-pdb
-  namespace: aio-sandbox
-spec:
-  minAvailable: 1
-  selector:
-    matchLabels:
-      app: aio-sandbox
-
----
-# 11. NetworkPolicy — restrict ingress/egress
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: aio-sandbox-netpol
-  namespace: aio-sandbox
-spec:
-  podSelector:
-    matchLabels:
-      app: aio-sandbox
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector:
-            matchLabels:
-              kubernetes.io/metadata.name: ingress-nginx
-      ports:
-        - protocol: TCP
-          port: 8080
-  egress:
-    - ports:
-        - protocol: TCP
-          port: 53
-        - protocol: UDP
-          port: 53
-    - ports:
-        - protocol: TCP
-          port: 443
-
----
-# 12. ResourceQuota for the namespace
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: aio-sandbox-quota
-  namespace: aio-sandbox
-spec:
-  hard:
-    pods: "10"
-    requests.cpu: "2"
-    requests.memory: 4Gi
-    limits.cpu: "4"
-    limits.memory: 8Gi
-    services: "5"
-    persistentvolumeclaims: "3"
-
----
-# 13. LimitRange — default container constraints
-apiVersion: v1
-kind: LimitRange
-metadata:
-  name: aio-sandbox-limitrange
-  namespace: aio-sandbox
-spec:
-  limits:
-    - type: Container
-      default:
-        cpu: "500m"
-        memory: "512Mi"
-      defaultRequest:
-        cpu: "100m"
-        memory: "128Mi"
-      max:
-        cpu: "1000m"
-        memory: "2Gi"
-      min:
-        cpu: "50m"
-        memory: "64Mi"
-
----
-# 14. PersistentVolumeClaim (if stateful storage is needed)
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: aio-sandbox-pvc
-  namespace: aio-sandbox
-spec:
-  accessModes:
-    - ReadWriteOnce
-  storageClassName: standard
-  resources:
-    requests:
-      storage: 5Gi
-
----
-# 15. Role & RoleBinding — least-privilege RBAC
-apiVersion: rbac.authorization.k8s.io/v1
-kind: Role
-metadata:
-  name: aio-sandbox-role
-  namespace: aio-sandbox
-rules:
-  - apiGroups: [""]
-    resources: ["configmaps", "secrets"]
-    verbs: ["get", "list", "watch"]
-  - apiGroups: [""]
-    resources: ["pods"]
-    verbs: ["get", "list"]
-
----
-apiVersion: rbac.authorization.k8s.io/v1
-kind: RoleBinding
-metadata:
-  name: aio-sandbox-rolebinding
-  namespace: aio-sandbox
-subjects:
-  - kind: ServiceAccount
-    name: aio-sandbox-sa
-    namespace: aio-sandbox
-roleRef:
-  kind: Role
-  apiGroup: rbac.authorization.k8s.io
-  name: aio-sandbox-role
+      - name: sandbox-container
+        image: ghcr.io/agent-infra/sandbox:latest
