@@ -9,14 +9,7 @@ annotations:
   artifacthub.io/prerelease: "false"
 apiVersion: v2
 appVersion: 0.1.0
-dependencies:
-- name: opensandbox-controller
-  repository: file://../opensandbox-controller
-  version: 0.1.0
-- name: opensandbox-server
-  repository: file://../opensandbox-server
-  version: 0.1.0
-description: All-in-one Helm chart for deploying OpenSandbox controller and server
+description: Helm chart for deploying OpenSandbox controller and server
 home: https://github.com/alibaba/OpenSandbox
 keywords:
 - sandbox

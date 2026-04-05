@@ -1,23 +1,27 @@
-# Default values for opensandbox (all-in-one chart).
-# This chart aggregates values from opensandbox-controller and opensandbox-server sub-charts.
+namespace: opensandbox-system
 
-# Controller component values
-opensandbox-controller:
-  # Default values are inherited from the sub-chart.
-  # Override specific controller settings here if needed.
-  controller:
-    logLevel: info
-    replicaCount: 1
+controller:
+  replicaCount: 1
+  image:
+    repository: opensandbox/controller
+    tag: v1.0.0
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
-# Server component values
-opensandbox-server:
-  # Default values are inherited from the sub-chart.
-  # Override specific server settings here if needed.
-  server:
-    replicaCount: 1
-
-global:
-  # Example: shared image pull secrets
-  # imagePullSecrets:
-  #   - name: my-registry-secret
-  _: null  # keeps block valid as a map
+server:
+  replicaCount: 1
+  image:
+    repository: opensandbox/server
+    tag: v1.0.0
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
