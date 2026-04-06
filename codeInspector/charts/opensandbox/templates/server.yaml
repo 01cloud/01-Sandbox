@@ -1,0 +1,111 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: opensandbox-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: opensandbox-server
+    component: server
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 8080
+      protocol: TCP
+      name: http
+  selector:
+    app: opensandbox-server
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: opensandbox-server
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: opensandbox-server
+    component: server
+spec:
+  replicas: {{ .Values.server.replicaCount }}
+  selector:
+    matchLabels:
+      app: opensandbox-server
+  template:
+    metadata:
+      labels:
+        app: opensandbox-server
+        component: server
+    spec:
+      containers:
+        - name: server
+          image: "{{ .Values.server.image.repository }}:{{ .Values.server.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              protocol: TCP
+          env:
+            - name: PORT
+              value: "8080"
+            - name: CONTROLLER_URL
+              value: "http://opensandbox-controller.{{ .Values.namespace }}.svc.cluster.local:8080"
+            - name: SANDBOX_CONFIG_PATH
+              value: "/etc/opensandbox/config.toml"
+          volumeMounts:
+            - name: server-config
+              mountPath: /etc/opensandbox/config.toml
+              subPath: config.toml
+              readOnly: true
+          resources:
+            requests:
+              cpu: {{ .Values.server.resources.requests.cpu | quote }}
+              memory: {{ .Values.server.resources.requests.memory | quote }}
+            limits:
+              cpu: {{ .Values.server.resources.limits.cpu | quote }}
+              memory: {{ .Values.server.resources.limits.memory | quote }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 30
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8080
+            initialDelaySeconds: 5
+            periodSeconds: 5
+      volumes:
+        - name: server-config
+          configMap:
+            name: opensandbox-server-config
+      restartPolicy: Always
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: opensandbox-server-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.toml: |
+    [server]
+    host = "0.0.0.0"
+    port = 8080
+    log_level = "INFO"
+
+    [runtime]
+    type = "kubernetes"
+    execd_image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.7"
+
+    [storage]
+    allowed_host_paths = []
+
+    [kubernetes]
+    kubeconfig_path = ""
+    namespace = "{{ .Values.namespace }}"
+    informer_enabled = true
+    informer_resync_seconds = 300
+    informer_watch_timeout_seconds = 60
+    workload_provider = "batchsandbox"
+    batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
+
+    [ingress]
+    mode = "direct"

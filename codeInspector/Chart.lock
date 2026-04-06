@@ -1,0 +1,21 @@
+dependencies:
+- name: agentgateway
+  repository: ""
+  version: 0.1.0
+- name: apiServer
+  repository: ""
+  version: 0.1.0
+- name: metallb
+  repository: ""
+  version: 0.1.0
+- name: kindCluster
+  repository: ""
+  version: 0.1.0
+- name: opensandboxResourcePool
+  repository: ""
+  version: 0.1.0
+- name: opensandbox
+  repository: ""
+  version: 0.1.0
+digest: sha256:5080545eec8ccc860f5760ae2487b6ff2e2a414cc6856cb0696261e3cab4724e
+generated: "2026-04-05T20:18:31.208119809+05:45"

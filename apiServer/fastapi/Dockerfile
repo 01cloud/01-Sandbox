@@ -28,6 +28,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 COPY sandbox_fastapi.py .
+COPY codeinterpreter.py .
 
 # Switch to non-root user
 USER appuser

@@ -88,9 +88,42 @@ kindCluster:
     name: gvisor
     handler: runsc
 
+
+
+# OpenSandbox component values
+opensandbox:
+  enabled: true
+  namespace: opensandbox-system
+  controller:
+    replicaCount: 1
+    image:
+      repository: opensandbox-controller
+      tag: 1.0.0
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+  server:
+    replicaCount: 1
+    image:
+      repository: opensandbox-server
+      tag: 1.0.0
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+
+
+
 # OpenSandbox Resource Pool component values
 opensandboxResourcePool:
-  enabled: true
+  enabled: false
   namespace: opensandbox-system
   pool:
     name: my-sandbox-pool
@@ -104,32 +137,3 @@ opensandboxResourcePool:
       bufferMax: 10
       poolMin: 1
       poolMax: 50
-
-# OpenSandbox component values
-opensandbox:
-  enabled: true
-  namespace: opensandbox-system
-  controller:
-    replicaCount: 1
-    image:
-      repository: opensandbox/controller
-      tag: v1.0.0
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
-  server:
-    replicaCount: 1
-    image:
-      repository: opensandbox/server
-      tag: v1.0.0
-    resources:
-      requests:
-        cpu: 100m
-        memory: 128Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
