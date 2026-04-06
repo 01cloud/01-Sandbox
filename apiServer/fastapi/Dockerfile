@@ -28,7 +28,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 
-COPY codeinspectior_api.py .
+COPY *.py .
 
 # Switch to non-root user
 USER appuser

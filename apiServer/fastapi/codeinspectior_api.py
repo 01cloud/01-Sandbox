@@ -12,176 +12,26 @@ to communicate with the `opensandbox-server` kubernetes service.
 
 from __future__ import annotations
 
-import abc
 import os
-import time
-import uuid
 from contextlib import asynccontextmanager
-from enum import Enum
-from typing import Optional
 
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+
+# Modular Imports
+from models import (
+    RunRequest, RunResponse, StatusResponse, 
+    CreateSandboxRequest, SandboxResponse
+)
+from config import opensandbox_base_url, opensandbox_headers
+from backends import SandboxBackend, GenericHTTPBackend
 
 
 # ─────────────────────────────────────────────
-# 1. Base Schemas & Models
+# 1. Application State
 # ─────────────────────────────────────────────
-
-class Language(str, Enum):
-    """Supported execution languages."""
-    PYTHON = "python"
-    JAVASCRIPT = "javascript"
-    BASH = "bash"
-
-
-class RunRequest(BaseModel):
-    """Payload representing a code execution request structure for the backend."""
-    code: str = Field(..., example="print('hello')")
-    language: Language = Field(Language.PYTHON)
-    timeout: int = Field(30, ge=1, le=120)
-
-
-class RunResponse(BaseModel):
-    """Response defining code execution results dynamically."""
-    stdout: str
-    stderr: str
-    exit_code: int
-    duration_ms: float
-    sandbox_id: str
-    backend: str
-
-
-class SessionResponse(BaseModel):
-    """Identifying metadata correlating linked session context internally."""
-    session_id: str
-    backend: str
-    metadata: dict = {}
-
-
-class StatusResponse(BaseModel):
-    """Reports configuration matching backend instances health correctly."""
-    backend: str
-    healthy: bool
-
-
-# ─────────────────────────────────────────────
-# 2. OpenSandbox Config Settings (Kubernetes Native)
-# ─────────────────────────────────────────────
-
-def opensandbox_base_url() -> str:
-    """
-    Points directly to the internal Kubernetes service by default.
-    Using 'http://opensandbox-server:80' resolves locally inside the cluster.
-    """
-    return os.environ.get("BACKEND_URL_OPENSANDBOX", "http://opensandbox-server:80")
-
-
-def opensandbox_headers() -> dict[str, str]:
-    """Generates standard HTTP parameter validating authorization."""
-    api_key = os.environ.get("OPENSANDBOX_API_KEY", "your-secure-api-key")
-    return {
-        "Content-Type": "application/json",
-        "OPEN-SANDBOX-API-KEY": api_key,
-    }
-
-
-# ─────────────────────────────────────────────
-# 3. Abstract Backend Framework
-# ─────────────────────────────────────────────
-
-class SandboxBackend(abc.ABC):
-    """Abstract interface exposing generic operation mapping routines natively."""
-    
-    @abc.abstractmethod
-    def run(self, code: str, language: str, timeout: int) -> RunResponse:
-        pass
-
-    @abc.abstractmethod
-    def open_session(self) -> SessionResponse:
-        pass
-
-    @abc.abstractmethod
-    def close_session(self, session_id: str) -> None:
-        pass
-
-    @abc.abstractmethod
-    def health_check(self) -> bool:
-        pass
-
-    @property
-    @abc.abstractmethod
-    def name(self) -> str:
-        pass
-
-
-# ─────────────────────────────────────────────
-# 4. GenericHTTPBackend specific for OpenSandbox
-# ─────────────────────────────────────────────
-
-class GenericHTTPBackend(SandboxBackend):
-    """
-    Implements standard HTTP interfacing specifically hard-wired explicitly targeting
-    REST API backend resources routing dynamically.
-    """
-    def __init__(self, name: str, url: str):
-        self._name = name
-        self._url = url
-
-    @property
-    def name(self):
-        return self._name
-
-    def run(self, code: str, language: str, timeout: int) -> RunResponse:
-        """Transmits JSON payload explicitly dictating remote execution instructions."""
-        payload = {"code": code, "language": language, "timeout": timeout}
-        t0 = time.perf_counter()
-        
-        try:
-            with httpx.Client(timeout=timeout + 5) as client:
-                # Typically execution mapping dynamically wraps endpoints. 
-                # This explicitly points to the dynamic run/evaluation interface.
-                r = client.post(f"{self._url}/run", json=payload, headers=opensandbox_headers())
-                r.raise_for_status()
-                data = r.json()
-                
-                return RunResponse(
-                    stdout=data.get("stdout", ""),
-                    stderr=data.get("stderr", ""),
-                    exit_code=data.get("exit_code", 0),
-                    duration_ms=(time.perf_counter() - t0) * 1000,
-                    sandbox_id=data.get("sandbox_id", str(uuid.uuid4())),
-                    backend=self.name,
-                )
-        except Exception as e:
-            return RunResponse(
-                stdout="",
-                stderr=f"Generic HTTP Backend Error ({self.name}): {e}",
-                exit_code=1,
-                duration_ms=0,
-                sandbox_id="",
-                backend=self.name,
-            )
-
-    def open_session(self) -> SessionResponse:
-        """Simulates dynamic instantiation locally allocating logical tracking contexts."""
-        return SessionResponse(session_id=str(uuid.uuid4()), backend=self.name)
-
-    def close_session(self, session_id: str) -> None:
-        pass
-
-    def health_check(self) -> bool:
-        """Validates upstream responsiveness mapping explicit endpoint checks dynamically."""
-        try:
-            with httpx.Client(timeout=3) as client:
-                r = client.get(f"{self._url}/health", headers=opensandbox_headers())
-                return r.status_code < 500
-        except Exception:
-            return False
-
 
 class AppState:
     """Manages active proxy mapping configurations statically holding internal maps."""
@@ -195,7 +45,7 @@ state = AppState()
 
 
 # ─────────────────────────────────────────────
-# 5. Global API Instantiation
+# 2. Global API Instantiation & Lifespan
 # ─────────────────────────────────────────────
 
 @asynccontextmanager
@@ -210,17 +60,17 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="CodeInspector API Manager",
     description="A centralized proxy relaying connections mapping standard interaction seamlessly to the underlying actual code-evaluation clusters locally natively successfully.",
-    version="2.0.0",
-    docs_url="/docs",  # Basic docs path (kept minimal natively)
+    version="2.1.0",
+    docs_url="/docs",
     lifespan=lifespan,
 )
 
 
 # ─────────────────────────────────────────────
-# 6. Global Base Operations natively registered
+# 3. Global Base Operations
 # ─────────────────────────────────────────────
 
-@app.get("/health", response_model=StatusResponse, summary="Retrieve active connection tracking properties securely safely validating", tags=["System"])
+@app.get("/health", response_model=StatusResponse, summary="Retrieve active connection tracking properties", tags=["System"])
 def health():
     """Confirms running state natively mapping logic checks."""
     return StatusResponse(
@@ -229,21 +79,19 @@ def health():
     )
 
 
-@app.post("/run", response_model=RunResponse, summary="Dispatch synchronous script explicitly triggering configured backend safely logically safely", tags=["System"])
+@app.post("/run", response_model=RunResponse, summary="Dispatch synchronous script explicitly", tags=["System"])
 def run_code(req: RunRequest):
-    """Evaluates payload instructions passing securely logically natively effectively correctly dynamically passing properties."""
+    """Evaluates payload instructions passing securely to the configured backend."""
     return state.backend.run(req.code, req.language.value, req.timeout)
 
 
 # ─────────────────────────────────────────────
-# 7. OpenSandbox Proxy Forwarding & Docs
+# 4. OpenSandbox Proxy Forwarding & Docs
 # ─────────────────────────────────────────────
 
 @app.get("/backend/opensandbox/docs", include_in_schema=False)
 async def get_backend_docs():
-    """
-    Renders actual upstream OpenSandbox Swagger API actively fetching real properties correctly wrapping references dynamically correctly safely sequentially efficiently.
-    """
+    """Renders actual upstream OpenSandbox Swagger API."""
     return get_swagger_ui_html(
         openapi_url="/backend/opensandbox/openapi.json",
         title="OpenSandbox — Remote API Docs",
@@ -254,9 +102,7 @@ async def get_backend_docs():
 
 @app.get("/backend/opensandbox/openapi.json", include_in_schema=False)
 async def get_backend_openapi_spec():
-    """
-    Translates and patches explicitly upstream OpenAPI spec adding authentication tracking dynamically cleanly safely flawlessly transparently.
-    """
+    """Translates and patches explicitly upstream OpenAPI spec."""
     base_url = opensandbox_base_url()
 
     for spec_path in ["/openapi.json", "/v1/openapi.json", "/docs/openapi.json"]:
@@ -265,7 +111,6 @@ async def get_backend_openapi_spec():
                 r = await client.get(f"{base_url}{spec_path}")
                 if r.status_code == 200:
                     spec = r.json()
-                    # Reconfigure server root pointing implicitly locally dynamically natively correctly effectively exclusively globally.
                     spec["servers"] = [{"url": "/backend/opensandbox"}]
                     spec.setdefault("components", {})
                     spec["components"].setdefault("securitySchemes", {})
@@ -278,8 +123,7 @@ async def get_backend_openapi_spec():
         except Exception:
             continue
 
-    # Notice: If it fails, we return a 404 instead of app.openapi() to ensure it doesn't default to the local docs!
-    raise HTTPException(status_code=404, detail=f"Target upstream openapi.json not found securely properly on {base_url}")
+    raise HTTPException(status_code=404, detail=f"Target upstream openapi.json not found on {base_url}")
 
 
 async def _do_proxy(proxy_path: str, request: Request):
@@ -319,7 +163,7 @@ async def _do_proxy(proxy_path: str, request: Request):
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Proxy routing failed natively targeting upstream explicitly {target_url}: {exc}",
+                detail=f"Proxy routing failed targeting {target_url}: {exc}",
             )
 
 
@@ -342,6 +186,22 @@ async def proxy_delete(proxy_path: str, request: Request):
 @app.patch("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PATCH request")
 async def proxy_patch(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
+
+
+# ─────────────────────────────────────────────
+# 5. Native Sandbox Management (V1)
+# ─────────────────────────────────────────────
+
+@app.post("/v1/sandboxes", response_model=SandboxResponse, tags=["Sandboxes"], summary="Provision a new isolated sandbox")
+def create_sandbox(req: CreateSandboxRequest):
+    """Creates a new sandbox environment using the active backend."""
+    return state.backend.create_sandbox(req)
+
+
+@app.get("/v1/sandboxes", response_model=list[SandboxResponse], tags=["Sandboxes"], summary="List all active sandboxes")
+def list_sandboxes():
+    """Retrieves a list of all currently active sandboxes from the backend."""
+    return state.backend.list_sandboxes()
 
 
 if __name__ == "__main__":
