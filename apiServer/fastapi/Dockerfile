@@ -27,8 +27,7 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
-# COPY sandbox_fastapi.py .
-# COPY codeinterpreter.py .
+
 COPY codeinspectior_api.py .
 
 # Switch to non-root user
