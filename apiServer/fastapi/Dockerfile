@@ -27,8 +27,9 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
-COPY sandbox_fastapi.py .
-COPY codeinterpreter.py .
+# COPY sandbox_fastapi.py .
+# COPY codeinterpreter.py .
+COPY codeinspectior_api.py .
 
 # Switch to non-root user
 USER appuser
@@ -41,4 +42,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
   CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"
 
 # Start the server
-CMD ["uvicorn", "sandbox_fastapi:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "codeinspectior_api:app", "--host", "0.0.0.0", "--port", "8000"]
