@@ -25,6 +25,11 @@ docker buildx inspect --bootstrap
 
 docker buildx ls
 
+# Clear cache to resolve potential corruption ("parent snapshot not found" error)
+echo "Pruning build cache..."
+docker buildx prune -f --filter "until=24h"
+
+
 #docker buildx build -t opensandbox/code-interpreter-base:${TAG} \
 #  --platform linux/amd64,linux/arm64 \
 #  -f Dockerfile_base \
@@ -35,5 +40,6 @@ docker buildx build \
   -t opensandbox/code-interpreter:${TAG} \
   -t sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:${TAG} \
   --platform linux/amd64,linux/arm64 \
+  --no-cache \
   --push \
   .

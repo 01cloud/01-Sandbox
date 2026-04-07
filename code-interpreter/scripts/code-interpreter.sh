@@ -188,6 +188,50 @@ _check_tool "trivy"    "trivy --version"
 echo "---------------------------------------------"
 echo " PATH: ${PATH}"
 echo "============================================="
+
+# ── Dynamic Security Scanning ─────────────────────────────────────────────────
+run_security_scans() {
+    echo "============================================="
+    echo "  Automated Security Scanning — /workspace"
+    echo "---------------------------------------------"
+
+    # Semgrep - Static Analysis
+    if command -v semgrep >/dev/null 2>&1; then
+        echo " [RUNNING]  Semgrep scan..."
+        semgrep scan --config=auto --quiet --error /workspace || echo " [WARN]     Semgrep found potential issues"
+    fi
+
+    # YAMLlint - Configuration Check
+    if command -v yamllint >/dev/null 2>&1; then
+        echo " [RUNNING]  YAMLlint scan..."
+        yamllint -d "{extends: relaxed, rules: {line-length: disable}}" /workspace || echo " [WARN]     YAMLlint found potential issues"
+    fi
+
+    # Bandit - Python Security
+    if command -v bandit >/dev/null 2>&1; then
+        echo " [RUNNING]  Bandit scan (Python)..."
+        bandit -r /workspace -q || echo " [WARN]     Bandit found potential issues"
+    fi
+
+    # Gitleaks - Secret Detection
+    if command -v gitleaks >/dev/null 2>&1; then
+        echo " [RUNNING]  Gitleaks scan (Secrets)..."
+        gitleaks detect --source /workspace --no-git --report-format json --no-banner || echo " [WARN]     Gitleaks found potential secrets"
+    fi
+
+    # Trivy - General Vulnerabilities
+    if command -v trivy >/dev/null 2>&1; then
+        echo " [RUNNING]  Trivy scan (FS)..."
+        trivy fs --scanners vuln,secret,config --quiet /workspace || echo " [WARN]     Trivy found potential issues"
+    fi
+
+    echo "---------------------------------------------"
+    echo "  Security scans complete."
+    echo "============================================="
+}
+
+# Execute scans automatically on startup
+run_security_scans
 # ─────────────────────────────────────────────────────────────────────────────
 
 jupyter notebook --ip=127.0.0.1 --port="${JUPYTER_PORT:-44771}" --allow-root --no-browser --NotebookApp.token="${JUPYTER_TOKEN:-opensandboxcodeinterpreterjupyter}" >/opt/opensandbox/jupyter.log
