@@ -29,6 +29,70 @@ RUN set -eux; \
         echo "Skipping clone3-workaround: upstream provides amd64/x86_64 binary only (TARGETARCH=${TARGETARCH})"; \
     fi
 
+# ── Security Scanning Tools ───────────────────────────────────────────────────
+# Install system-level dependencies needed by scanning tools
+RUN set -eux; \
+    apt-get update && apt-get install -y --no-install-recommends \
+        git \
+        curl \
+        unzip \
+        ca-certificates \
+        libseccomp2 \
+    && rm -rf /var/lib/apt/lists/*
+
+# semgrep — static analysis / SAST (supports Python, JS, Go, Java, etc.)
+# yamllint — YAML syntax and style linting
+# bandit  — Python-specific security linter
+# Python is uv-managed; source env script to activate it, then pass
+# --break-system-packages (same pattern the kernel install loops use).
+RUN set -eux; \
+    . /opt/opensandbox/code-interpreter-env.sh python 3.12; \
+    python3 -m pip install --no-cache-dir --break-system-packages \
+        semgrep \
+        yamllint \
+        bandit
+
+# gitleaks — secret / credential leak detection in source code
+RUN set -eux; \
+    GITLEAKS_VERSION="8.18.4"; \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        GITLEAKS_ARCH="x64"; \
+    elif [ "${TARGETARCH}" = "arm64" ]; then \
+        GITLEAKS_ARCH="arm64"; \
+    else \
+        GITLEAKS_ARCH="x64"; \
+    fi; \
+    curl -fsSL \
+        "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_${GITLEAKS_ARCH}.tar.gz" \
+        | tar -xz -C /usr/local/bin gitleaks; \
+    chmod 755 /usr/local/bin/gitleaks
+
+# trivy — vulnerability scanner for OS packages and language dependencies
+# Pinned to v0.69.3 (confirmed safe immutable release post supply-chain incident)
+RUN set -eux; \
+    TRIVY_VERSION="0.69.3"; \
+    if [ "${TARGETARCH}" = "amd64" ]; then \
+        TRIVY_ARCH="64bit"; \
+    elif [ "${TARGETARCH}" = "arm64" ]; then \
+        TRIVY_ARCH="ARM64"; \
+    else \
+        TRIVY_ARCH="64bit"; \
+    fi; \
+    curl -fsSL \
+        "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-${TRIVY_ARCH}.tar.gz" \
+        | tar -xz -C /usr/local/bin trivy; \
+    chmod 755 /usr/local/bin/trivy
+
+# Verify all scanning tools are accessible
+RUN set -eux; \
+    . /opt/opensandbox/code-interpreter-env.sh python 3.12; \
+    semgrep --version; \
+    yamllint --version; \
+    bandit --version; \
+    gitleaks version; \
+    trivy --version
+# ─────────────────────────────────────────────────────────────────────────────
+
 # Install Python kernels
 RUN set -euo pipefail \
     && echo "Setting up ipykernel for Python 3.10, 3.11, 3.12, 3.13, 3.14" \
@@ -76,6 +140,8 @@ RUN set -euo pipefail \
         && go install golang.org/x/tools/gopls@latest; \
     done \
     && echo "Setting up gonb done"
+
+##
 
 ENV JUPYTER_HOST=http://127.0.0.1:44771 \
     JUPYTER_PORT=44771 \

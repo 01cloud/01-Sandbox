@@ -112,7 +112,6 @@ setup_java() {
 	}
 }
 
-# setup node
 setup_node() {
 	time {
 		npm install -g tslab
@@ -133,7 +132,13 @@ setup_bash() {
 	}
 }
 
-# export go bin path
+# ── Install missing security scanning tools ───────────────────────────────────
+setup_security_tools() {
+	echo "Installing missing security scanning tools..."
+	pip install semgrep yamllint bandit --break-system-packages --quiet
+}
+
+# Export go bin path
 export PATH="$(go env GOPATH)/bin:$PATH"
 if [ -n "${EXECD_ENVS:-}" ]; then
 	mkdir -p "$(dirname "$EXECD_ENVS")" 2>/dev/null || true
@@ -150,5 +155,39 @@ setup_go &
 pids+=($!)
 setup_bash &
 pids+=($!)
+setup_security_tools &
+pids+=($!)
+
+# ── Security Scanning Tools — startup verification ────────────────────────────
+# Wait for all background setup jobs to complete before verification
+for pid in "${pids[@]}"; do
+	wait "$pid"
+done
+
+echo "============================================="
+echo " Security Scanning Tools — Startup Check"
+echo "---------------------------------------------"
+
+_check_tool() {
+	local name=$1
+	local version_cmd=$2
+	local version_output
+	if version_output=$(eval "${version_cmd}" 2>&1); then
+		echo " [OK]      ${name}: $(echo "${version_output}" | head -n1)"
+	else
+		echo " [MISSING] ${name}: not found on PATH"
+	fi
+}
+
+_check_tool "semgrep"  "semgrep --version"
+_check_tool "yamllint" "yamllint --version"
+_check_tool "bandit"   "bandit --version"
+_check_tool "gitleaks" "gitleaks version"
+_check_tool "trivy"    "trivy --version"
+
+echo "---------------------------------------------"
+echo " PATH: ${PATH}"
+echo "============================================="
+# ─────────────────────────────────────────────────────────────────────────────
 
 jupyter notebook --ip=127.0.0.1 --port="${JUPYTER_PORT:-44771}" --allow-root --no-browser --NotebookApp.token="${JUPYTER_TOKEN:-opensandboxcodeinterpreterjupyter}" >/opt/opensandbox/jupyter.log
