@@ -1,0 +1,39 @@
+# cloudflared-deployment.yaml (repeat per env with correct token)
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cloudflared
+  namespace: opensandbox-system  # change per env
+spec:
+  replicas: 2          # run 2 for HA
+  selector:
+    matchLabels:
+      app: cloudflared
+  template:
+    metadata:
+      labels:
+        app: cloudflared
+    spec:
+      containers:
+      - name: cloudflared
+        image: cloudflare/cloudflared:latest
+        args:
+          - tunnel
+          - --no-autoupdate
+          - run
+          - --token
+          - $(TUNNEL_TOKEN)
+        env:
+        - name: TUNNEL_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: cloudflare-tunnel-token
+              key: token
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: cloudflare-tunnel-token
+  namespace: opensandbox-system
+stringData:
+  token: "eyJhIjoiZTNkZjUyNzc2YjhjOWQzYWMyMGI0ZTc1ZjYxMjkyNmIiLCJ0IjoiNzVjZWViOTQtMzhmMC00ZTRiLWI0MWQtZTZhMGEyNWQ5MGIyIiwicyI6Ik9UWTFNVGxrTjJJdE1tVTNOeTAwWldRMkxUZzNNV0V0TVRZM09UaGhNemRrT1RsbSJ9"

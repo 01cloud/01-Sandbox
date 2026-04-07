@@ -60,7 +60,7 @@ spec:
             - containerPort: 8080
               protocol: TCP
           resources:
-            {{- include "opensandbox.controller.resources" . | nindent 10 }}
+            {{- include "opensandbox.controller.resources" . | nindent 12 }}
           livenessProbe:
             httpGet:
               path: /healthz
