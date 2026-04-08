@@ -118,6 +118,12 @@ opensandbox:
       limits:
         cpu: 500m
         memory: 512Mi
+    storage:
+      enabled: true
+      pvcName: "scan-pvc"
+      size: "10Gi"
+      accessMode: "ReadWriteOnce"
+      mountPath: "/data"
 
 
 

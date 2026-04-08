@@ -74,6 +74,10 @@ spec:
               mountPath: /etc/opensandbox/config.toml
               subPath: config.toml
               readOnly: true
+            {{- if .Values.storage.enabled }}
+            - name: data
+              mountPath: {{ .Values.storage.mountPath | default "/data" }}
+            {{- end }}
           resources:
             requests:
               cpu: {{ .Values.server.resources.requests.cpu | quote }}
@@ -97,6 +101,11 @@ spec:
         - name: server-config
           configMap:
             name: opensandbox-server-config
+        {{- if .Values.storage.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.storage.pvcName | default "scan-pvc" }}
+        {{- end }}
       restartPolicy: Always
 ---
 apiVersion: v1

@@ -73,3 +73,11 @@ configToml: |
   workload_provider = "batchsandbox"
   batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
 
+
+# Storage configuration for Scan Jobs
+storage:
+  enabled: true
+  pvcName: "scan-pvc"
+  size: "10Gi"
+  accessMode: "ReadWriteOnce"
+  mountPath: "/data"

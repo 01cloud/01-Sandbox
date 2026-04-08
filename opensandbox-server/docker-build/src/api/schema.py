@@ -512,6 +512,37 @@ class RenewSandboxExpirationResponse(BaseModel):
 
 
 # ============================================================================
+# Scan Job
+# ============================================================================
+
+class ScanJobRequest(BaseModel):
+    """
+    Request to create a security scan job for a set of code files.
+    """
+    files: Optional[Dict[str, str]] = Field(
+        None, 
+        description="A mapping of filenames to their contents (plain text or base64)."
+    )
+    timeout: Optional[int] = Field(
+        300,
+        ge=60,
+        description="Timeout for the scan sandbox in seconds."
+    )
+    metadata: Optional[Dict[str, str]] = Field(
+        None,
+        description="Custom metadata for the scan job."
+    )
+
+
+class ScanJobResponse(BaseModel):
+    """
+    Response containing the identifiers for the created scan job and its sandbox.
+    """
+    job_id: str = Field(..., description="Unique job identifier")
+    sandbox_id: str = Field(..., description="Unique sandbox identifier")
+
+
+# ============================================================================
 # Endpoint
 # ============================================================================
 

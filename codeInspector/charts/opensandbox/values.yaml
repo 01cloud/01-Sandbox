@@ -13,6 +13,14 @@ controller:
       cpu: 500m
       memory: 512Mi
 
+# Storage configuration for Scan Jobs
+storage:
+  enabled: true
+  pvcName: "scan-pvc"
+  size: "10Gi"
+  accessMode: "ReadWriteOnce"
+  mountPath: "/data"
+
 server:
   replicaCount: 1
   image:

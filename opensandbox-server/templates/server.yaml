@@ -97,6 +97,10 @@ spec:
               mountPath: /etc/opensandbox/config.toml
               subPath: config.toml
               readOnly: true
+            {{- if .Values.storage.enabled }}
+            - name: data
+              mountPath: {{ .Values.storage.mountPath | default "/data" }}
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /health
@@ -117,6 +121,11 @@ spec:
         - name: config
           configMap:
             name: {{ include "opensandbox-server.fullname" . }}-config
+        {{- if .Values.storage.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ .Values.storage.pvcName | default "scan-pvc" }}
+        {{- end }}
       {{- with .Values.server.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}

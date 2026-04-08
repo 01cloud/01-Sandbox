@@ -19,10 +19,9 @@ This module defines FastAPI routes that map to the OpenAPI specification endpoin
 All business logic is delegated to the service layer that backs each operation.
 """
 
-from typing import List, Optional
-
+from typing import List, Optional, Any
 import httpx
-from fastapi import APIRouter, Header, Query, Request, status
+from fastapi import APIRouter, Header, Query, Request, status, Body
 from fastapi.exceptions import HTTPException
 from fastapi.responses import Response, StreamingResponse
 
@@ -38,6 +37,12 @@ from src.api.schema import (
     RenewSandboxExpirationResponse,
     Sandbox,
     SandboxFilter,
+    ScanJobRequest,
+    ScanJobResponse,
+    ImageSpec,
+    Volume,
+    PVC,
+    ResourceLimits as SchemaResourceLimits,
 )
 from src.services.factory import create_sandbox_service
 
@@ -105,6 +110,124 @@ async def create_sandbox(
     """
 
     return sandbox_service.create_sandbox(request)
+
+
+@router.post(
+    "/scan-jobs",
+    response_model=ScanJobResponse,
+    status_code=status.HTTP_201_CREATED,
+    responses={
+        201: {"description": "Scan job successfully created and sandbox provisioned"},
+        400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
+        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+    },
+    openapi_extra={
+        "requestBody": {
+            "content": {
+                "application/json": {
+                    "schema": {
+                        "type": "string",
+                        "description": "A JSON ScanJobRequest or a raw Python code snippet.",
+                        "example": "print('Hello, World!')"
+                    }
+                }
+            }
+        }
+    }
+)
+async def create_scan_job(
+    request: Request,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+) -> ScanJobResponse:
+    """
+    High-level API to submit a set of files for security scanning.
+    
+    This endpoint:
+    1. Writes files to a shared PVC.
+    2. Provisions a code-interpreter sandbox with a volume mount to those files.
+    3. The sandbox automatically runs security scans on startup.
+    """
+    import os
+    import base64
+    import json
+    from uuid import uuid4
+
+    # Robust parsing: Try JSON first, fallback to raw text as main.py
+    body_bytes = await request.body()
+    body_str = body_bytes.decode("utf-8")
+    
+    scan_request = None
+    try:
+        # Check if it's a valid JSON object matching our schema
+        data = json.loads(body_str)
+        if isinstance(data, dict):
+            scan_request = ScanJobRequest(**data)
+    except Exception:
+        # Not a valid JSON or doesn't match schema; will be treated as raw code below
+        pass
+
+    if not scan_request or not scan_request.files:
+        # Treat the entire body as a single Python file if it's not a JSON ScanJobRequest
+        scan_request = ScanJobRequest(files={"main.py": body_str})
+
+    job_id = str(uuid4())
+    # Base path for shared storage (mounted via PVC in Helm)
+    data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
+    job_dir = os.path.join(data_root, job_id, "workspace")
+    
+    try:
+        os.makedirs(job_dir, exist_ok=True)
+        
+        for filename, content in scan_request.files.items():
+            # Basic path sanitization to prevent directory traversal
+            safe_filename = os.path.basename(filename)
+            file_path = os.path.join(job_dir, safe_filename)
+            
+            # Identify if content is base64 encoded
+            try:
+                # If it looks like base64, decode it; otherwise write as plain text.
+                # Common heuristic: check if it can be decoded as base64 without error.
+                # For safety, we try to decode.
+                decoded_content = base64.b64decode(content, validate=True)
+                with open(file_path, "wb") as f:
+                    f.write(decoded_content)
+            except Exception:
+                # Fallback to plain text
+                with open(file_path, "w") as f:
+                    f.write(content)
+                    
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "FILE_SYSTEM_ERROR", "message": f"Failed to write scan files: {str(e)}"}
+        )
+
+    # Construct the sandbox creation request
+    # Note: We use the shared PVC name defined in our Helm chart
+    sandbox_req = CreateSandboxRequest(
+        image=ImageSpec(uri="codeinterpreter:3.1.0"), # Using the version we verified earlier
+        resourceLimits=SchemaResourceLimits(root={"cpu": "1", "memory": "2Gi"}),
+        entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+        volumes=[Volume(
+            name="workspace",
+            pvc=PVC(claimName="scan-pvc"),
+            mountPath="/workspace", 
+            subPath=f"{job_id}/workspace"
+        )],
+        env={
+            "SCAN_DIR": "/workspace", 
+            "SCAN_REPORT": "/workspace/security_scan_report.json"
+        },
+        timeout=scan_request.timeout or 300,
+        metadata=scan_request.metadata
+    )
+
+    created_sandbox = sandbox_service.create_sandbox(sandbox_req)
+    
+    return ScanJobResponse(
+        job_id=job_id,
+        sandbox_id=created_sandbox.id
+    )
 
 
 # Search endpoint
