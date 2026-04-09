@@ -327,46 +327,35 @@ class KubernetesSandboxService(SandboxService):
             )
             
             logger.info(
-                "Created sandbox: id=%s, workload=%s",
+                "Created sandbox (Async): id=%s, workload=%s",
                 sandbox_id,
                 workload_info.get("name"),
             )
             
-            # Wait for Pod to be Running with IP
-            try:
-                workload = self._wait_for_sandbox_ready(
-                    sandbox_id=sandbox_id,
-                    timeout_seconds=self.app_config.kubernetes.sandbox_create_timeout_seconds,
-                    poll_interval_seconds=self.app_config.kubernetes.sandbox_create_poll_interval_seconds,
-                )
-                
-                # Get final status
-                status_info = self.workload_provider.get_status(workload)
-                
-                # Build and return response with Running state
-                return CreateSandboxResponse(
-                    id=sandbox_id,
-                    status=SandboxStatus(
-                        state=status_info["state"],
-                        reason=status_info["reason"],
-                        message=status_info["message"],
-                        last_transition_at=status_info["last_transition_at"],
-                    ),
-                    created_at=created_at,
-                    expires_at=expires_at,
-                    metadata=request.metadata,
-                    image=request.image,
-                    entrypoint=request.entrypoint,
-                )
-                
-            except HTTPException:
-                # Clean up on failure
-                try:
-                    logger.warning(f"Creation failed, cleaning up sandbox: {sandbox_id}")
-                    self.workload_provider.delete_workload(sandbox_id, self.namespace)
-                except Exception as cleanup_ex:
-                    logger.error(f"Failed to cleanup sandbox {sandbox_id}", exc_info=cleanup_ex)
-                raise
+            # Fetch the initial workload state (likely Pending) to build the response
+            workload = self.workload_provider.get_workload(
+                sandbox_id=sandbox_id,
+                namespace=self.namespace,
+            )
+            
+            # Get initial status
+            status_info = self.workload_provider.get_status(workload)
+            
+            # Build and return response immediately with initial state
+            return CreateSandboxResponse(
+                id=sandbox_id,
+                status=SandboxStatus(
+                    state=status_info["state"],
+                    reason=status_info["reason"],
+                    message=status_info["message"],
+                    last_transition_at=status_info["last_transition_at"],
+                ),
+                created_at=created_at,
+                expires_at=expires_at,
+                metadata=request.metadata,
+                image=request.image,
+                entrypoint=request.entrypoint,
+            )
             
         except HTTPException:
             raise
