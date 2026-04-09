@@ -122,7 +122,7 @@ opensandbox:
       enabled: true
       pvcName: "scan-pvc"
       size: "10Gi"
-      accessMode: "ReadWriteOnce"
+      accessMode: "ReadWriteMany"
       mountPath: "/data"
 
 

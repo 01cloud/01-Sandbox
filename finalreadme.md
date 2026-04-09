@@ -47,9 +47,9 @@ CodeInspector features a sophisticated scanning system that audits code before a
 ### High-Level Scan API (`/v1/scan-jobs`)
 A dedicated endpoint for bulk security audits designed for high-concurrency environments.
 1. **Instant Acknowledgement**: Returns a `job_id` and `sandbox_id` in milliseconds.
-2. **Persistence**: Files are written to a unique sub-path in `/workspace` on a shared PVC.
-3. **Background Provisioning**: Schedules a `codeinterpreter:3.1.0` sandbox in Kubernetes without blocking the API worker.
-4. **State Tracking**: Users poll the status endpoint to track the transition from `Pending` -> `Running` -> `Completed`.
+2. **Persistence**: Every file is stored in a unique path `/data/{job_id}/{workspace|reports}` on a shared PVC.
+3. **Background Provisioning**: Schedules a sandbox in Kubernetes without blocking the API.
+4. **Retrieval**: Results are persistent and can be fetched via `GET /v1/scan-jobs/{job_id}/report`.
 5. **Automation**: The sandbox entrypoint automatically triggers the `ScannerOrchestrator` upon container startup.
 
 ### The Security Toolchain

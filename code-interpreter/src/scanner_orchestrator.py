@@ -13,7 +13,7 @@ logging.basicConfig(
 )
 
 SCAN_DIR = os.getenv("SCAN_DIR", "/workspace")
-REPORT_PATH = os.getenv("SCAN_REPORT", "/tmp/security_scan_report.json")
+REPORT_PATH = os.getenv("SCAN_REPORT", "/reports/security_scan_report.json")
 SCAN_TOOLS_ENV = os.getenv("SCAN_TOOLS", "") # Comma-separated list of tools to run
 
 class ScannerOrchestrator:

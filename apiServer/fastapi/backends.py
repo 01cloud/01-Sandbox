@@ -33,6 +33,14 @@ class SandboxBackend(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def create_scan_job(self, req: dict) -> dict:
+        pass
+
+    @abc.abstractmethod
+    def get_scan_report(self, job_id: str) -> dict:
+        pass
+
+    @abc.abstractmethod
     def list_sandboxes(self) -> list[SandboxResponse]:
         pass
 
@@ -111,6 +119,27 @@ class GenericHTTPBackend(SandboxBackend):
             r.raise_for_status()
             data = r.json()
             return SandboxResponse(**data)
+
+    def create_scan_job(self, req: dict) -> dict:
+        """Triggers the isolated scan pipeline on the remote OpenSandbox server."""
+        with httpx.Client(timeout=30) as client:
+            r = client.post(
+                f"{self._url}/v1/scan-jobs",
+                json=req,
+                headers=opensandbox_headers()
+            )
+            r.raise_for_status()
+            return r.json()
+
+    def get_scan_report(self, job_id: str) -> dict:
+        """Retrieves a persistent scan report from the remote OpenSandbox PVC."""
+        with httpx.Client(timeout=10) as client:
+            r = client.get(
+                f"{self._url}/scan-jobs/{job_id}/report",
+                headers=opensandbox_headers()
+            )
+            r.raise_for_status()
+            return r.json()
 
     def list_sandboxes(self) -> list[SandboxResponse]:
         """Retrieves active sandboxes from the remote OpenSandbox server."""

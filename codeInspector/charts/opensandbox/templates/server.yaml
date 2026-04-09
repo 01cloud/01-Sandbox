@@ -74,6 +74,10 @@ spec:
               mountPath: /etc/opensandbox/config.toml
               subPath: config.toml
               readOnly: true
+            - name: server-config
+              mountPath: /etc/opensandbox/example.batchsandbox-template.yaml
+              subPath: example.batchsandbox-template.yaml
+              readOnly: true
             {{- if .Values.storage.enabled }}
             - name: data
               mountPath: {{ .Values.storage.mountPath | default "/data" }}
@@ -106,6 +110,8 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Values.storage.pvcName | default "scan-pvc" }}
         {{- end }}
+      nodeSelector:
+        kubernetes.io/hostname: codebot-worker
       restartPolicy: Always
 ---
 apiVersion: v1
@@ -138,3 +144,26 @@ data:
 
     [ingress]
     mode = "direct"
+  example.batchsandbox-template.yaml: |
+    metadata:
+      labels:
+        app.kubernetes.io/name: opensandbox
+    spec:
+      replicas: 1
+      template:
+        metadata:
+          labels:
+            app: opensandbox-sandbox
+        spec:
+          nodeSelector:
+            kubernetes.io/hostname: codebot-worker
+          restartPolicy: Never
+          tolerations:
+            - operator: "Exists"
+          containers:
+          - name: main
+            image: codeinterpreter:3.1.0
+            command:
+            - tail
+            - -f
+            - /dev/null

@@ -23,7 +23,8 @@ from fastapi.responses import JSONResponse
 # Modular Imports
 from models import (
     RunRequest, RunResponse, StatusResponse, 
-    CreateSandboxRequest, SandboxResponse
+    CreateSandboxRequest, SandboxResponse,
+    ScanJobRequest, ScanJobResponse
 )
 from config import opensandbox_base_url, opensandbox_headers
 from backends import SandboxBackend, GenericHTTPBackend
@@ -202,6 +203,25 @@ def create_sandbox(req: CreateSandboxRequest):
 def list_sandboxes():
     """Retrieves a list of all currently active sandboxes from the backend."""
     return state.backend.list_sandboxes()
+
+
+@app.post("/v1/scan-jobs", response_model=ScanJobResponse, tags=["Security Scan Pipeline"])
+async def create_scan_job(req: ScanJobRequest):
+    """
+    Submits files for unified security scanning.
+    Every submission is isolated by a unique UUID in the PVC.
+    """
+    data = state.backend.create_scan_job(req.dict(exclude_none=True))
+    return ScanJobResponse(**data)
+
+
+@app.get("/v1/scan-jobs/{job_id}/report", tags=["Security Scan Pipeline"])
+async def get_scan_report(job_id: str):
+    """
+    Retrieves the persistent JSON scan report for a specific job ID.
+    Visible even after the sandbox pod has finished.
+    """
+    return state.backend.get_scan_report(job_id)
 
 
 if __name__ == "__main__":
