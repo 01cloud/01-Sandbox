@@ -98,10 +98,13 @@ class ScannerOrchestrator:
             cmd[0] = "semgrep"
             res = self.run_command(cmd, "Semgrep")
         
-        if res.get("status") == "ISSUES_FOUND" and res.get("stdout"):
+        if res.get("stdout"):
             try:
                 data = json.loads(res["stdout"])
-                for result in data.get("results", []):
+                results = data.get("results", [])
+                if results:
+                    res["status"] = "ISSUES_FOUND"
+                for result in results:
                     self.results["findings"].append({
                         "tool": "semgrep",
                         "file": result.get("path"),
@@ -128,6 +131,8 @@ class ScannerOrchestrator:
             try:
                 with open(report_path, "r") as f:
                     leaks = json.load(f)
+                    if leaks:
+                        res["status"] = "ISSUES_FOUND"
                     for leak in leaks:
                         self.results["findings"].append({
                             "tool": "gitleaks",
@@ -171,7 +176,10 @@ class ScannerOrchestrator:
         if res.get("stdout"):
             try:
                 data = json.loads(res["stdout"])
-                for issue in data.get("results", []):
+                results = data.get("results", [])
+                if results:
+                    res["status"] = "ISSUES_FOUND"
+                for issue in results:
                     self.results["findings"].append({
                         "tool": "bandit",
                         "file": issue.get("filename"),
@@ -201,9 +209,11 @@ class ScannerOrchestrator:
         if res.get("stdout"):
             try:
                 data = json.loads(res["stdout"])
+                issues_found = False
                 for result in data.get("Results", []):
                     # Parse vulnerabilities
                     for vuln in result.get("Vulnerabilities", []):
+                        issues_found = True
                         self.results["findings"].append({
                             "tool": "trivy",
                             "file": result.get("Target"),
@@ -213,6 +223,7 @@ class ScannerOrchestrator:
                         })
                     # Parse misconfigurations
                     for conf in result.get("Misconfigurations", []):
+                        issues_found = True
                         self.results["findings"].append({
                             "tool": "trivy",
                             "file": result.get("Target"),
@@ -220,6 +231,8 @@ class ScannerOrchestrator:
                             "issue": conf.get("Title"),
                             "severity": conf.get("Severity")
                         })
+                if issues_found:
+                    res["status"] = "ISSUES_FOUND"
             except Exception as e:
                 logging.error(f" Failed to parse Trivy JSON: {e}")
                 
