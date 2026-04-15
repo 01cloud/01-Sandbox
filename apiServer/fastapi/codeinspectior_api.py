@@ -18,7 +18,7 @@ from contextlib import asynccontextmanager
 import httpx
 from fastapi import FastAPI, HTTPException, Request, Response, status
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 
 # Modular Imports
 from models import (
@@ -151,7 +151,7 @@ async def _do_proxy(proxy_path: str, request: Request):
                 params=params,
                 content=body,
                 headers=headers,
-                timeout=60.0,
+                timeout=300.0,
             )
             return Response(
                 content=resp.content,
@@ -164,7 +164,7 @@ async def _do_proxy(proxy_path: str, request: Request):
         except Exception as exc:
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Proxy routing failed targeting {target_url}: {exc}",
+                detail=f"Proxy routing failed targeting {target_url}: {type(exc).__name__} - {exc}",
             )
 
 
@@ -210,8 +210,9 @@ async def create_scan_job(req: ScanJobRequest):
     """
     Submits files for unified security scanning.
     Every submission is isolated by a unique UUID in the PVC.
+    This endpoint blocks and waits for the entire scan process to complete.
     """
-    data = state.backend.create_scan_job(req.dict(exclude_none=True))
+    data = await state.backend.create_scan_job(req.dict(exclude_none=True))
     return ScanJobResponse(**data)
 
 

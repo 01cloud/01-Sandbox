@@ -3,7 +3,7 @@ namespace: agentgateway-system
 
 httproute:
   hostnames:
-    - test.sandbox.com
+    - dipper-shun-glowing.ngrok-free.dev
   backendService:
     name: sandbox-api-service
     port: 80

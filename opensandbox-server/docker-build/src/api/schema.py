@@ -544,10 +544,13 @@ class ScanJobRequest(BaseModel):
 
 class ScanJobResponse(BaseModel):
     """
-    Response containing the identifiers for the created scan job and its sandbox.
+    Response containing the identifiers and output for a completed scan job.
     """
     job_id: str = Field(..., description="Unique job identifier")
-    sandbox_id: str = Field(..., description="Unique sandbox identifier")
+    status: Optional[str] = Field(None, description="Final status: COMPLETED or FAILED")
+    report: Optional[Dict] = Field(None, description="The security scan findings report")
+    error: Optional[str] = Field(None, description="Error message if Failed")
+    sandbox_id: Optional[str] = Field(None, description="Unique sandbox identifier")
 
 
 # ============================================================================

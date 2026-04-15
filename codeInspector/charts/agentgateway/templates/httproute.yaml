@@ -19,6 +19,7 @@ spec:
     - group: ""
       kind: Service
       name: {{ .Values.httproute.backendService.name }}
+      namespace: opensandbox-system
       port: {{ .Values.httproute.backendService.port }}
       weight: 1
     matches:

@@ -86,3 +86,6 @@ class ScanJobResponse(BaseModel):
     """Response returned upon successfully scheduling a scan job."""
     job_id: str
     sandbox_id: Optional[str] = None
+    status: Optional[str] = None
+    report: Optional[dict] = None
+    error: Optional[str] = None

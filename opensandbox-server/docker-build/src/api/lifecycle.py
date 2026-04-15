@@ -151,7 +151,7 @@ async def create_sandbox(
     response_model=ScanJobResponse,
     status_code=status.HTTP_201_CREATED,
     responses={
-        201: {"description": "Scan job successfully created and sandbox provisioned"},
+        201: {"description": "Scan job successfully completed and report retrieved"},
         400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
         500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
     },
@@ -178,12 +178,13 @@ async def create_scan_job(
     
     This endpoint:
     1. Writes files to a shared PVC.
-    2. Provisions a code-interpreter sandbox with a volume mount to those files.
-    3. The sandbox automatically runs security scans on startup.
+    2. Provisions a code-interpreter sandbox.
+    3. Blocks synchronously until the scan finishes and returns the full JSON report.
     """
     import os
     import base64
     import json
+    import asyncio
     from uuid import uuid4
 
     # Robust parsing: Try JSON first, fallback to raw text as main.py
@@ -234,18 +235,14 @@ async def create_scan_job(
         os.makedirs(reports_dir, exist_ok=True)
         
         for filename, content in files_to_save.items():
-            # Basic path sanitization
             safe_filename = os.path.basename(filename)
             file_path = os.path.join(job_dir, safe_filename)
             
-            # Identify if content is base64 encoded
             try:
-                # If it looks like base64, decode it; otherwise write as plain text.
                 decoded_content = base64.b64decode(content, validate=True)
                 with open(file_path, "wb") as f:
                     f.write(decoded_content)
             except Exception:
-                # Fallback to plain text
                 with open(file_path, "w") as f:
                     f.write(content)
                     
@@ -255,8 +252,10 @@ async def create_scan_job(
             detail={"code": "FILE_SYSTEM_ERROR", "message": f"Failed to write scan files: {str(e)}"}
         )
 
-    # Construct the sandbox creation request
-    # Note: We use the shared PVC name defined in our Helm chart
+    # Attach job_id to sandbox metadata so it can be tracked
+    metadata = scan_request.metadata if scan_request and scan_request.metadata else {}
+    metadata["job_id"] = job_id
+
     sandbox_req = CreateSandboxRequest(
         image=ImageSpec(uri="codeinterpreter:3.1.0"),
         resourceLimits=SchemaResourceLimits(root={"cpu": "1", "memory": "2Gi"}),
@@ -281,14 +280,56 @@ async def create_scan_job(
                 subPath=f"{job_id}/reports"
             )
         ],
-        metadata=scan_request.metadata if scan_request else {}
+        metadata=metadata
     )
 
     created_sandbox = sandbox_service.create_sandbox(sandbox_req)
+    sandbox_id = created_sandbox.id
     
+    report_path = os.path.join(reports_dir, "security_scan_report.json")
+    timeout_seconds = sandbox_req.timeout if sandbox_req.timeout else 300
+    deadline = asyncio.get_event_loop().time() + timeout_seconds
+
+    while asyncio.get_event_loop().time() < deadline:
+        # 1. Check if the final report exists — return immediately when found
+        if os.path.exists(report_path):
+            try:
+                with open(report_path, "r") as f:
+                    report_data = json.load(f)
+                return ScanJobResponse(
+                    job_id=job_id,
+                    sandbox_id=sandbox_id,
+                    status="COMPLETED",
+                    report=report_data
+                )
+            except (json.JSONDecodeError, OSError):
+                pass # File may still be mid-write; retry next cycle
+
+        # 2. Yield control to the async event loop (non-blocking wait)
+        await asyncio.sleep(1)
+
+        # 3. Check sandbox state for early terminal failures
+        #    Run in executor so the blocking K8s API call doesn't freeze the event loop
+        try:
+            loop = asyncio.get_event_loop()
+            sb = await loop.run_in_executor(None, sandbox_service.get_sandbox, sandbox_id)
+            state = sb.status.state if sb.status else "Unknown"
+            if state in ("Failed", "Terminated", "Stopped") and not os.path.exists(report_path):
+                return ScanJobResponse(
+                    job_id=job_id,
+                    sandbox_id=sandbox_id,
+                    status="FAILED",
+                    error=f"Sandbox reached terminal state '{state}' before scan report was written."
+                )
+        except Exception:
+            pass  # Ignore transient look-up errors; keep waiting
+
+    # Deadline exceeded without a report
     return ScanJobResponse(
         job_id=job_id,
-        sandbox_id=created_sandbox.id
+        sandbox_id=sandbox_id,
+        status="FAILED",
+        error="Scan timed out waiting for the report to be written to the PVC."
     )
 
 

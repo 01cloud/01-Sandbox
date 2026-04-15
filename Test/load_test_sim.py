@@ -12,7 +12,7 @@ HEADERS = {
     "Content-Type": "application/json",
     "OPEN-SANDBOX-API-KEY": "your-secure-api-key"
 }
-CONCURRENT_USERS = 20  # Change this to test higher or lower loads
+CONCURRENT_USERS = 10  # Change this to test higher or lower loads
 
 def send_scan_request(user_id, results):
     """Simulates a single user submitting a code payload."""

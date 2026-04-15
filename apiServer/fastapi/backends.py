@@ -33,7 +33,7 @@ class SandboxBackend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def create_scan_job(self, req: dict) -> dict:
+    async def create_scan_job(self, req_body: bytes) -> dict:
         pass
 
     @abc.abstractmethod
@@ -120,12 +120,12 @@ class GenericHTTPBackend(SandboxBackend):
             data = r.json()
             return SandboxResponse(**data)
 
-    def create_scan_job(self, req: dict) -> dict:
-        """Triggers the isolated scan pipeline on the remote OpenSandbox server."""
-        with httpx.Client(timeout=30) as client:
-            r = client.post(
+    async def create_scan_job(self, req_body: bytes) -> dict:
+        """Triggers the isolated scan pipeline and blocks asynchronously for the final result."""
+        async with httpx.AsyncClient(timeout=300) as client:
+            r = await client.post(
                 f"{self._url}/v1/scan-jobs",
-                json=req,
+                content=req_body,
                 headers=opensandbox_headers()
             )
             r.raise_for_status()
