@@ -160,6 +160,27 @@ RUN set -eux; \
     gitleaks version; \
     trivy --version
 
+# 9. Install kubectl
+RUN set -eux; \
+    K8S_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt); \
+    ARCH=""; \
+    if [ -z "${TARGETARCH}" ]; then \
+      case "$(uname -m)" in \
+        x86_64) TARGETARCH="amd64" ;; \
+        aarch64) TARGETARCH="arm64" ;; \
+        *) echo "Unsupported architecture: $(uname -m)"; exit 1 ;; \
+      esac; \
+    fi && \
+    case "${TARGETARCH}" in \
+      "amd64") ARCH="amd64" ;; \
+      "arm64") ARCH="arm64" ;; \
+      *) echo "Unsupported architecture: ${TARGETARCH}"; exit 1 ;; \
+    esac && \
+    curl -fsSL -O "https://dl.k8s.io/release/${K8S_VERSION}/bin/linux/${ARCH}/kubectl" && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl && \
+    kubectl version --client
+
 RUN mkdir -p /opt/opensandbox
 COPY scripts/code-interpreter-env.sh /opt/opensandbox/code-interpreter-env.sh
 RUN chmod +x /opt/opensandbox/code-interpreter-env.sh
