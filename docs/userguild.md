@@ -58,7 +58,7 @@ You can access the Swagger UI through the following public URL:
 
 **How to Use:**
 1. Navigate to the `/docs` URL in your browser.
-2. Click the **Authorize** button (usually at the top right) to input your API token (e.g., `X-API-Key` or `Bearer Token`) allowing you to securely make authenticated requests.
+2. Use google extension tool `modHeader` to add `X-API-Key` header with your secure API token.
 3. Expand any endpoint (such as `POST /v1/scan-jobs`).
 4. Click **Try it out** to safely execute requests directly from the interface. It allows you to modify the request payload and instantly review the system's responses.
 
