@@ -41,6 +41,7 @@ class AppState:
             "opensandbox",
             opensandbox_base_url()
         )
+        self.latest_job_id: str | None = None
 
 state = AppState()
 
@@ -212,6 +213,14 @@ async def create_scan_job(req: ScanJobRequest):
     Every submission is isolated by a unique UUID in the PVC.
     This endpoint blocks and waits for the entire scan process to complete.
     """
+    import uuid
+    job_id = str(uuid.uuid4())
+    state.latest_job_id = job_id
+    
+    if req.metadata is None:
+        req.metadata = {}
+    req.metadata["job_id"] = job_id
+
     data = await state.backend.create_scan_job(req.dict(exclude_none=True))
     return ScanJobResponse(**data)
 
@@ -223,6 +232,36 @@ async def get_scan_report(job_id: str):
     Visible even after the sandbox pod has finished.
     """
     return state.backend.get_scan_report(job_id)
+
+
+@app.get("/v1/scan-status/{job_id}", tags=["Security Scan Pipeline"])
+async def get_scan_status(job_id: str):
+    """
+    Retrieves the active state of the sandbox handling the given scan job.
+    Useful for polling while a long scan is queued or running asynchronously.
+    """
+    return state.backend.get_scan_status(job_id)
+
+
+@app.get("/v1/job_id", tags=["Security Scan Pipeline"])
+async def get_latest_job_id():
+    """
+    Retrieves the job_id of the most recently initiated scan job in the current session.
+    Useful when a /v1/scan-jobs request is blocking and you need the job_id from another tab.
+    """
+    if not state.latest_job_id:
+        raise HTTPException(status_code=404, detail="No scan jobs have been initiated yet.")
+    return {"job_id": state.latest_job_id}
+
+
+@app.get("/v1/job_status", tags=["Security Scan Pipeline"])
+async def get_latest_job_status():
+    """
+    Retrieves the status of the most recently initiated scan job in the current session.
+    """
+    if not state.latest_job_id:
+        raise HTTPException(status_code=404, detail="No scan jobs have been initiated yet.")
+    return state.backend.get_scan_status(state.latest_job_id)
 
 
 if __name__ == "__main__":

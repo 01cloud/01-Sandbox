@@ -201,7 +201,14 @@ async def create_scan_job(
         # Fallback: create an empty request object if parsing fails
         scan_request = ScanJobRequest()
 
-    job_id = str(uuid4())
+    # Check metadata for pre-generated job_id from gateway
+    metadata = {}
+    if scan_request and scan_request.metadata:
+        metadata = scan_request.metadata
+        
+    job_id = metadata.get("job_id", str(uuid4()))
+    metadata["job_id"] = job_id
+
     # Base path for shared storage (mounted via PVC in Helm)
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
     job_dir = os.path.join(data_root, job_id, "workspace")
@@ -251,10 +258,6 @@ async def create_scan_job(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"code": "FILE_SYSTEM_ERROR", "message": f"Failed to write scan files: {str(e)}"}
         )
-
-    # Attach job_id to sandbox metadata so it can be tracked
-    metadata = scan_request.metadata if scan_request and scan_request.metadata else {}
-    metadata["job_id"] = job_id
 
     sandbox_req = CreateSandboxRequest(
         image=ImageSpec(uri="codeinterpreter:3.1.0"),
@@ -378,6 +381,29 @@ async def get_scan_source(job_id: str, file_path: str):
         )
         
     return FileResponse(full_path)
+
+
+@router.get("/scan-status/{job_id}", tags=["Security Scan Pipeline"])
+async def get_scan_status(job_id: str):
+    """
+    Retrieves the current sandbox status for a given scan job ID.
+    Looks up the active sandbox using the job_id injected into its metadata.
+    """
+    request = ListSandboxesRequest(
+        filter=SandboxFilter(metadata={"job_id": job_id}),
+        pagination=PaginationRequest(page=1, pageSize=1)
+    )
+    res = sandbox_service.list_sandboxes(request)
+    
+    if not res.items:
+        return {"job_id": job_id, "status": "NOT_FOUND", "message": "No active sandbox found for this job ID. It may have been garbage collected, or never existed."}
+        
+    sandbox = res.items[0]
+    return {
+        "job_id": job_id,
+        "sandbox_id": sandbox.id,
+        "status": sandbox.status.state if sandbox.status else "Unknown"
+    }
 
 
 # Search endpoint

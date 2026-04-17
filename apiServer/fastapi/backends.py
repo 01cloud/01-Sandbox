@@ -41,6 +41,10 @@ class SandboxBackend(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def get_scan_status(self, job_id: str) -> dict:
+        pass
+
+    @abc.abstractmethod
     def list_sandboxes(self) -> list[SandboxResponse]:
         pass
 
@@ -136,6 +140,16 @@ class GenericHTTPBackend(SandboxBackend):
         with httpx.Client(timeout=10) as client:
             r = client.get(
                 f"{self._url}/scan-jobs/{job_id}/report",
+                headers=opensandbox_headers()
+            )
+            r.raise_for_status()
+            return r.json()
+
+    def get_scan_status(self, job_id: str) -> dict:
+        """Retrieves the live scanning status mapped to the backend OpenSandbox service."""
+        with httpx.Client(timeout=5) as client:
+            r = client.get(
+                f"{self._url}/scan-status/{job_id}",
                 headers=opensandbox_headers()
             )
             r.raise_for_status()
