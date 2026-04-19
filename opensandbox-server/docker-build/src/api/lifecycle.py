@@ -104,6 +104,9 @@ router = APIRouter(tags=["Sandboxes"])
 # Initialize service based on configuration from config.toml (defaults to docker)
 sandbox_service = create_sandbox_service()
 
+# Track the most recently initiated scan job ID for instant retrieval
+_latest_job_id = None
+
 
 # ============================================================================
 # Sandbox CRUD Operations
@@ -208,6 +211,10 @@ async def create_scan_job(
         
     job_id = metadata.get("job_id", str(uuid4()))
     metadata["job_id"] = job_id
+
+    # Update latest job ID globally for instant retrieval from other tabs
+    global _latest_job_id
+    _latest_job_id = job_id
 
     # Base path for shared storage (mounted via PVC in Helm)
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
@@ -404,6 +411,33 @@ async def get_scan_status(job_id: str):
         "sandbox_id": sandbox.id,
         "status": sandbox.status.state if sandbox.status else "Unknown"
     }
+
+
+@router.get("/job_id", tags=["Security Scan Pipeline"])
+async def get_latest_job_id():
+    """
+    Retrieves the job_id of the most recently initiated scan job in the current session.
+    Useful when a /v1/scan-jobs request is blocking and you need the job_id from another context.
+    """
+    if not _latest_job_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NO_JOBS_FOUND", "message": "No scan jobs have been initiated yet in this session."}
+        )
+    return {"job_id": _latest_job_id}
+
+
+@router.get("/job_status", tags=["Security Scan Pipeline"])
+async def get_latest_job_status():
+    """
+    Retrieves the status of the most recently initiated scan job in the current session.
+    """
+    if not _latest_job_id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "NO_JOBS_FOUND", "message": "No scan jobs have been initiated yet in this session."}
+        )
+    return await get_scan_status(_latest_job_id)
 
 
 # Search endpoint
