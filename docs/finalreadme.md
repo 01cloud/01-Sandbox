@@ -1,189 +1,162 @@
-# CodeInspector: Swappable Sandbox & Automated Security Pipeline
+# CodeInspector: Master Documentation
 
-## Overview
-
-CodeInspector is a Kubernetes-native, security-first platform for executing untrusted code in isolated environments. Built with a **Facade Architecture**, it provides a unified FastAPI gateway that supports multiple execution backends while integrating an **Automated Security Scanning Pipeline** directly into the sandbox lifecycle.
-
-### Key Pillars
-- **Secure by Design**: Uses **gVisor** (runsc) for kernel-level isolation and strict **Agent Gateway** API-key enforcement.
-- **Asynchronous Execution**: Uses a **Fire-and-Forget** model for sandbox creation and scanning, ensuring the API remains responsive under high load (e.g., 50+ concurrent users).
-- **Isolated Persistence**: Uses job-specific sub-paths on a shared PVC to isolate source code from security reports.
+Welcome to **CodeInspector**, an enterprise-grade, Kubernetes-native platform designed to execute untrusted code in hardened, isolated environments. Whether you are building an AI agent, a CI/CD pipeline, or a multi-tenant cloud application, CodeInspector provides the perfect balance between **Rapid Iteration** and **Strict Security Compliance**.
 
 ---
 
-## Architecture
+## 🌟 1. Overview & Key Pillars
 
-The system is designed to provide a stable interface regardless of the underlying execution engine.
+CodeInspector is built on a **Facade Architecture**, offering a unified, high-performance API that abstracts away the complexity of managing multiple execution environments. Every line of code submitted is securely "sandboxed" and automatically audited for vulnerabilities, secrets, and policy violations.
+
+### Key Pillars
+1. **Kernel-Level Isolation**: Powered by **gVisor (runsc)**, CodeInspector provides a second layer of defense. Even if a process escapes the container, it remains trapped within a sandboxed kernel.
+2. **The Asynchronous Advantage**: A "Fire-and-Forget" architecture ensures sub-100ms job acknowledgment, enabling seamless user experiences under load.
+3. **Isolated Persistence**: Every execution job is assigned a unique cryptographic path on a shared PVC, preventing cross-tenant data leakage.
+4. **Automated Security Pipeline**: Code is audited in real-time by an **Ultra-Strict Security Toolchain** (Semgrep, Gitleaks, Bandit, Trivy, YAMLlint, Kube-Linter, KubeConform).
+
+---
+
+## 🏗️ 2. Architecture & Data Flow
+
+### Traffic Flow & Component Architecture
+CodeInspector acts as a "Brain" (FastAPI Orchestrator) that manages "Workers" (Sandboxes). 
 
 ```mermaid
 graph TD
-    User([User/Client]) -->|REST/Scan Request| Gateway[Agent Gateway]
-    Gateway -->|Forward| APIServer[FastAPI Orchestrator]
+    User([External Client]) -->|HTTP POST| MB[MetalLB Load Balancer]
+    MB -->|IP Traffic| AG[Agent Gateway - Envoy Proxy]
     
-    subgraph "Distributed Execution (OpenSandbox)"
-        APIServer -->|REST| OpenServer[OpenSandbox Server]
-        OpenServer -->|CRDs| Controller[Controller]
-        Controller -->|Orchestrate| K8sNodes[Hardened gVisor Pods]
-    end
-
-    subgraph "Local Execution"
-        APIServer -->|Docker API| Docker[Docker Containers]
-        APIServer -->|Subprocess| Local[Subprocess]
+    subgraph "Ingress Layer"
+        AG -->|Auth Check| AGP[AgentgatewayPolicy - API Key]
+        AGP -->|Route| HR[HTTPRoute - /]
     end
     
-    subgraph "Storage Isolation"
-        K8sNodes -->|Mount| PVC[Shared PVC]
-        PVC -->|/workspace| Code[User Source Code]
-        PVC -->|/results| Reports[Scan JSON Reports]
+    HR -->|Forward| SAS[Sandbox API Service]
+    
+    subgraph "Orchestration Layer"
+        SAS -->|FastAPI| AS[API Server]
+        AS -->|Proxy| OSB_PROXY[/backend/opensandbox/*]
+    end
+    
+    subgraph "Execution Layer"
+        OSB_PROXY -->|REST| OSS[OpenSandbox Server]
+        OSS -->|Lifecycle| OSC[OpenSandbox Controller]
+        OSC -->|Provision| CI_POD[Code Interpreter Pod / gVisor]
     end
 ```
 
----
+### Component Deep Dive
+- **Agent Gateway**: High-level proxy (Kubernetes Gateway API + Envoy) providing a strict API Key Authentication policy and routing external traffic into the cluster.
+- **Sandbox API Server (FastAPI)**: The central orchestrator exposing the stable HTTP contract. It translates high-level code execution requests to backend-specific commands.
+- **OpenSandbox Server & Controller**: The Kubernetes-native sandbox engine managing ephemeral `BatchSandbox` and `Pool` CRDs.
+- **Code Interpreter Sandbox**: The isolated execution pod. It dynamically installs Jupyter kernels and orchestrates the pre-boot security scans (`scanner_orchestrator.py`).
 
-## Automated Security Scanning Pipeline
-
-CodeInspector features a sophisticated scanning system that audits code before and during execution.
-
-### High-Level Scan API (`/v1/scan-jobs`)
-A dedicated endpoint for bulk security audits designed for high-concurrency environments.
-1. **Instant Acknowledgement**: Returns a `job_id` and `sandbox_id` in milliseconds.
-2. **Persistence**: Every file is stored in a unique path `/data/{job_id}/{workspace|reports}` on a shared PVC.
-3. **Background Provisioning**: Schedules a sandbox in Kubernetes without blocking the API.
-4. **Retrieval**: Results are persistent and can be fetched via `GET /v1/scan-jobs/{job_id}/report`.
-5. **Automation**: The sandbox entrypoint automatically triggers the `ScannerOrchestrator` upon container startup.
-
-### The Security Toolchain
-| Tool | Scope | Action |
-| :--- | :--- | :--- |
-| **Semgrep** | Logic & Vulns | Multi-language static analysis with auto-config. |
-| **Gitleaks** | Secrets | Scans for leaked credentials, tokens, and keys. |
-| **Bandit** | Python | Specialized security linting for Python code. |
-| **Trivy** | Filesystem | Scans for OS vulnerabilities and misconfigurations. |
-| **YAMLlint** | Config | Validates security and syntax in YAML configurations. |
+### Intelligent Scanning Pipeline Data Flow
+1. **Submission**: User submits a `ScanJobRequest` with raw code strings to `/v1/scan-jobs`.
+2. **Detection & Persistence**: The OpenSandbox Server uses Intelligent Language Detection to determine the code language, saves it with the correct extension, and mounts it via PVC `subPath` into a new Sandbox.
+3. **Scans Run**: `scanner_orchestrator.py` triggers the Ultra-Strict security toolchain within the gVisor-isolated sandbox. This includes policy-based linting (**Kube-Linter**) and strict schema validation (**KubeConform**) for Kubernetes manifests.
+4. **Reporting**: Results are aggregated, unified, and saved back to the PVC in `security_scan_report.json`.
 
 ---
 
-## Local Development & Image Building
+## ⚡ 3. The Asynchronous Execution Pipeline
 
-To build the core OpenSandbox components locally for custom versions:
+To handle high concurrency (e.g., 50+ concurrent bursts), CodeInspector has transitioned from a synchronous blocking model to an asynchronous **"Fire-and-Forget"** paradigm.
 
-### Build Server
+- **Non-Blocking Architecture**: The server creates the Sandbox cluster resource and immediately responds with a `job_id`. Threads are released instantly, dropping latency to <100ms.
+- **Concurrency Resilience**: Using `TokenBucketRateLimiter` and optimized HPAs, the system queues simultaneous requests safely at the Kubernetes scheduler level (`Pending` state).
+- **Process Logging**: The API outputs a unified, terminal-style `process.log` updated by both the API server (provisioning phases) and the Sandbox (scanning phases).
+
+---
+
+## 🌐 4. Exposing the API & Gateway Integration
+
+All external traffic to the Sandbox API MUST pass through the **Agent Gateway** which enforces strict Authentication via `AgentgatewayPolicy`.
+
+### Ngrok Exposure Example
+Ngrok must tunnel directly to the AgentGateway's LoadBalancer IP:
 ```bash
-cd opensandbox-server/docker-build
-docker build -t opensandbox-server:local .
+ngrok http --domain=your-custom.ngrok-free.dev <AGENTGATEWAY_LB_IP>:80
 ```
 
-### Build Controller
-```bash
-cd opensandbox-controller/docker-build
-docker build -t opensandbox-controller:local .
-```
+### Navigating Strict API Contexts
+Because the Gateway demands an API key on every request:
+1. **Browsers**: Directly visiting the Swagger `/docs` in Chrome will yield a `401 Unauthorized`. You must use a header injector extension (like ModHeader) to add: `Authorization: Bearer <API_KEY>`.
+2. **API Clients**: Provide the token under standard Bearer Token authorization.
 
-### Build Code Interpreter (Sandbox)
-```bash
-cd code-interpreter
-docker build -t codeinterpreter:3.1.0 .
+---
+
+## 🚀 5. User Integration Guide
+
+External applications (CI/CD pipelines, dashboards, bots) interact with CodeInspector via a standard integration workflow.
+
+### The Polling Workflow
+1. **Submit Job** to `POST /v1/scan-jobs`
+2. **Retrieve `job_id`** from response
+3. **Poll Status** at `GET /v1/scan-status/{job_id}` (or simply `/v1/scan-status` for the latest session job)
+4. **Fetch Final Report** at `GET /v1/scan-jobs/{job_id}/report`
+
+### Example Integration (Python)
+
+```python
+import requests
+import time
+
+BASE_URL = "https://your-custom.ngrok-free.dev/backend/opensandbox"
+HEADERS = {
+    "Authorization": "Bearer YOUR_API_TOKEN",
+    "Content-Type": "application/json"
+}
+
+def run_security_scan():
+    # 1. Submit scan job
+    payload = {"code": "import os\nos.system('echo Vulnerability')"}
+    print("[*] Submitting code for analysis...")
+    response = requests.post(f"{BASE_URL}/v1/scan-jobs", json=payload, headers=HEADERS)
+    job_id = response.json().get("job_id")
+    print(f"[*] Job ID received: {job_id}")
+
+    # 2. Poll for terminal-style Status Logs
+    print("[*] Tailing execution logs...")
+    while True:
+        status_res = requests.get(f"{BASE_URL}/v1/scan-status/{job_id}", headers=HEADERS)
+        logs = status_res.text
+        print(logs)
+        
+        if "Security scans complete." in logs or "FAILED" in logs:
+            break
+        time.sleep(3)
+
+    # 3. Retrieve structured JSON report
+    print("\n[*] Fetching final security report...")
+    report_res = requests.get(f"{BASE_URL}/v1/scan-jobs/{job_id}/report", headers=HEADERS)
+    print(report_res.json())
+
+if __name__ == "__main__":
+    run_security_scan()
 ```
 
 ---
 
-## Native Kubernetes Provisioning
+## ⚙️ 6. Deployment & Configuration
 
-CodeInspector supports two primary ways to provision sandboxes within a Kubernetes cluster:
+CodeInspector is orchestrated entirely via **Helm**. To deploy:
 
-### Method A: REST API (via OpenSandbox Server)
-Submit a `POST` request to the API server. This is the recommended method for application-driven workflows.
 ```bash
-curl -X POST "http://localhost:8080/v1/sandboxes" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "image": { "uri": "codeinterpreter:3.1.0" },
-    "entrypoint": ["/bin/sh"],
-    "timeout": 3600
-  }'
+cd codeInspector
+helm upgrade --install codeinspector . -n default --create-namespace
 ```
 
-### Method B: Declarative YAML (via K8s Controller)
-Submit a `BatchSandbox` CRD directly to the cluster. This is the "Kubernetes Native" way.
-```yaml
-apiVersion: sandbox.opensandbox.io/v1alpha1
-kind: BatchSandbox
-metadata:
-  name: my-sandbox
-spec:
-  replicas: 1
-  template:
-    spec:
-      containers:
-      - name: sandbox-container
-        image: codeinterpreter:3.1.0
-```
+### Kubernetes Highlights & Technical Fixes Handled Natively
+During cluster stabilization, several critical issues were resolved within the internal chart definitions:
+- **Missing CRDs**: Re-compiled raw YAML CRDs so Helm registers `BatchSandbox` and `Pool` configurations properly before the controller initializes.
+- **RBAC Limitations**: Upgraded `ClusterRole` permissions to map precisely to the `sandbox.opensandbox.io` apiGroups.
+- **Kube-Config Injection**: Applied an inline ConfigMap (`kubeconfig_path = ""`) to correctly enable in-cluster auth for the `opensandbox-server`.
+- **Node Affinity Pinning**: Enforced `kubernetes.io/hostname: codebot-worker` nodeSelector logic so the Server and Sandboxes execute on the identical physical node, guaranteeing local-path PVC read/write consistency.
 
----
-
-## Troubleshooting & Critical Fixes
-
-The following issues are pre-configured and fixed in this version of the stack:
-
-1. **Missing CRDs**: CRDs are now located in `opensandbox/crds/` for Helm 3 auto-installation.
-2. **RBAC Permissions**: `ClusterRole` updated to allow `sandbox.opensandbox.io` apiGroup access.
-3. **Probe Failures**: Controller ports fixed (8081 for healthz/metrics). Server health routes aligned to `/health`.
-4. **Kubeconfig Mounting**: Server configured to use `incluster` hooks via ConfigMap, preventing `Invalid kube-config` crashes.
-
----
-
-## Infrastructure Summary (K8s)
-
-| Resource | Purpose |
-| :--- | :--- |
-| **Namespace** | `sandbox` — Virtual isolation for the stack. |
-| **RuntimeClass** | `gvisor` — Ensures pods run with `runsc` isolation. |
-| **MetalLB** | Provides local IP address management for the Gateway. |
-| **HPA** | Scales the API Gateway from 1 to 10 replicas based on load. |
-
----
-
-## Usage Examples
-
-### Execute a Scan Job
+**To verify the stack:**
 ```bash
-curl -X POST http://sandbox-api.local/v1/scan-jobs \
-  -H "Content-Type: application/json" \
-  -d '{
-    "files": {
-      "main.py": "import os\nprint(os.getenv(\"SECRET_KEY\"))"
-    },
-    "tools": ["semgrep", "bandit"],
-    "metadata": {"project": "audit-v1"}
-  }'
-```
-
-### Hot-Swap Backend
-```bash
-curl -X POST http://sandbox-api.local/backend/switch \
-  -H "Content-Type: application/json" \
-  -d '{"backend": "opensandbox", "validate": true}'
-```
-
----
-
-## Project Structure
-
-```text
-codeInspector/
-├── apiServer/
-│   ├── fastapi/               # Gateway logic & Strategy implementation
-│   └── k8s/                   # API deployment & HPA manifests
-├── code-interpreter/
-│   ├── scripts/
-│   │   └── code-interpreter.sh # Sandbox entrypoint & scan trigger
-│   ├── src/
-│   │   └── scanner_orchestrator.py # Security tool orchestration logic
-│   └── Dockerfile             # Hardened image with pre-installed toolchain
-├── agentgateway/              # Gateway API & Security Policy configuration
-├── kindCluster/               # Kind cluster config & gVisor setup scripts
-├── k8s/                       # Global infra (MetalLB, etc.)
-└── opensandbox-server/        # Source for the REST Server
-└── opensandbox-controller/    # Source for the K8s Operator
-└── opensandbox/               # Helm charts for the K8s operator
+kubectl get pods -n opensandbox-system
+kubectl get pods -n agentgateway-system
+kubectl get batchsandbox -A
 ```
