@@ -34,7 +34,72 @@ curl -X POST "https://dipper-shun-glowing.ngrok-free.dev/backend/opensandbox/v1/
 
 
 
-## 2. System Health & Auditing
+---
+
+## 2. Integrating CodeInspector into Your Application
+
+If you are an external user looking to integrate the CodeInspector APIs into your own application (e.g., a CI/CD pipeline, custom dashboard, or bot), follow this standard integration workflow.
+
+### Integration Workflow
+
+1. **Submit the Scan Job:** Send the source code or files to the `/v1/scan-jobs` endpoint.
+2. **Retrieve the `job_id`:** The API will instantly return a JSON response containing a unique `job_id`. 
+3. **Poll for Execution Status:** Periodically poll the `/v1/scan-status/{job_id}` endpoint to get real-time terminal-like logs of the sandbox execution process.
+4. **Fetch the Final Report:** Once the status logs indicate completion, retrieve the structured JSON report from the `/v1/scan-jobs/{job_id}/report` endpoint.
+
+### Example: Python Integration
+
+Here is a practical example of how to orchestrate the API calls using Python's `requests` library:
+
+```python
+import requests
+import time
+
+BASE_URL = "https://dipper-shun-glowing.ngrok-free.dev/backend/opensandbox"
+HEADERS = {
+    "Authorization": "Bearer YOUR_API_TOKEN",
+    "Content-Type": "application/json"
+}
+
+def run_security_scan():
+    # 1. Submit the scan job
+    payload = {
+        "code": "print('hello world')"
+    }
+    print("[*] Submitting code for analysis...")
+    response = requests.post(f"{BASE_URL}/v1/scan-jobs", json=payload, headers=HEADERS)
+    job_id = response.json().get("job_id")
+    print(f"[*] Job ID received: {job_id}")
+
+    # 2. Poll for Status and Logs
+    print("[*] Tailing execution logs...")
+    while True:
+        status_res = requests.get(f"{BASE_URL}/v1/scan-status/{job_id}", headers=HEADERS)
+        
+        # The scan-status endpoint returns real-time plain text logs
+        logs = status_res.text
+        print(logs)
+        
+        # Check if the process has finished
+        if "Security scans complete." in logs or "FAILED" in logs:
+            break
+            
+        time.sleep(3) # Wait before polling again
+
+    # 3. Retrieve the final report
+    print("\n[*] Fetching final JSON security report...")
+    report_res = requests.get(f"{BASE_URL}/v1/scan-jobs/{job_id}/report", headers=HEADERS)
+    print(report_res.json())
+
+if __name__ == "__main__":
+    run_security_scan()
+```
+
+---
+
+
+
+## 3. System Health & Auditing
 
 You can easily verify the state of CodeInspector using its secondary endpoints:
 
@@ -47,7 +112,7 @@ curl https://dipper-shun-glowing.ngrok-free.dev/health
 
 ---
 
-## 3. Interactive API Guide (Swagger UI)
+## 4. Interactive API Guide (Swagger UI)
 
 CodeInspector provides an auto-generated, interactive Swagger UI where you can explore and test all available REST APIs directly from your web browser. 
 
@@ -64,7 +129,7 @@ You can access the Swagger UI through the following public URL:
 
 ---
 
-## 4. Advanced: Infrastructure Deployment (For Technical Users)
+## 5. Advanced: Infrastructure Deployment (For Technical Users)
 
 CodeInspector consists of multiple Kubernetes-native components. The easiest and recommended way to deploy the core sandbox engine is via **Helm**.
 
