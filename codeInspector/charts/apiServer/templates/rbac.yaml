@@ -1,0 +1,27 @@
+# Role — permissions to update the gateway secret
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: gateway-secret-patcher
+  namespace: {{ .Values.configMap.GATEWAY_SECRET_NAMESPACE }}
+rules:
+- apiGroups: [""]
+  resources: ["secrets"]
+  resourceNames: [{{ .Values.configMap.GATEWAY_SECRET_NAME | quote }}]
+  verbs: ["get", "patch", "update"]
+
+---
+# RoleBinding — bind the SA to the Role across namespaces
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: sandbox-api-gateway-patcher-binding
+  namespace: {{ .Values.configMap.GATEWAY_SECRET_NAMESPACE }}
+subjects:
+- kind: ServiceAccount
+  name: sandbox-api
+  namespace: {{ .Values.namespace }}
+roleRef:
+  kind: Role
+  name: gateway-secret-patcher
+  apiGroup: rbac.authorization.k8s.io

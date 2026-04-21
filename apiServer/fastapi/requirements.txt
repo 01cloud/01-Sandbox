@@ -9,6 +9,9 @@ uvicorn[standard]==0.34.0
  
 # Data validation (used by FastAPI)
 pydantic==2.11.1
+kubernetes
+PyJWT==2.10.1
+cryptography==43.0.3
  
 # ── Optional backends ────────────────────────
  

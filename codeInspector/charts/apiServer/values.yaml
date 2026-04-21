@@ -6,6 +6,13 @@ configMap:
   APP_ENV: "production"
   PORT: "8000"
   BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"
+  GATEWAY_SECRET_NAME: "apikey"
+  GATEWAY_SECRET_NAMESPACE: "agentgateway-system"
+  GATEWAY_SECRET_KEY: "api-key"
+  JWT_ALGORITHM: "HS256"
+  JWT_EXPIRATION_MINUTES: "60"
+  JWT_ISSUER: "code-inspector"
+  JWT_SIGNING_SECRET: "default-signing-secret-change-me"
 
 secret:
   E2B_API_KEY: ""

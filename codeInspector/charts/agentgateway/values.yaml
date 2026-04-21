@@ -16,8 +16,7 @@ gateway:
       name: http
 
 policy:
-  apiKeyAuthentication:
-    mode: Strict
+  authenticationType: "jwt"
 
 secret:
-  apiKey: N2YwMDIxZTEtNGUzNS1jNzgzLTRkYjAtYjE2YzRkZGVmNjcy
+  signingKey: "default-signing-secret-change-me"

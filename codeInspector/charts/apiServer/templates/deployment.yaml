@@ -22,6 +22,7 @@ spec:
         app: sandbox-api
         version: "1.0.0"
     spec:
+      serviceAccountName: sandbox-api
       securityContext:
         runAsNonRoot: {{ .Values.deployment.securityContext.runAsNonRoot }}
         runAsUser: {{ .Values.deployment.securityContext.runAsUser }}

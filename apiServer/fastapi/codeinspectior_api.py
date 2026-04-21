@@ -16,18 +16,28 @@ import os
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI, HTTPException, Request, Response, status
+from fastapi import FastAPI, HTTPException, Request, Response, status, Depends
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.middleware.cors import CORSMiddleware
+import json
 
 # Modular Imports
 from models import (
     RunRequest, RunResponse, StatusResponse, 
     CreateSandboxRequest, SandboxResponse,
-    ScanJobRequest, ScanJobResponse
+    ScanJobRequest, ScanJobResponse,
+    GenerateAPIResponse
 )
-from config import opensandbox_base_url, opensandbox_headers
+from config import opensandbox_base_url, opensandbox_headers, gateway_secret_config, jwt_config
 from backends import SandboxBackend, GenericHTTPBackend
+
+import secrets
+import base64
+import jwt
+import datetime
+from kubernetes import client, config
 
 
 # ─────────────────────────────────────────────
@@ -59,6 +69,8 @@ async def lifespan(app: FastAPI):
     print("[shutdown] Ceasing operations successfully...")
 
 
+security = HTTPBearer()
+
 app = FastAPI(
     title="CodeInspector API Manager",
     description="A centralized proxy relaying connections mapping standard interaction seamlessly to the underlying actual code-evaluation clusters locally natively successfully.",
@@ -66,6 +78,64 @@ app = FastAPI(
     docs_url="/docs",
     lifespan=lifespan,
 )
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+security = HTTPBearer(auto_error=False)
+
+def validate_token(request: Request, credentials: HTTPAuthorizationCredentials = Depends(security)):
+    """
+    Decodes and validates the RS256 JWT using the public JWKS.
+    """
+    if not credentials:
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+    conf = jwt_config()
+    token = credentials.credentials
+    
+    try:
+        # 1. Get kid from header
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+        if not kid:
+            raise HTTPException(status_code=401, detail="Missing 'kid' in token header")
+        
+        # 2. Load Public JWKS
+        jwks_data = json.loads(conf["public_jwks"])
+        jwks = jwt.PyJWKSet.from_dict(jwks_data)
+        
+        # 3. Get matching key
+        signing_key = None
+        for key in jwks.keys:
+            if key.key_id == kid:
+                signing_key = key
+                break
+        
+        if not signing_key:
+            raise HTTPException(status_code=401, detail="No matching key found in JWKS")
+            
+        # 4. Decode and verify
+        payload = jwt.decode(
+            token, 
+            signing_key.key, 
+            algorithms=[conf["algorithm"]],
+            audience="code-inspector-api",
+            issuer=conf["issuer"]
+        )
+        return payload
+        
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token has expired")
+    except jwt.InvalidTokenError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail="Authorization failed")
 
 
 # ─────────────────────────────────────────────
@@ -81,7 +151,7 @@ def health():
     )
 
 
-@app.post("/run", response_model=RunResponse, summary="Dispatch synchronous script explicitly", tags=["System"])
+@app.post("/run", response_model=RunResponse, summary="Dispatch synchronous script explicitly", tags=["System"], dependencies=[Depends(validate_token)])
 def run_code(req: RunRequest):
     """Evaluates payload instructions passing securely to the configured backend."""
     return state.backend.run(req.code, req.language.value, req.timeout)
@@ -116,11 +186,12 @@ async def get_backend_openapi_spec():
                     spec["servers"] = [{"url": "/backend/z1sandbox"}]
                     spec.setdefault("components", {})
                     spec["components"].setdefault("securitySchemes", {})
-                    spec["components"]["securitySchemes"]["ApiKeyAuth"] = {
-                        "type": "apiKey",
-                        "in": "header",
-                        "name": "OPEN-SANDBOX-API-KEY",
+                    spec["components"]["securitySchemes"]["BearerAuth"] = {
+                        "type": "http",
+                        "scheme": "bearer",
+                        "bearerFormat": "JWT",
                     }
+                    spec["security"] = [{"BearerAuth": []}]
                     return JSONResponse(content=spec)
         except Exception:
             continue
@@ -169,23 +240,23 @@ async def _do_proxy(proxy_path: str, request: Request):
             )
 
 
-@app.get("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy GET request")
+@app.get("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy GET request", dependencies=[Depends(validate_token)])
 async def proxy_get(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
-@app.post("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy POST request")
+@app.post("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy POST request", dependencies=[Depends(validate_token)])
 async def proxy_post(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
-@app.put("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PUT request")
+@app.put("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PUT request", dependencies=[Depends(validate_token)])
 async def proxy_put(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
-@app.delete("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy DELETE request")
+@app.delete("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy DELETE request", dependencies=[Depends(validate_token)])
 async def proxy_delete(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
-@app.patch("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PATCH request")
+@app.patch("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PATCH request", dependencies=[Depends(validate_token)])
 async def proxy_patch(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
@@ -194,19 +265,19 @@ async def proxy_patch(proxy_path: str, request: Request):
 # 5. Native Sandbox Management (V1)
 # ─────────────────────────────────────────────
 
-@app.post("/v1/sandboxes", response_model=SandboxResponse, tags=["Sandboxes"], summary="Provision a new isolated sandbox")
+@app.post("/v1/sandboxes", response_model=SandboxResponse, tags=["Sandboxes"], summary="Provision a new isolated sandbox", dependencies=[Depends(validate_token)])
 def create_sandbox(req: CreateSandboxRequest):
     """Creates a new sandbox environment using the active backend."""
     return state.backend.create_sandbox(req)
 
 
-@app.get("/v1/sandboxes", response_model=list[SandboxResponse], tags=["Sandboxes"], summary="List all active sandboxes")
+@app.get("/v1/sandboxes", response_model=list[SandboxResponse], tags=["Sandboxes"], summary="List all active sandboxes", dependencies=[Depends(validate_token)])
 def list_sandboxes():
     """Retrieves a list of all currently active sandboxes from the backend."""
     return state.backend.list_sandboxes()
 
 
-@app.post("/v1/scan-jobs", response_model=ScanJobResponse, tags=["Security Scan Pipeline"])
+@app.post("/v1/scan-jobs", response_model=ScanJobResponse, tags=["Security Scan Pipeline"], dependencies=[Depends(validate_token)])
 async def create_scan_job(req: ScanJobRequest):
     """
     Submits files for unified security scanning.
@@ -225,7 +296,7 @@ async def create_scan_job(req: ScanJobRequest):
     return ScanJobResponse(**data)
 
 
-@app.get("/v1/scan-jobs/{job_id}/report", tags=["Security Scan Pipeline"])
+@app.get("/v1/scan-jobs/{job_id}/report", tags=["Security Scan Pipeline"], dependencies=[Depends(validate_token)])
 async def get_scan_report(job_id: str):
     """
     Retrieves the persistent JSON scan report for a specific job ID.
@@ -234,7 +305,7 @@ async def get_scan_report(job_id: str):
     return state.backend.get_scan_report(job_id)
 
 
-@app.get("/v1/scan-status/{job_id}", tags=["Security Scan Pipeline"])
+@app.get("/v1/scan-status/{job_id}", tags=["Security Scan Pipeline"], dependencies=[Depends(validate_token)])
 async def get_scan_status(job_id: str):
     """
     Retrieves the active state of the sandbox handling the given scan job.
@@ -262,6 +333,46 @@ async def get_latest_job_status():
     if not state.latest_job_id:
         raise HTTPException(status_code=404, detail="No scan jobs have been initiated yet.")
     return state.backend.get_scan_status(state.latest_job_id)
+
+
+# ─────────────────────────────────────────────
+# 6. API Key Generation & Gateway Sync
+# ─────────────────────────────────────────────
+
+@app.post("/v1/generate-api", response_model=GenerateAPIResponse, tags=["Security"])
+async def generate_api(user_id: str = "default-user"):
+    """
+    Generates a secure JWT for multi-user authentication.
+    The token is signed with a shared secret and verified by the agentgateway.
+    """
+    conf = jwt_config()
+    private_key = conf["private_key"]
+    algorithm = conf["algorithm"]
+    expires_delta = conf["expiration_minutes"]
+    issuer = conf["issuer"]
+
+    try:
+        now = datetime.datetime.now(datetime.UTC)
+        payload = {
+            "sub": user_id,
+            "iat": now,
+            "exp": now + datetime.timedelta(minutes=expires_delta),
+            "iss": issuer,
+            "aud": "code-inspector-api"
+        }
+        
+        token = jwt.encode(payload, private_key, algorithm=algorithm, headers={"kid": "code-inspector-key-01"})
+        
+        return GenerateAPIResponse(
+            api_key=token,
+            status=f"JWT generated successfully for {user_id}. Valid for {expires_delta} minutes."
+        )
+        
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to generate JWT: {str(e)}"
+        )
 
 
 if __name__ == "__main__":

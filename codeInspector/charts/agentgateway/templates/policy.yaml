@@ -1,3 +1,4 @@
+{{- if not (eq .Values.policy.authenticationType "none") }}
 apiVersion: agentgateway.dev/v1alpha1
 kind: AgentgatewayPolicy
 metadata:
@@ -6,10 +7,22 @@ metadata:
 spec:
   targetRefs:
     - group: gateway.networking.k8s.io
-      kind: Gateway
-      name: agentgateway-proxy
+      kind: HTTPRoute
+      name: agentgateway-route
   traffic:
+    {{- if eq .Values.policy.authenticationType "jwt" }}
+    jwtAuthentication:
+      mode: {{ .Values.policy.jwtMode | default "Strict" }}
+      providers:
+        - issuer: "code-inspector"
+          audiences:
+            - "code-inspector-api"
+          jwks:
+            inline: {{ .Values.global.JWT_PUBLIC_JWKS | quote }}
+    {{- else if eq .Values.policy.authenticationType "apiKey" }}
     apiKeyAuthentication:
-      mode: {{ .Values.policy.apiKeyAuthentication.mode }}
+      mode: {{ .Values.policy.apiKeyAuthentication.mode | default "Strict" }}
       secretRef:
         name: apikey
+    {{- end }}
+{{- end }}

@@ -89,3 +89,9 @@ class ScanJobResponse(BaseModel):
     status: Optional[str] = None
     report: Optional[dict] = None
     error: Optional[str] = None
+
+
+class GenerateAPIResponse(BaseModel):
+    """Response returned upon successfully generating a new API key."""
+    api_key: str
+    status: str
