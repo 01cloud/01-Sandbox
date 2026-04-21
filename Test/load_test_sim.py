@@ -7,7 +7,7 @@ import json
 # LOAD TEST CONFIGURATION
 # ─────────────────────────────────────────────────────────────────────────────
 # Port 8000 is the local CodeInspector API Gateway
-API_URL = "http://localhost:8000/backend/opensandbox/v1/scan-jobs"
+API_URL = "http://localhost:8000/backend/z1sandbox/v1/scan-jobs"
 HEADERS = {
     "Content-Type": "application/json",
     "OPEN-SANDBOX-API-KEY": "your-secure-api-key"
