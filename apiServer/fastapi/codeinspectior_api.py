@@ -6,7 +6,7 @@ A clean, simplified proxy API specifically designed to forward traffic
 to the internal OpenSandbox backend.
 
 It removes all hardcoded sandbox routing (like /sandboxes, /batched),
-instead relying completely transparently on `/backend/opensandbox/{proxy_path}` 
+instead relying completely transparently on `/backend/z1sandbox/{proxy_path}` 
 to communicate with the `opensandbox-server` kubernetes service.
 """
 
@@ -91,18 +91,18 @@ def run_code(req: RunRequest):
 # 4. OpenSandbox Proxy Forwarding & Docs
 # ─────────────────────────────────────────────
 
-@app.get("/backend/opensandbox/docs", include_in_schema=False)
+@app.get("/backend/z1sandbox/docs", include_in_schema=False)
 async def get_backend_docs():
     """Renders actual upstream OpenSandbox Swagger API."""
     return get_swagger_ui_html(
-        openapi_url="/backend/opensandbox/openapi.json",
+        openapi_url="/backend/z1sandbox/openapi.json",
         title="OpenSandbox — Remote API Docs",
         swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
         swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
     )
 
 
-@app.get("/backend/opensandbox/openapi.json", include_in_schema=False)
+@app.get("/backend/z1sandbox/openapi.json", include_in_schema=False)
 async def get_backend_openapi_spec():
     """Translates and patches explicitly upstream OpenAPI spec."""
     base_url = opensandbox_base_url()
@@ -113,7 +113,7 @@ async def get_backend_openapi_spec():
                 r = await client.get(f"{base_url}{spec_path}")
                 if r.status_code == 200:
                     spec = r.json()
-                    spec["servers"] = [{"url": "/backend/opensandbox"}]
+                    spec["servers"] = [{"url": "/backend/z1sandbox"}]
                     spec.setdefault("components", {})
                     spec["components"].setdefault("securitySchemes", {})
                     spec["components"]["securitySchemes"]["ApiKeyAuth"] = {
@@ -169,23 +169,23 @@ async def _do_proxy(proxy_path: str, request: Request):
             )
 
 
-@app.get("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy GET request")
+@app.get("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy GET request")
 async def proxy_get(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
-@app.post("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy POST request")
+@app.post("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy POST request")
 async def proxy_post(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
-@app.put("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PUT request")
+@app.put("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PUT request")
 async def proxy_put(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
-@app.delete("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy DELETE request")
+@app.delete("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy DELETE request")
 async def proxy_delete(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
-@app.patch("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PATCH request")
+@app.patch("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PATCH request")
 async def proxy_patch(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
