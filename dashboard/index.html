@@ -236,11 +236,8 @@
 
         <div id="logged-out-view" class="card">
             <h2 style="margin-bottom: 2rem;">Welcome Back</h2>
-            <div id="init-error" class="hidden"
-                style="color: #ef4444; background: rgba(239, 68, 68, 0.1); padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.9rem; border: 1px solid rgba(239, 68, 68, 0.2);">
-            </div>
-            <button id="login-btn" class="btn" onclick="login()" disabled
-                style="opacity: 0.5; cursor: not-allowed;">Loading Security Layer...</button>
+            <div id="init-error" class="hidden" style="color: #ef4444; background: rgba(239, 68, 68, 0.1); padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.9rem; border: 1px solid rgba(239, 68, 68, 0.2);"></div>
+            <button id="login-btn" class="btn" onclick="login()" disabled style="opacity: 0.5; cursor: not-allowed;">Loading Security Layer...</button>
             <p style="margin-top: 2.5rem; font-size: 0.9rem; color: var(--text-dim);">
                 New to CodeInspector? <a href="#" style="color: var(--primary);">Create an account</a>.
             </p>
@@ -289,7 +286,14 @@
 
         const initAuth0 = async () => {
             try {
-                auth0Client = await createAuth0Client({
+                // Wait for the library to be available in the global scope
+                const clientCreator = window.createAuth0Client || (window.auth0 && window.auth0.createAuth0Client);
+                
+                if (!clientCreator) {
+                    throw new Error("Auth0 Security SDK failed to load. Please check your internet connection or disable ad-blockers for this domain.");
+                }
+
+                auth0Client = await clientCreator({
                     domain: config.domain,
                     clientId: config.clientId,
                     authorizationParams: {
@@ -306,7 +310,7 @@
                 }
 
                 updateUI();
-
+                
                 // Enable button once ready
                 const loginBtn = document.getElementById("login-btn");
                 loginBtn.disabled = false;
@@ -319,7 +323,7 @@
                 const errorBox = document.getElementById("init-error");
                 errorBox.classList.remove("hidden");
                 errorBox.innerHTML = `<strong>Initialization Failed:</strong> ${err.message}<br><br>Ensure you are accessing this page via <u>http://localhost</u> or <u>ngrok</u>. Secure auth cannot run from a direct <code>file://</code> path.`;
-
+                
                 const loginBtn = document.getElementById("login-btn");
                 loginBtn.textContent = "Security Error";
             }
