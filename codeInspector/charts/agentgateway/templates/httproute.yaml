@@ -1,7 +1,7 @@
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
 metadata:
-  name: agentgateway-route
+  name: agentgateway-dashboard-route
   namespace: {{ .Values.namespace }}
 spec:
   hostnames:
@@ -15,14 +15,33 @@ spec:
     namespace: {{ .Values.namespace }}
     sectionName: http
   rules:
-  - backendRefs:
-    - group: ""
-      kind: Service
-      name: {{ .Values.httproute.backendService.name }}
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /dashboard
+    backendRefs:
+    - name: dashboard-service
       namespace: opensandbox-system
-      port: {{ .Values.httproute.backendService.port }}
-      weight: 1
-    matches:
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: agentgateway-api-route
+  namespace: {{ .Values.namespace }}
+spec:
+  hostnames:
+  {{- range .Values.httproute.hostnames }}
+  - {{ . }}
+  {{- end }}
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: agentgateway-proxy
+    namespace: {{ .Values.namespace }}
+    sectionName: http
+  rules:
+  - matches:
     - path:
         type: PathPrefix
         value: /
@@ -32,3 +51,53 @@ spec:
         path:
           type: ReplacePrefixMatch
           replacePrefixMatch: /
+    backendRefs:
+    - name: sandbox-api-service
+      namespace: opensandbox-system
+      port: 80
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: agentgateway-public-api-route
+  namespace: {{ .Values.namespace }}
+spec:
+  hostnames:
+  {{- range .Values.httproute.hostnames }}
+  - {{ . }}
+  {{- end }}
+  parentRefs:
+  - group: gateway.networking.k8s.io
+    kind: Gateway
+    name: agentgateway-proxy
+    namespace: {{ .Values.namespace }}
+    sectionName: http
+  rules:
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /backend/z1sandbox/docs
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplacePrefixMatch
+          replacePrefixMatch: /docs
+    backendRefs:
+    - name: sandbox-api-service
+      namespace: opensandbox-system
+      port: 80
+  - matches:
+    - path:
+        type: PathPrefix
+        value: /backend/z1sandbox/openapi.json
+    filters:
+    - type: URLRewrite
+      urlRewrite:
+        path:
+          type: ReplacePrefixMatch
+          replacePrefixMatch: /openapi.json
+    backendRefs:
+    - name: sandbox-api-service
+      namespace: opensandbox-system
+      port: 80

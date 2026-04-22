@@ -8,7 +8,7 @@ spec:
   targetRefs:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
-      name: agentgateway-route
+      name: agentgateway-api-route
   traffic:
     {{- if eq .Values.policy.authenticationType "jwt" }}
     jwtAuthentication:
@@ -18,7 +18,12 @@ spec:
           audiences:
             - "code-inspector-api"
           jwks:
-            inline: {{ .Values.global.JWT_PUBLIC_JWKS | quote }}
+            inline: {{ if .Values.global }}{{ .Values.global.JWT_PUBLIC_JWKS | default "{}" | quote }}{{ else }}{{ "{}" | quote }}{{ end }}
+        - issuer: "https://dev-axwc0ui527kw0c5d.us.auth0.com/"
+          audiences:
+            - "https://code-inspector-api"
+          jwks:
+            inline: '{"keys":[{"alg":"RS256","kty":"RSA","use":"sig","n":"u3KdUumTlNhdys7_bBPMq4BTEtkdQuS8_VPrE9IytsSgR7kZ1pMmtEQ_CxznF87nj0DvnCvZgBWN5Vi15BPW4Vaf-jcH1ndOjTDElTAtXAHkB8SEsSFYZAKyUQDKDRdoBHXuUpxB6p0zIEpztgkQpJnnMbhtuPa7NQitSCWjyLzpaaEQVTt-bBw860ZvRAEBqLs2nf4Aeacj8VwM8HW5jl10mLx46CgLHIsWsmBj0WFDnQstTNr76VelEVQl7-l18nZCi-KMDFdJBSCJvqSrWEWJzIgGn-L8vYBn-CCel9vJVidRzAlZK59AUCUrLlBdEYMnz86z9dzVfOQKW4eM5w","e":"AQAB","kid":"axC0qAwREjLm_QvUFSxjv"},{"alg":"RS256","kty":"RSA","use":"sig","n":"mYxlrA1TJpmkav3uFe27SgJdKNuZnX34dDSdb2u8-H4JenrwNoONnw4sxWLHOCZv1JHrCgfPLz-iLxffTE6iLWib3A5YeBES7iAAFq1KfH_JrAU50uurBYwaiMnZlINYoAGlVBWME1sdoUD3v3bULZx-OulF8omUb07_VSHvwak8Z9meRMGvtirTFT3uANu-Ix9caAD7PMR30K1YhXvbSJmgP_JphqYGNAsKWNHBfUSLo9aRguKTnM80Nswt48pR4me0S2UZaZvGN8NCELFEmS6t5LjTBfbOL7rwgH9-TQmni-lQPGjZ_s3gGkOqaMTVVEaKeKuZQ-1AntRjMoA0sQ","e":"AQAB","kid":"V-4gNYJwfsnwsUIwdnmT0"}]}'
     {{- else if eq .Values.policy.authenticationType "apiKey" }}
     apiKeyAuthentication:
       mode: {{ .Values.policy.apiKeyAuthentication.mode | default "Strict" }}

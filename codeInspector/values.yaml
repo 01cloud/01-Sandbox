@@ -21,8 +21,8 @@ agentgateway:
         port: 80
         name: http
   policy:
-    authenticationType: "none"
-    jwtMode: "Optional"
+    authenticationType: "jwt"
+    jwtMode: "Strict"
   # No secret section needed for gateway as JWKS is inline in policy
 
 # API Server component values
@@ -110,6 +110,19 @@ apiServer:
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
+
+# Dashboard component values
+dashboard:
+  enabled: true
+  namespace: opensandbox-system
+  replicaCount: 1
+  image:
+    repository: dashboard
+    tag: "1.0.0"
+    pullPolicy: Never
+  service:
+    type: ClusterIP
+    port: 80
 
 # MetalLB component values
 metallb:

@@ -29,7 +29,6 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 # Copy application code
 
 COPY *.py .
-COPY dashboard/ ./dashboard/
 
 # Switch to non-root user
 USER appuser
