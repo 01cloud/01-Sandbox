@@ -336,7 +336,15 @@
 
             if (isAuthenticated) {
                 const user = await auth0Client.getUser();
-                const token = await auth0Client.getTokenSilently();
+                const token = await auth0Client.getTokenSilently({
+                    authorizationParams: {
+                        audience: config.audience
+                    }
+                });
+                
+                if (token.split('.').length < 3) {
+                    console.error("CRITICAL: Auth0 returned an OPAQUE token. Ensure the API 'https://code-inspector-api' is registered in your Auth0 dashboard, otherwise backend validation will fail!");
+                }
 
                 document.getElementById("logged-out-view").classList.add("hidden");
                 document.getElementById("logged-in-view").classList.remove("hidden");
