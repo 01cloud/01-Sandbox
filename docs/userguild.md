@@ -2,7 +2,7 @@
 
 Welcome to the **CodeInspector** User Guide! CodeInspector is a Kubernetes-native, security-first platform for executing untrusted code in isolated sandbox environments. It features an Automated Security Scanning Pipeline and a Facade Architecture to easily swap execution backends.
 
-This guide provides instructions on how to use the CodeInspector application's REST APIs to execute code, run security scans, and manage execution backends.
+This guide provides instructions on how to use the CodeInspector application's REST APIs to execute code, run security scans, and manage execution backends. For a detailed architectural overview of the system processes, see the [System Flow](flow.md) document.
 
 ---
 
@@ -10,7 +10,7 @@ This guide provides instructions on how to use the CodeInspector application's R
 
 ## 1. Running Automated Security Scans (`/v1/scan-jobs`)
 
-CodeInspector comes equipped with an advanced asynchronous security scanning pipeline. You can submit code files to be executed and audited simultaneously by tools like Semgrep, Bandit, Gitleaks, etc.
+CodeInspector comes equipped with an advanced asynchronous security scanning pipeline. You can submit code files to be executed and audited simultaneously by tools like Semgrep, Bandit, Gitleaks, etc. For a full list of supported scanners and their details, see the [Security Scanning Tools](scanning-tools.md) documentation.
 
 **Endpoint:** `POST /v1/scan-jobs`
 

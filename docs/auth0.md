@@ -1,6 +1,6 @@
-# CodeInspector Security Architecture: Auth0 & Edge Gateway Integration
+# Z1 Agent Sandbox Security Architecture: Auth0 & Edge Gateway Integration
 
-This document outlines the technical architecture, security mechanisms, and solutions implemented to support secure, seamless authentication using **Auth0** across the CodeInspector ecosystem.
+This document outlines the technical architecture, security mechanisms, and solutions implemented to support secure, seamless authentication using **Auth0** across the Z1 Agent Sandbox ecosystem.
 
 ---
 
@@ -10,59 +10,112 @@ The system strictly adheres to an "Edge-First" zero-trust validation model where
 
 ### Components Involved:
 1. **Frontend (Dashboard)**: Implements the Auth0 Single Page Application (SPA) SDK to authenticate users via social logins (e.g., Gmail) and fetch a cryptographic RSA-256 JWT.
-2. **Envoy Proxy (AgentGateway)**: Implements `Gateway API` with custom `AgentgatewayPolicy`. Acts as the front door, seamlessly transforming session cookies into authenticated bearer headers.
-3. **Backend Server (FastAPI)**: Enforces hard cryptographic validation mathematically ensuring the token signatures are intact and natively rejecting unauthenticated users attempting to view API documentation.
+2. **Envoy Proxy (AgentGateway)**: Implements `Gateway API` with custom `AgentgatewayPolicy`. Acts as the front door, seamlessly transforming session cookies into authenticated bearer headers using **Common Expression Language (CEL)**.
+3. **Backend Server (FastAPI)**: Enforces hard cryptographic validation (RS256) ensuring the token signatures are intact and natively rejecting unauthenticated users.
 
 ---
 
-## 2. Frictionless Security Flow
+## 2. Frictionless Security Flow: Cookie to Bearer Transformation
 
-The major challenge was providing strict edge security for raw APIs while maintaining a smooth UX for users operating through browser-based interfaces (like Swagger UI), which natively rely on Cookies rather than `Authorization: Bearer <token>` headers. 
+The primary technical challenge was supporting **Swagger UI** and browser-based access, which natively handle Cookies, while the backend requires an `Authorization: Bearer <JWT>` header for standard OIDC/OAuth2 compliance.
 
-### The Security Pipeline
-1. **Auth0 JWT Retrieval**: When a user logs in, the Auth0 Client explicitly requests an Access Token scoped specifically to `https://code-inspector-api`. This forces Auth0 to return a mathematically verifiable 3-part RS256 JWT rather than an opaque session string.
-2. **Cookie Storage**: The dashboard stores this raw JWT inside an `inspector_auth` Strict Cookie.
-3. **Browser Navigation**: When the user accesses the `/docs` or the API internally, the browser automatically attaches this cookie.
-4. **Envoy Header Transformation**: 
-   The AgentGateway executes a granular CEL expression to seamlessly "bridge" the browser's cookie-based world to the backend's header-based world. 
-   ```javascript
-   'authorization' in request.headers ? request.headers['authorization'] : ('cookie' in request.headers && request.headers['cookie'].contains("inspector_auth=") ? "Bearer " + request.headers['cookie'].split("inspector_auth=")[1].split(";")[0] : "")
-   ```
-   *Action*: It reads the `inspector_auth` cookie and injects its value into the `Authorization: Bearer` header. Importantly, if the user explicitly provided an `Authorization` header manually, the gateway skips the cookie read to respect their manual input.
-5. **Backend Verification**: The FastAPI server executes the `validate_token` dependency. It captures the newly injected `Authorization` header, decodes it, fetches the public JWKs directly from the Auth0 Tenant `.well-known/jwks.json`, and cryptographically proves the signature.
+### The "Security Bridge" Mechanism
 
----
+#### A. Token Ingestion (The Browser)
+When a user logs in via the dashboard, the Auth0 SDK retrieves a JWT scoped to `https://code-inspector-api`. This token is stored in an `HttpOnly` (or secure JS-readable) cookie named `inspector_auth`.
 
-## 3. Resolving Core Deployment Issues
+#### B. Edge Transformation (Envoy CEL)
+The **AgentGateway** (Envoy) is configured with an `HTTPRoute` filter that executes a CEL script on every incoming request. This script handles the conversion logic at the edge, before the request ever reaches the backend.
 
-During the transition from Javascript-based soft-gating to Infrastructure-level strict gating, several edge-case technical barriers were encountered and patched.
+**The Transformation Script:**
+```javascript
+'authorization' in request.headers ? 
+    request.headers['authorization'] : 
+    ('cookie' in request.headers && request.headers['cookie'].contains("inspector_auth=") ? 
+        "Bearer " + request.headers['cookie'].split("inspector_auth=")[1].split(";")[0] : 
+        "")
+```
 
-### Bug 1: The "Not enough segments" Error
-**Symptoms:** Users received a generic `Invalid token: Not enough segments` when trying to execute an API call from the Swagger UI after logging in with Gmail.
-**Root Cause:** The Auth0 SPA client was originally invoking `getTokenSilently()` without explicitly scoping the `authorizationParams: { audience: ... }`. Auth0 interprets this as a generic profile lookup and defaults to returning an **Opaque Token** (a 32-character random string) instead of a JWT. Opaque tokens lack the `header.payload.signature` segments required by PyJWT, causing instant backend crashes.
-**Resolution:** The SPA Initialization was patched to strictly demand the matching audience parameter during silent token requests, forcing the generation of a compliant JWT.
-
-### Bug 2: Envoy Overwriting Valid Padlock Tokens
-**Symptoms:** If a user deliberately used the "Authorize" Padlock green button in Swagger UI to paste a valid JWT, the API returned 401 Unauthorized.
-**Root Cause:** The Envoy transformation rule blindly executed a `set` command. Because Swagger UI sent *both* the explicitly pasted `Authorization` header and the background browser `Cookie`, Envoy extracted the cookie string (which could be expired or malformed) and aggressively overwrote the valid manually-provided header. 
-**Resolution:** The Gateway Policy CEL script was upgraded stringently using the ternary `'authorization' in request.headers ? ...` allowing explicit authorization headers to effortlessly bypass the cookie extraction logic.
-
-### Bug 3: The Strict Mode Gateway Bouncer Deadlock
-**Symptoms:** Configuring `AgentgatewayPolicy` to `Strict` mode on a route accessed natively by a browser successfully threw an `authentication failure: no bearer token found` error. 
-**Root Cause:** Envoy executes JWT Authentication filters *before* executing Route Transformation configurations. The Gateway expected an `Authorization` header immediately, but the script that converted the user's `Cookie` into that header had not triggered yet, creating an impassable deadlock.
-**Resolution:** The "Middleware Security Bridge" architecture was launched. 
-- The Gateway policies were shifted to `Permissive`, allowing the request to survive long enough for cookie transformation.
-- A **FastAPI Middleware** (`CookieAuthRedirectMiddleware`) was designed specifically as the "Bouncer". If an unauthenticated user attempts to visit the documentation routes, the backend safely and instantly executes an `HTTP 307 Temporary Redirect` natively bouncing them back to the dashboard, ensuring airtight security without requiring Gateway deadlocks.
+**Technical Logic:**
+1. **Priority Check**: It first checks if a manual `Authorization` header exists (e.g., from a CLI tool or the Swagger "Authorize" padlock). If found, it **respects the manual header** and skips the cookie logic.
+2. **Cookie Extraction**: If no header is present, it scans the `Cookie` header for the `inspector_auth=` key.
+3. **String Manipulation**: It uses `.split()` to isolate the JWT from the cookie string.
+4. **Header Injection**: It prepends `"Bearer "` and injects the result into a new `Authorization` request header.
 
 ---
 
-## 4. Auth0 Operations & Token Adjustments
+## 3. Backend Enforcement: RS256 Cryptographic Validation
 
-**Time-To-Live (TTL):**
-Tokens generated by Auth0 default explicitly to a 24-hour expiration duration. The AgentGateway and the Python Backend aggressively honor this restriction. If the `exp` claim has elapsed, execution is blocked outright.
+Once the header reaches the **FastAPI Backend**, it undergoes a rigorous multi-step validation process using the `PyJWT` library.
 
-**Customizing Limits:**
-Any adjustments to the Auth0 duration parameters must be configured within the Auth0 Admin Console:
-1. Navigate to **Applications** ➔ **APIs**.
-2. Select the designated API target (`https://code-inspector-api`).
-3. Modify the **Token Expiration (Seconds)** setting (e.g., `3600` for 1 hour).
+### The RS256 Handshake
+Unlike symmetric algorithms (HS256) which share a secret key, Z1 Agent Sandbox uses **RS256 (RSA Signature with SHA-256)**. This is an asymmetric scheme using a Public/Private key pair.
+
+1. **JWKS Discovery**: The backend does not store the secret key. Instead, it periodically fetches the **JSON Web Key Set (JWKS)** from Auth0's public endpoint:
+   `https://[auth0-tenant].us.auth0.com/.well-known/jwks.json`
+2. **Key Matching**: It reads the `kid` (Key ID) from the JWT header and finds the matching Public Modulus (`n`) and Exponent (`e`) in the JWKS.
+3. **Signature Verification**: It mathematically proves that the JWT was signed by the Auth0 Private Key by verifying the payload against the provided signature using the Public Key.
+4. **Claims Validation**:
+   - `iss` (Issuer): Must match the expected Auth0 Tenant URL.
+   - `aud` (Audience): Must match `https://code-inspector-api`.
+   - `exp` (Expiration): The current UTC time must be before the expiration timestamp.
+
+---
+
+## 4. Resolving Integration Edge-Cases
+
+### The "Opaque Token" Bug
+**Issue**: Using `getTokenSilently()` without an `audience` resulted in an Opaque Token (short string) instead of a JWT.
+**Fix**: Patched the SPA Init to strictly demand `audience: 'https://code-inspector-api'`, forcing Auth0 to issue a verifiable 3-part JWT.
+
+### The Middleware Bouncer
+**Issue**: Strict Gateway mode caused 401s for browser users because the JWT Authentication filter ran *before* the Cookie Transformation filter.
+**Fix**: Switched Gateway to `Permissive` mode and moved the final "Bouncer" logic to a **FastAPI Middleware**.
+- If a user visits `/docs` and the `validate_token` check fails, the middleware issues an **HTTP 307 Redirect** back to the dashboard login page, ensuring a smooth UX while maintaining 100% security coverage.
+
+---
+
+## 5. Operations & Token Adjustments
+
+- **TTL**: Tokens are currently valid for 24 hours.
+- **Revocation**: Handled by Auth0. If a user is deactivated in the console, their JWT signatures will fail validation once refreshed or expired.
+- **Admin Access**: Security auditors can adjust scopes and roles directly within the Auth0 Dashboard under **User Management** ➔ **Roles**.
+
+---
+
+## 6. Technical Summary & Final Architecture
+
+
+### 1. The Authentication Handshake (Auth0)
+*   **Identity Provider**: Users authenticate via Auth0 (Social Logins like Gmail).
+*   **Token Type**: Auth0 issues an **RS256 JWT** (cryptographically signed with a private key held only by Auth0).
+*   **Storage**: The dashboard stores this JWT in a browser cookie named `inspector_auth`.
+
+### 2. The "Security Bridge" (Cookie to Bearer Transformation)
+This is the most critical part of the system. It allows a browser-based user to talk to a header-based API without manual token pasting.
+*   **The Component**: **Agent Gateway** (Envoy) sitting at the edge.
+*   **The Code**: A **Common Expression Language (CEL)** script located in the Helm template: [`agentgateway/templates/policy.yaml`](file:///home/berrybytes/Desktop/codeInspector/codeInspector/charts/agentgateway/templates/policy.yaml).
+*   **The Logic**: 
+    1.  Gateway checks if an `Authorization` header already exists.
+    2.  If not, it scans the incoming `Cookie` header for `inspector_auth=`.
+    3.  It extracts the JWT string and **injects** a new `Authorization: Bearer <JWT>` header into the request context.
+    4.  The request is then forwarded to the backend.
+
+### 3. Backend Enforcement (FastAPI)
+*   **Validation**: The backend uses the `validate_token` dependency.
+*   **Cryptography**: It fetches the **Public JSON Web Keys (JWKS)** from your Auth0 tenant.
+*   **Verification**: It mathematically proves that the JWT signature is valid using the Public Key.
+*   **The Bouncer (Middleware)**: If a user visits `/docs` and the token is missing or invalid, the backend issues an **HTTP 307 Temporary Redirect** back to the dashboard/login page.
+
+### 4. Production Hardening
+We have hardened the `values.yaml` for production deployment:
+*   **Removed `JWT_PRIVATE_KEY`**: Since Auth0 handles the signing, your backend no longer stores any private keys. It only stores the **Public Keys (JWKS)** for validation.
+*   **Zero-Trust**: Security is enforced as close to the sandbox as possible (at the FastAPI level), ensuring that even if the gateway is bypassed, the request remains protected.
+
+### 5. Observability & Verification
+We verified the entire flow by analyzing the `sandbox-api` logs:
+1.  **Stage 1 (Unauthenticated)**: `GET /docs ... 307 Temporary Redirect` (The Bouncer sends you to log in).
+2.  **Stage 2 (Authenticated)**: `GET /docs ... 200 OK` (The Gateway injected the header, and the Backend validated it).
+
+---
+*Last Updated: 2026-04-23 by Antigravity*
