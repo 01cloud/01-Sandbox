@@ -43,34 +43,6 @@ apiServer:
     JWT_ALGORITHM: "RS256"
     AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com"
     AUTH0_AUDIENCE: "https://code-inspector-api"
-    JWT_PRIVATE_KEY: |
-      -----BEGIN RSA PRIVATE KEY-----
-      MIIEowIBAAKCAQEA7eXFpr2rANKszQYSKd+bDRy1+M0tsatbwpr0BGkMOsZMHRph
-      3bv9kLB0TuyLJ09VXDdmUpiYLGd6oQr3iKhtk3oe1/+p6aS7JKTZ+YCQW7TPRQge
-      t7lxWZj9l9a+E1WM+JSBjc7tXsGsKjVS9eDC+18gKbS4SnZhxhYwf08flLYa1nHh
-      xuaUbxe7YNzqB6VMIAzt4iyC0LS3cm/CCI8hNg5RjbFkZXE/IC0rdRScLotfWOX2
-      rgSdEH83hA41C8Nx0WICnQ6HysrBIxTfiUiQD4ieKb6HlK4Tr25hUhW/rcshhvcG
-      yBAzQKYtadd51kADr4a0G09U95zby4pCasN+0wIDAQABAoIBAASt9bMIXXCeHQDg
-      V2B9B79ZsLp7S3XxRbzwjUP4Ze07UQ8mZ2KCs0mVjM2Y0L6lWBR1P20+l6DL+kqW
-      8Wi9/CLlpgSrxlzl3/RWhxNOefcDHLdcUKpemrCZodu/WH4WmH2zGWdLSjofhz4I
-      CGavTzC9o4J1x/+F4W4F786NpUviwcoeTjfRNTv/48FZNqW73BQi2/TAxvo+X0q0
-      neHgbwT0N3moYl52R1OFMS48qVRV2GycfPyFmBjgfbVepVfwH2v+6BX7vUx/nMYN
-      TRVTa35cZ9GzctZa9lcTFi0L1tvX6M9b0wmx/zaCDlryRXQB2XYph3Ls5pKFzNdl
-      b5n93mUCgYEA/N1h4zI47h8Cbwnxl51XonhQ+3Smo0YSFqH8CS2JQUZjlP07nn8t
-      hiyltdeb2QZjZ17Ywu7uC2VW200j3FQxgZPPyUBC2HEoXcg1hclQ75/R3AmlSvDN
-      vk4OLQFPoMZN65R9hgumb4PVWs8q8jExJPebipU2HCMccBgrq1KHoAUCgYEA8Njh
-      20NKzvjV75TNTPlFusUujlHmlQ9WGDpp+64Nr2xSJY7j6Kn01kObwZZIKyts00QB
-      PZ6RXBM5d2u/zrsNTdlCBEElaAMBvCSU1lOBJRaB1h2uM8m6X9yg/eeThzIvIyer
-      Bk5RvH0CHckG4LeHg91V0Kh7sTtB4Er1k5tU0vcCgYEAsm/qzq+3GtoJFqBWut3O
-      ZJkw1HE50kf1JcGDIFrg2443YYDdnHg0gNVqzopqsNhgNyboIY8HrkUB6Nljr+w9
-      zymmXGcbhK89hAhvNIyer6oBJpwr51lMZrmgKUQek968R7zOY1Q/S7wlR+KfdK8f
-      9e1A9qdaurpQLA3yawBfMp0CgYAfHbYYUNpSYR2qpUvc3PugRKdeJcCnk2KpIKre
-      pD8KYfE+/vX88jA6mmN+ID9UrHiT1t5eKqVXAvjSr+4I9GukmiQITq5ZgMHxn7xG
-      8GTn+L9vfUgrUq2sguGdzBRoTBiA7zgOSYIP2wqx9G3aDHwKkkbq/Ul1vVUmeCjA
-      GDpeQwKBgG6D0b4AeYHQfyrDEYf22VmMXLjFBtvkc2lgYpHfRXHndQ5GXmZ5fyVd
-      GO6f76W1g2dLZc2bH3ke0Z/XYvb/N4RAhAMnUZPGJuRxC7d1IHWrXwsD1OVk52zc
-      ymhyzQBawRhpl0s1GTuZ7eadY7eOh9rIb93g+LAYBT1whyZ2f1dz
-      -----END RSA PRIVATE KEY-----
     JWT_PUBLIC_JWKS: |
       {"keys": [{"kty": "RSA", "use": "sig", "kid": "code-inspector-key-01", "alg": "RS256", "n": "7eXFpr2rANKszQYSKd-bDRy1-M0tsatbwpr0BGkMOsZMHRph3bv9kLB0TuyLJ09VXDdmUpiYLGd6oQr3iKhtk3oe1_-p6aS7JKTZ-YCQW7TPRQget7lxWZj9l9a-E1WM-JSBjc7tXsGsKjVS9eDC-18gKbS4SnZhxhYwf08flLYa1nHhxuaUbxe7YNzqB6VMIAzt4iyC0LS3cm_CCI8hNg5RjbFkZXE_IC0rdRScLotfWOX2rgSdEH83hA41C8Nx0WICnQ6HysrBIxTfiUiQD4ieKb6HlK4Tr25hUhW_rcshhvcGyBAzQKYtadd51kADr4a0G09U95zby4pCasN-0w", "e": "AQAB"}]}
   secret:

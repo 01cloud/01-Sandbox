@@ -495,6 +495,10 @@ pytest
 ```
 codeInspector/
 ├── README.md                          # This file
+├── docs/                              # Platform documentation
+│   ├── flow.md                        # End-to-end system sequence & process flow
+│   ├── scanning-tools.md              # Security scanning tools overview
+│   └── userguild.md                   # Comprehensive user guide
 ├── apiServer/
 │   ├── README.md                      # API server documentation
 │   ├── fastapi/
