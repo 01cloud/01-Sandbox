@@ -95,3 +95,30 @@ class GenerateAPIResponse(BaseModel):
     """Response returned upon successfully generating a new API key."""
     api_key: str
     status: str
+
+
+# --- API Key Management Models ---
+
+class APIKeyBackend(str, Enum):
+    """Supported backends for key scoping."""
+    Z1_SANDBOX = "Z1_SANDBOX"
+class APIKeyCreateRequest(BaseModel):
+    """Payload to create a new manageable API key."""
+    name: str = Field(..., example="Prod-Scanner-Key")
+    backend: APIKeyBackend = Field(APIKeyBackend.Z1_SANDBOX)
+    ttl_hours: int = Field(1, ge=-1) # Default 1 hour, -1 means never expire
+
+class APIKeyRecord(BaseModel):
+    """Metadata record for a stored API key."""
+    id: str # JTI
+    name: str
+    backend: str
+    created_at: str
+    expires_at: str
+    last_used_at: Optional[str] = None
+    is_revoked: bool = False
+    prefix: str # Partial key for identification (e.g. ci_...)
+
+class APIKeyListResponse(BaseModel):
+    """Response containing a list of masked API key records."""
+    keys: list[APIKeyRecord]

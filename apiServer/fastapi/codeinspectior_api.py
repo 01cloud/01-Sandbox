@@ -36,8 +36,13 @@ from backends import SandboxBackend, GenericHTTPBackend
 import secrets
 import base64
 import jwt
+from starlette.requests import Request
 import datetime
 from kubernetes import client, config
+import sqlite3
+import asyncio
+import uuid
+from typing import List, Dict
 
 
 # ─────────────────────────────────────────────
@@ -52,8 +57,34 @@ class AppState:
             opensandbox_base_url()
         )
         self.latest_job_id: str | None = None
+        self.db_path = "/tmp/apikeys.db"
+        self.revocation_cache: Dict[str, bool] = {} # JTI -> IsRevoked (High-traffic optimization)
+
+    def init_db(self):
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS api_keys (
+                id TEXT PRIMARY KEY,
+                name TEXT,
+                backend TEXT,
+                user_id TEXT,
+                created_at TEXT,
+                expires_at TEXT,
+                last_used_at TEXT,
+                is_revoked INTEGER DEFAULT 0,
+                prefix TEXT
+            )
+        """)
+        # Load revoked JTIs into cache
+        cursor.execute("SELECT id FROM api_keys WHERE is_revoked = 1")
+        for row in cursor.fetchall():
+            self.revocation_cache[row[0]] = True
+        conn.commit()
+        conn.close()
 
 state = AppState()
+state.init_db()
 
 
 # ─────────────────────────────────────────────
@@ -87,6 +118,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def log_headers(request: Request, call_next):
+    print(f"[DEBUG HEADERS] {request.method} {request.url.path} Headers: {dict(request.headers)}")
+    response = await call_next(request)
+    return response
 @app.middleware("http")
 async def cookie_auth_redirect_middleware(request: Request, call_next):
     if request.url.path in ["/docs", "/backend/z1sandbox/docs"]:
@@ -124,15 +160,23 @@ async def validate_token(request: Request):
     Decodes and validates the RS256 JWT produced by the Edge Gateway's 
     cookie transformation.
     """
-    auth_header = request.headers.get("Authorization")
+    # Case-insensitive lookup for the Authorization header
+    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
+    
+    # Fallback: Check for the Auth0 cookie if header is missing
+    # This acts as the "Security Bridge" for browser clients where Gateway transformation is not available
+    if not auth_header:
+        cookie_token = request.cookies.get("inspector_auth")
+        if cookie_token:
+            auth_header = f"Bearer {cookie_token}"
+
     if not auth_header or not auth_header.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header")
+        print(f"[DEBUG SECURITY] ERROR: Missing or invalid Authorization header/cookie. Headers found: {list(request.headers.keys())}")
+        raise HTTPException(status_code=401, detail="Missing or invalid Authorization header/cookie")
     
     token = auth_header.replace("Bearer ", "", 1)
     conf = jwt_config()
-    import sys
     print(f"[DEBUG SECURITY] Received raw token from Gateway: '{token}'")
-    sys.stdout.flush()
     
     try:
         # 1. Get unverified info to determine issuer
@@ -146,11 +190,13 @@ async def validate_token(request: Request):
         
         # 2. Determine which JWKS to use
         if issuer and issuer.startswith("https://") and conf["auth0_domain"] and conf["auth0_domain"] in issuer:
+            print(f"[DEBUG SECURITY] Detected Auth0 token from issuer: {issuer}")
             # Remote Issuer (Auth0)
             target_jwks = await get_remote_jwks(f"{issuer.rstrip('/')}/.well-known/jwks.json")
             target_audience = conf["auth0_audience"]
             target_issuer = issuer
         else:
+            print(f"[DEBUG SECURITY] Detected Internal token from issuer: {issuer}")
             # Local Issuer
             jwks_data = json.loads(conf["public_jwks"])
             target_jwks = jwt.PyJWKSet.from_dict(jwks_data)
@@ -165,16 +211,92 @@ async def validate_token(request: Request):
                 break
         
         if not signing_key:
+            print(f"[DEBUG SECURITY] ERROR: No matching key found for kid '{kid}' in JWKS. Available kids: {[k.key_id for k in target_jwks.keys]}")
             raise HTTPException(status_code=401, detail=f"No matching key found for kid: {kid}")
             
         # 4. Decode and verify signature
-        payload = jwt.decode(
-            token, 
-            signing_key.key, 
-            algorithms=[conf["algorithm"]],
-            audience=target_audience,
-            issuer=target_issuer
-        )
+        try:
+            payload = jwt.decode(
+                token, 
+                signing_key.key, 
+                algorithms=[conf["algorithm"]],
+                audience=target_audience,
+                issuer=target_issuer
+            )
+        except Exception as e:
+            print(f"[DEBUG SECURITY] JWT Decode ERROR: {str(e)}")
+            raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+        
+        # 5. Hardened Enforcement: Direct Database Verification for Internal tokens
+        # We switch to an "Allowlist" model: Token MUST exist in the DB to be valid.
+        jti = payload.get("jti")
+        print(f"[DEBUG SECURITY] Token JTI: {jti}, Issuer: {issuer}, Internal Issuer: {conf['issuer']}")
+        if issuer == conf["issuer"]:
+            if not jti:
+                raise HTTPException(status_code=401, detail="Internal token missing required JTI claim")
+                
+            conn = sqlite3.connect(state.db_path)
+            cursor = conn.cursor()
+            cursor.execute("SELECT is_revoked FROM api_keys WHERE id = ?", (jti,))
+            row = cursor.fetchone()
+            conn.close()
+            
+            if not row:
+                print(f"[DEBUG SECURITY] REJECTION: Key {jti} does not exist in database (Deactivated/Deleted)")
+                raise HTTPException(status_code=401, detail="API Key has been deactivated or deleted")
+            
+            if row[0] == 1:
+                print(f"[DEBUG SECURITY] REJECTION: Key {jti} is explicitly marked as revoked")
+                raise HTTPException(status_code=401, detail="API Key has been revoked")
+            
+            print(f"[DEBUG SECURITY] SUCCESS: Key {jti} verified against active registry")
+            
+            # Update last_used_at in background
+            asyncio.create_task(update_last_used(jti))
+
+        # 6. Hardened Enforcement: Scoping & Session Alignment
+        if request.url.path.startswith("/backend/z1sandbox"):
+            # A) Scope Check
+            token_backend = payload.get("backend")
+            if issuer == conf["issuer"] and token_backend and token_backend not in ["Z1_SANDBOX", "GENERAL"]:
+                raise HTTPException(status_code=403, detail="API Key lacks permission for Z1_SANDBOX backend")
+            
+            # B) Session Alignment Check
+            auth_header_raw = request.headers.get("authorization") or request.headers.get("Authorization")
+            cookie_token = request.cookies.get("inspector_auth")
+            if auth_header_raw and cookie_token:
+                apikey_sub = payload.get("sub")
+                try:
+                    cookie_payload = jwt.decode(cookie_token, options={"verify_signature": False})
+                    cookie_sub = cookie_payload.get("sub")
+                    if cookie_sub and cookie_sub != apikey_sub:
+                        raise HTTPException(status_code=403, detail="Session mismatch: The provided API Key does not belong to the current Auth0 session.")
+                except Exception:
+                    pass
+
+        # 7. Disallow Auth0 token from executing workloads
+        if issuer != conf["issuer"]:
+            # This is a browser session/Auth0 token.
+            path = request.url.path
+            allowed_auth0_paths = [
+                "/v1/api-keys",
+                "/v1/generate-api",
+                "/backend/z1sandbox/docs",
+                "/backend/z1sandbox/openapi.json",
+                "/backend/opensandbox/docs",
+                "/backend/opensandbox/openapi.json"
+            ]
+            
+            is_allowed = False
+            for p in allowed_auth0_paths:
+                if path == p or path.startswith(p + "/"):
+                    is_allowed = True
+                    break
+                    
+            if not is_allowed:
+                print(f"[DEBUG SECURITY] REJECTION: Auth0 session {issuer} attempted to access execution route {path}")
+                raise HTTPException(status_code=403, detail="Active Auth0 dashboard sessions cannot be used for direct backend execution. Please generate and supply a developer API Key in the Authorization headers.")
+
         return payload
         
     except jwt.ExpiredSignatureError:
@@ -195,6 +317,19 @@ async def validate_token(request: Request):
     except Exception as e:
         if isinstance(e, HTTPException): raise e
         raise HTTPException(status_code=401, detail=f"Authorization failed: {str(e)}")
+
+
+async def update_last_used(jti: str):
+    """Updates the last_used_at timestamp in SQLite for an active key."""
+    try:
+        now = datetime.datetime.now(datetime.UTC).isoformat()
+        conn = sqlite3.connect(state.db_path)
+        cursor = conn.cursor()
+        cursor.execute("UPDATE api_keys SET last_used_at = ? WHERE id = ?", (now, jti))
+        conn.commit()
+        conn.close()
+    except Exception:
+        pass # Non-critical failure
 
 
 # ─────────────────────────────────────────────
@@ -294,6 +429,11 @@ def health():
         healthy=state.backend.health_check(),
     )
 
+@app.get("/v1/health", response_model=StatusResponse, summary="Retrieve active connection tracking properties (V1)", tags=["System"], dependencies=[Depends(validate_token)])
+def health_v1():
+    """Alias for /health scoped to /v1 for gateway compatibility."""
+    return health()
+
 
 @app.post("/run", response_model=RunResponse, summary="Dispatch synchronous script explicitly", tags=["System"])
 def run_code(req: RunRequest):
@@ -305,7 +445,7 @@ def run_code(req: RunRequest):
 # 4. OpenSandbox Proxy Forwarding & Docs
 # ─────────────────────────────────────────────
 
-@app.get("/backend/z1sandbox/docs", include_in_schema=False)
+@app.get("/backend/z1sandbox/docs", include_in_schema=False, dependencies=[Depends(validate_token)])
 async def get_backend_docs():
     """
     Renders actual upstream OpenSandbox Swagger API with custom authentication logic.
@@ -313,7 +453,7 @@ async def get_backend_docs():
     return render_swagger_ui("/backend/z1sandbox/openapi.json", "OpenSandbox — Remote API Docs")
 
 
-@app.get("/backend/z1sandbox/openapi.json", include_in_schema=False)
+@app.get("/backend/z1sandbox/openapi.json", include_in_schema=False, dependencies=[Depends(validate_token)])
 async def get_backend_openapi_spec():
     """Translates and patches explicitly upstream OpenAPI spec."""
     base_url = opensandbox_base_url()
@@ -327,12 +467,12 @@ async def get_backend_openapi_spec():
                     spec["servers"] = [{"url": "/backend/z1sandbox"}]
                     spec.setdefault("components", {})
                     spec["components"].setdefault("securitySchemes", {})
-                    spec["components"]["securitySchemes"]["CookieAuth"] = {
-                        "type": "apiKey",
-                        "in": "cookie",
-                        "name": "inspector_auth",
+                    spec["components"]["securitySchemes"]["BearerAuth"] = {
+                        "type": "http",
+                        "scheme": "bearer",
+                        "bearerFormat": "JWT"
                     }
-                    spec["security"] = [{"CookieAuth": []}]
+                    spec["security"] = [{"BearerAuth": []}]
                     return JSONResponse(content=spec)
         except Exception:
             continue
@@ -401,6 +541,19 @@ async def proxy_delete(proxy_path: str, request: Request):
 async def proxy_patch(proxy_path: str, request: Request):
     return await _do_proxy(proxy_path, request)
 
+# OpenSandbox Cluster Proxy Routes
+@app.get("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="OpenSandbox Proxy GET", dependencies=[Depends(validate_token)])
+async def opensandbox_proxy_get(proxy_path: str, request: Request):
+    return await _do_proxy(proxy_path, request)
+
+@app.post("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="OpenSandbox Proxy POST", dependencies=[Depends(validate_token)])
+async def opensandbox_proxy_post(proxy_path: str, request: Request):
+    return await _do_proxy(proxy_path, request)
+
+@app.delete("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="OpenSandbox Proxy DELETE", dependencies=[Depends(validate_token)])
+async def opensandbox_proxy_delete(proxy_path: str, request: Request):
+    return await _do_proxy(proxy_path, request)
+
 
 # ─────────────────────────────────────────────
 # 5. Native Sandbox Management (V1)
@@ -425,7 +578,6 @@ async def create_scan_job(req: ScanJobRequest):
     Every submission is isolated by a unique UUID in the PVC.
     This endpoint blocks and waits for the entire scan process to complete.
     """
-    import uuid
     job_id = str(uuid.uuid4())
     state.latest_job_id = job_id
     
@@ -514,6 +666,106 @@ async def generate_api(user_id: str = "default-user"):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to generate JWT: {str(e)}"
         )
+
+
+# ─────────────────────────────────────────────
+# 7. Management UI Support - API Keys (CRUD)
+# ─────────────────────────────────────────────
+
+from models import APIKeyCreateRequest, APIKeyRecord, APIKeyListResponse
+
+@app.get("/v1/api-keys", response_model=APIKeyListResponse, tags=["Security"], dependencies=[Depends(validate_token)])
+async def list_user_api_keys(payload: dict = Depends(validate_token)):
+    """Retrieves all active and revoked keys for the authenticated user."""
+    user_id = payload.get("sub")
+    conn = sqlite3.connect(state.db_path)
+    conn.row_factory = sqlite3.Row
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM api_keys WHERE user_id = ?", (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    keys = []
+    for row in rows:
+        keys.append(APIKeyRecord(
+            id=row["id"],
+            name=row["name"],
+            backend=row["backend"],
+            created_at=row["created_at"],
+            expires_at=row["expires_at"],
+            last_used_at=row["last_used_at"],
+            is_revoked=bool(row["is_revoked"]),
+            prefix=row["prefix"]
+        ))
+    return APIKeyListResponse(keys=keys)
+
+
+@app.post("/v1/api-keys", response_model=GenerateAPIResponse, tags=["Security"], dependencies=[Depends(validate_token)])
+async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(validate_token)):
+    """
+    Generates a new signed API key (JWT) and persists metadata for revocation/management.
+    One-time reveal implementation.
+    """
+    user_id = payload.get("sub")
+    conf = jwt_config()
+    jti = str(uuid.uuid4())
+    now = datetime.datetime.now(datetime.UTC)
+    if req.ttl_hours == -1:
+        expires_at = now + datetime.timedelta(days=365 * 100) # Effectively never expires
+        status_msg = f"Key '{req.name}' generated successfully. Valid indefinitely."
+    else:
+        expires_at = now + datetime.timedelta(hours=req.ttl_hours)
+        status_msg = f"Key '{req.name}' generated successfully. Valid for {req.ttl_hours} hour(s)."
+
+    
+    token_payload = {
+        "sub": user_id,
+        "iat": now,
+        "exp": expires_at,
+        "iss": conf["issuer"],
+        "aud": "code-inspector-api",
+        "jti": jti,
+        "backend": req.backend.value
+    }
+    
+    token = jwt.encode(token_payload, conf["private_key"], algorithm=conf["algorithm"], headers={"kid": "code-inspector-key-01"})
+    
+    # Persist to SQLite
+    conn = sqlite3.connect(state.db_path)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO api_keys (id, name, backend, user_id, created_at, expires_at, prefix)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+    """, (jti, req.name, req.backend.value, user_id, now.isoformat(), expires_at.isoformat(), f"ci_{jti[:8]}..."))
+    conn.commit()
+    conn.close()
+
+    return GenerateAPIResponse(
+        api_key=token,
+        status=status_msg
+    )
+
+
+@app.delete("/v1/api-keys/{jti}", tags=["Security"], dependencies=[Depends(validate_token)])
+async def delete_api_key(jti: str, payload: dict = Depends(validate_token)):
+    """Deletes/Revokes an API key instantly by removing it from the SQLite database."""
+    user_id = payload.get("sub")
+    conn = sqlite3.connect(state.db_path)
+    cursor = conn.cursor()
+    # Physical deletion from registry
+    cursor.execute("DELETE FROM api_keys WHERE id = ? AND user_id = ?", (jti, user_id))
+    rows_deleted = cursor.rowcount
+    conn.commit()
+    conn.close()
+    
+    if rows_deleted == 0:
+        raise HTTPException(status_code=404, detail="Key not found or unauthorized")
+    
+    # Remove from high-traffic cache if it existed there
+    if jti in state.revocation_cache:
+        del state.revocation_cache[jti]
+    
+    return {"status": "success", "message": f"Key {jti} has been permanently destroyed and deactivated."}
 
 
 if __name__ == "__main__":
