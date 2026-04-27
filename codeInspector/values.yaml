@@ -81,7 +81,7 @@ apiServer:
     image:
       repository: fastapi
       tag: "1.0.0"
-      pullPolicy: Never
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: "100m"
@@ -111,6 +111,20 @@ apiServer:
     maxReplicas: 10
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
+  postgresql:
+    enabled: true
+    host: "postgresql-service"
+    port: 5432
+    user: "postgres"
+    password: "password123"
+    database: "apikeys"
+    storage: "5Gi"
+  redis:
+    enabled: true
+    host: "redis-service"
+    port: 6379
+    password: ""
+
 
 # Dashboard component values
 dashboard:

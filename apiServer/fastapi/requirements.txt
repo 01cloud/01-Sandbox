@@ -12,6 +12,9 @@ pydantic==2.11.1
 kubernetes
 PyJWT==2.10.1
 cryptography==43.0.3
+psycopg2-binary==2.9.10
+redis==5.2.0
+
  
 # ── Optional backends ────────────────────────
  

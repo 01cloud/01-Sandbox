@@ -109,14 +109,37 @@ sequenceDiagram
     API-->>Dev: 401 Unauthorized (Kill-switch fired)
 ```
 
-### Technical Component Breakdown:
+## 6. High-Scale Persistence (Production Architecture)
+To support environments with **1,000+ users** and high-concurrency demands, the system transitions from local isolated storage to a distributed persistence model.
 
-1.  **The Token (The ID Badge)**: We use **RS256 JWTs**. These are signed with a private key that only our backend holds. They are "Self-Describing," meaning they contain the user's ID and the backend they are allowed to access.
-2.  **The Registry (The Guest List)**: Every time a key is used, the backend checks the **SQLite Registry**. Unlike a "Blocklist" (which only lists bad keys), an **Allowlist** requires the key to be explicitly present in the data to be valid. If you delete it, it’s like tearing up an entry on a guest list—even if the ID badge looks real, they aren't getting in.
-3.  **The Gateway (The Shield)**: The **AgentGateway** acts as a high-performance entry point. It ensures that traffic is routed correctly to the `sandbox-api` service without modifying or stripping headers, preserving the integrity of your Developer Keys.
-4.  **The Firewall (The Sentry)**: We have a logical firewall that distinguishes between a **Browser Session** (Auth0) and a **Developer API Key**. 
-    - **Dashboard Login**: Can only manage keys, read docs, and view status.
-    - **API Key**: The *only* credential allowed to trigger code execution and sandbox processing.
+### 6.1 Centralized Metadata Registry (PostgreSQL)
+- **Role**: Serves as the "Single Source of Truth."
+- **Function**: Stores full key metadata including ownership (`user_id`), creation timestamps, and backend scopes. 
+- **Benefit**: Ensures that API key data survives pod restarts and remains consistent across an unlimited number of horizontally scaled API instances.
+
+### 6.2 Distributed Allowlist Cache (Redis)
+- **Role**: Provides line-rate validation at sub-millisecond speeds.
+- **Function**: Maintains a high-speed **Set** of all active `jti` IDs (the `active_api_keys` set).
+- **Process**:
+    1.  **Sync**: On startup, every API pod synchronizes with Redis to ensure its local state matches the cluster state.
+    2.  **Validation**: Every incoming request triggers a `SISMEMBER` check against Redis. This replaces slow disk-based database lookups with ultra-fast memory lookups.
+    3.  **Revocation**: When a key is deleted, the backend performs a synchronous `SREM` (Set Remove) in Redis. This ensures the key is blocked **globally** across all pods within milliseconds.
+
+### 6.3 Horizontal Scalability
+Because the security state is decoupled from the compute pods:
+- You can scale the `sandbox-api` deployment to `N` replicas.
+- Any pod can fulfill any request because they all share the same **Redistributed Allowlist**.
+- There is zero "Session Stickiness" required at the Gateway level, simplifying the network architecture.
+
+---
+
+### Technical Component Breakdown (Scaled):
+
+1.  **The Token (The ID Badge)**: Signed RS256 JWT containing scoped claims and a unique `jti`.
+2.  **The Registry (PostgreSQL)**: The persistent guest list that survives hardware failures.
+3.  **The Cache (Redis)**: The "Instant Lookup" table that ensures verification doesn't slow down the system.
+4.  **The Gateway (AgentGateway)**: The high-performance entry point that acts as a pure pass-through for signed credentials.
+5.  **The Firewall (Backend)**: The final sentry that combines cryptographic validation with the real-time Redis Allowlist check.
 
 ---
 *Last Updated: April 2026*

@@ -40,6 +40,9 @@ from starlette.requests import Request
 import datetime
 from kubernetes import client, config
 import sqlite3
+import psycopg2
+from psycopg2.extras import RealDictCursor
+import redis
 import asyncio
 import uuid
 from typing import List, Dict
@@ -50,36 +53,92 @@ from typing import List, Dict
 # ─────────────────────────────────────────────
 
 class AppState:
-    """Manages active proxy mapping configurations statically holding internal maps."""
+    """Manages active proxy mapping configurations and centralized high-scale persistence."""
     def __init__(self):
         self.backend: SandboxBackend = GenericHTTPBackend(
             "opensandbox",
             opensandbox_base_url()
         )
         self.latest_job_id: str | None = None
-        self.db_path = "/tmp/apikeys.db"
-        self.revocation_cache: Dict[str, bool] = {} # JTI -> IsRevoked (High-traffic optimization)
+        
+        # Persistence Config
+        self.use_postgres = os.environ.get("PG_HOST") is not None
+        self.use_redis = os.environ.get("REDIS_HOST") is not None
+        
+        self.db_path = os.environ.get("DB_PATH", "/tmp/apikeys.db")
+        self.redis_client = None
+        
+        if self.use_redis:
+            try:
+                self.redis_client = redis.Redis(
+                    host=os.environ.get("REDIS_HOST"),
+                    port=int(os.environ.get("REDIS_PORT", 6379)),
+                    password=os.environ.get("REDIS_PASSWORD", ""),
+                    decode_responses=True
+                )
+                print(f"[startup] Connected to Redis at {os.environ.get('REDIS_HOST')}")
+            except Exception as e:
+                print(f"[startup] FAILED to connect to Redis: {str(e)}")
+                self.use_redis = False
+
+    def get_db_conn(self):
+        if self.use_postgres:
+            return psycopg2.connect(
+                host=os.environ.get("PG_HOST"),
+                port=os.environ.get("PG_PORT"),
+                user=os.environ.get("PG_USER"),
+                password=os.environ.get("PG_PASSWORD"),
+                dbname=os.environ.get("PG_DATABASE")
+            )
+        return sqlite3.connect(self.db_path)
 
     def init_db(self):
-        conn = sqlite3.connect(self.db_path)
+        conn = self.get_db_conn()
         cursor = conn.cursor()
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id TEXT PRIMARY KEY,
-                name TEXT,
-                backend TEXT,
-                user_id TEXT,
-                created_at TEXT,
-                expires_at TEXT,
-                last_used_at TEXT,
-                is_revoked INTEGER DEFAULT 0,
-                prefix TEXT
-            )
-        """)
-        # Load revoked JTIs into cache
-        cursor.execute("SELECT id FROM api_keys WHERE is_revoked = 1")
-        for row in cursor.fetchall():
-            self.revocation_cache[row[0]] = True
+        
+        # Postgres uses slightly different syntax for PRIMARY KEY and types
+        if self.use_postgres:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    backend TEXT,
+                    user_id TEXT,
+                    created_at TEXT,
+                    expires_at TEXT,
+                    last_used_at TEXT,
+                    is_revoked INTEGER DEFAULT 0,
+                    prefix TEXT
+                )
+            """)
+        else:
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    backend TEXT,
+                    user_id TEXT,
+                    created_at TEXT,
+                    expires_at TEXT,
+                    last_used_at TEXT,
+                    is_revoked INTEGER DEFAULT 0,
+                    prefix TEXT
+                )
+            """)
+        
+        # Sync Active Registry to Redis for line-rate validation
+        if self.use_redis:
+            cursor.execute("SELECT id FROM api_keys WHERE is_revoked = 0")
+            active_jtis = cursor.fetchall()
+            if active_jtis:
+                # Add all active JTIs to a Redis set called 'active_api_keys'
+                pipe = self.redis_client.pipeline()
+                pipe.delete("active_api_keys") # Refresh
+                for (jti,) in active_jtis:
+                    pipe.sadd("active_api_keys", jti)
+                pipe.execute()
+                print(f"[startup] Synced {len(active_jtis)} active keys to Redis registry.")
+                
         conn.commit()
         conn.close()
 
@@ -227,29 +286,44 @@ async def validate_token(request: Request):
             print(f"[DEBUG SECURITY] JWT Decode ERROR: {str(e)}")
             raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
         
-        # 5. Hardened Enforcement: Direct Database Verification for Internal tokens
-        # We switch to an "Allowlist" model: Token MUST exist in the DB to be valid.
+        # 5. Hardened Enforcement: Distributed Registry Verification (Redis/DB)
+        # We use an "Allowlist" model: Token MUST exist in the shared registry to be valid.
         jti = payload.get("jti")
         print(f"[DEBUG SECURITY] Token JTI: {jti}, Issuer: {issuer}, Internal Issuer: {conf['issuer']}")
         if issuer == conf["issuer"]:
             if not jti:
                 raise HTTPException(status_code=401, detail="Internal token missing required JTI claim")
                 
-            conn = sqlite3.connect(state.db_path)
-            cursor = conn.cursor()
-            cursor.execute("SELECT is_revoked FROM api_keys WHERE id = ?", (jti,))
-            row = cursor.fetchone()
-            conn.close()
+            is_valid = False
             
-            if not row:
-                print(f"[DEBUG SECURITY] REJECTION: Key {jti} does not exist in database (Deactivated/Deleted)")
-                raise HTTPException(status_code=401, detail="API Key has been deactivated or deleted")
+            # Step A: High-speed check via Redis (hits all pods instantly)
+            if state.use_redis:
+                is_valid = state.redis_client.sismember("active_api_keys", jti)
+                print(f"[DEBUG SECURITY] Redis Allowlist Check for JTI {jti}: {'VALID' if is_valid else 'UNKNOWN/REVOKED'}")
             
-            if row[0] == 1:
-                print(f"[DEBUG SECURITY] REJECTION: Key {jti} is explicitly marked as revoked")
-                raise HTTPException(status_code=401, detail="API Key has been revoked")
+            # Step B: Fallback/Integrity check via Central Database
+            if not is_valid:
+                conn = state.get_db_conn()
+                cursor = conn.cursor()
+                query = "SELECT is_revoked FROM api_keys WHERE id = %s" if state.use_postgres else "SELECT is_revoked FROM api_keys WHERE id = ?"
+                cursor.execute(query, (jti,))
+                row = cursor.fetchone()
+                conn.close()
+                
+                if not row:
+                    print(f"[DEBUG SECURITY] REJECTION: Key {jti} does not exist in central database")
+                    raise HTTPException(status_code=401, detail="API Key has been deactivated or deleted")
+                
+                if row[0] == 1:
+                    print(f"[DEBUG SECURITY] REJECTION: Key {jti} is explicitly revoked in central database")
+                    raise HTTPException(status_code=401, detail="API Key has been revoked")
+                
+                # If it's in DB but not Redis, re-sync it (self-healing)
+                if state.use_redis:
+                    state.redis_client.sadd("active_api_keys", jti)
+                is_valid = True
             
-            print(f"[DEBUG SECURITY] SUCCESS: Key {jti} verified against active registry")
+            print(f"[DEBUG SECURITY] SUCCESS: Key {jti} verified against distributed registry")
             
             # Update last_used_at in background
             asyncio.create_task(update_last_used(jti))
@@ -320,16 +394,17 @@ async def validate_token(request: Request):
 
 
 async def update_last_used(jti: str):
-    """Updates the last_used_at timestamp in SQLite for an active key."""
+    """Updates the last_used_at timestamp in the central database."""
     try:
-        now = datetime.datetime.now(datetime.UTC).isoformat()
-        conn = sqlite3.connect(state.db_path)
+        conn = state.get_db_conn()
         cursor = conn.cursor()
-        cursor.execute("UPDATE api_keys SET last_used_at = ? WHERE id = ?", (now, jti))
+        now = datetime.datetime.now(datetime.UTC).isoformat()
+        query = "UPDATE api_keys SET last_used_at = %s WHERE id = %s" if state.use_postgres else "UPDATE api_keys SET last_used_at = ? WHERE id = ?"
+        cursor.execute(query, (now, jti))
         conn.commit()
         conn.close()
-    except Exception:
-        pass # Non-critical failure
+    except Exception as e:
+        print(f"[background] Error updating last_used_at: {str(e)}")
 
 
 # ─────────────────────────────────────────────
@@ -676,12 +751,20 @@ from models import APIKeyCreateRequest, APIKeyRecord, APIKeyListResponse
 
 @app.get("/v1/api-keys", response_model=APIKeyListResponse, tags=["Security"], dependencies=[Depends(validate_token)])
 async def list_user_api_keys(payload: dict = Depends(validate_token)):
-    """Retrieves all active and revoked keys for the authenticated user."""
+    """Retrieves all active and revoked keys for the authenticated user from central store."""
     user_id = payload.get("sub")
-    conn = sqlite3.connect(state.db_path)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM api_keys WHERE user_id = ?", (user_id,))
+    conn = state.get_db_conn()
+    
+    # Handle dict behavior difference between sqlite3 and psycopg2
+    if state.use_postgres:
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        query = "SELECT * FROM api_keys WHERE user_id = %s"
+    else:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        query = "SELECT * FROM api_keys WHERE user_id = ?"
+        
+    cursor.execute(query, (user_id,))
     rows = cursor.fetchall()
     conn.close()
 
@@ -730,15 +813,23 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
     
     token = jwt.encode(token_payload, conf["private_key"], algorithm=conf["algorithm"], headers={"kid": "code-inspector-key-01"})
     
-    # Persist to SQLite
-    conn = sqlite3.connect(state.db_path)
+    # Persist to Central Database
+    conn = state.get_db_conn()
     cursor = conn.cursor()
-    cursor.execute("""
+    query = """
+        INSERT INTO api_keys (id, name, backend, user_id, created_at, expires_at, prefix)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    """ if state.use_postgres else """
         INSERT INTO api_keys (id, name, backend, user_id, created_at, expires_at, prefix)
         VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (jti, req.name, req.backend.value, user_id, now.isoformat(), expires_at.isoformat(), f"ci_{jti[:8]}..."))
+    """
+    cursor.execute(query, (jti, req.name, req.backend.value, user_id, now.isoformat(), expires_at.isoformat(), f"ci_{jti[:8]}..."))
     conn.commit()
     conn.close()
+    
+    # Sync to Redis for instant cluster-wide activation
+    if state.use_redis:
+        state.redis_client.sadd("active_api_keys", jti)
 
     return GenerateAPIResponse(
         api_key=token,
@@ -748,12 +839,13 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
 
 @app.delete("/v1/api-keys/{jti}", tags=["Security"], dependencies=[Depends(validate_token)])
 async def delete_api_key(jti: str, payload: dict = Depends(validate_token)):
-    """Deletes/Revokes an API key instantly by removing it from the SQLite database."""
+    """Deletes/Revokes an API key instantly from global registry and cache."""
     user_id = payload.get("sub")
-    conn = sqlite3.connect(state.db_path)
+    conn = state.get_db_conn()
     cursor = conn.cursor()
-    # Physical deletion from registry
-    cursor.execute("DELETE FROM api_keys WHERE id = ? AND user_id = ?", (jti, user_id))
+    
+    query = "DELETE FROM api_keys WHERE id = %s AND user_id = %s" if state.use_postgres else "DELETE FROM api_keys WHERE id = ? AND user_id = ?"
+    cursor.execute(query, (jti, user_id))
     rows_deleted = cursor.rowcount
     conn.commit()
     conn.close()
@@ -761,11 +853,12 @@ async def delete_api_key(jti: str, payload: dict = Depends(validate_token)):
     if rows_deleted == 0:
         raise HTTPException(status_code=404, detail="Key not found or unauthorized")
     
-    # Remove from high-traffic cache if it existed there
-    if jti in state.revocation_cache:
-        del state.revocation_cache[jti]
+    # Instant revocation across all pods via shared Redis
+    if state.use_redis:
+        state.redis_client.srem("active_api_keys", jti)
+        print(f"[DEBUG SECURITY] Key {jti} removed from shared Redis allowlist")
     
-    return {"status": "success", "message": f"Key {jti} has been permanently destroyed and deactivated."}
+    return {"status": "success", "message": f"Key {jti} has been permanently destroyed across the cluster."}
 
 
 if __name__ == "__main__":

@@ -53,6 +53,23 @@ spec:
                   name: sandbox-api-secret
                   key: JWT_PRIVATE_KEY
                   optional: true
+            - name: PG_HOST
+              value: {{ .Values.postgresql.host | quote }}
+            - name: PG_PORT
+              value: {{ .Values.postgresql.port | quote }}
+            - name: PG_USER
+              value: {{ .Values.postgresql.user | quote }}
+            - name: PG_PASSWORD
+              value: {{ .Values.postgresql.password | quote }}
+            - name: PG_DATABASE
+              value: {{ .Values.postgresql.database | quote }}
+            - name: REDIS_HOST
+              value: {{ .Values.redis.host | quote }}
+            - name: REDIS_PORT
+              value: {{ .Values.redis.port | quote }}
+            - name: REDIS_PASSWORD
+              value: {{ .Values.redis.password | quote }}
+
 
           livenessProbe:
             httpGet:
