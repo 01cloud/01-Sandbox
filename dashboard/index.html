@@ -1,547 +1,239 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="dark">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>01 Sandbox | Developer Dashboard</title>
+
+    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap"
+        rel="stylesheet">
+
+    <!-- External SDKs -->
     <script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
-    <style>
-        :root {
-            --primary: #0d9488;
-            --primary-hover: #0f766e;
-            --bg: #020617;
-            --card-bg: rgba(15, 23, 42, 0.6);
-            --text: #f8fafc;
-            --text-dim: #94a3b8;
-            --border: rgba(255, 255, 255, 0.08);
-            --glass-border: rgba(255, 255, 255, 0.05);
-            --success: #10b981;
-            --accent: #22d3ee;
-        }
+    <script src="https://cdn.tailwindcss.com"></script>
 
-        * {
-            box-sizing: border-box;
-            margin: 0;
-            padding: 0;
-            font-family: 'Outfit', sans-serif;
-        }
-
-        body {
-            background-color: var(--bg);
-            background-image:
-                radial-gradient(at 0% 0%, rgba(13, 148, 136, 0.12) 0px, transparent 50%),
-                radial-gradient(at 100% 0%, rgba(34, 211, 238, 0.1) 0px, transparent 50%);
-            color: var(--text);
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            overflow-x: hidden;
-        }
-
-        header {
-            width: 100%;
-            padding: 1.5rem 5%;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            backdrop-filter: blur(12px);
-            border-bottom: 1px solid var(--border);
-            background: rgba(2, 6, 23, 0.7);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .logo {
-            font-size: 1.5rem;
-            font-weight: 700;
-            letter-spacing: -0.5px;
-            background: linear-gradient(to right, #0d9488, #22d3ee);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-        }
-
-        .container {
-            width: 100%;
-            max-width: 1000px;
-            padding: 4rem 2rem;
-            flex-grow: 1;
-        }
-
-        .hero {
-            text-align: center;
-            margin-bottom: 4rem;
-        }
-
-        .hero h1 {
-            font-size: 3.5rem;
-            font-weight: 700;
-            margin-bottom: 1rem;
-            line-height: 1.1;
-        }
-
-        .hero p {
-            font-size: 1.2rem;
-            color: var(--text-dim);
-            max-width: 600px;
-            margin: 0 auto;
-        }
-
-        .card {
-            background: var(--card-bg);
-            backdrop-filter: blur(20px);
-            border: 1px solid var(--glass-border);
-            border-radius: 24px;
-            padding: 3rem;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-            text-align: center;
-            transition: transform 0.3s ease;
-        }
-
-        .hidden {
-            display: none !important;
-        }
-
-        .btn {
-            background: var(--primary);
-            color: white;
-            border: none;
-            padding: 1rem 2.5rem;
-            border-radius: 12px;
-            font-size: 1.1rem;
-            font-weight: 600;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            box-shadow: 0 10px 15px -3px rgba(13, 148, 136, 0.2);
-        }
-
-        .btn:hover {
-            background: var(--primary-hover);
-            transform: translateY(-2px);
-            box-shadow: 0 20px 25px -5px rgba(13, 148, 136, 0.3);
-        }
-
-        .token-container {
-            margin-top: 2rem;
-            text-align: left;
-        }
-
-        .token-label {
-            font-size: 0.9rem;
-            color: var(--text-dim);
-            margin-bottom: 0.75rem;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-
-        .token-box {
-            background: rgba(15, 23, 42, 0.8);
-            border: 1px solid var(--border);
-            padding: 1.25rem;
-            border-radius: 12px;
-            font-family: 'Courier New', Courier, monospace;
-            font-size: 0.9rem;
-            word-break: break-all;
-            color: var(--accent);
-            position: relative;
-            cursor: pointer;
-            transition: border-color 0.2s;
-        }
-
-        .token-box:hover {
-            border-color: var(--primary);
-        }
-
-        .copy-hint {
-            font-size: 0.8rem;
-            color: var(--success);
-            margin-top: 0.5rem;
-            opacity: 0;
-            transition: opacity 0.3s;
-        }
-
-        .copy-hint.visible {
-            opacity: 1;
-        }
-
-        .user-profile {
-            display: flex;
-            align-items: center;
-            gap: 1rem;
-        }
-
-        .avatar {
-            width: 40px;
-            height: 40px;
-            border-radius: 50%;
-            border: 2px solid var(--primary);
-        }
-
-        .logout-link {
-            color: var(--text-dim);
-            text-decoration: none;
-            font-size: 0.9rem;
-            cursor: pointer;
-        }
-
-        .logout-link:hover {
-            color: var(--text);
-        }
-
-        footer {
-            padding: 2rem;
-            color: var(--text-dim);
-            font-size: 0.9rem;
-        }
-
-        /* Micro-animations */
-        @keyframes fadeIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-
-            to {
-                opacity: 1;
-                transform: translateY(0);
+    <!-- Tailwind Config -->
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'], display: ['Plus Jakarta Sans', 'sans-serif'] },
+                    colors: {
+                        background: 'hsl(var(--background))', foreground: 'hsl(var(--foreground))',
+                        card: 'hsl(var(--card))', 'card-foreground': 'hsl(var(--card-foreground))',
+                        primary: { DEFAULT: 'hsl(var(--primary))', foreground: 'hsl(var(--primary-foreground))' },
+                        secondary: { DEFAULT: 'hsl(var(--secondary))', foreground: 'hsl(var(--secondary-foreground))' },
+                        muted: { DEFAULT: 'hsl(var(--muted))', foreground: 'hsl(var(--muted-foreground))' },
+                        accent: { DEFAULT: 'hsl(var(--accent))', foreground: 'hsl(var(--accent-foreground))' },
+                        destructive: { DEFAULT: 'hsl(var(--destructive))', foreground: 'hsl(var(--destructive-foreground))' },
+                        border: 'hsl(var(--border))', input: 'hsl(var(--input))', ring: 'hsl(var(--ring))',
+                    }
+                }
             }
         }
+    </script>
 
-        .animate-fade-in {
-            animation: fadeIn 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-        }
-
-        /* Management Styles */
-        .keys-grid {
-            display: grid;
-            grid-template-columns: 1fr;
-            gap: 1rem;
-            margin-top: 1rem;
-            text-align: left;
-        }
-
-        .key-card {
-            background: rgba(15, 23, 42, 0.4);
-            border: 1px solid var(--border);
-            padding: 1.25rem;
-            border-radius: 16px;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            transition: all 0.2s ease;
-        }
-
-        .key-card:hover {
-            border-color: var(--primary);
-            background: rgba(15, 23, 42, 0.6);
-        }
-
-        .key-info h4 {
-            font-size: 1rem;
-            margin-bottom: 0.25rem;
-        }
-
-        .key-meta {
-            display: flex;
-            gap: 1rem;
-            font-size: 0.8rem;
-            color: var(--text-dim);
-        }
-
-        .badge {
-            padding: 0.2rem 0.6rem;
-            border-radius: 20px;
-            font-size: 0.7rem;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .badge-Z1_SANDBOX {
-            background: rgba(13, 148, 136, 0.15);
-            color: #2dd4bf;
-        }
-
-        /* Dashboard Layout */
-        .dashboard-layout {
-            display: flex;
-            width: 100%;
-            flex-grow: 1;
-            background: var(--bg);
-        }
-
-        .sidebar {
-            width: 260px;
-            background: rgba(15, 23, 42, 0.95);
-            border-right: 1px solid var(--border);
-            padding: 2rem 0;
-            display: flex;
-            flex-direction: column;
-            min-height: calc(100vh - 80px);
-        }
-
-        .sidebar-category {
-            font-size: 0.75rem;
-            text-transform: uppercase;
-            font-weight: 700;
-            color: var(--text-dim);
-            padding: 1.5rem 1.5rem 0.5rem 1.5rem;
-            letter-spacing: 0.5px;
-        }
-
-        .menu-item {
-            padding: 0.75rem 1.5rem;
-            color: var(--text-dim);
-            cursor: pointer;
-            font-size: 0.95rem;
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-            transition: all 0.2s;
-            border-left: 3px solid transparent;
-        }
-
-        .menu-item:hover {
-            background: rgba(255, 255, 255, 0.05);
-            color: var(--text);
-        }
-
-        .menu-item.active {
-            background: rgba(13, 148, 136, 0.08);
-            color: var(--primary);
-            border-left-color: var(--primary);
-            font-weight: 600;
-        }
-
-        .menu-icon {
-            font-size: 1.1rem;
-            opacity: 0.8;
-        }
-
-        .main-content {
-            flex-grow: 1;
-            padding: 3rem 4rem;
-            background: var(--bg);
-        }
-
-        .modal-overlay {
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.8);
-            backdrop-filter: blur(8px);
-            z-index: 1000;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .modal-content {
-            background: var(--bg);
-            border: 1px solid var(--border);
-            padding: 2.5rem;
-            border-radius: 24px;
-            width: 100%;
-            max-width: 500px;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-        }
-
-        .form-group {
-            margin-bottom: 1.5rem;
-            text-align: left;
-        }
-
-        .form-group label {
-            display: block;
-            font-size: 0.9rem;
-            color: var(--text-dim);
-            margin-bottom: 0.5rem;
-        }
-
-        .form-group input,
-        .form-group select {
-            width: 100%;
-            padding: 0.75rem 1rem;
-            background: rgba(15, 23, 42, 0.8);
-            border: 1px solid var(--border);
-            border-radius: 10px;
-            color: white;
-            font-size: 1rem;
-        }
-
-        .btn-delete {
-            background: rgba(239, 68, 68, 0.1);
-            color: #ef4444;
-            border: 1px solid rgba(239, 68, 68, 0.2);
-            padding: 0.5rem 1rem;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            cursor: pointer;
-            transition: all 0.2s;
-        }
-
-        .btn-delete:hover {
-            background: rgba(239, 68, 68, 0.2);
-        }
-
-        .spinner {
-            width: 40px;
-            height: 40px;
-            border: 4px solid var(--border);
-            border-top: 4px solid var(--primary);
-            border-radius: 50%;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
-        }
-
-        @keyframes spin {
-            0% {
-                transform: rotate(0deg);
+    <style type="text/tailwindcss">
+        @layer base {
+            :root {
+                --background: 210 40% 97.5%; --foreground: 240 35% 12%; --card: 0 0% 100%;
+                --card-foreground: 240 35% 12%; --popover: 0 0% 100%; --popover-foreground: 240 35% 12%;
+                --primary: 240 35% 12%; --primary-foreground: 0 0% 100%; --secondary: 210 30% 96%;
+                --secondary-foreground: 210 50% 30%; --muted: 210 25% 97%; --muted-foreground: 210 15% 45%;
+                --accent: 215 85% 65%; --accent-foreground: 0 0% 100%; --destructive: 0 72% 51%;
+                --destructive-foreground: 0 0% 100%; --border: 210 25% 92%; --input: 210 25% 92%; --ring: 210 85% 65%;
+                --grad-3: 210 100% 60%; --grad-4: 160 70% 50%;
             }
-
-            100% {
-                transform: rotate(360deg);
+            .dark {
+                --background: 222 47% 11%; --foreground: 210 40% 98%; --card: 217 33% 17%;
+                --card-foreground: 210 40% 98%; --popover: 217 33% 17%; --popover-foreground: 210 40% 98%;
+                --primary: 210 40% 98%; --primary-foreground: 222 47% 11%; --secondary: 217 33% 17%;
+                --secondary-foreground: 210 40% 98%; --muted: 217 33% 17%; --muted-foreground: 215 20.2% 65.1%;
+                --accent: 265 85% 70%; --accent-foreground: 210 40% 98%; --destructive: 0 62.8% 30.6%;
+                --destructive-foreground: 210 40% 98%; --border: 217 33% 25%; --input: 217 33% 25%; --ring: 265 85% 70%;
             }
+            body { @apply bg-background text-foreground antialiased; font-feature-settings: "ss01", "cv11"; }
         }
     </style>
+
+    <!-- Custom Modularied CSS -->
+    <link rel="stylesheet" href="assets/css/styles.css">
 </head>
 
-<body>
-    <header>
-        <div class="logo">01 Sandbox</div>
-        <div id="user-nav" class="hidden">
-            <div class="user-profile">
-                <img id="user-avatar" class="avatar" src="" alt="Avatar">
-                <a onclick="logout()" class="logout-link">Sign Out</a>
+<body class="min-h-screen flex flex-col overflow-x-hidden pt-[73px]">
+
+    <!-- Header -->
+    <header
+        class="w-full px-6 py-4 flex justify-between items-center border-b border-border bg-background fixed top-0 z-50">
+        <div class="text-2xl font-display font-bold text-gradient tracking-tight">01 Sandbox</div>
+        <div class="flex items-center gap-4">
+            <button id="theme-toggle"
+                class="p-2 rounded-md hover:bg-muted transition-colors border border-transparent hover:border-border"
+                onclick="toggleTheme()" aria-label="Toggle Dark Mode">
+                <span id="theme-icon-light" class="hidden text-xl">☀️</span>
+                <span id="theme-icon-dark" class="text-xl">🌙</span>
+            </button>
+            <div id="user-nav" class="hidden flex items-center gap-3 border-l border-border pl-4 ml-2">
+                <img id="user-avatar" class="w-9 h-9 rounded-full border border-border" src="" alt="Avatar">
+                <a onclick="logout()"
+                    class="text-sm text-muted-foreground hover:text-foreground cursor-pointer font-medium transition-colors">Sign
+                    Out</a>
             </div>
         </div>
     </header>
 
-    <div id="public-view" class="container animate-fade-in">
-        <div class="hero">
-            <h1>Identity meets Intelligence.</h1>
-            <p>Unified security scaling across distributed clusters. Manage your credentials and start scanning.</p>
+    <!-- Public Logged Out View -->
+    <div id="public-view"
+        class="w-full max-w-4xl mx-auto px-6 py-20 flex-grow flex flex-col justify-center items-center animate-[fadeIn_0.5s_ease-out]">
+        <div class="text-center mb-16">
+            <h1 class="text-5xl md:text-6xl font-display font-extrabold mb-6 tracking-tight leading-tight">Identity
+                meets Intelligence.</h1>
+            <p class="text-xl text-muted-foreground max-w-2xl mx-auto">Unified security scaling across distributed
+                clusters. Manage your credentials and start scanning.</p>
         </div>
 
-        <div id="logged-out-view" class="card">
-            <h2 style="margin-bottom: 2rem;">Welcome Back</h2>
-            <div id="init-error" class="hidden"
-                style="color: #ef4444; background: rgba(239, 68, 68, 0.1); padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem; font-size: 0.9rem; border: 1px solid rgba(239, 68, 68, 0.2);">
+        <div id="logged-out-view"
+            class="aws-widget max-w-md w-full p-8 text-center items-center shadow-lg border-border/50 bg-card/80 backdrop-blur-sm">
+            <h2 class="text-3xl font-display font-semibold mb-6 text-foreground">Welcome Back</h2>
+            <div id="init-error"
+                class="hidden w-full text-left text-sm text-destructive bg-destructive/10 border border-destructive/20 p-4 rounded-md mb-6">
             </div>
-            <button id="login-btn" class="btn" onclick="login()" disabled
-                style="opacity: 0.5; cursor: not-allowed;">Loading Security Layer...</button>
-            <p style="margin-top: 2.5rem; font-size: 0.9rem; color: var(--text-dim);">
-                New to 01 Sandbox? <a href="#" style="color: var(--primary);">Create an account</a>.
+            <button id="login-btn"
+                class="w-full bg-primary text-primary-foreground font-semibold py-3.5 px-4 rounded-md shadow hover:opacity-90 transition-opacity disabled:opacity-50 disabled:cursor-not-allowed"
+                onclick="login()" disabled>
+                Loading Security Layer...
+            </button>
+            <p class="mt-6 text-sm text-muted-foreground">
+                New to 01 Sandbox? <a href="#"
+                    class="text-accent hover:text-accent/80 hover:underline font-medium">Create an account</a>.
             </p>
         </div>
     </div>
 
-    <!-- Logged in Dashboard Layout -->
-    <div id="dashboard-view" class="dashboard-layout hidden">
-        <aside class="sidebar">
-            <!-- 
-            <div class="menu-item"><span class="menu-icon">⚡</span> Getting Started</div>
-            <div class="menu-item"><span class="menu-icon">✨</span> AI Agents <span style="background: var(--primary); color: white; font-size: 0.6rem; padding: 2px 6px; border-radius: 4px; margin-left: left;">NEW</span></div>
-            <div class="menu-item"><span class="menu-icon">📈</span> Activity</div>
-            -->
+    <!-- Dashboard View -->
+    <div id="dashboard-view" class="flex w-full min-h-[calc(100vh-73px)] hidden items-stretch">
 
-            <div class="sidebar-category">Applications & APIs</div>
-            <div class="menu-item" onclick="showApplicationsPage()"><span class="menu-icon">📦</span> Applications</div>
-            <div class="menu-item active" onclick="showAPIPage()"><span class="menu-icon">🔌</span> APIs</div>
-            <!-- <div class="menu-item"><span class="menu-icon">🔑</span> SSO Integrations</div> -->
+        <!-- Sidebar -->
+        <aside
+            class="w-[260px] border-r border-border bg-card flex flex-col shrink-0 sticky top-[73px] h-[calc(100vh-73px)] overflow-y-auto hidden md:flex">
+            <div class="px-4 py-8">
+                <div class="text-[11px] font-bold text-muted-foreground uppercase tracking-widest mb-3 px-3">
+                    Applications & APIs</div>
 
-            <!--
-            <div class="sidebar-category">System Setup</div>
-            <div class="menu-item"><span class="menu-icon">🔐</span> Authentication</div>
-            <div class="menu-item"><span class="menu-icon">🏢</span> Organizations</div>
-            <div class="menu-item"><span class="menu-icon">👥</span> User Management</div>
-            <div class="menu-item"><span class="menu-icon">🛡️</span> Security</div>
-            <div class="menu-item"><span class="menu-icon">📊</span> Monitoring</div>
-            -->
+                <div id="menu-applications"
+                    class="menu-item active flex items-center gap-3 px-3 py-2.5 rounded-md bg-accent/10 text-accent font-medium cursor-pointer mb-1"
+                    onclick="showApplicationsPage()">
+                    <span class="text-lg opacity-80">📦</span>
+                    <span class="text-sm">Applications</span>
+                </div>
+
+                <div id="menu-apis"
+                    class="menu-item flex items-center gap-3 px-3 py-2.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground font-medium cursor-pointer transition-colors mb-1"
+                    onclick="showAPIPage()">
+                    <span class="text-lg opacity-80">🔌</span>
+                    <span class="text-sm">APIs</span>
+                </div>
+            </div>
+            <div class="px-7 py-6 mt-auto border-t border-border/30 text-xs text-muted-foreground">&copy; 2026 01
+                Sandbox.</div>
         </aside>
 
-        <main class="main-content">
-            <div id="api-page" class="card" style="text-align: left; max-width: 1000px; margin: 0 auto;">
-                <div
-                    style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 2rem;">
-                    <div>
-                        <h2 style="margin-bottom: 0.5rem; font-size: 1.8rem;">API Management</h2>
-                        <p style="color: var(--text-dim);">Manage your service-specific access tokens and track usage.
-                        </p>
+        <!-- Main Content -->
+        <main class="flex-grow p-4 md:p-8 bg-background overflow-x-hidden">
+            <div class="md:hidden flex gap-2 mb-6 border-b border-border pb-4">
+                <button
+                    class="flex-1 py-2 px-3 text-sm font-medium rounded-md bg-muted text-foreground border border-border"
+                    onclick="showApplicationsPage()">Apps</button>
+                <button
+                    class="flex-1 py-2 px-3 text-sm font-medium rounded-md bg-accent/20 text-accent border border-accent/30"
+                    onclick="showAPIPage()">APIs</button>
+            </div>
+
+            <!-- API Page -->
+            <div id="api-page" class="max-w-[1200px] w-full mx-auto hidden">
+                <div class="mb-8 px-1">
+                    <h2 class="text-3xl font-display font-bold mb-2">API Management</h2>
+                    <p class="text-muted-foreground text-sm">Manage your service-specific access tokens and track usage.
+                    </p>
+                </div>
+                <div class="aws-widget w-full">
+                    <div class="aws-widget-header">
+                        <h3 class="aws-widget-title text-foreground">
+                            <svg class="w-4 h-4 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+                                stroke-width="2">
+                                <rect x="3" y="3" width="7" height="7" rx="1" />
+                                <rect x="14" y="3" width="7" height="7" rx="1" />
+                                <rect x="14" y="14" width="7" height="7" rx="1" />
+                                <rect x="3" y="14" width="7" height="7" rx="1" />
+                            </svg>
+                            Active Keys
+                        </h3>
+                        <button
+                            class="bg-primary text-primary-foreground px-3 py-1.5 rounded text-xs font-semibold hover:opacity-90"
+                            onclick="showCreateModal()">+ Create key</button>
                     </div>
-                    <button class="btn" style="padding: 0.75rem 1.5rem;" onclick="showCreateModal()">+ Create API
-                        Key</button>
-                </div>
-
-                <div class="keys-grid" id="keys-list">
-                    <!-- Keys will be injected here -->
-                </div>
-
-                <div style="margin-top: 3rem; border-top: 1px solid var(--border); padding-top: 2rem;">
-                    <h3 style="font-size: 1.1rem; margin-bottom: 0.5rem;">Quick Integration</h3>
-                    <code
-                        style="background: rgba(0,0,0,0.3); padding: 0.75rem; border-radius: 8px; display: block; font-size: 0.85rem; border: 1px solid var(--border); color: #818cf8;">
-                        curl -X GET "https://dipper-shun-glowing.ngrok-free.dev/v1/health" \ <br>
-                        &nbsp;&nbsp;&nbsp;&nbsp;-H "Authorization: Bearer &lt;your-key&gt;"
-                    </code>
-                </div>
-            </div>
-
-            <div id="placeholder-page" class="hidden" style="text-align: center; margin-top: 5rem;">
-                <div style="font-size: 4rem; opacity: 0.5; margin-bottom: 1rem;">🚧</div>
-                <h2>Module Coming Soon</h2>
-                <p style="color: var(--text-dim); margin-top: 0.5rem;">This section of the dashboard is currently under
-                    development.</p>
-            </div>
-
-            <div id="applications-page" class="hidden card"
-                style="text-align: left; max-width: 1000px; margin: 0 auto;">
-                <div style="margin-bottom: 2rem;">
-                    <h2 style="margin-bottom: 0.5rem; font-size: 1.8rem;">Applications</h2>
-                    <p style="color: var(--text-dim);">Navigate to your configured sandbox backends.</p>
-                </div>
-
-                <div class="keys-grid">
-                    <div class="key-card animate-fade-in hover-scale"
-                        style="cursor: pointer; transition: transform 0.2s;"
-                        onclick="bindAndNavigate('Z1_SANDBOX', 'https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox/docs')">
-                        <div class="key-info">
-                            <div style="display: flex; align-items: flex-start; gap: 1rem;">
-                                <div
-                                    style="font-size: 2.5rem; background: rgba(99, 102, 241, 0.1); padding: 0.5rem; border-radius: 12px; line-height: 1;">
-                                    ⚡</div>
-                                <div>
-                                    <h4 style="margin:0; font-size: 1.2rem; color: var(--text);">Z1 Sandbox</h4>
-                                    <p
-                                        style="color: var(--text-dim); margin-top: 0.5rem; font-size: 0.9rem; line-height: 1.4;">
-                                        Active remote backend for live code evaluation and execution.</p>
-                                </div>
+                    <div class="aws-widget-body p-0">
+                        <div
+                            class="grid grid-cols-12 gap-4 px-6 py-3 border-b border-border bg-muted/20 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                            <div class="col-span-12 md:col-span-5">Name / Backend</div>
+                            <div class="col-span-4 hidden md:block">Prefix / Created</div>
+                            <div class="col-span-3 text-right">Actions</div>
+                        </div>
+                        <div id="keys-list" class="flex flex-col divide-y divide-border">
+                            <div class="p-8 text-center">
+                                <div class="spinner mx-auto"></div>
                             </div>
                         </div>
                     </div>
+                    <a onclick="showCreateModal()" class="aws-widget-footer">Generate Additional Key</a>
+                </div>
+            </div>
 
-                    <div class="key-card animate-fade-in hover-scale"
-                        style="cursor: pointer; transition: transform 0.2s;"
-                        onclick="window.open('https://dipper-shun-glowing.ngrok-free.dev/backend/opensandbox/docs', '_blank')">
-                        <div class="key-info">
-                            <div style="display: flex; align-items: flex-start; gap: 1rem;">
-                                <div
-                                    style="font-size: 2.5rem; background: rgba(16, 185, 129, 0.1); padding: 0.5rem; border-radius: 12px; line-height: 1;">
-                                    🌐</div>
-                                <div>
-                                    <h4 style="margin:0; font-size: 1.2rem; color: var(--text);">OpenSandbox</h4>
-                                    <p
-                                        style="color: var(--text-dim); margin-top: 0.5rem; font-size: 0.9rem; line-height: 1.4;">
-                                        Distributed scaling cluster configuration and telemetry.</p>
-                                </div>
+            <!-- Applications Page -->
+            <div id="applications-page" class="max-w-[1200px] w-full mx-auto">
+                <div class="mb-8 px-1">
+                    <h2 class="text-3xl font-display font-bold mb-2">Applications</h2>
+                    <p class="text-muted-foreground text-sm">Navigate to your configured sandbox backends.</p>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="aws-widget hover:border-primary/50 transition-colors group shadow-sm bg-card">
+                        <div class="aws-widget-header bg-card">
+                            <h3 class="aws-widget-title text-foreground text-base">
+                                <div class="bg-indigo-500/10 text-indigo-400 p-1.5 rounded-md text-xl mr-2">⚡</div> Z1 Sandbox
+                            </h3>
+                        </div>
+                        <div class="aws-widget-body bg-muted/5 group-hover:bg-card transition-colors">
+                            <p class="text-sm text-foreground mb-4">Active remote backend for live code evaluation and execution workloads.</p>
+                            <div class="flex gap-2">
+                                <button class="flex-1 bg-accent/10 border border-accent/20 text-accent font-semibold py-2 px-3 rounded text-xs hover:bg-accent/20 transition-all flex items-center justify-center gap-1.5" onclick="openScanner('Z1_SANDBOX', 'https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox')">
+                                    <span>🔍</span> Quick Scan
+                                </button>
+                                <button class="flex-1 bg-muted border border-border text-foreground font-semibold py-2 px-3 rounded text-xs hover:bg-muted-foreground/10 transition-all" onclick="bindAndNavigate('Z1_SANDBOX', 'https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox/docs')">
+                                    Go to docs
+                                </button>
                             </div>
+                        </div>
+                    </div>
+                    <div class="aws-widget hover:border-primary/50 transition-colors cursor-pointer group shadow-sm bg-card"
+                        onclick="bindAndNavigate('OPEN_SANDBOX', 'https://dipper-shun-glowing.ngrok-free.dev/backend/opensandbox/docs')">
+                        <div class="aws-widget-header bg-card">
+                            <h3 class="aws-widget-title text-foreground text-base">
+                                <div class="bg-emerald-500/10 text-emerald-400 p-1.5 rounded-md text-xl mr-2">🌐</div>
+                                OpenSandbox
+                            </h3>
+                            <button
+                                class="bg-transparent text-muted-foreground group-hover:text-primary group-hover:bg-muted px-3 py-1.5 rounded border border-border text-xs font-semibold">Go
+                                to app</button>
+                        </div>
+                        <div class="aws-widget-body bg-muted/5 group-hover:bg-card transition-colors">
+                            <p class="text-sm text-foreground mb-2">Distributed scaling cluster configuration and
+                                backend telemetry service.</p>
                         </div>
                     </div>
                 </div>
@@ -550,395 +242,141 @@
     </div>
 
     <!-- Modals -->
-    <div id="modal-overlay" class="modal-overlay hidden" onclick="closeModals()">
-        <!-- Create Key Modal -->
-        <div id="create-modal" class="modal-content hidden" onclick="event.stopPropagation()">
-            <h2 style="margin-bottom: 1.5rem;">Create New API Key</h2>
-            <div class="form-group">
-                <label>Key Name</label>
-                <input type="text" id="key-name" placeholder="e.g. Production Scanner">
+    <div id="modal-overlay"
+        class="fixed inset-0 bg-background/80 backdrop-blur-sm z-[100] flex items-center justify-center hidden"
+        onclick="closeModals()">
+        <div id="create-modal"
+            class="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md hidden m-4 animate-[fadeIn_0.15s_ease-out] overflow-hidden"
+            onclick="event.stopPropagation()">
+            <div class="px-6 py-4 border-b border-border bg-muted/30 flex justify-between items-center">
+                <h2 class="text-lg font-display font-semibold text-foreground">Create New API Key</h2>
+                <button onclick="closeModals()" class="text-muted-foreground hover:text-foreground">✕</button>
             </div>
-            <div class="form-group">
-                <label>Target Backend</label>
-                <select id="key-backend">
-                    <option value="Z1_SANDBOX">Z1 Sandbox (/backend/z1sandbox/docs)</option>
-                </select>
-            </div>
-            <div class="form-group" style="display: flex; flex-direction: column;">
-                <label>Time to live</label>
-                <div style="display: flex; gap: 0.5rem; width: 100%;">
-                    <input type="number" id="key-ttl-value" value="1" min="1" style="flex: 1;">
-                    <select id="key-ttl-unit" style="flex: 2; cursor: pointer;"
-                        onchange="document.getElementById('key-ttl-value').disabled = (this.value === 'never');">
-                        <option value="hours">Hours</option>
-                        <option value="days">Days</option>
-                        <option value="months">Months</option>
-                        <option value="years">Years</option>
-                        <option value="never">Never Expire</option>
+            <div class="p-6">
+                <div class="mb-5">
+                    <label class="block text-xs font-bold text-muted-foreground uppercase tracking-wide mb-2">Key
+                        Name</label>
+                    <input type="text" id="key-name"
+                        class="w-full bg-input/50 focus:bg-input border border-border rounded-md px-3 py-2.5 text-sm text-foreground focus:outline-none"
+                        placeholder="e.g. Production Scanner">
+                </div>
+                <div class="mb-5">
+                    <label class="block text-xs font-bold text-muted-foreground uppercase tracking-wide mb-2">Target
+                        Backend</label>
+                    <select id="key-backend"
+                        class="w-full bg-input/50 focus:bg-input border border-border rounded-md px-3 py-2.5 text-sm text-foreground">
+                        <option value="Z1_SANDBOX">Z1 Sandbox (/backend/z1sandbox/docs)</option>
+                        <option value="OPEN_SANDBOX">OpenSandbox (/backend/opensandbox/docs)</option>
                     </select>
                 </div>
+                <div class="mb-8">
+                    <label class="block text-xs font-bold text-muted-foreground uppercase tracking-wide mb-2">Time to
+                        live</label>
+                    <div class="flex gap-2">
+                        <input type="number" id="key-ttl-value" value="1" min="1"
+                            class="w-1/3 bg-input/50 focus:bg-input border border-border rounded-md px-3 py-2.5 text-sm text-foreground disabled:opacity-40">
+                        <select id="key-ttl-unit"
+                            class="w-2/3 bg-input/50 focus:bg-input border border-border rounded-md px-3 py-2.5 text-sm text-foreground"
+                            onchange="document.getElementById('key-ttl-value').disabled = (this.value === 'never');">
+                            <option value="hours">Hours</option>
+                            <option value="days">Days</option>
+                            <option value="months">Months</option>
+                            <option value="years">Years</option>
+                            <option value="never">Never Expire</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="flex gap-3">
+                    <button
+                        class="flex-1 border border-border text-foreground py-2.5 rounded-md text-sm hover:bg-muted font-semibold"
+                        onclick="closeModals()">Cancel</button>
+                    <button
+                        class="flex-1 bg-primary text-primary-foreground py-2.5 rounded-md text-sm hover:opacity-90 font-semibold"
+                        onclick="submitCreateKey()">Generate Key</button>
+                </div>
             </div>
-            <div style="display: flex; gap: 1rem; margin-top: 2rem;">
-                <button class="btn" style="flex: 1; padding: 0.75rem;" onclick="submitCreateKey()">Generate Key</button>
-                <button class="btn"
-                    style="flex: 1; padding: 0.75rem; background: transparent; border: 1px solid var(--border); box-shadow: none;"
-                    onclick="closeModals()">Cancel</button>
+        </div>
+        <div id="reveal-modal"
+            class="bg-card border border-border rounded-xl shadow-2xl w-full max-w-md hidden m-4 animate-[fadeIn_0.15s_ease-out] overflow-hidden"
+            onclick="event.stopPropagation()">
+            <div class="p-6">
+                <div
+                    class="bg-emerald-500/15 border border-emerald-500/30 text-emerald-500 p-4 rounded-md text-sm mb-6 flex gap-3 items-start">
+                    <span>✅</span>
+                    <div><strong class="block mb-1">Success!</strong> Key generated. Copy it now, as you won't be able
+                        to see it again.</div>
+                </div>
+                <div id="new-key-display"
+                    class="bg-[#020617] text-emerald-400 font-mono text-sm p-4 rounded-md border border-border mb-8 break-all min-h-[80px] flex items-center justify-center cursor-pointer hover:border-emerald-500/50"
+                    onclick="copyNewKey()" title="Click to copy"></div>
+                <div class="flex flex-col gap-3">
+                    <button
+                        class="w-full bg-primary text-primary-foreground py-3 rounded-md text-sm hover:opacity-90 font-semibold shadow-sm flex items-center justify-center gap-2"
+                        onclick="copyNewKey()">Copy to Clipboard</button>
+                    <a href="https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox/docs" target="_blank"
+                        class="w-full text-center bg-accent/10 border border-accent/20 text-accent py-3 rounded-md text-sm hover:bg-accent/20 font-semibold">Go
+                        to Docs</a>
+                    <button class="w-full text-muted-foreground py-2 rounded-md text-sm hover:text-foreground mt-2"
+                        onclick="closeModals()">Close</button>
+                </div>
             </div>
         </div>
 
-        <!-- Reveal Key Modal (One-time) -->
-        <div id="reveal-modal" class="modal-content hidden" onclick="event.stopPropagation()">
-            <div
-                style="background: rgba(16, 185, 129, 0.1); color: var(--success); padding: 1rem; border-radius: 12px; margin-bottom: 1.5rem; font-size: 0.9rem; border: 1px solid rgba(16, 185, 129, 0.2);">
-                <strong>Success!</strong> Your key has been generated. Copy it now, as you won't be able to see it
-                again.
+        <!-- Scanner Modal -->
+        <div id="scanner-modal" class="bg-card border border-border rounded-xl shadow-2xl w-full max-w-6xl hidden m-4 animate-[fadeIn_0.15s_ease-out] overflow-hidden flex flex-col h-[85vh]" onclick="event.stopPropagation()">
+            <div class="px-8 py-5 border-b border-border bg-muted/40 flex justify-between items-center shrink-0">
+                 <div class="flex items-center gap-4">
+                    <div class="bg-primary/10 p-2.5 rounded-lg text-2xl">🔍</div>
+                    <div>
+                        <h2 class="text-xl font-display font-bold text-foreground">Security Scanner Workspace</h2>
+                        <p class="text-[10px] text-muted-foreground uppercase tracking-[0.2em] font-black" id="scanner-target-label">Z1_SANDBOX_CLUSTER</p>
+                    </div>
+                 </div>
+                 <button onclick="closeModals()" class="p-2 rounded-full hover:bg-muted text-muted-foreground hover:text-foreground transition-colors text-xl">✕</button>
             </div>
-            <div class="token-box" id="new-key-display"
-                style="font-size: 0.85rem; padding: 1.5rem; background: #000; color: #fff; border: 1px solid var(--primary); min-height: 60px;">
-                <!-- Token goes here -->
-            </div>
-            <div style="display: flex; gap: 1rem; margin-top: 2rem;">
-                <button class="btn" style="flex: 1; padding: 0.75rem;" onclick="copyNewKey()">Copy Key</button>
-                <a href="https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox/docs" target="_blank" class="btn"
-                    style="flex: 1; padding: 0.75rem; background: rgba(99, 102, 241, 0.2); color: #818cf8; border: 1px solid rgba(99, 102, 241, 0.5); text-decoration: none; text-align: center;">Go
-                    to Sandbox Docs</a>
-                <button class="btn"
-                    style="flex: 1; padding: 0.75rem; background: transparent; border: 1px solid var(--border); box-shadow: none;"
-                    onclick="closeModals()">Done</button>
+           
+            <div class="p-0 flex-grow overflow-hidden flex flex-col md:flex-row divide-x divide-border">
+                <!-- Request Side -->
+                <div class="flex-1 flex flex-col p-6 bg-slate-50 dark:bg-card/40">
+                    <div class="flex items-center justify-between mb-4">
+                        <label class="text-[11px] font-black text-slate-400 dark:text-muted-foreground uppercase tracking-[0.2em]">Source Code / Script</label>
+                        <span class="text-[10px] font-mono text-accent bg-accent/5 dark:bg-accent/10 px-2.5 py-1 rounded-full border border-accent/10 dark:border-accent/20">POST /v1/scan-jobs</span>
+                    </div>
+                    <textarea id="scan-payload" class="w-full flex-grow bg-white dark:bg-[#0d1117] text-slate-700 dark:text-emerald-400 font-mono text-[13px] p-6 rounded-xl border border-slate-200 dark:border-border/50 focus:outline-none focus:ring-2 focus:ring-accent/20 shadow-sm resize-none leading-relaxed transition-all" spellcheck="false" placeholder="# Paste your code here..."></textarea>
+                    <div class="mt-6">
+                        <button id="run-scan-btn" class="w-full bg-slate-900 dark:bg-primary text-white dark:text-primary-foreground font-bold py-4 rounded-xl text-sm hover:opacity-90 transition-all flex items-center justify-center gap-3 shadow-xl hover:translate-y-[-1px] active:translate-y-[1px]" onclick="submitScan()">
+                            Run Security Audit
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Response Side -->
+                <div class="flex-1 flex flex-col p-6 bg-slate-100/50 dark:bg-[#010409]">
+                    <div class="flex items-center justify-between mb-4">
+                        <label class="text-[11px] font-black text-slate-400 dark:text-muted-foreground uppercase tracking-[0.2em]">Audit Results</label>
+                        <div class="flex gap-2" id="scan-status-pill">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+                    <div id="scan-response" class="w-full flex-grow bg-transparent text-slate-800 dark:text-accent font-mono text-[12px] p-2 overflow-auto leading-relaxed scrollbar-thin">
+                        <div class="flex flex-col items-center justify-center h-full text-slate-300 dark:text-muted-foreground opacity-60">
+                             <span class="text-4xl mb-4 grayscale opacity-50">🧪</span>
+                             <p class="text-sm font-semibold tracking-tight">System Ready</p>
+                             <p class="text-[11px] mt-1">Submit code to begin security audit</p>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
 
-    <footer>
-        &copy; 2026 01 Sandbox Security. Built for Enterprise.
-    </footer>
+    <!-- Toast Container -->
+    <div id="toast-container"></div>
 
-    <script>
-        let auth0Client = null;
-        let backendKeys = {}; // Global map: Backend name -> Active Developer Key
-
-        const getCookie = (name) => {
-            const value = `; ${document.cookie}`;
-            const parts = value.split(`; ${name}=`);
-            if (parts.length === 2) return parts.pop().split(';').shift();
-        };
-
-        // AUTH0 CONFIGURATION (Placeholders)
-        const config = {
-            domain: "dev-axwc0ui527kw0c5d.us.auth0.com",
-            clientId: "sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D",
-            audience: "https://code-inspector-api"
-        };
-
-        const initAuth0 = async () => {
-            try {
-                // Wait for the library to be available in the global scope
-                const clientCreator = window.createAuth0Client || (window.auth0 && window.auth0.createAuth0Client);
-
-                if (!clientCreator) {
-                    throw new Error("Auth0 Security SDK failed to load. Please check your internet connection or disable ad-blockers for this domain.");
-                }
-
-                auth0Client = await clientCreator({
-                    domain: config.domain,
-                    clientId: config.clientId,
-                    authorizationParams: {
-                        audience: config.audience,
-                        scope: 'openid profile email',
-                        redirect_uri: window.location.origin + window.location.pathname
-                    }
-                });
-
-                // Handle redirect callback
-                if (window.location.search.includes("code=") &&
-                    window.location.search.includes("state=")) {
-                    await auth0Client.handleRedirectCallback();
-                    window.history.replaceState({}, document.title, window.location.pathname);
-                    // Flag to trigger redirect after UI update
-                    window.shouldRedirectToDocs = true;
-                }
-
-                updateUI();
-
-                // Enable button once ready
-                const loginBtn = document.getElementById("login-btn");
-                loginBtn.disabled = false;
-                loginBtn.style.opacity = "1";
-                loginBtn.style.cursor = "pointer";
-                loginBtn.textContent = "Sign In with Auth0";
-
-            } catch (err) {
-                console.error("Auth0 Init Error:", err);
-                const errorBox = document.getElementById("init-error");
-                errorBox.classList.remove("hidden");
-                errorBox.innerHTML = `<strong>Initialization Failed:</strong> ${err.message}<br><br>Ensure you are accessing this page via <u>http://localhost</u> or <u>ngrok</u>. Secure auth cannot run from a direct <code>file://</code> path.`;
-
-                const loginBtn = document.getElementById("login-btn");
-                loginBtn.textContent = "Security Error";
-            }
-        };
-
-        const updateUI = async () => {
-            const isAuthenticated = await auth0Client.isAuthenticated();
-
-            if (isAuthenticated) {
-                const user = await auth0Client.getUser();
-                const token = await auth0Client.getTokenSilently();
-
-                document.getElementById("public-view").classList.add("hidden");
-                document.getElementById("dashboard-view").classList.remove("hidden");
-                document.getElementById("user-nav").classList.remove("hidden");
-
-                document.getElementById("user-avatar").src = user.picture;
-
-                // 1. Fetch keys to find the best Developer Key for each backend
-                await fetchAPIKeys();
-
-                // 2. Set default management cookie (Auth0)
-                document.cookie = `inspector_auth=${token}; SameSite=Strict; Path=/`;
-
-                setupSidebar();
-            } else {
-                document.getElementById("public-view").classList.remove("hidden");
-                document.getElementById("dashboard-view").classList.add("hidden");
-                document.getElementById("user-nav").classList.add("hidden");
-            }
-        };
-
-        const fetchAPIKeys = async () => {
-            try {
-                const token = await auth0Client.getTokenSilently();
-                const response = await fetch("/v1/api-keys", {
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                const data = await response.json();
-                
-                // POPULATE BACKEND KEY MAP
-                if (data.keys) {
-                    data.keys.forEach(key => {
-                        if (!key.is_revoked) {
-                            // 1. Memory binding
-                            const savedKey = localStorage.getItem(`bound_key_${key.id}`);
-                            if (savedKey) {
-                                backendKeys[key.backend] = savedKey;
-                                
-                                // 2. IMMEDIATE AUTO-BIND (Zero-Touch)
-                                // If this is our primary backend, set the cookie now!
-                                if (key.backend === 'Z1_SANDBOX' && !getCookie('execution_token')) {
-                                    document.cookie = `execution_token=${savedKey}; SameSite=Strict; Path=/`;
-                                    console.log(`[Zero-Touch] Automatically synchronized execution token for ${key.backend}`);
-                                }
-                            }
-                        }
-                    });
-                }
-                
-                renderKeys(data.keys);
-            } catch (err) {
-                console.error("Failed to fetch keys:", err);
-            }
-        };
-
-        const bindAndNavigate = (backend, url) => {
-            const key = backendKeys[backend];
-            if (!key) {
-                alert(`No API Key found for ${backend}. Please create one in the 'APIs' tab first to enable secure execution.`);
-                showAPIPage();
-                return;
-            }
-            
-            // Set the EXECUTION cookie (Use the Developer Key instead of Auth0)
-            document.cookie = `execution_token=${key}; SameSite=Strict; Path=/`;
-            console.log(`[Security] Session bound to Developer Key for ${backend}`);
-            
-            window.open(url, '_blank');
-        };
-
-        const renderKeys = (keys) => {
-            const list = document.getElementById("keys-list");
-            const activeKeys = keys ? keys.filter(k => !k.is_revoked) : [];
-
-            if (activeKeys.length === 0) {
-                list.innerHTML = `
-                    <div style="padding: 4rem; color: var(--text-dim); text-align: center;">
-                        <div style="font-size: 3rem; margin-bottom: 1rem;">🔑</div>
-                        <p>No active API keys found. Create one to get started.</p>
-                    </div>`;
-                return;
-            }
-
-            list.innerHTML = activeKeys.map(key => `
-                <div class="key-card animate-fade-in">
-                    <div class="key-info">
-                        <div style="display: flex; align-items: center; gap: 0.75rem;">
-                            <h4 style="margin:0">${key.name}</h4>
-                            <span class="badge badge-${key.backend}">${key.backend}</span>
-                        </div>
-                        <div class="key-meta">
-                            <span>ID: ${key.prefix}</span>
-                            <span>Used: ${key.last_used_at ? new Date(key.last_used_at).toLocaleDateString() : 'Never'}</span>
-                        </div>
-                    </div>
-                    <button class="btn-delete" onclick="deleteKey('${key.id}')">Revoke</button>
-                </div>
-            `).join('');
-        };
-
-        const showCreateModal = () => {
-            document.getElementById("modal-overlay").classList.remove("hidden");
-            document.getElementById("create-modal").classList.remove("hidden");
-            document.getElementById("reveal-modal").classList.add("hidden");
-        };
-
-        const closeModals = () => {
-            document.getElementById("modal-overlay").classList.add("hidden");
-            document.getElementById("create-modal").classList.add("hidden");
-            document.getElementById("reveal-modal").classList.add("hidden");
-        };
-
-        const submitCreateKey = async () => {
-            const name = document.getElementById("key-name").value;
-            const backend = document.getElementById("key-backend").value;
-            const ttlValue = parseInt(document.getElementById("key-ttl-value").value) || 1;
-            const ttlUnit = document.getElementById("key-ttl-unit").value;
-            let finalTtlHours = 1;
-
-            if (ttlUnit === "hours") finalTtlHours = ttlValue;
-            else if (ttlUnit === "days") finalTtlHours = ttlValue * 24;
-            else if (ttlUnit === "months") finalTtlHours = ttlValue * 24 * 30;
-            else if (ttlUnit === "years") finalTtlHours = ttlValue * 24 * 365;
-            else if (ttlUnit === "never") finalTtlHours = -1;
-
-            try {
-                const token = await auth0Client.getTokenSilently();
-                const user = await auth0Client.getUser();
-                const response = await fetch("/v1/api-keys", {
-                    method: 'POST',
-                    headers: {
-                        'Authorization': `Bearer ${token}`,
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ 
-                        name, 
-                        backend, 
-                        ttl_hours: finalTtlHours,
-                        user_email: user.email 
-                    })
-                });
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.detail || "Failed to generate key");
-                }
-
-                if (!data.api_key) {
-                    throw new Error("Server did not return a valid API key.");
-                }
-
-                // Refresh list
-                await fetchAPIKeys();
-
-                // AUTOMATIC BINDING: Store in localStorage                // 1. Persist for session recovery
-                localStorage.setItem(`bound_key_${data.api_key_id}`, data.api_key);
-                backendKeys[backend] = data.api_key;
-
-                // 2. INSTANT BIND: Tell the Gateway/Backend to use this new key for docs immediately
-                document.cookie = `execution_token=${data.api_key}; SameSite=Strict; Path=/`;
-                console.log(`[Zero-Touch] Session instantly synchronized with new key for ${backend}`);
-                
-                // Show reveal modal
-                document.getElementById("create-modal").classList.add("hidden");
-                document.getElementById("reveal-modal").classList.remove("hidden");
-                document.getElementById("new-key-display").textContent = data.api_key;
-            } catch (err) {
-                alert("Creation Failed: " + err.message);
-                console.error(err);
-            }
-        };
-
-        const deleteKey = async (jti) => {
-            if (!confirm("Are you sure you want to revoke this key? This action is instant and permanent.")) return;
-
-            try {
-                const token = await auth0Client.getTokenSilently();
-                await fetch(`/v1/api-keys/${jti}`, {
-                    method: 'DELETE',
-                    headers: { 'Authorization': `Bearer ${token}` }
-                });
-                fetchAPIKeys();
-            } catch (err) {
-                alert("Failed to revoke key: " + err.message);
-            }
-        };
-
-        const copyNewKey = () => {
-            const token = document.getElementById("new-key-display").textContent;
-            navigator.clipboard.writeText(token);
-            alert("Key copied to clipboard!");
-        };
-
-        const login = async () => {
-            await auth0Client.loginWithRedirect();
-        };
-
-        const logout = () => {
-            // Clear all auth cookies
-            document.cookie = "inspector_auth=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-            document.cookie = "execution_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-            document.cookie = "auth_token=; expires=Thu, 01 Jan 1970 00:00:00 UTC; path=/;";
-
-            auth0Client.logout({
-                logoutParams: {
-                    returnTo: window.location.origin + window.location.pathname
-                }
-            });
-        };
-
-        const copyToken = () => {
-            const token = document.getElementById("token-display").textContent;
-            navigator.clipboard.writeText(token);
-
-            const status = document.getElementById("copy-status");
-            status.classList.remove("hidden");
-            setTimeout(() => status.classList.add("hidden"), 2000);
-        };
-
-        const setupSidebar = () => {
-            const items = document.querySelectorAll('.menu-item');
-            items.forEach(item => {
-                item.addEventListener('click', () => {
-                    items.forEach(i => i.classList.remove('active'));
-                    item.classList.add('active');
-
-                    if (item.textContent.includes('APIs')) {
-                        showAPIPage();
-                    } else if (item.textContent.includes('Applications')) {
-                        showApplicationsPage();
-                    } else {
-                        document.getElementById('api-page').classList.add('hidden');
-                        document.getElementById('applications-page').classList.add('hidden');
-                        document.getElementById('placeholder-page').classList.remove('hidden');
-                    }
-                });
-            });
-        };
-
-        const showAPIPage = () => {
-            document.getElementById('api-page').classList.remove('hidden');
-            document.getElementById('applications-page').classList.add('hidden');
-            document.getElementById('placeholder-page').classList.add('hidden');
-            fetchAPIKeys();
-        };
-
-        const showApplicationsPage = () => {
-            document.getElementById('applications-page').classList.remove('hidden');
-            document.getElementById('api-page').classList.add('hidden');
-            document.getElementById('placeholder-page').classList.add('hidden');
-        };
-
-        window.onload = initAuth0;
-    </script>
+    <!-- Modularied Scripts -->
+    <script src="assets/js/utils.js"></script>
+    <script src="assets/js/auth.js"></script>
+    <script src="assets/js/dashboard.js"></script>
 </body>
 
 </html>
