@@ -47,99 +47,74 @@ Before any request reaches the application backend, it is intercepted and valida
 - **Pure Pass-Through**: To prevent header stripping and ensure data integrity, the Gateway is configured as a transparent pass-through. It directs the raw `Authorization` headers and `Cookies` directly to the backend for unified processing.
 - **Identity Forwarding**: Successfully routed traffic is forwarded to the backend, enabling a "Defense in Depth" strategy where the backend manages granular database verification.
 
-## 4. Hardened Security: Zero-Touch Revocation
-To solve the "Ghost Access" issue (where revoked keys appeared to still function), the system was hardened with the following architecture:
+## 4. The Zero-Touch Authentication Lifecycle
+The system implements a multi-phase "Zero-Touch" flow that bridges management identity (Auth0) with high-security execution rights (Internal API Keys).
 
-### The "Execution Firewall"
-To prevent Auth0 dashboard sessions (cookies) from inadvertently bypassing API key security, a hard firewall was implemented:
-1. **Scope Restriction**: Auth0 session tokens (`issuer: auth0.com`) are strictly prohibited from hitting proxy execution paths like `/backend/z1sandbox/*` or `/v1/run`.
-2. **Mandatory API Keys**: For code execution or backend interaction, the user **must** supply a generated internal API Key (`issuer: code-inspector`). This ensures that revoking or deleting the key results in immediate loss of execution capability, regardless of whether the user is still logged into the dashboard.
+### Phase 1: Identity Establishment (Auth0)
+1.  **Authentication**: Users log into the Dashboard via Auth0.
+2.  **Session Token**: Auth0 issues an RS256 JWT (OIDC). This token is stored in the browser as the `inspector_auth` cookie.
+3.  **Role**: Proves the user's management identity (`sub`) but is prohibited from direct backend execution.
 
-### Physical Deletion Protocol
-Unlike traditional "Soft Deletes," the revocation process now uses a **Physical Deletion Protocol**:
-1. **Database Purge**: When a key is revoked via the dashboard, its record is **permanently deleted** from the SQLite database.
-2. **Instant Kill-Switch**: The backend validation logic uses an "Allowlist" model. Because the key record no longer exists in the registry, the next incoming request with that JWT is rejected with a `401 Unauthorized` within milliseconds of the deletion command.
+### Phase 2: Key Management & Synchronization
+1.  **Generation**: Using the Auth0 session, the user creates an API Key.
+2.  **Registry Persistence**: The backend verifies the Auth0 token and records the new API Key in the **PostgreSQL Registry**, linked to the user's `sub`.
+3.  **Instant Binding**: The Dashboard immediately synchronizes the new key to the browser's `execution_token` cookie.
 
-### Solving Header Stripping (Gateway Fix)
-We identified that CEL (Common Expression Language) transformations at the Gateway level were occasionally stripping the `Authorization` header due to case-sensitivity mismatches or complex evaluation logic.
-- **Solution**: Removed native Envoy JWT transformations. 
-## 5. End-to-End Architecture
-The following diagram illustrates the complete lifecycle of a Developer API Key, from generation to instant revocation.
+### Phase 3: Secure Transport (AgentGateway)
+1.  **Traffic Interception**: When accessing backend documentation, the browser sends both the `inspector_auth` and `execution_token` cookies.
+2.  **Encrypted Tunnel**: The **AgentGateway** intercepts the request over HTTPS.
+3.  **Transparent Routing**: The gateway acts as a pass-through, forwarding all security credentials directly to the backend without modification.
+
+### Phase 4: The Identity Bridge (Backend Validation)
+The backend `validate_token` middleware performs the final handshake:
+1.  **Extraction**: The backend prioritizes the `execution_token`.
+2.  **Mapping**: If valid keys exist, the **Identity Bridge** maps the management session to the user's primary Developer API Key in real-time.
+3.  **Distributed Check**: The system validates the key ID (`jti`) against the **Redis Distributed Allowlist** for line-rate verification.
+
+### Phase 5: Managed Doc Authorization (Swagger UI)
+1.  **UI Injection**: The backend renders the Swagger UI with an embedded auto-authorization script.
+2.  **Automatic Lock**: The script reads the `execution_token` and programmatically authorizes the session via `ui.authActions.authorize`.
+3.  **Execution Persona**: Future "Try it out" requests from the browser are now strictly authorized by the **Developer API Key**, fulfilling the "API-Key-Only" enforcement principle.
+
+## 5. End-to-End Architecture Diagram
+The following diagram illustrates the complete lifecycle of a Developer API Key and its bridge to Auth0.
 
 ```mermaid
 sequenceDiagram
-    participant Dev as Developer (Client)
+    participant Dev as Developer (Browser)
     participant GW as AgentGateway (Edge)
     participant API as Sandbox-API (Backend)
-    participant DB as SQLite Registry
+    participant DB as Postgres/Redis Registry
     participant SB as Upstream Sandbox
 
-    Note over Dev, SB: 1. API KEY GENERATION
-    Dev->>API: POST /v1/api-keys (Auth0 Cookie)
-    API->>API: Generate RS256 JWT (Claims: Backend, JTI, Sub)
-    API->>DB: Record Key Metadata (JTI, Name, UserID)
-    API-->>Dev: Return Plaintext JWT (Never stored elsewhere)
+    Note over Dev, SB: 1. AUTH0 LOGIN & KEY GEN
+    Dev->>API: Login via Auth0 (Sets inspector_auth)
+    Dev->>API: Generate API Key (Uses Auth0 identity)
+    API->>DB: SQL Save + Redis Cache Add
+    API-->>Dev: Return Key + Set execution_token cookie
 
-    Note over Dev, SB: 2. API EXECUTION FLOW
-    Dev->>GW: curl -H "Authorization: Bearer <JWT>"
-    GW->>GW: Pass-through (No Header Stripping)
-    GW->>API: Forward Request
-    
-    API->>API: validate_token()
-    API->>API: Cryptographic Check (RS256 Public Key)
-    API->>DB: Allowlist Check (Does JTI exist?)
-    alt JTI Missing/Deleted
-        API-->>Dev: 401 Unauthorized
-    else JTI Active
-        API->>API: Execution Firewall (Is it an Auth0 Token? Block if yes)
-        API->>SB: Authorized Proxy to Sandbox
-        SB-->>API: Execution Result
-        API-->>Dev: 200 OK Output
-    end
+    Note over Dev, SB: 2. ZERO-TOUCH DOCS ACCESS
+    Dev->>GW: GET /backend/z1sandbox/docs (Sends both cookies)
+    GW->>API: Transparent Pass-through
+    API->>API: Identity Bridge: Map sub to primary API Key
+    API->>DB: Redis Allowlist Check (Verify JTI)
+    API->>SB: Authorized execution (API Key Persona)
+    SB-->>API: Result
+    API-->>Dev: 200 OK (Swagger Padlock turns Green)
 
-    Note over Dev, SB: 3. INSTANT REVOCATION
-    Dev->>API: DELETE /v1/api-keys/{jti}
-    API->>DB: Physical DELETE FROM api_keys
-    Note right of DB: Key is gone!
-    API-->>Dev: 200 Key Destroyed
-    Dev->>GW: curl -H "Authorization: Bearer <Old-JWT>"
-    GW->>API: Forward Request
-    API->>DB: SELECT * FROM api_keys WHERE id={old_jti}
-    DB-->>API: [No Rows Found]
-    API-->>Dev: 401 Unauthorized (Kill-switch fired)
+    Note over Dev, SB: 3. REVOCATION
+    Dev->>API: Revoke API Key
+    API->>DB: SQL Delete + Redis Purge
+    Dev->>GW: Any request using old Key
+    API->>DB: Redis Check (Miss)
+    API-->>Dev: 401 Unauthorized
 ```
 
-## 6. High-Scale Persistence (Production Architecture)
-To support environments with **1,000+ users** and high-concurrency demands, the system transitions from local isolated storage to a distributed persistence model.
-
-### 6.1 Centralized Metadata Registry (PostgreSQL)
-- **Role**: Serves as the "Single Source of Truth."
-- **Function**: Stores full key metadata including ownership (`user_id`), creation timestamps, and backend scopes. 
-- **Benefit**: Ensures that API key data survives pod restarts and remains consistent across an unlimited number of horizontally scaled API instances.
-
-### 6.2 Distributed Allowlist Cache (Redis)
-- **Role**: Provides line-rate validation at sub-millisecond speeds.
-- **Function**: Maintains a high-speed **Set** of all active `jti` IDs (the `active_api_keys` set).
-- **Process**:
-    1.  **Sync**: On startup, every API pod synchronizes with Redis to ensure its local state matches the cluster state.
-    2.  **Validation**: Every incoming request triggers a `SISMEMBER` check against Redis. This replaces slow disk-based database lookups with ultra-fast memory lookups.
-    3.  **Revocation**: When a key is deleted, the backend performs a synchronous `SREM` (Set Remove) in Redis. This ensures the key is blocked **globally** across all pods within milliseconds.
-
-### 6.3 Horizontal Scalability
-Because the security state is decoupled from the compute pods:
-- You can scale the `sandbox-api` deployment to `N` replicas.
-- Any pod can fulfill any request because they all share the same **Redistributed Allowlist**.
-- There is zero "Session Stickiness" required at the Gateway level, simplifying the network architecture.
+## 6. Technical Components (Production)
+1.  **The Token**: Signed RS256 JWT with scoped claims.
+2.  **The AgentGateway**: High-performance entry point using transparent pass-through for all security credentials.
+3.  **The Identity Bridge**: Middleware that maps Auth0 dashboard sessions to their respective Developer API Keys in real-time.
+4.  **The Registry**: Combined PostgreSQL persistence and Redis distributed allowlist for line-rate validation.
 
 ---
-
-### Technical Component Breakdown (Scaled):
-
-1.  **The Token (The ID Badge)**: Signed RS256 JWT containing scoped claims and a unique `jti`.
-2.  **The Registry (PostgreSQL)**: The persistent guest list that survives hardware failures.
-3.  **The Cache (Redis)**: The "Instant Lookup" table that ensures verification doesn't slow down the system.
-4.  **The Gateway (AgentGateway)**: The high-performance entry point that acts as a pure pass-through for signed credentials.
-5.  **The Firewall (Backend)**: The final sentry that combines cryptographic validation with the real-time Redis Allowlist check.
-
----
-*Last Updated: April 2026*
+*Last Updated: April 2026 (Version 2.0 - Zero-Touch Architecture)*
