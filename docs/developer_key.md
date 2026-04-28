@@ -1,83 +1,46 @@
-# Technical Documentation: API Key Generation & Authentication
+# Technical Documentation: Zero-Touch API Key & Identity Lifecycle
 
-This document outlines the technical implementation of the self-service API key management system used in the CodeInspector platform.
+This document defines the high-security architecture for self-service API key management, identity bridge implementation, and cross-user protection within the CodeInspector platform.
 
-## 1. Generation Process
-The API key generation is triggered via the developer dashboard and handled by the `POST /v1/api-keys` endpoint.
-
-### Flow Breakdown:
-1.  **Request**: The frontend sends a request containing the key `name`, `target_backend`, and `ttl_hours`.
-2.  **Identity Verification**: The backend verifies the user's active Auth0 session via a `Bearer` token or browser cookie. The user's unique identity (`sub`) is extracted.
-3.  **Payload Creation**: A JSON payload is constructed with the following standard and custom claims:
-    *   `sub`: The Auth0 User ID.
-    *   `iat`: Issued At (current UTC timestamp).
-    *   `exp`: Expiration (current timestamp + selected TTL).
-    *   `iss`: `code-inspector` (Issuer ID).
-    *   `aud`: `code-inspector-api` (Audience ID).
-    *   `jti`: A unique UUID v4 (JWT ID) used for tracking and revocation.
-    *   `backend`: The designated backend scope (e.g., `Z1_SANDBOX`).
-4.  **Asymmetric Signing**: The payload is signed using the **RS256** algorithm:
-    *   **Private Key**: Used by the backend to sign the token.
-    *   **Header**: Includes a `kid` (Key ID) used by consumers to identify the correct public key for verification.
-5.  **Persistence**: The key metadata (Name, Prefix, Expiry, UserID, JTI) is saved to a SQLite database. The full signed JWT is returned to the user **once** and is never stored on the server.
-
-## 2. Authentication Context
-When an API key is presented in a request:
-
-### Layer 1: Cryptographic Validation
-The **AgentGateway** and Backend use the **Public JWKS** (JSON Web Key Set) to verify the signature. This ensures the key was created by our system and hasn't been modified.
-
-### Layer 2: Lifecycle Management (Active Registry)
-The system verifies the `jti` claim against the **Active Registry** (Allowlist). 
-- If the `jti` is missing from the database, it is considered **deleted or deactivated** and rejected.
-- If the `jti` exists but is marked as `is_revoked`, it is rejected.
-- This ensures that mere cryptographic validity is insufficient for access; the key must be actively registered in the live database.
-
-### Layer 3: Backend Scoping
-The backend enforces the `backend` claim. If a key is scoped to `Z1_SANDBOX`, any attempt to access unauthorized backend paths will result in a `403 Forbidden`.
-
-### Layer 4: Session Alignment
-For browser-based sessions, the backend compares the `sub` claim of the API key with the `sub` claim of the active Auth0 cookie. This prevents "Key Leaking" where a user might attempt to use another developer's leaked key within their own session.
-
-## 3. AgentGateway Enforcement
-Before any request reaches the application backend, it is intercepted and validated at the edge by the **AgentGateway**.
-
-### Edge Validation Logic:
-- **Traffic Interception**: The Gateway targets the `HTTPRoute` for all API traffic using an `AgentgatewayPolicy`.
-- **Pure Pass-Through**: To prevent header stripping and ensure data integrity, the Gateway is configured as a transparent pass-through. It directs the raw `Authorization` headers and `Cookies` directly to the backend for unified processing.
-- **Identity Forwarding**: Successfully routed traffic is forwarded to the backend, enabling a "Defense in Depth" strategy where the backend manages granular database verification.
-
-## 4. The Zero-Touch Authentication Lifecycle
-The system implements a multi-phase "Zero-Touch" flow that bridges management identity (Auth0) with high-security execution rights (Internal API Keys).
+## 1. The Multi-Phase Authentication Journey
+The system implements a "Zero-Touch" flow that translates high-level management identity (Auth0) into granular, high-performance execution rights (RS256 API Keys).
 
 ### Phase 1: Identity Establishment (Auth0)
-1.  **Authentication**: Users log into the Dashboard via Auth0.
-2.  **Session Token**: Auth0 issues an RS256 JWT (OIDC). This token is stored in the browser as the `inspector_auth` cookie.
-3.  **Role**: Proves the user's management identity (`sub`) but is prohibited from direct backend execution.
+1.  **Authentication**: Users log into the Dashboard via Auth0 over an encrypted HTTPS tunnel.
+2.  **Session Token**: Auth0 issues an RS256 JWT. This is stored in the browser as the `inspector_auth` cookie.
+3.  **Role**: This token proves **who** the user is (`sub`) but is strictly prohibited from triggering code execution on the backends.
 
-### Phase 2: Key Management & Synchronization
-1.  **Generation**: Using the Auth0 session, the user creates an API Key.
-2.  **Registry Persistence**: The backend verifies the Auth0 token and records the new API Key in the **PostgreSQL Registry**, linked to the user's `sub`.
-3.  **Instant Binding**: The Dashboard immediately synchronizes the new key to the browser's `execution_token` cookie.
+### Phase 2: Key Generation & Persistent Registry
+1.  **Generation**: Using the Auth0 session, the user generates a Developer API Key.
+2.  **Registration**: The backend verifies the Auth0 identity and creates a record in the **PostgreSQL Central Registry**.
+3.  **Audit Trail**: The record is permanently bound to the user's `user_id` and `user_email`.
+4.  **Instant Sync**: The Dashboard immediately synchronizes this new key to the browser's `execution_token` cookie for zero-touch documentation access.
 
 ### Phase 3: Secure Transport (AgentGateway)
-1.  **Traffic Interception**: When accessing backend documentation, the browser sends both the `inspector_auth` and `execution_token` cookies.
-2.  **Encrypted Tunnel**: The **AgentGateway** intercepts the request over HTTPS.
-3.  **Transparent Routing**: The gateway acts as a pass-through, forwarding all security credentials directly to the backend without modification.
+1.  **Encrypted Path**: All requests flow through the **AgentGateway** at the cluster edge.
+2.  **Credential Pass-Through**: The gateway acts as a transparent, high-performance pipe, forwarding all `Authorization` headers and `Cookies` directly to the backend sentry (`validate_token`).
 
-### Phase 4: The Identity Bridge (Backend Validation)
-The backend `validate_token` middleware performs the final handshake:
-1.  **Extraction**: The backend prioritizes the `execution_token`.
-2.  **Mapping**: If valid keys exist, the **Identity Bridge** maps the management session to the user's primary Developer API Key in real-time.
-3.  **Distributed Check**: The system validates the key ID (`jti`) against the **Redis Distributed Allowlist** for line-rate verification.
+### Phase 4: The Identity Bridge & Lockdown (Backend)
+The backend sentry performs the final, hardened validation:
+1.  **Execution Firewall**: For all execution routes (`/v1/run`, `/backend/z1sandbox/v1/scan-jobs`), the system **ignores cookies** and demands an explicit `Authorization` header. This prevents "Ghost Authorization" when the UI padlock is unlocked.
+2.  **Identity Lockdown**: If a browser session exists, the system verifies that the claimant is the **actual owner** of the key. If User B attempts to use User A's API key, the request is blocked with a `403 Forbidden` identity mismatch.
+3.  **Real-time Verification**: The Key ID (`jti`) is verified against the **Redis Distributed Allowlist** at line-rate speed.
 
-### Phase 5: Managed Doc Authorization (Swagger UI)
-1.  **UI Injection**: The backend renders the Swagger UI with an embedded auto-authorization script.
-2.  **Automatic Lock**: The script reads the `execution_token` and programmatically authorizes the session via `ui.authActions.authorize`.
-3.  **Execution Persona**: Future "Try it out" requests from the browser are now strictly authorized by the **Developer API Key**, fulfilling the "API-Key-Only" enforcement principle.
+### Phase 5: Managed Pre-Authorization
+1.  **Automated Lock**: The backend renders the Swagger UI with an auto-authorization script.
+2.  **Zero-Touch**: The script reads the session cookie and programmatically locks the green padlock, ensuring the user is ready to execute immediately.
 
-## 5. End-to-End Architecture Diagram
-The following diagram illustrates the complete lifecycle of a Developer API Key and its bridge to Auth0.
+## 2. Security Enforcement Grid
+
+| Protocol | Strategy | Enforcement Layer |
+| :--- | :--- | :--- |
+| **Integrity** | RS256 Asymmetric Signing | Cryptographic Check |
+| **Revocation** | Redis Global Set (JTI Kill-switch) | Distributed Registry |
+| **Isolation** | Identity Lockdown (sub-matching) | Cross-User Protection |
+| **Execution** | Mandatory Authorization Header | Path-Aware Enforcement |
+| **Scoping** | Backend-specific JWT Claims | Resource Control |
+
+## 3. End-to-End Architecture Diagram
 
 ```mermaid
 sequenceDiagram
@@ -87,34 +50,35 @@ sequenceDiagram
     participant DB as Postgres/Redis Registry
     participant SB as Upstream Sandbox
 
-    Note over Dev, SB: 1. AUTH0 LOGIN & KEY GEN
-    Dev->>API: Login via Auth0 (Sets inspector_auth)
-    Dev->>API: Generate API Key (Uses Auth0 identity)
-    API->>DB: SQL Save + Redis Cache Add
+    Note over Dev, SB: 1. IDENTITY & KEY BOOTSTRAP
+    Dev->>API: Login via Auth0
+    API-->>Dev: Set inspector_auth (User Persona)
+    Dev->>API: Generate Key (Uses Auth0)
+    API->>DB: Record User ID + Email in Postgres
     API-->>Dev: Return Key + Set execution_token cookie
 
-    Note over Dev, SB: 2. ZERO-TOUCH DOCS ACCESS
-    Dev->>GW: GET /backend/z1sandbox/docs (Sends both cookies)
-    GW->>API: Transparent Pass-through
-    API->>API: Identity Bridge: Map sub to primary API Key
-    API->>DB: Redis Allowlist Check (Verify JTI)
-    API->>SB: Authorized execution (API Key Persona)
+    Note over Dev, SB: 2. SECURE EXECUTION (Zero-Touch)
+    Dev->>GW: POST /backend/z1sandbox/v1/scan-jobs (Header Present)
+    GW->>API: Forward TLS Encrypted Request
+    API->>API: validate_token()
+    API->>API: Identity Lockdown (Does Header Match Cookie Session?)
+    API->>DB: Redis Check (Is JTI valid and active?)
+    API->>SB: Authorized Proxy call
     SB-->>API: Result
-    API-->>Dev: 200 OK (Swagger Padlock turns Green)
+    API-->>Dev: 200 OK
 
-    Note over Dev, SB: 3. REVOCATION
-    Dev->>API: Revoke API Key
-    API->>DB: SQL Delete + Redis Purge
-    Dev->>GW: Any request using old Key
-    API->>DB: Redis Check (Miss)
-    API-->>Dev: 401 Unauthorized
+    Note over Dev, SB: 3. GHOST PROTECTION (Logout)
+    Dev->>Dev: Unlock Padlock (Remove Header)
+    Dev->>GW: POST /backend/z1sandbox/v1/scan-jobs (No Header)
+    API->>API: Path-Aware Enforcement: Refuse Cookie for Execution
+    API-->>Dev: 401 Unauthorized (Padlock required)
 ```
 
-## 6. Technical Components (Production)
-1.  **The Token**: Signed RS256 JWT with scoped claims.
-2.  **The AgentGateway**: High-performance entry point using transparent pass-through for all security credentials.
-3.  **The Identity Bridge**: Middleware that maps Auth0 dashboard sessions to their respective Developer API Keys in real-time.
-4.  **The Registry**: Combined PostgreSQL persistence and Redis distributed allowlist for line-rate validation.
+## 4. Technical Component Breakdown
+1.  **Central Registry (Postgres)**: The single source of truth for key ownership and lifecycle.
+2.  **Line-Rate Cache (Redis)**: Enables sub-millisecond validation and cluster-wide revocation.
+3.  **Identity Bridge**: Middleware that ensures users only use keys they own.
+4.  **AgentGateway**: The high-performance entry point for the entire secure ecosystem.
 
 ---
-*Last Updated: April 2026 (Version 2.0 - Zero-Touch Architecture)*
+*Last Updated: April 2026 (Version 3.0 - Identity-Locked Architecture)*

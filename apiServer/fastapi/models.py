@@ -108,6 +108,7 @@ class APIKeyCreateRequest(BaseModel):
     name: str = Field(..., example="Prod-Scanner-Key")
     backend: APIKeyBackend = Field(APIKeyBackend.Z1_SANDBOX)
     ttl_hours: int = Field(1, ge=-1) # Default 1 hour, -1 means never expire
+    user_email: Optional[str] = None
 
 class APIKeyRecord(BaseModel):
     """Metadata record for a stored API key."""

@@ -879,7 +879,9 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
     token = jwt.encode(token_payload, conf["private_key"], algorithm=conf["algorithm"], headers={"kid": "code-inspector-key-01"})
     
     # Persist metadata with User identity
-    user_email = payload.get("email") # Auth0 claims usually include email
+    # Priority: Explicit request field -> Token claim -> Namespaced claim
+    user_email = req.user_email or payload.get("email") or payload.get("https://code-inspector.com/email")
+    
     conn = state.get_db_conn()
     cursor = conn.cursor()
     query = """

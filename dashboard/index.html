@@ -11,15 +11,16 @@
     <script src="https://cdn.auth0.com/js/auth0-spa-js/2.1/auth0-spa-js.production.js"></script>
     <style>
         :root {
-            --primary: #6366f1;
-            --primary-hover: #4f46e5;
-            --bg: #0f172a;
-            --card-bg: rgba(30, 41, 59, 0.7);
+            --primary: #0d9488;
+            --primary-hover: #0f766e;
+            --bg: #020617;
+            --card-bg: rgba(15, 23, 42, 0.6);
             --text: #f8fafc;
             --text-dim: #94a3b8;
-            --border: rgba(255, 255, 255, 0.1);
+            --border: rgba(255, 255, 255, 0.08);
             --glass-border: rgba(255, 255, 255, 0.05);
             --success: #10b981;
+            --accent: #22d3ee;
         }
 
         * {
@@ -32,8 +33,8 @@
         body {
             background-color: var(--bg);
             background-image:
-                radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.15) 0px, transparent 50%),
-                radial-gradient(at 100% 0%, rgba(139, 92, 246, 0.15) 0px, transparent 50%);
+                radial-gradient(at 0% 0%, rgba(13, 148, 136, 0.12) 0px, transparent 50%),
+                radial-gradient(at 100% 0%, rgba(34, 211, 238, 0.1) 0px, transparent 50%);
             color: var(--text);
             min-height: 100vh;
             display: flex;
@@ -44,12 +45,13 @@
 
         header {
             width: 100%;
-            padding: 2rem 5%;
+            padding: 1.5rem 5%;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            backdrop-filter: blur(10px);
+            backdrop-filter: blur(12px);
             border-bottom: 1px solid var(--border);
+            background: rgba(2, 6, 23, 0.7);
             position: sticky;
             top: 0;
             z-index: 100;
@@ -59,7 +61,7 @@
             font-size: 1.5rem;
             font-weight: 700;
             letter-spacing: -0.5px;
-            background: linear-gradient(to right, #818cf8, #c084fc);
+            background: linear-gradient(to right, #0d9488, #22d3ee);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
         }
@@ -115,13 +117,13 @@
             font-weight: 600;
             cursor: pointer;
             transition: all 0.2s ease;
-            box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.3);
+            box-shadow: 0 10px 15px -3px rgba(13, 148, 136, 0.2);
         }
 
         .btn:hover {
             background: var(--primary-hover);
             transform: translateY(-2px);
-            box-shadow: 0 20px 25px -5px rgba(99, 102, 241, 0.4);
+            box-shadow: 0 20px 25px -5px rgba(13, 148, 136, 0.3);
         }
 
         .token-container {
@@ -146,7 +148,7 @@
             font-family: 'Courier New', Courier, monospace;
             font-size: 0.9rem;
             word-break: break-all;
-            color: #818cf8;
+            color: var(--accent);
             position: relative;
             cursor: pointer;
             transition: border-color 0.2s;
@@ -261,8 +263,8 @@
         }
 
         .badge-Z1_SANDBOX {
-            background: rgba(99, 102, 241, 0.2);
-            color: #818cf8;
+            background: rgba(13, 148, 136, 0.15);
+            color: #2dd4bf;
         }
 
         /* Dashboard Layout */
@@ -310,7 +312,7 @@
         }
 
         .menu-item.active {
-            background: rgba(99, 102, 241, 0.1);
+            background: rgba(13, 148, 136, 0.08);
             color: var(--primary);
             border-left-color: var(--primary);
             font-weight: 600;
@@ -642,6 +644,7 @@
                     clientId: config.clientId,
                     authorizationParams: {
                         audience: config.audience,
+                        scope: 'openid profile email',
                         redirect_uri: window.location.origin + window.location.pathname
                     }
                 });
@@ -808,13 +811,19 @@
 
             try {
                 const token = await auth0Client.getTokenSilently();
+                const user = await auth0Client.getUser();
                 const response = await fetch("/v1/api-keys", {
                     method: 'POST',
                     headers: {
                         'Authorization': `Bearer ${token}`,
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify({ name, backend, ttl_hours: finalTtlHours })
+                    body: JSON.stringify({ 
+                        name, 
+                        backend, 
+                        ttl_hours: finalTtlHours,
+                        user_email: user.email 
+                    })
                 });
 
                 const data = await response.json();
