@@ -586,7 +586,7 @@ async def get_backend_docs():
     """
     Renders actual upstream OpenSandbox Swagger API with custom authentication logic.
     """
-    return render_swagger_ui("/backend/z1sandbox/openapi.json", "OpenSandbox — Remote API Docs")
+    return render_swagger_ui("/backend/z1sandbox/openapi.json", "Z1 Sandbox — Remote API Docs")
 
 
 @app.get("/backend/z1sandbox/openapi.json", include_in_schema=False, dependencies=[Depends(validate_token)])

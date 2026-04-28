@@ -103,6 +103,7 @@ class GenerateAPIResponse(BaseModel):
 class APIKeyBackend(str, Enum):
     """Supported backends for key scoping."""
     Z1_SANDBOX = "Z1_SANDBOX"
+
 class APIKeyCreateRequest(BaseModel):
     """Payload to create a new manageable API key."""
     name: str = Field(..., example="Prod-Scanner-Key")
