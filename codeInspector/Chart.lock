@@ -5,6 +5,9 @@ dependencies:
 - name: apiServer
   repository: ""
   version: 0.1.0
+- name: z1sandbox-website
+  repository: ""
+  version: 2.0.0
 - name: metallb
   repository: ""
   version: 0.1.0
@@ -17,5 +20,5 @@ dependencies:
 - name: opensandbox
   repository: ""
   version: 0.1.0
-digest: sha256:5080545eec8ccc860f5760ae2487b6ff2e2a414cc6856cb0696261e3cab4724e
-generated: "2026-04-05T20:18:31.208119809+05:45"
+digest: sha256:63d1c6718aeddb31ddc48072503f83252b61c4e7931d55dc4a260c959542ea46
+generated: "2026-04-29T12:31:31.134027768+05:45"

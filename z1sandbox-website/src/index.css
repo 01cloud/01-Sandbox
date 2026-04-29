@@ -1,0 +1,193 @@
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 210 40% 97.5%;
+    --foreground: 240 35% 12%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 240 35% 12%;
+
+    --popover: 0 0% 100%;
+    --popover-foreground: 240 35% 12%;
+
+    --primary: 240 35% 12%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 210 30% 96%;
+    --secondary-foreground: 210 50% 30%;
+
+    --muted: 210 25% 97%;
+    --muted-foreground: 210 15% 45%;
+
+    --accent: 215 85% 65%;
+    --accent-foreground: 0 0% 100%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 210 25% 92%;
+    --input: 210 25% 92%;
+    --ring: 210 85% 65%;
+
+    --radius: 1rem;
+
+    --surface: 210 25% 98%;
+    --surface-hover: 210 30% 96%;
+
+    /* Gradient stops used by 01cloud-like accent text */
+    --grad-1: 14 100% 65%;   /* warm coral */
+    --grad-2: 265 85% 65%;   /* purple */
+    --grad-3: 210 100% 60%;  /* blue */
+    --grad-4: 160 70% 50%;   /* mint */
+
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 240 35% 12%;
+    --sidebar-primary: 240 35% 12%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 260 60% 96%;
+    --sidebar-accent-foreground: 240 35% 12%;
+    --sidebar-border: 240 15% 92%;
+    --sidebar-ring: 265 85% 65%;
+  }
+
+  .dark {
+    --background: 240 25% 6%;
+    --foreground: 240 15% 95%;
+
+    --card: 240 22% 9%;
+    --card-foreground: 240 15% 95%;
+
+    --popover: 240 22% 9%;
+    --popover-foreground: 240 15% 95%;
+
+    --primary: 240 15% 95%;
+    --primary-foreground: 240 25% 6%;
+
+    --secondary: 260 30% 16%;
+    --secondary-foreground: 260 60% 90%;
+
+    --muted: 240 18% 12%;
+    --muted-foreground: 240 10% 65%;
+
+    --accent: 265 85% 70%;
+    --accent-foreground: 240 25% 6%;
+
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 240 18% 16%;
+    --input: 240 18% 16%;
+    --ring: 265 85% 70%;
+
+    --surface: 240 22% 8%;
+    --surface-hover: 260 30% 14%;
+
+    --sidebar-background: 240 25% 6%;
+    --sidebar-foreground: 240 15% 95%;
+    --sidebar-primary: 240 15% 95%;
+    --sidebar-primary-foreground: 240 25% 6%;
+    --sidebar-accent: 260 30% 16%;
+    --sidebar-accent-foreground: 240 15% 95%;
+    --sidebar-border: 240 18% 16%;
+    --sidebar-ring: 265 85% 70%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family: 'Inter', sans-serif;
+    font-feature-settings: "ss01", "cv11";
+    overflow-x: hidden;
+    width: 100%;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    letter-spacing: -0.02em;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+  }
+
+  .text-gradient {
+    background: linear-gradient(
+      135deg,
+      hsl(var(--grad-3)),
+      hsl(var(--grad-4))
+    );
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: transparent;
+  }
+
+  .gradient-orb {
+    background: radial-gradient(
+      ellipse at center,
+      hsl(var(--accent) / 0.18) 0%,
+      hsl(265 100% 80% / 0.08) 35%,
+      transparent 70%
+    );
+  }
+
+  .pill-badge {
+    background: linear-gradient(
+      90deg,
+      hsl(210 100% 95%),
+      hsl(160 70% 94%)
+    );
+  }
+
+  .dark .pill-badge {
+    background: linear-gradient(
+      135deg,
+      hsl(210 100% 60% / 0.15),
+      hsl(160 70% 50% / 0.15)
+    );
+    border: 1px solid hsl(var(--grad-3) / 0.2);
+    color: hsl(var(--foreground));
+    backdrop-blur: md;
+  }
+
+  .underline-squiggle {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='12' viewBox='0 0 180 12'%3E%3Cpath d='M2 8 Q 30 0, 60 6 T 120 6 T 180 4' stroke='url(%23g)' stroke-width='3' fill='none' stroke-linecap='round'/%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' x2='1'%3E%3Cstop offset='0%25' stop-color='%233B82F6'/%3E%3Cstop offset='100%25' stop-color='%2334D399'/%3E%3C/linearGradient%3E%3C/defs%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: bottom left;
+    background-size: 100% 10px;
+    padding-bottom: 14px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 10px;
+  }
+
+  .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--muted-foreground) / 0.5);
+  }
+}

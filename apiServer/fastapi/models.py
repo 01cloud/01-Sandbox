@@ -103,17 +103,21 @@ class GenerateAPIResponse(BaseModel):
 class APIKeyBackend(str, Enum):
     """Supported backends for key scoping."""
     Z1_SANDBOX = "Z1_SANDBOX"
+
 class APIKeyCreateRequest(BaseModel):
     """Payload to create a new manageable API key."""
     name: str = Field(..., example="Prod-Scanner-Key")
     backend: APIKeyBackend = Field(APIKeyBackend.Z1_SANDBOX)
     ttl_hours: int = Field(1, ge=-1) # Default 1 hour, -1 means never expire
+    user_email: Optional[str] = None
 
 class APIKeyRecord(BaseModel):
     """Metadata record for a stored API key."""
     id: str # JTI
     name: str
     backend: str
+    user_id: str
+    user_email: Optional[str] = None
     created_at: str
     expires_at: str
     last_used_at: Optional[str] = None

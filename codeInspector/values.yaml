@@ -126,18 +126,76 @@ apiServer:
     password: ""
 
 
-# Dashboard component values
-dashboard:
+# ─────────────────────────────────────────────────────────────────────────────
+# Z1 Sandbox Website (formerly named "dashboard")
+# This is the main public-facing website + developer dashboard with Auth0 login.
+# Build the image first:
+#   cd /home/berrybytes/Desktop/z1sandbox-website
+#   docker build \
+#     --build-arg VITE_AUTH0_DOMAIN=dev-axwc0ui527kw0c5d.us.auth0.com \
+#     --build-arg VITE_AUTH0_CLIENT_ID=sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D \
+#     --build-arg VITE_AUTH0_AUDIENCE=https://code-inspector-api \
+#     --build-arg VITE_RECAPTCHA_SITE_KEY=6LeKiswsAAAAAMF_8fxlr1z7VCRQ0zr-oFfncfd0 \
+#     -t z1sandbox-website:latest .
+# ─────────────────────────────────────────────────────────────────────────────
+z1sandbox-website:
   enabled: true
   namespace: opensandbox-system
   replicaCount: 1
   image:
-    repository: dashboard
+    repository: z1-sandbox
     tag: "1.0.0"
     pullPolicy: Never
   service:
     type: ClusterIP
     port: 80
+  # Auth0 values are baked at build time — document them here for reference
+  auth0:
+    domain: "dev-axwc0ui527kw0c5d.us.auth0.com"
+    clientId: "sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D"
+    audience: "https://code-inspector-api"
+  # In-cluster ClusterIP service name of the FastAPI backend
+  apiServiceName: "sandbox-api-service"
+  
+  # Dashboard Applications Config
+  # Adding items here will automatically create new cards in the dashboard.
+  backends:
+    - id: "Z1_SANDBOX"
+      name: "01 Sandbox"
+      description: "Active remote backend for live code evaluation and execution workloads."
+      baseUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox"
+      documentationUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox/docs"
+      icon: "terminal"
+      color: "indigo"
+    # - id: "OPEN_SANDBOX"
+    #   name: "OpenSandbox"
+    #   description: "Distributed scaling cluster configuration and backend telemetry service."
+    #   baseUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/opensandbox"
+    #   documentationUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/opensandbox/docs"
+    #   icon: "box"
+    #   color: "emerald"
+    
+    # - id: "TENCEND"
+    #   name: "Tencend"
+    #   description: "Distributed scaling cluster configuration and backend telemetry service."
+    #   baseUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/tencend"
+    #   documentationUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/tencend/docs"
+    #   icon: "box"
+    #   color: "emerald"
+    
+      
+  ingress:
+    enabled: false
+    className: nginx
+    host: "sandbox.local"
+    annotations: {}
+  resources:
+    limits:
+      cpu: 200m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
 
 # MetalLB component values
 metallb:
