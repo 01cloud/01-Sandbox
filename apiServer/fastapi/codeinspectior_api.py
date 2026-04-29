@@ -198,7 +198,7 @@ async def cookie_auth_redirect_middleware(request: Request, call_next):
     if request.url.path in ["/docs", "/backend/z1sandbox/docs"]:
         cookie_val = request.cookies.get("inspector_auth")
         if not cookie_val:
-            return RedirectResponse(url="/login/index.html", status_code=307)
+            return RedirectResponse(url="/", status_code=307)
     return await call_next(request)
 
 

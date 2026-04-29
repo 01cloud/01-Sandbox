@@ -1,0 +1,179 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ConfigMap — Nginx config with API reverse-proxy to sandbox-api-service
+# This is mounted into the container so the service name can be set at
+# helm install time without requiring a Docker image rebuild.
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: website-nginx-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: z1sandbox-website
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name _;
+
+        root /usr/share/nginx/html;
+        index index.html;
+
+        # ── SPA Client-Side Routing ─────────────────────────────────────────
+        location / {
+            try_files $uri $uri/ /index.html;
+        }
+
+        # ── API Proxy → {{ .Values.apiServiceName }} ────────────────────────
+        location /v1/ {
+            proxy_pass http://{{ .Values.apiServiceName }}/v1/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 300s;
+            proxy_send_timeout 300s;
+        }
+
+        location /backend/ {
+            proxy_pass http://{{ .Values.apiServiceName }}/backend/;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_read_timeout 300s;
+            proxy_send_timeout 300s;
+        }
+
+        location /health {
+            proxy_pass http://{{ .Values.apiServiceName }}/health;
+            proxy_set_header Host $host;
+        }
+
+        error_page 500 502 503 504 /50x.html;
+        location = /50x.html {
+            root /usr/share/nginx/html;
+            internal;
+        }
+    }
+  backends.json: |
+    {{ .Values.backends | toJson }}
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Deployment — Z1 Sandbox Website
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: z1sandbox-website
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: z1sandbox-website
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      app: z1sandbox-website
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  template:
+    metadata:
+      labels:
+        app: z1sandbox-website
+    spec:
+      containers:
+        - name: z1sandbox-website
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          # Mount the templated nginx config from the ConfigMap above
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/conf.d/default.conf
+              subPath: default.conf
+            - name: nginx-config
+              mountPath: /usr/share/nginx/html/config/backends.json
+              subPath: backends.json
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 3
+            periodSeconds: 10
+            timeoutSeconds: 2
+            failureThreshold: 3
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      volumes:
+        - name: nginx-config
+          configMap:
+            name: website-nginx-config
+
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Service — Stable internal ClusterIP for the website
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Service
+metadata:
+  name: z1sandbox-website-service
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: z1sandbox-website
+spec:
+  type: {{ .Values.service.type }}
+  ports:
+    - port: {{ .Values.service.port }}
+      targetPort: 80
+      protocol: TCP
+      name: http
+  selector:
+    app: z1sandbox-website
+
+{{- if .Values.ingress.enabled }}
+---
+# ─────────────────────────────────────────────────────────────────────────────
+# Ingress — Expose website to external traffic
+# ─────────────────────────────────────────────────────────────────────────────
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: z1sandbox-website-ingress
+  namespace: {{ .Values.namespace }}
+  {{- if .Values.ingress.annotations }}
+  annotations:
+    {{- range $key, $value := .Values.ingress.annotations }}
+    {{ $key }}: {{ $value | quote }}
+    {{- end }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: z1sandbox-website-service
+                port:
+                  number: {{ .Values.service.port }}
+{{- end }}
