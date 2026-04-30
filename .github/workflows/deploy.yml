@@ -1,0 +1,62 @@
+name: Deploy CodeInspector
+
+on:
+  push:
+    branches: [ "feat/identity-locked-tokens", "main" ]
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # 1. Build & Push API Server
+      - name: Build and Push API
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apiServer/fastapi
+          push: true
+          tags: kamalberrybytes/sandboxapi:1.0.0
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 2. Build & Push Website
+      - name: Build and Push Website
+        uses: docker/build-push-action@v5
+        with:
+          context: ./z1sandbox-website
+          push: true
+          tags: kamalberrybytes/z1sandbox-website:1.0.0
+          build-args: |
+            VITE_AUTH0_DOMAIN=dev-axwc0ui527kw0c5d.us.auth0.com
+            VITE_AUTH0_CLIENT_ID=sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D
+            VITE_AUTH0_AUDIENCE=https://code-inspector-api
+            VITE_RECAPTCHA_SITE_KEY=6LeKiswsAAAAAMF_8fxlr1z7VCRQ0zr-oFfncfd0
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # 3. Deploy to K8s
+      - name: Set up Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > ~/.kube/config
+          chmod 600 ~/.kube/config
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install codeinspector ./codeInspector \
+            --namespace opensandbox-system \
+            --wait --timeout 10m
