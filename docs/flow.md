@@ -54,7 +54,7 @@ The user first authenticates through the Auth0 login flow. For browser-based cli
 The `Agent Gateway` (implemented via Kubernetes Gateway API and Envoy) acts as the secure entry point.
 - **TLS Termination**: Handles secure HTTPS connections.
 - **Authentication Enforcement**: Rejects any request without a valid token or API key.
-- **Routing**: Routes traffic destined for `/backend/z1sandbox/*` to the internal API Server.
+- **Routing**: Routes traffic destined for `/api/z1sandbox/*` to the internal API Server.
 
 ### 3. Orchestration Layer (API Server)
 The FastAPI server acts as a management layer that speaks the "Language of the Sandbox."

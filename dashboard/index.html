@@ -201,46 +201,10 @@
                     <h2 class="text-3xl font-display font-bold mb-2">Applications</h2>
                     <p class="text-muted-foreground text-sm">Navigate to your configured sandbox backends.</p>
                 </div>
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                    <div class="aws-widget hover:border-primary/50 transition-colors group shadow-sm bg-card">
-                        <div class="aws-widget-header bg-card">
-                            <h3 class="aws-widget-title text-foreground text-base">
-                                <div class="bg-indigo-500/10 text-indigo-400 p-1.5 rounded-md text-xl mr-2">⚡</div> Z1
-                                Sandbox
-                            </h3>
-                        </div>
-                        <div class="aws-widget-body bg-muted/5 group-hover:bg-card transition-colors">
-                            <p class="text-sm text-foreground mb-4">Active remote backend for live code evaluation and
-                                execution workloads.</p>
-                            <div class="flex gap-2">
-                                <button
-                                    class="flex-1 bg-accent/10 border border-accent/20 text-accent font-semibold py-2 px-3 rounded text-xs hover:bg-accent/20 transition-all flex items-center justify-center gap-1.5"
-                                    onclick="openScanner('Z1_SANDBOX', 'https://shininess-enroll-going.ngrok-free.dev/backend/z1sandbox')">
-                                    <span>🔍</span> Quick Scan
-                                </button>
-                                <button
-                                    class="flex-1 bg-muted border border-border text-foreground font-semibold py-2 px-3 rounded text-xs hover:bg-muted-foreground/10 transition-all"
-                                    onclick="bindAndNavigate('Z1_SANDBOX', 'https://shininess-enroll-going.ngrok-free.dev/backend/z1sandbox/docs')">
-                                    Go to docs
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="aws-widget hover:border-primary/50 transition-colors cursor-pointer group shadow-sm bg-card"
-                        onclick="bindAndNavigate('OPEN_SANDBOX', 'https://shininess-enroll-going.ngrok-free.dev/backend/opensandbox/docs')">
-                        <div class="aws-widget-header bg-card">
-                            <h3 class="aws-widget-title text-foreground text-base">
-                                <div class="bg-emerald-500/10 text-emerald-400 p-1.5 rounded-md text-xl mr-2">🌐</div>
-                                OpenSandbox
-                            </h3>
-                            <button
-                                class="bg-transparent text-muted-foreground group-hover:text-primary group-hover:bg-muted px-3 py-1.5 rounded border border-border text-xs font-semibold">Go
-                                to app</button>
-                        </div>
-                        <div class="aws-widget-body bg-muted/5 group-hover:bg-card transition-colors">
-                            <p class="text-sm text-foreground mb-2">Distributed scaling cluster configuration and
-                                backend telemetry service.</p>
-                        </div>
+                <div id="backends-container" class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <!-- Dynamic Backends will be injected here -->
+                    <div class="col-span-full py-12 text-center text-muted-foreground animate-pulse">
+                        <p class="text-sm font-medium tracking-wide uppercase">Initializing Security Clusters...</p>
                     </div>
                 </div>
             </div>
@@ -271,8 +235,7 @@
                         Backend</label>
                     <select id="key-backend"
                         class="w-full bg-input/50 focus:bg-input border border-border rounded-md px-3 py-2.5 text-sm text-foreground">
-                        <option value="Z1_SANDBOX">Z1 Sandbox (/backend/z1sandbox/docs)</option>
-                        <option value="OPEN_SANDBOX">OpenSandbox (/backend/opensandbox/docs)</option>
+                        <!-- Options populated dynamically -->
                     </select>
                 </div>
                 <div class="mb-8">
@@ -319,7 +282,7 @@
                     <button
                         class="w-full bg-primary text-primary-foreground py-3 rounded-md text-sm hover:opacity-90 font-semibold shadow-sm flex items-center justify-center gap-2"
                         onclick="copyNewKey()">Copy to Clipboard</button>
-                    <a href="https://shininess-enroll-going.ngrok-free.dev/backend/z1sandbox/docs" target="_blank"
+                    <a id="docs-link" href="#" target="_blank"
                         class="w-full text-center bg-accent/10 border border-accent/20 text-accent py-3 rounded-md text-sm hover:bg-accent/20 font-semibold">Go
                         to Docs</a>
                     <button class="w-full text-muted-foreground py-2 rounded-md text-sm hover:text-foreground mt-2"

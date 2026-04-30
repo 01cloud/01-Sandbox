@@ -16,8 +16,8 @@ z1sandbox-website:
     - id: "MY_NEW_BACKEND"
       name: "Alpha Laboratory"
       description: "Custom description for your new backend service."
-      baseUrl: "https://your-api-endpoint.ngrok-free.dev/backend/alpha"
-      documentationUrl: "https://your-api-endpoint.ngrok-free.dev/backend/alpha/docs"
+      baseUrl: "https://your-api-endpoint.ngrok-free.dev/api/alpha"
+      documentationUrl: "https://your-api-endpoint.ngrok-free.dev/api/alpha/docs"
       icon: "terminal" # Options: terminal, box, code
       color: "indigo"  # Options: indigo, emerald
 ```

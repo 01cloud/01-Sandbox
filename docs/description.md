@@ -39,7 +39,7 @@ graph TD
 The central orchestrator that exposes the stable HTTP contract. 
 - **Endpoint Transformation**: It translates high-level requests (e.g., "run this Python code") into backend-specific commands.
 - **Dynamic Registry**: Maintains a registry of available backends (`Mock`, `Subprocess`, `Docker`, `E2B`, `OpenSandbox`).
-- **Transparent Proxy**: Provides a proxy mechanism (`/backend/{name}/{path}`) to allow direct interaction with specialized backend APIs without exposing them to the external network.
+- **Transparent Proxy**: Provides a proxy mechanism (`/api/{name}/{path}`) to allow direct interaction with specialized backend APIs without exposing them to the external network.
 
 ### 2. High-Level Gateway (Agent Gateway)
 Implemented using the **Kubernetes Gateway API**, it provides a standardized way to route external traffic into the cluster.
@@ -61,19 +61,19 @@ A distributed sandbox system managed via Helm.
 
 ### 1. Code Execution Flow (`/run`)
 1.  **Client Request**: The user sends a POST request to `/run` with `code`, `language`, and `timeout`.
-2.  **State Lookup**: The API server identifies the currently active backend (defaulting to `mock` or as set via `/backend/switch`).
+2.  **State Lookup**: The API server identifies the currently active backend (defaulting to `mock` or as set via `/api/switch`).
 3.  **Backend Execution**:
     -   If **Local**: The server spawns a process or container, captures output, and returns a `RunResponse`.
     -   If **Remote (OpenSandbox)**: The server forwards the payload to the `BACKEND_URL_OPENSANDBOX` (configured via ConfigMap).
 4.  **Response**: The client receives a standardized JSON response containing `stdout`, `stderr`, and `exit_code`, regardless of the backend used.
 
-### 2. Backend Switching Flow (`/backend/switch`)
-1.  **Request**: An admin sends a POST to `/backend/switch` with the desired backend name.
+### 2. Backend Switching Flow (`/api/switch`)
+1.  **Request**: An admin sends a POST to `/api/switch` with the desired backend name.
 2.  **Validation**: If `validate=true`, the API server performs a health check on the target backend (e.g., checking if Docker is running or if OpenSandbox is reachable).
 3.  **Hot Swap**: Upon success, the `AppState` is updated globally. All subsequent `/run` calls now use the new backend immediately without server restart.
 
-### 3. Transparent Proxying (`/backend/z1sandbox/*`)
-1.  **Intercept**: The API server matches the dynamic route `/backend/{backend_name}/{proxy_path}`.
+### 3. Transparent Proxying (`/api/z1sandbox/*`)
+1.  **Intercept**: The API server matches the dynamic route `/api/{backend_name}/{proxy_path}`.
 2.  **Re-routing**: It strips the prefix and forwards the headers/body to the internal service URL (e.g., `http://opensandbox-server.opensandbox-system.svc.cluster.local`).
 3.  **Response Relay**: The response from the internal service is relayed back to the original client, making the API server act as a secure gateway.
 

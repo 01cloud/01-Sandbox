@@ -95,7 +95,7 @@ Client  →  POST /run  →  SandboxAPI  →  [Mock | Subprocess | Docker | E2B]
 |----------|--------------------|--------------------------------------|
 | `GET`    | `/health`          | Health check of the active backend   |
 | `GET`    | `/backend`         | Show current backend name & status   |
-| `POST`   | `/backend/switch`  | Hot-swap to a different backend      |
+| `POST`   | `/api/switch`  | Hot-swap to a different backend      |
 | `GET`    | `/backends`        | List all registered backends         |
 
 **Switch backend request:**
@@ -329,7 +329,7 @@ kubectl apply -f api-deployment.yaml
 
 ```bash
 # 1. Switch to subprocess backend
-curl -X POST http://localhost:8000/backend/switch \
+curl -X POST http://localhost:8000/api/switch \
   -H "Content-Type: application/json" \
   -d '{"backend": "subprocess", "validate": false}'
 

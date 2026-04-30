@@ -79,23 +79,20 @@ const Dashboard = () => {
       const response = await fetch("/config/backends.json");
       if (response.ok) {
         const data = await response.json();
-        setBackends(data);
+        // Process backends to ensure they have all required fields dynamically
+        const processed = data.map((b: any) => ({
+          ...b,
+          baseUrl: b.baseUrl || `/api/${b.id.toLowerCase()}`,
+          documentationUrl: b.documentationUrl || b.baseUrl || `/api/${b.id.toLowerCase()}/docs`
+        }));
+        setBackends(processed);
       } else {
-        // Fallback for local development or if config missing
-        setBackends([
-          {
-            id: "Z1_SANDBOX",
-            name: "Z1 Sandbox",
-            description: "Active remote backend for live code evaluation and execution workloads.",
-            baseUrl: "https://shininess-enroll-going.ngrok-free.dev/backend/z1sandbox",
-            documentationUrl: "https://shininess-enroll-going.ngrok-free.dev/backend/z1sandbox/docs",
-            icon: "terminal",
-            color: "indigo"
-          }
-        ]);
+        console.warn("Backends config not found, using empty list.");
+        setBackends([]);
       }
     } catch (e) {
       console.error("Failed to load backends config:", e);
+      setBackends([]);
     }
   };
 

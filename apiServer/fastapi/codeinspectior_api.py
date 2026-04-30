@@ -6,7 +6,7 @@ A clean, simplified proxy API specifically designed to forward traffic
 to the internal OpenSandbox backend.
 
 It removes all hardcoded sandbox routing (like /sandboxes, /batched),
-instead relying completely transparently on `/backend/z1sandbox/{proxy_path}` 
+instead relying completely transparently on `/api/z1sandbox/{proxy_path}` 
 to communicate with the `opensandbox-server` kubernetes service.
 """
 
@@ -197,7 +197,7 @@ async def log_headers(request: Request, call_next):
     return response
 @app.middleware("http")
 async def cookie_auth_redirect_middleware(request: Request, call_next):
-    if request.url.path in ["/docs", "/backend/z1sandbox/docs"]:
+    if request.url.path == "/docs" or (request.url.path.startswith("/api/") and request.url.path.endswith("/docs")):
         cookie_val = request.cookies.get("inspector_auth")
         if not cookie_val:
             return RedirectResponse(url="/", status_code=307)
@@ -235,7 +235,7 @@ async def validate_token(request: Request):
     # 1. Path-Aware Enforcement: Decide if we allow Cookie Fallbacks
     path = request.url.path
     # Execution routes MUST use a header. No 'Ghost Authorization' via cookies allowed for execution.
-    is_execution_route = path.startswith("/v1/run") or ("/backend/z1sandbox/" in path and "/docs" not in path and "/openapi.json" not in path)
+    is_execution_route = path.startswith("/v1/run") or ("/api/z1sandbox/" in path and "/docs" not in path and "/openapi.json" not in path)
     
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     raw_token = None
@@ -583,18 +583,18 @@ def run_code(req: RunRequest):
 # 4. OpenSandbox Proxy Forwarding & Docs
 # ─────────────────────────────────────────────
 
-@app.get("/backend/z1sandbox/docs", include_in_schema=False, dependencies=[Depends(validate_token)])
-async def get_backend_docs():
+@app.get("/api/{backend_id}/docs", include_in_schema=False, dependencies=[Depends(validate_token)])
+async def get_backend_docs(backend_id: str):
     """
     Renders actual upstream OpenSandbox Swagger API with custom authentication logic.
     """
-    return render_swagger_ui("/backend/z1sandbox/openapi.json", "Z1 Sandbox — Remote API Docs")
+    return render_swagger_ui(f"/api/{backend_id}/openapi.json", f"{backend_id.upper()} — Remote API Docs")
 
 
-@app.get("/backend/z1sandbox/openapi.json", include_in_schema=False, dependencies=[Depends(validate_token)])
-async def get_backend_openapi_spec():
+@app.get("/api/{backend_id}/openapi.json", include_in_schema=False, dependencies=[Depends(validate_token)])
+async def get_backend_openapi_spec(backend_id: str):
     """Translates and patches explicitly upstream OpenAPI spec."""
-    base_url = opensandbox_base_url()
+    base_url = opensandbox_base_url(backend_id)
 
     for spec_path in ["/openapi.json", "/v1/openapi.json", "/docs/openapi.json"]:
         try:
@@ -602,7 +602,7 @@ async def get_backend_openapi_spec():
                 r = await client.get(f"{base_url}{spec_path}")
                 if r.status_code == 200:
                     spec = r.json()
-                    spec["servers"] = [{"url": "/backend/z1sandbox"}]
+                    spec["servers"] = [{"url": f"/api/{backend_id}"}]
                     spec.setdefault("components", {})
                     spec["components"].setdefault("securitySchemes", {})
                     spec["components"]["securitySchemes"]["BearerAuth"] = {
@@ -616,12 +616,12 @@ async def get_backend_openapi_spec():
         except Exception:
             continue
 
-    raise HTTPException(status_code=404, detail=f"Target upstream openapi.json not found on {base_url}")
+    raise HTTPException(status_code=404, detail=f"Target upstream openapi.json not found on {base_url} for backend {backend_id}")
 
 
-async def _do_proxy(proxy_path: str, request: Request):
+async def _do_proxy(backend_id: str, proxy_path: str, request: Request):
     """Internal proxy routing logic forwarding transparently upstream."""
-    base_url = opensandbox_base_url()
+    base_url = opensandbox_base_url(backend_id)
     target_url = f"{base_url.rstrip('/')}/{proxy_path}"
     
     params = dict(request.query_params)
@@ -660,38 +660,12 @@ async def _do_proxy(proxy_path: str, request: Request):
             )
 
 
-@app.get("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy GET request", dependencies=[Depends(validate_token)])
-async def proxy_get(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.post("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy POST request", dependencies=[Depends(validate_token)])
-async def proxy_post(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.put("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PUT request", dependencies=[Depends(validate_token)])
-async def proxy_put(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.delete("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy DELETE request", dependencies=[Depends(validate_token)])
-async def proxy_delete(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.patch("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PATCH request", dependencies=[Depends(validate_token)])
-async def proxy_patch(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-# OpenSandbox Cluster Proxy Routes
-@app.get("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="OpenSandbox Proxy GET", dependencies=[Depends(validate_token)])
-async def opensandbox_proxy_get(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.post("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="OpenSandbox Proxy POST", dependencies=[Depends(validate_token)])
-async def opensandbox_proxy_post(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.delete("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="OpenSandbox Proxy DELETE", dependencies=[Depends(validate_token)])
-async def opensandbox_proxy_delete(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
+@app.api_route("/api/{backend_id}/{proxy_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"], tags=["Proxy Backend"], summary="Dynamic Proxy Request", dependencies=[Depends(validate_token)])
+async def dynamic_proxy(backend_id: str, proxy_path: str, request: Request):
+    """
+    Catch-all dynamic proxy route that forwards traffic to any registered backend.
+    """
+    return await _do_proxy(backend_id, proxy_path, request)
 
 
 # ─────────────────────────────────────────────

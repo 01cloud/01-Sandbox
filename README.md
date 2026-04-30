@@ -94,10 +94,10 @@ The core component is a FastAPI application that provides a stable HTTP API for 
 |----------|--------|-------------|
 | `/run` | POST | Execute code in the active backend |
 | `/health` | GET | Check backend health status |
-| `/backend/switch` | POST | Hot-swap the active backend |
+| `/api/switch` | POST | Hot-swap the active backend |
 | `/backend` | GET | Get current backend info |
 | `/backends` | GET | List all available backends |
-| `/backend/{name}` | POST | Execute code in a specific backend |
+| `/api/{name}` | POST | Execute code in a specific backend |
 
 **Supported Backends:**
 
@@ -256,7 +256,7 @@ MetalLB provides load balancing for bare-metal Kubernetes clusters.
 ### Backend Switching Flow
 
 ```
-1. Client sends POST /backend/switch with backend name
+1. Client sends POST /api/switch with backend name
    ↓
 2. FastAPI validates backend exists
    ↓
@@ -355,7 +355,7 @@ curl -X POST http://sandbox-api.local/run \
 
 ### Switch Backend
 ```bash
-curl -X POST http://sandbox-api.local/backend/switch \
+curl -X POST http://sandbox-api.local/api/switch \
   -H "Content-Type: application/json" \
   -H "X-API-Key: N2YwMDIxZTEtNGUzNS1jNzgzLTRkYjAtYjE2YzRkZGVmNjcy" \
   -d '{

@@ -22,7 +22,7 @@ graph TD
     
     subgraph "Orchestration Layer (apiServer)"
         SAS -->|ClusterIP| AS[API Server - FastAPI]
-        AS -->|Backend Strategy| OSB_PROXY[/backend/z1sandbox/*]
+        AS -->|Backend Strategy| OSB_PROXY[/api/z1sandbox/*]
     end
     
     subgraph "Execution Management (opensandbox-server)"
@@ -43,7 +43,7 @@ graph TD
 1.  **Client Entry**: An external client hits the LoadBalancer IP provided by MetalLB.
 2.  **Authentication**: The **Agent Gateway** intercepts the request. It uses a custom `AgentgatewayPolicy` to validate the `X-API-Key` header against a Kubernetes Secret.
 3.  **Routing**: Validated requests are routed by the `HTTPRoute` to the internal `sandbox-api-service`.
-4.  **Backend Delegation**: The **API Server (FastAPI)** receives the request. Depending on the active backend (configured via `/backend/switch`), it delegates execution. For production, it proxies the request to the `opensandbox-server`.
+4.  **Backend Delegation**: The **API Server (FastAPI)** receives the request. Depending on the active backend (configured via `/api/switch`), it delegates execution. For production, it proxies the request to the `opensandbox-server`.
 5.  **Sandbox Provisioning**: The **OpenSandbox Server** communicates with the Kubernetes API (via the OpenSandbox Controller CRDs) to ensure an isolated pod (sandbox) is available.
 6.  **Code Execution**: The **Code Interpreter** pod, running behind gVisor isolation, receives the instructions, performs automated security scans on the payload, and executes the code via a specialized Jupyter kernel.
 

@@ -1,5 +1,72 @@
 // Main Dashboard Logic
 let backendKeys = {};
+let availableBackends = [];
+
+const fetchBackends = async () => {
+    try {
+        const response = await fetch("/config/backends.json");
+        if (response.ok) {
+            availableBackends = await response.json();
+            // Process backends to ensure they have all required fields
+            availableBackends = availableBackends.map(b => ({
+                ...b,
+                baseUrl: b.baseUrl || `/api/${b.id.toLowerCase()}`,
+                documentationUrl: b.documentationUrl || b.baseUrl || `/api/${b.id.toLowerCase()}/docs`
+            }));
+        } else {
+            console.warn("Backends config not found, using empty list.");
+            availableBackends = [];
+        }
+        renderBackends();
+        populateBackendSelect();
+    } catch (err) {
+        console.error("Failed to fetch backends config:", err);
+    }
+};
+
+const renderBackends = () => {
+    const container = document.getElementById("backends-container");
+    if (!container) return;
+
+    if (availableBackends.length === 0) {
+        container.innerHTML = '<div class="col-span-full py-12 text-center text-muted-foreground"><p>No backends configured.</p></div>';
+        return;
+    }
+
+    container.innerHTML = availableBackends.map(backend => `
+        <div class="aws-widget hover:border-primary/50 transition-colors group shadow-sm bg-card">
+            <div class="aws-widget-header bg-card">
+                <h3 class="aws-widget-title text-foreground text-base">
+                    <div class="bg-${backend.color || 'indigo'}-500/10 text-${backend.color || 'indigo'}-400 p-1.5 rounded-md text-xl mr-2">${backend.icon === 'terminal' ? '⚡' : '🌐'}</div> 
+                    ${backend.name}
+                </h3>
+            </div>
+            <div class="aws-widget-body bg-muted/5 group-hover:bg-card transition-colors">
+                <p class="text-sm text-foreground mb-4">${backend.description}</p>
+                <div class="flex gap-2">
+                    <button
+                        class="flex-1 bg-accent/10 border border-accent/20 text-accent font-semibold py-2 px-3 rounded text-xs hover:bg-accent/20 transition-all flex items-center justify-center gap-1.5"
+                        onclick="openScanner('${backend.id}', '${backend.baseUrl}')">
+                        <span>🔍</span> Quick Scan
+                    </button>
+                    <button
+                        class="flex-1 bg-muted border border-border text-foreground font-semibold py-2 px-3 rounded text-xs hover:bg-muted-foreground/10 transition-all"
+                        onclick="bindAndNavigate('${backend.id}', '${backend.documentationUrl}')">
+                        Go to docs
+                    </button>
+                </div>
+            </div>
+        </div>
+    `).join('');
+};
+
+const populateBackendSelect = () => {
+    const select = document.getElementById("key-backend");
+    if (!select) return;
+    select.innerHTML = availableBackends.map(b => `
+        <option value="${b.id}">${b.name} (${b.documentationUrl})</option>
+    `).join('');
+};
 
 const fetchAPIKeys = async () => {
     try {
@@ -20,6 +87,7 @@ const fetchAPIKeys = async () => {
                     const savedKey = localStorage.getItem(`bound_key_${key.id}`);
                     if (savedKey) {
                         backendKeys[key.backend] = savedKey;
+                        // Default to Z1_SANDBOX for execution token cookie
                         if (key.backend === 'Z1_SANDBOX' && !getCookie('execution_token')) {
                             document.cookie = `execution_token=${savedKey}; SameSite=Strict; Path=/`;
                         }
@@ -266,6 +334,13 @@ const submitCreateKey = async () => {
         document.getElementById("create-modal").classList.add("hidden");
         document.getElementById("reveal-modal").classList.remove("hidden");
         document.getElementById("new-key-display").textContent = data.api_key;
+        
+        // Update docs link in reveal modal
+        const selectedBackend = availableBackends.find(b => b.id === backend);
+        if (selectedBackend) {
+            document.getElementById("docs-link").href = selectedBackend.documentationUrl;
+        }
+
         showToast("API Key generated successfully!", "success");
     } catch (err) {
         showToast("Creation Failed: " + err.message, "error");
@@ -330,5 +405,6 @@ const showApplicationsPage = () => {
 
 window.onload = () => {
     initThemeUI();
+    fetchBackends();
     initAuth0();
 };

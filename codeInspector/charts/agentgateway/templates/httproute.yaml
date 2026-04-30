@@ -47,7 +47,7 @@ spec:
         value: /v1
     - path:
         type: PathPrefix
-        value: /backend/z1sandbox/v1
+        value: /api/z1sandbox/v1
     - path:
         type: PathPrefix
         value: /run
@@ -82,10 +82,10 @@ spec:
         value: /openapi.json
     - path:
         type: PathPrefix
-        value: /backend/z1sandbox/docs
+        value: /api/z1sandbox/docs
     - path:
         type: PathPrefix
-        value: /backend/z1sandbox/openapi.json
+        value: /api/z1sandbox/openapi.json
     backendRefs:
     - name: sandbox-api-service
       namespace: opensandbox-system

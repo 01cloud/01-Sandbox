@@ -1,11 +1,32 @@
 import os
 
-def opensandbox_base_url() -> str:
+def backend_mappings() -> dict[str, str]:
     """
-    Points directly to the internal Kubernetes service by default.
-    Using 'http://opensandbox-server:80' resolves locally inside the cluster.
+    Returns a mapping of backend IDs to their internal cluster URLs.
+    Can be extended via a JSON environment variable.
     """
-    return os.environ.get("BACKEND_URL_OPENSANDBOX", "http://opensandbox-server:80")
+    default_mappings = {
+        "z1sandbox": os.environ.get("BACKEND_URL_Z1SANDBOX", "http://opensandbox-server:80"),
+        "opensandbox": os.environ.get("BACKEND_URL_OPENSANDBOX", "http://opensandbox-server:80"),
+    }
+    
+    # Allow override/extension via JSON string
+    custom_json = os.environ.get("BACKEND_MAPPINGS_JSON")
+    if custom_json:
+        try:
+            import json
+            custom_mappings = json.loads(custom_json)
+            default_mappings.update(custom_mappings)
+        except Exception as e:
+            print(f"[config] Failed to parse BACKEND_MAPPINGS_JSON: {e}")
+            
+    return default_mappings
+
+def opensandbox_base_url(backend_id: str = "opensandbox") -> str:
+    """
+    Retrieves the internal URL for a specific backend ID.
+    """
+    return backend_mappings().get(backend_id, "http://opensandbox-server:80")
 
 
 def opensandbox_headers() -> dict[str, str]:

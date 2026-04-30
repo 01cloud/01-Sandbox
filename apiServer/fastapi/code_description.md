@@ -38,7 +38,7 @@ This module implements the **Strategy Pattern**.
 This is the "brain" of the application. It initializes the FastAPI app and sets up the routes.
 -   **App State**: Initializes the global `state.backend` based on configuration.
 -   **Native Routes**: Provides high-level, typed endpoints like `/v1/sandboxes`.
--   **Transparent Proxy**: Contains the `_do_proxy` helper which forwards any request under `/backend/z1sandbox/*` directly to the backend while injecting authentication and stripping unnecessary headers.
+-   **Transparent Proxy**: Contains the `_do_proxy` helper which forwards any request under `/api/z1sandbox/*` directly to the backend while injecting authentication and stripping unnecessary headers.
 -   **Dynamic Documentation**: Bridges the gap between the local API and the remote service by fetching and patching the backend's `openapi.json` on the fly.
 
 ---

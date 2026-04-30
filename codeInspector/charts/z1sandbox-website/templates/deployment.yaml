@@ -35,8 +35,8 @@ data:
             proxy_send_timeout 300s;
         }
 
-        location /backend/ {
-            proxy_pass http://{{ .Values.apiServiceName }}/backend/;
+        location /api/ {
+            proxy_pass http://{{ .Values.apiServiceName }}/api/;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -57,7 +57,7 @@ data:
         }
     }
   backends.json: |
-    {{ .Values.backends | toJson }}
+    {{ tpl (.Values.backends | toJson) . }}
 
 ---
 # ─────────────────────────────────────────────────────────────────────────────
