@@ -295,7 +295,8 @@ const submitCreateKey = async () => {
         return;
     }
 
-    if (ttlUnit === "hours") finalTtlHours = ttlValue;
+    if (ttlUnit === "minutes") finalTtlHours = ttlValue / 60;
+    else if (ttlUnit === "hours") finalTtlHours = ttlValue;
     else if (ttlUnit === "days") finalTtlHours = ttlValue * 24;
     else if (ttlUnit === "months") finalTtlHours = ttlValue * 24 * 30;
     else if (ttlUnit === "years") finalTtlHours = ttlValue * 24 * 365;

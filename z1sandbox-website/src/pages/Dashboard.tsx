@@ -135,7 +135,8 @@ const Dashboard = () => {
 
       let ttl_hours = -1;
       const val = parseInt(form.ttlValue);
-      if (form.ttl === "hours") ttl_hours = val;
+      if (form.ttl === "minutes") ttl_hours = val / 60;
+      else if (form.ttl === "hours") ttl_hours = val;
       else if (form.ttl === "days") ttl_hours = val * 24;
       else if (form.ttl === "months") ttl_hours = val * 24 * 30;
       else if (form.ttl === "years") ttl_hours = val * 24 * 365;
@@ -409,6 +410,7 @@ const Dashboard = () => {
                                 <SelectValue placeholder="Unit" />
                               </SelectTrigger>
                               <SelectContent className="rounded-xl border-border/50">
+                                <SelectItem value="minutes">Minutes</SelectItem>
                                 <SelectItem value="hours">Hours</SelectItem>
                                 <SelectItem value="days">Days</SelectItem>
                                 <SelectItem value="months">Months</SelectItem>

@@ -141,7 +141,8 @@ class AppState:
 
         # Sync Active Registry to Redis for line-rate validation
         if self.use_redis:
-            cursor.execute("SELECT id FROM api_keys WHERE is_revoked = 0")
+            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
+            cursor.execute("SELECT id FROM api_keys WHERE is_revoked = 0 AND expires_at > %s" if self.use_postgres else "SELECT id FROM api_keys WHERE is_revoked = 0 AND expires_at > ?", (now_iso,))
             active_jtis = cursor.fetchall()
             if active_jtis:
                 # Add all active JTIs to a Redis set called 'active_api_keys'
@@ -166,8 +167,8 @@ state.init_db()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Bootstrapping hook logs startup variables for transparency securely."""
-    print(f"[startup] OpenSandbox base URL default defined as → {opensandbox_base_url()}")
-    # Ensures connections start without hardcoded port overrides crashing locally.
+    # Launch the key janitor to purge expired keys automatically
+    asyncio.create_task(cleanup_expired_keys_task())
     yield
     print("[shutdown] Ceasing operations successfully...")
 
@@ -324,14 +325,15 @@ async def validate_token(request: Request):
                 return payload
             
             print(f"[Identity Bridge] Mapping Auth0 user {user_id} to their primary Developer API Key...")
+            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             conn = state.get_db_conn()
             cursor = conn.cursor()
             query = """
                 SELECT id FROM api_keys 
-                WHERE user_id = %s AND is_revoked = 0 
+                WHERE user_id = %s AND is_revoked = 0 AND expires_at > %s
                 ORDER BY created_at DESC LIMIT 1
-            """ if state.use_postgres else "SELECT id FROM api_keys WHERE user_id = ? AND is_revoked = 0 ORDER BY created_at DESC LIMIT 1"
-            cursor.execute(query, (user_id,))
+            """ if state.use_postgres else "SELECT id FROM api_keys WHERE user_id = ? AND is_revoked = 0 AND expires_at > ? ORDER BY created_at DESC LIMIT 1"
+            cursor.execute(query, (user_id, now_iso))
             row = cursor.fetchone()
             conn.close()
             
@@ -339,8 +341,8 @@ async def validate_token(request: Request):
                 jti = row[0]
                 print(f"[Identity Bridge] SUCCESS: Auth0 session now acting as Developer Key ID: {jti}")
             else:
-                print(f"[Identity Bridge] WARNING: No Developer Key found for {user_id}")
-                raise HTTPException(status_code=403, detail="No active Developer API Key found. Please create your FIRST API Key in this tab to enable sandbox operations.")
+                print(f"[Identity Bridge] WARNING: No active/non-expired Developer Key found for {user_id}")
+                raise HTTPException(status_code=403, detail="No active or non-expired Developer API Key found. Please create a NEW API Key to enable sandbox operations.")
 
         if not jti:
             raise HTTPException(status_code=401, detail="Invalid token: Missing JTI/Key ID")
@@ -354,9 +356,10 @@ async def validate_token(request: Request):
         
         # Step B: Fallback/Integrity check via Central Database
         if not is_valid:
+            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             conn = state.get_db_conn()
             cursor = conn.cursor()
-            query = "SELECT is_revoked FROM api_keys WHERE id = %s" if state.use_postgres else "SELECT is_revoked FROM api_keys WHERE id = ?"
+            query = "SELECT is_revoked, expires_at FROM api_keys WHERE id = %s" if state.use_postgres else "SELECT is_revoked, expires_at FROM api_keys WHERE id = ?"
             cursor.execute(query, (jti,))
             row = cursor.fetchone()
             conn.close()
@@ -366,6 +369,12 @@ async def validate_token(request: Request):
             
             if row[0] == 1:
                 raise HTTPException(status_code=401, detail="API Key has been revoked")
+                
+            # Check expiration timestamp
+            if row[1] < now_iso:
+                if state.use_redis:
+                    state.redis_client.srem("active_api_keys", jti)
+                raise HTTPException(status_code=401, detail="API Key has expired")
             
             # Self-healing Redis cache
             if state.use_redis:
@@ -433,6 +442,47 @@ async def update_last_used(jti: str):
         conn.close()
     except Exception as e:
         print(f"[background] Error updating last_used_at: {str(e)}")
+
+
+async def cleanup_expired_keys_task():
+    """
+    Background worker that purges expired keys from Postgres and Redis every hour.
+    This ensures the 'Back Door' is closed even if no one is currently trying to use the keys.
+    """
+    while True:
+        try:
+            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
+            print(f"[Janitor] Running cleanup for keys expired before {now_iso}...")
+            
+            conn = state.get_db_conn()
+            cursor = conn.cursor()
+            
+            # 1. Identify expired keys for Redis cleanup
+            query_find = "SELECT id FROM api_keys WHERE expires_at < %s" if state.use_postgres else "SELECT id FROM api_keys WHERE expires_at < ?"
+            cursor.execute(query_find, (now_iso,))
+            expired_ids = [row[0] for row in cursor.fetchall()]
+            
+            if expired_ids and state.use_redis:
+                for eid in expired_ids:
+                    state.redis_client.srem("active_api_keys", eid)
+                print(f"[Janitor] Removed {len(expired_ids)} expired keys from Redis")
+
+            # 2. Delete from Database
+            query_del = "DELETE FROM api_keys WHERE expires_at < %s" if state.use_postgres else "DELETE FROM api_keys WHERE expires_at < ?"
+            cursor.execute(query_del, (now_iso,))
+            deleted_count = cursor.rowcount
+            
+            conn.commit()
+            conn.close()
+            
+            if deleted_count > 0:
+                print(f"[Janitor] Successfully purged {deleted_count} expired keys from database.")
+                
+        except Exception as e:
+            print(f"[Janitor] Error during cleanup: {str(e)}")
+            
+        # Run every minute to handle short-lived keys (like 5-min TTL)
+        await asyncio.sleep(60)
 
 
 # ─────────────────────────────────────────────
@@ -795,15 +845,16 @@ async def list_user_api_keys(payload: dict = Depends(validate_token)):
     conn = state.get_db_conn()
     
     # Handle dict behavior difference between sqlite3 and psycopg2
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     if state.use_postgres:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-        query = "SELECT * FROM api_keys WHERE user_id = %s"
+        query = "SELECT * FROM api_keys WHERE user_id = %s AND expires_at > %s"
+        cursor.execute(query, (user_id, now_iso))
     else:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        query = "SELECT * FROM api_keys WHERE user_id = ?"
-        
-    cursor.execute(query, (user_id,))
+        query = "SELECT * FROM api_keys WHERE user_id = ? AND expires_at > ?"
+        cursor.execute(query, (user_id, now_iso))
     rows = cursor.fetchall()
     conn.close()
 
@@ -837,6 +888,10 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
     if req.ttl_hours == -1:
         expires_at = now + datetime.timedelta(days=365 * 100) # Effectively never expires
         status_msg = f"Key '{req.name}' generated successfully. Valid indefinitely."
+    elif req.ttl_hours < 1:
+        expires_at = now + datetime.timedelta(hours=req.ttl_hours)
+        minutes = int(req.ttl_hours * 60)
+        status_msg = f"Key '{req.name}' generated successfully. Valid for {minutes} minute(s)."
     else:
         expires_at = now + datetime.timedelta(hours=req.ttl_hours)
         status_msg = f"Key '{req.name}' generated successfully. Valid for {req.ttl_hours} hour(s)."
