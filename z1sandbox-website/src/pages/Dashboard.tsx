@@ -327,8 +327,8 @@ const Dashboard = () => {
               <div>
                 <CardTitle className="text-2xl font-black flex items-center gap-3">
                   Active Service Keys
-                  <Badge variant="outline" className="rounded-full bg-emerald-500/5 text-emerald-500 border-emerald-500/20 px-3 py-1 text-xs font-bold font-mono">
-                    {keys.length} ACTIVE
+                  <Badge variant="outline" className={`rounded-full px-3 py-1 text-xs font-bold font-mono ${keys.length >= 5 ? 'bg-destructive/5 text-destructive border-destructive/20' : 'bg-emerald-500/5 text-emerald-500 border-emerald-500/20'}`}>
+                    {keys.length} / 5 KEYS USED
                   </Badge>
                 </CardTitle>
                 <CardDescription className="text-base mt-2">Manage your production and development access tokens.</CardDescription>
@@ -423,9 +423,20 @@ const Dashboard = () => {
                           </div>
                         </div>
                       </div>
+                      {keys.length >= 5 && (
+                        <div className="p-4 rounded-2xl bg-destructive/5 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3">
+                          <ShieldCheck className="w-5 h-5" />
+                          <span>You have reached the limit of 5 API keys. Please delete an existing key to create a new one.</span>
+                        </div>
+                      )}
+
                       <DialogFooter className="mt-8 pt-6 border-t border-border/50">
-                        <Button className="w-full rounded-2xl h-12 font-bold" disabled={isCreating} onClick={handleCreateKey}>
-                          {isCreating ? <RefreshCw className="w-5 h-5 animate-spin" /> : "Generate Key"}
+                        <Button 
+                          className="w-full rounded-2xl h-12 font-bold" 
+                          disabled={isCreating || keys.length >= 5} 
+                          onClick={handleCreateKey}
+                        >
+                          {isCreating ? <RefreshCw className="w-5 h-5 animate-spin" /> : keys.length >= 5 ? "Limit Reached" : "Generate Key"}
                         </Button>
                       </DialogFooter>
                     </div>

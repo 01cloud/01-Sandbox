@@ -882,6 +882,18 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
     One-time reveal implementation.
     """
     user_id = payload.get("sub")
+    
+    # Check quota (Max 5 keys per user)
+    conn = state.get_db_conn()
+    cursor = conn.cursor()
+    query_count = "SELECT COUNT(*) FROM api_keys WHERE user_id = %s" if state.use_postgres else "SELECT COUNT(*) FROM api_keys WHERE user_id = ?"
+    cursor.execute(query_count, (user_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    
+    if count >= 5:
+        raise HTTPException(status_code=403, detail="API Key limit reached (Max 5). Please delete an existing key to create a new one.")
+
     conf = jwt_config()
     jti = str(uuid.uuid4())
     now = datetime.datetime.now(datetime.UTC)
