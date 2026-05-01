@@ -12,7 +12,7 @@ const reasons = [
     icon: Shield,
     title: "Security that actually holds up",
     description:
-      "Each run is isolated with gVisor, storage isn't shared between workloads, and scans run automatically in the background. Everything stays contained the way you'd expect.",
+      "Each run is isolated with a hardened runtime, storage isn't shared between workloads, and scans run automatically in the background. Everything stays contained the way you'd expect.",
   },
   {
     icon: Wand2,

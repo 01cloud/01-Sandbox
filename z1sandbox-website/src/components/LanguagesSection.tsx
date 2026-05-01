@@ -7,13 +7,20 @@ const languages = [
   { name: "Rust", icon: "🦀" },
   { name: "C++", icon: "📁" },
   { name: "Java", icon: "☕" },
+  { name: "Ruby", icon: "💎" },
+  { name: "PHP", icon: "🐘" },
+  { name: "Swift", icon: "🐦" },
+  { name: "TypeScript", icon: "🟦" },
   { name: "Bash", icon: "🐚" },
   { name: "YAML", icon: "📜" },
+  { name: "SQL", icon: "💾" },
+  { name: "Dockerfile", icon: "🐳" },
+  { name: "Kubernetes", icon: "☸️" },
 ];
 
 const LanguagesSection = () => {
   return (
-    <section className="py-20 border-y border-border/50 bg-secondary/30 overflow-hidden">
+    <section className="py-20 border-y border-border/50 overflow-hidden">
       <div className="container mx-auto px-6">
         <div className="flex flex-col md:flex-row items-center justify-between gap-12">
           <div className="md:w-1/3">
@@ -21,21 +28,21 @@ const LanguagesSection = () => {
               Multi-Language <span className="text-gradient">Ready</span>
             </h3>
             <p className="text-muted-foreground text-sm text-center md:text-left leading-relaxed">
-              Native support for top programming environments. 01 automatically detects the runtime and provisions the correct environment in milliseconds.
+              Native support for top programming environments and infrastructure tools. 01 Sandbox automatically detects the runtime and provisions the correct environment in milliseconds.
             </p>
           </div>
-          <div className="md:w-2/3 flex flex-wrap justify-center md:justify-end gap-x-4 sm:gap-x-8 gap-y-6">
+          <div className="md:w-2/3 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
             {languages.map((lang, i) => (
               <motion.div
                 key={lang.name}
-                initial={{ opacity: 0, scale: 0.9 }}
-                whileInView={{ opacity: 1, scale: 1 }}
+                initial={{ opacity: 0, y: 10 }}
+                whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true }}
-                transition={{ delay: i * 0.05 }}
-                className="flex items-center gap-2 px-5 py-3 rounded-2xl bg-background border border-border/60 hover:border-accent/40 shadow-sm transition-all text-foreground/80 hover:text-foreground"
+                transition={{ delay: i * 0.03 }}
+                className="flex items-center gap-3 px-4 py-3 rounded-xl bg-card/40 backdrop-blur-sm border border-border/50 hover:border-accent/40 hover:bg-card/60 shadow-sm hover:shadow-accent/5 transition-all group cursor-default"
               >
-                <span className="text-xl">{lang.icon}</span>
-                <span className="text-sm font-bold tracking-tight">{lang.name}</span>
+                <span className="text-xl group-hover:scale-110 transition-transform duration-300">{lang.icon}</span>
+                <span className="text-xs font-bold tracking-tight text-foreground/70 group-hover:text-foreground transition-colors">{lang.name}</span>
               </motion.div>
             ))}
           </div>

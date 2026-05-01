@@ -16,7 +16,7 @@ CodeInspector comes equipped with an advanced asynchronous security scanning pip
 
 **Example Request:**
 ```bash
-curl -X POST "https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox/v1/scan-jobs" \
+curl -X POST "https://dipper-shun-glowing.ngrok-free.dev/api/z1sandbox/v1/scan-jobs" \
   -H "Authorization: Bearer xxxxxxxxx" \
   -H "Content-Type: application/json" \
   -d '{
@@ -55,7 +55,7 @@ Here is a practical example of how to orchestrate the API calls using Python's `
 import requests
 import time
 
-BASE_URL = "https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox"
+BASE_URL = "https://dipper-shun-glowing.ngrok-free.dev/api/z1sandbox"
 HEADERS = {
     "Authorization": "Bearer YOUR_API_TOKEN",
     "Content-Type": "application/json"
@@ -118,7 +118,7 @@ CodeInspector provides an auto-generated, interactive Swagger UI where you can e
 
 **Accessing Swagger UI:**
 You can access the Swagger UI through the following public URL:
-- **Public API Docs**: `https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox/docs`
+- **Public API Docs**: `https://dipper-shun-glowing.ngrok-free.dev/api/z1sandbox/docs`
 
 
 **How to Use:**

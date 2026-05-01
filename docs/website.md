@@ -130,7 +130,7 @@ Integrate Z1 Agent Sandbox into your workflow with just a few lines of code:
 import requests
 import time
 
-BASE_URL = "https://your-api-gateway.com/backend/z1sandbox"
+BASE_URL = "https://your-api-gateway.com/api/z1sandbox"
 HEADERS = {"Authorization": "Bearer YOUR_API_TOKEN"}
 
 # 1. Submit the scan job (Instant response)
@@ -148,7 +148,7 @@ while True:
 
 ### Interactive Exploration
 Access our auto-generated, interactive **Swagger UI** to test endpoints directly from your browser:
-- **Public API Docs**: `https://your-api-gateway.com/backend/z1sandbox/docs`
+- **Public API Docs**: `https://your-api-gateway.com/api/z1sandbox/docs`
 
 ---
 

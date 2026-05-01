@@ -152,7 +152,7 @@ curl -X GET "https://dipper-shun-glowing.ngrok-free.dev/health" \
 
 **cURL Example (CLI): POST request for scan job**
 ```
-curl -X POST "https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox/v1/scan-jobs" \
+curl -X POST "https://dipper-shun-glowing.ngrok-free.dev/api/z1sandbox/v1/scan-jobs" \
   -H "Authorization: Bearer N2YwMDIxZTEtNGUzNS1jNzgzLTRkYjAtYjE2YzRkZGVmNjcy" \
   -H "Content-Type: application/json" \
   -d '{

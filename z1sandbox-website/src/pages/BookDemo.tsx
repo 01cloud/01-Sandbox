@@ -75,7 +75,7 @@ const BookDemo = () => {
   };
 
   const benefits = [
-    { title: "Hardened GVisor Isolation", desc: "Execute any AI-generated code in kernel-isolated pods that prevent access to host resources and peer containers." },
+    { title: "Hardened Isolation", desc: "Execute any AI-generated code in kernel-isolated pods that prevent access to host resources and peer containers." },
     { title: "Real-time Security Toolchain", desc: "Every execution job is automatically audited by Semgrep, Gitleaks, and Bandit to detect vulnerabilities at the edge." },
     { title: "High-Concurrency Low Latency", desc: "Optimized for AI agent workflows with millisecond-level pod provisioning and synchronous result delivery." },
   ];
@@ -118,7 +118,7 @@ const BookDemo = () => {
               <div className="p-8 rounded-[2rem] bg-secondary/30 border border-border/50 backdrop-blur-sm max-w-md">
                 <h4 className="text-xs font-black uppercase tracking-[0.2em] text-foreground mb-4">What to expect</h4>
                 <p className="text-sm text-muted-foreground leading-relaxed">
-                  A deep dive into our gVisor orchestration, synchronous security toolchain, and how to integrate Agent Sandbox into your multi-tenant application workflows.
+                  A deep dive into our isolation technology, synchronous security toolchain, and how to integrate Agent Sandbox into your multi-tenant application workflows.
                 </p>
               </div>
             </motion.div>

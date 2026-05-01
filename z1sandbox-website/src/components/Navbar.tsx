@@ -27,7 +27,8 @@ const Navbar = () => {
 
   return (
     <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[min(1200px,calc(100%-2rem))] sm:w-[min(1200px,calc(100%-3rem))] transition-all duration-300">
-      <div className={`border border-border/70 bg-background/80 backdrop-blur-xl shadow-[0_8px_32px_-12px_hsl(var(--primary)/0.1)] transition-all duration-500 overflow-hidden ${open ? 'rounded-[2rem]' : 'rounded-full'}`}>
+      <div className={`relative border border-white/10 bg-background/60 backdrop-blur-2xl shadow-[0_8px_32px_-12px_rgba(0,0,0,0.5)] transition-all duration-500 overflow-hidden ${open ? 'rounded-[2.5rem]' : 'rounded-full'}`}>
+        <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 via-transparent to-white/5 pointer-events-none" />
         <div className="px-6 sm:px-8 flex items-center justify-between h-16 sm:h-18">
           <a href="/" className="font-display font-extrabold text-xl tracking-tight flex items-center gap-3 transition-opacity hover:opacity-90">
             <div className="w-10 h-10 rounded-[10px] bg-foreground/5 flex items-center justify-center shadow-sm ring-1 ring-border/50 overflow-hidden p-1.5 transition-transform group-hover:scale-110">
@@ -40,11 +41,15 @@ const Navbar = () => {
             <span className="hidden sm:inline bg-gradient-to-br from-foreground to-foreground/70 bg-clip-text text-transparent transform-gpu">Sandbox</span>
           </a>
 
-          <div className="hidden lg:flex items-center gap-8 text-sm font-medium text-muted-foreground/90">
+          <div className="hidden md:flex items-center gap-1 xl:gap-2 text-sm font-medium">
             {links.map((l) => (
-              <a key={l.href} href={l.href} className="hover:text-foreground transition-colors relative group py-2">
+              <a 
+                key={l.href} 
+                href={l.href} 
+                className="px-4 py-2 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-foreground/[0.03] transition-all relative group"
+              >
                 {l.label}
-                <span className="absolute bottom-1 left-0 w-0 h-0.5 bg-accent/60 transition-all duration-300 group-hover:w-full" />
+                <span className="absolute bottom-1.5 left-4 right-4 h-0.5 bg-primary/40 scale-x-0 group-hover:scale-x-100 transition-transform origin-left" />
               </a>
             ))}
           </div>
@@ -58,28 +63,31 @@ const Navbar = () => {
                 {isAuthenticated ? (
                   <DropdownMenu>
                     <DropdownMenuTrigger className="focus:outline-none">
-                      <Avatar className="w-9 h-9 border border-border/50 hover:ring-2 hover:ring-primary/20 transition-all">
-                        <AvatarImage src={user?.picture} alt={user?.name} />
-                        <AvatarFallback><User className="w-4 h-4" /></AvatarFallback>
-                      </Avatar>
+                      <div className="flex items-center gap-2 p-1 pr-3 rounded-full bg-foreground/[0.03] border border-border/50 hover:bg-foreground/[0.05] transition-all">
+                        <Avatar className="w-8 h-8 border border-border/50">
+                          <AvatarImage src={user?.picture} alt={user?.name} />
+                          <AvatarFallback><User className="w-4 h-4" /></AvatarFallback>
+                        </Avatar>
+                        <span className="text-xs font-bold truncate max-w-[80px]">{user?.given_name || user?.name?.split(' ')[0]}</span>
+                      </div>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-56 mt-2 rounded-[1.25rem] p-2 backdrop-blur-xl bg-background/90 border-border/50 shadow-2xl">
-                      <DropdownMenuLabel className="px-3 py-2">
+                    <DropdownMenuContent align="end" className="w-56 mt-4 rounded-[1.5rem] p-2 backdrop-blur-2xl bg-background/90 border-white/10 shadow-2xl">
+                      <DropdownMenuLabel className="px-3 py-3">
                         <div className="flex flex-col gap-0.5">
-                          <p className="text-sm font-semibold truncate">{user?.name}</p>
-                          <p className="text-[10px] text-muted-foreground truncate uppercase tracking-widest font-black opacity-60">{user?.email}</p>
+                          <p className="text-sm font-black tracking-tight">{user?.name}</p>
+                          <p className="text-[10px] text-muted-foreground truncate uppercase tracking-[0.15em] font-bold opacity-50">{user?.email}</p>
                         </div>
                       </DropdownMenuLabel>
-                      <DropdownMenuSeparator className="bg-border/50" />
-                      <DropdownMenuItem className="rounded-xl px-3 py-2.5 focus:bg-accent/10 focus:text-accent font-medium cursor-pointer" asChild>
+                      <DropdownMenuSeparator className="bg-border/50 mx-2" />
+                      <DropdownMenuItem className="rounded-xl px-3 py-3 focus:bg-primary/10 focus:text-primary font-bold cursor-pointer" asChild>
                         <a href="/dashboard" className="flex items-center gap-3">
                           <LayoutDashboard className="w-4 h-4" />
-                          Dashboard
+                          Management Console
                         </a>
                       </DropdownMenuItem>
-                      <DropdownMenuSeparator className="bg-border/50" />
+                      <DropdownMenuSeparator className="bg-border/50 mx-2" />
                       <DropdownMenuItem 
-                        className="rounded-xl px-3 py-2.5 focus:bg-destructive/10 focus:text-destructive font-medium cursor-pointer text-destructive"
+                        className="rounded-xl px-3 py-3 focus:bg-destructive/10 focus:text-destructive font-bold cursor-pointer text-destructive/80"
                         onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
                       >
                         <LogOut className="w-4 h-4 mr-3" />
@@ -90,7 +98,7 @@ const Navbar = () => {
                 ) : (
                   <button
                     onClick={() => loginWithRedirect()}
-                    className="text-sm font-medium text-muted-foreground hover:text-foreground transition-colors px-4 py-2 hover:bg-secondary/50 rounded-full flex items-center gap-2"
+                    className="text-sm font-bold text-muted-foreground/80 hover:text-foreground transition-all px-5 py-2 hover:bg-foreground/[0.05] rounded-full flex items-center gap-2"
                   >
                     <LogIn className="w-4 h-4" />
                     Sign In
@@ -101,9 +109,10 @@ const Navbar = () => {
 
             <a
               href="/book-a-demo"
-              className="text-sm font-semibold px-5 py-2.5 rounded-full pill-badge text-foreground hover:scale-[1.02] active:scale-95 transition-all shadow-lg shadow-accent/5 border border-white/10"
+              className="group relative inline-flex items-center justify-center px-6 py-2.5 rounded-full bg-foreground text-background font-bold text-sm transition-all hover:scale-[1.05] active:scale-95 overflow-hidden"
             >
-              Book a Demo
+              <div className="absolute inset-0 bg-gradient-to-r from-primary via-accent to-primary opacity-0 group-hover:opacity-100 transition-opacity duration-500 animate-gradient" />
+              <span className="relative">Book a Demo</span>
             </a>
           </div>
 
@@ -119,9 +128,9 @@ const Navbar = () => {
           </div>
         </div>
 
-        <div className={`grid transition-all duration-500 ease-in-out ${open ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0'} max-h-[calc(100vh-6rem)] overflow-y-auto custom-scrollbar`}>
-          <div className="overflow-hidden">
-            <div className="px-8 pb-8 pt-2 flex flex-col gap-6">
+        <div className={`grid transition-all duration-500 ease-in-out ${open ? 'grid-rows-[1fr] opacity-100 py-4' : 'grid-rows-[0fr] opacity-0'} max-h-[calc(100vh-6rem)] overflow-y-auto custom-scrollbar`}>
+          <div className="min-h-0 overflow-hidden">
+            <div className="px-6 sm:px-8 pb-8 pt-2 flex flex-col gap-5">
               <div className="grid grid-cols-2 gap-x-4 gap-y-4">
                 {links.map((l) => (
                   <a key={l.href} href={l.href} onClick={() => setOpen(false)} className="text-base font-semibold text-muted-foreground hover:text-foreground transition-colors p-3 rounded-2xl bg-secondary/30">

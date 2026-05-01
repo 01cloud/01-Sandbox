@@ -31,7 +31,7 @@ const Terms = () => {
                 <ul className="list-disc pl-6 space-y-3 text-muted-foreground">
                   <li>Developing, executing, or distributing malware, ransomware, or any harmful software.</li>
                   <li>Performing unauthorized security research or DDoS attacks on third-party systems.</li>
-                  <li>Circumventing kernel-level isolation (gVisor) or accessing host infrastructure.</li>
+                  <li>Circumventing kernel-level isolation or accessing host infrastructure.</li>
                   <li>Engaging in illegal activities or violating the rights of others.</li>
                 </ul>
               </section>

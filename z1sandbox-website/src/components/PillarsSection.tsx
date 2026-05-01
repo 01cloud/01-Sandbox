@@ -6,7 +6,7 @@ const pillars = [
     icon: ShieldCheck,
     title: "Kernel-Level Isolation",
     description:
-      "Powered by gVisor (runsc),  Sandbox provides a strong layer of defense. Vulnerabilities are trapped within the sandbox kernel, protecting host infrastructure from malicious actors.",
+      "Powered by a secure, isolated runtime,  Sandbox provides a strong layer of defense. Vulnerabilities are trapped within the sandbox kernel, protecting host infrastructure from malicious actors.",
   },
   {
     icon: Rocket,

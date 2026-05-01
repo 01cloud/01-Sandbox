@@ -10,7 +10,7 @@ agentgateway:
   namespace: agentgateway-system
   httproute:
     hostnames:
-      - dipper-shun-glowing.ngrok-free.dev
+      - shininess-enroll-going.ngrok-free.dev
     backendService:
       name: sandbox-api-service
       port: 80
@@ -79,9 +79,9 @@ apiServer:
   deployment:
     replicaCount: 1
     image:
-      repository: fastapi
+      repository: kamalberrybytes/sandboxapi
       tag: "1.0.0"
-      pullPolicy: IfNotPresent
+      pullPolicy: Always
     resources:
       requests:
         cpu: "100m"
@@ -143,9 +143,9 @@ z1sandbox-website:
   namespace: opensandbox-system
   replicaCount: 1
   image:
-    repository: z1-sandbox
+    repository: kamalberrybytes/z1sandbox-website
     tag: "1.0.0"
-    pullPolicy: Never
+    pullPolicy: Always
   service:
     type: ClusterIP
     port: 80
@@ -163,23 +163,26 @@ z1sandbox-website:
     - id: "Z1_SANDBOX"
       name: "01 Sandbox"
       description: "Active remote backend for live code evaluation and execution workloads."
-      baseUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox"
-      documentationUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/z1sandbox/docs"
+      baseUrl: "https://shininess-enroll-going.ngrok-free.dev/api/z1sandbox"
+      documentationUrl: "https://shininess-enroll-going.ngrok-free.dev/api/z1sandbox/docs"
       icon: "terminal"
       color: "indigo"
+    # To use absolute URLs that automatically update with your hostname:
+    # baseUrl: "https://{{ index .Values.agentgateway.httproute.hostnames 0 }}/api/z1sandbox"
+    
     # - id: "OPEN_SANDBOX"
     #   name: "OpenSandbox"
     #   description: "Distributed scaling cluster configuration and backend telemetry service."
-    #   baseUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/opensandbox"
-    #   documentationUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/opensandbox/docs"
+    #   baseUrl: "/api/opensandbox"
+    #   documentationUrl: "/api/opensandbox/docs"
     #   icon: "box"
     #   color: "emerald"
     
     # - id: "TENCEND"
     #   name: "Tencend"
     #   description: "Distributed scaling cluster configuration and backend telemetry service."
-    #   baseUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/tencend"
-    #   documentationUrl: "https://dipper-shun-glowing.ngrok-free.dev/backend/tencend/docs"
+    #   baseUrl: "/api/tencend"
+    #   documentationUrl: "/api/tencend/docs"
     #   icon: "box"
     #   color: "emerald"
     
@@ -224,8 +227,9 @@ opensandbox:
   controller:
     replicaCount: 1
     image:
-      repository: opensandbox-controller
+      repository: kamalberrybytes/opensandbox-controller
       tag: 1.0.0
+      pullPolicy: Always
     resources:
       requests:
         cpu: 100m
@@ -235,9 +239,11 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
+    sandboxImage: "kamalberrybytes/codeinterpreter:1.0.0"
     image:
-      repository: opensandbox-server
+      repository: kamalberrybytes/opensandbox-server
       tag: 1.0.0
+      pullPolicy: Always
     resources:
       requests:
         cpu: 100m
@@ -261,7 +267,7 @@ opensandboxResourcePool:
   pool:
     name: my-sandbox-pool
     container:
-      image: codeinterpreter:3.1.0
+      image: kamalberrybytes/codeinterpreter:1.0.0
       ports:
         - containerPort: 44772
         - containerPort: 54321

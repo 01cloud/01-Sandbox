@@ -6,7 +6,7 @@ A clean, simplified proxy API specifically designed to forward traffic
 to the internal OpenSandbox backend.
 
 It removes all hardcoded sandbox routing (like /sandboxes, /batched),
-instead relying completely transparently on `/backend/z1sandbox/{proxy_path}` 
+instead relying completely transparently on `/api/z1sandbox/{proxy_path}` 
 to communicate with the `opensandbox-server` kubernetes service.
 """
 
@@ -128,6 +128,8 @@ class AppState:
                 )
             """)
         
+        conn.commit()
+        
         # Schema Guard: Ensure user_email exists (Migration)
         try:
             cursor.execute("ALTER TABLE api_keys ADD COLUMN user_email TEXT" if self.use_postgres else "ALTER TABLE api_keys ADD COLUMN user_email TEXT")
@@ -139,7 +141,8 @@ class AppState:
 
         # Sync Active Registry to Redis for line-rate validation
         if self.use_redis:
-            cursor.execute("SELECT id FROM api_keys WHERE is_revoked = 0")
+            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
+            cursor.execute("SELECT id FROM api_keys WHERE is_revoked = 0 AND expires_at > %s" if self.use_postgres else "SELECT id FROM api_keys WHERE is_revoked = 0 AND expires_at > ?", (now_iso,))
             active_jtis = cursor.fetchall()
             if active_jtis:
                 # Add all active JTIs to a Redis set called 'active_api_keys'
@@ -164,8 +167,8 @@ state.init_db()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Bootstrapping hook logs startup variables for transparency securely."""
-    print(f"[startup] OpenSandbox base URL default defined as → {opensandbox_base_url()}")
-    # Ensures connections start without hardcoded port overrides crashing locally.
+    # Launch the key janitor to purge expired keys automatically
+    asyncio.create_task(cleanup_expired_keys_task())
     yield
     print("[shutdown] Ceasing operations successfully...")
 
@@ -195,7 +198,7 @@ async def log_headers(request: Request, call_next):
     return response
 @app.middleware("http")
 async def cookie_auth_redirect_middleware(request: Request, call_next):
-    if request.url.path in ["/docs", "/backend/z1sandbox/docs"]:
+    if request.url.path == "/docs" or (request.url.path.startswith("/api/") and request.url.path.endswith("/docs")):
         cookie_val = request.cookies.get("inspector_auth")
         if not cookie_val:
             return RedirectResponse(url="/", status_code=307)
@@ -233,7 +236,7 @@ async def validate_token(request: Request):
     # 1. Path-Aware Enforcement: Decide if we allow Cookie Fallbacks
     path = request.url.path
     # Execution routes MUST use a header. No 'Ghost Authorization' via cookies allowed for execution.
-    is_execution_route = path.startswith("/v1/run") or ("/backend/z1sandbox/" in path and "/docs" not in path and "/openapi.json" not in path)
+    is_execution_route = path.startswith("/v1/run") or ("/api/z1sandbox/" in path and "/docs" not in path and "/openapi.json" not in path)
     
     auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
     raw_token = None
@@ -322,14 +325,15 @@ async def validate_token(request: Request):
                 return payload
             
             print(f"[Identity Bridge] Mapping Auth0 user {user_id} to their primary Developer API Key...")
+            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             conn = state.get_db_conn()
             cursor = conn.cursor()
             query = """
                 SELECT id FROM api_keys 
-                WHERE user_id = %s AND is_revoked = 0 
+                WHERE user_id = %s AND is_revoked = 0 AND expires_at > %s
                 ORDER BY created_at DESC LIMIT 1
-            """ if state.use_postgres else "SELECT id FROM api_keys WHERE user_id = ? AND is_revoked = 0 ORDER BY created_at DESC LIMIT 1"
-            cursor.execute(query, (user_id,))
+            """ if state.use_postgres else "SELECT id FROM api_keys WHERE user_id = ? AND is_revoked = 0 AND expires_at > ? ORDER BY created_at DESC LIMIT 1"
+            cursor.execute(query, (user_id, now_iso))
             row = cursor.fetchone()
             conn.close()
             
@@ -337,8 +341,8 @@ async def validate_token(request: Request):
                 jti = row[0]
                 print(f"[Identity Bridge] SUCCESS: Auth0 session now acting as Developer Key ID: {jti}")
             else:
-                print(f"[Identity Bridge] WARNING: No Developer Key found for {user_id}")
-                raise HTTPException(status_code=403, detail="No active Developer API Key found. Please create your FIRST API Key in this tab to enable sandbox operations.")
+                print(f"[Identity Bridge] WARNING: No active/non-expired Developer Key found for {user_id}")
+                raise HTTPException(status_code=403, detail="No active or non-expired Developer API Key found. Please create a NEW API Key to enable sandbox operations.")
 
         if not jti:
             raise HTTPException(status_code=401, detail="Invalid token: Missing JTI/Key ID")
@@ -352,9 +356,10 @@ async def validate_token(request: Request):
         
         # Step B: Fallback/Integrity check via Central Database
         if not is_valid:
+            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             conn = state.get_db_conn()
             cursor = conn.cursor()
-            query = "SELECT is_revoked FROM api_keys WHERE id = %s" if state.use_postgres else "SELECT is_revoked FROM api_keys WHERE id = ?"
+            query = "SELECT is_revoked, expires_at FROM api_keys WHERE id = %s" if state.use_postgres else "SELECT is_revoked, expires_at FROM api_keys WHERE id = ?"
             cursor.execute(query, (jti,))
             row = cursor.fetchone()
             conn.close()
@@ -364,6 +369,12 @@ async def validate_token(request: Request):
             
             if row[0] == 1:
                 raise HTTPException(status_code=401, detail="API Key has been revoked")
+                
+            # Check expiration timestamp
+            if row[1] < now_iso:
+                if state.use_redis:
+                    state.redis_client.srem("active_api_keys", jti)
+                raise HTTPException(status_code=401, detail="API Key has expired")
             
             # Self-healing Redis cache
             if state.use_redis:
@@ -431,6 +442,47 @@ async def update_last_used(jti: str):
         conn.close()
     except Exception as e:
         print(f"[background] Error updating last_used_at: {str(e)}")
+
+
+async def cleanup_expired_keys_task():
+    """
+    Background worker that purges expired keys from Postgres and Redis every hour.
+    This ensures the 'Back Door' is closed even if no one is currently trying to use the keys.
+    """
+    while True:
+        try:
+            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
+            print(f"[Janitor] Running cleanup for keys expired before {now_iso}...")
+            
+            conn = state.get_db_conn()
+            cursor = conn.cursor()
+            
+            # 1. Identify expired keys for Redis cleanup
+            query_find = "SELECT id FROM api_keys WHERE expires_at < %s" if state.use_postgres else "SELECT id FROM api_keys WHERE expires_at < ?"
+            cursor.execute(query_find, (now_iso,))
+            expired_ids = [row[0] for row in cursor.fetchall()]
+            
+            if expired_ids and state.use_redis:
+                for eid in expired_ids:
+                    state.redis_client.srem("active_api_keys", eid)
+                print(f"[Janitor] Removed {len(expired_ids)} expired keys from Redis")
+
+            # 2. Delete from Database
+            query_del = "DELETE FROM api_keys WHERE expires_at < %s" if state.use_postgres else "DELETE FROM api_keys WHERE expires_at < ?"
+            cursor.execute(query_del, (now_iso,))
+            deleted_count = cursor.rowcount
+            
+            conn.commit()
+            conn.close()
+            
+            if deleted_count > 0:
+                print(f"[Janitor] Successfully purged {deleted_count} expired keys from database.")
+                
+        except Exception as e:
+            print(f"[Janitor] Error during cleanup: {str(e)}")
+            
+        # Run every minute to handle short-lived keys (like 5-min TTL)
+        await asyncio.sleep(60)
 
 
 # ─────────────────────────────────────────────
@@ -581,18 +633,18 @@ def run_code(req: RunRequest):
 # 4. OpenSandbox Proxy Forwarding & Docs
 # ─────────────────────────────────────────────
 
-@app.get("/backend/z1sandbox/docs", include_in_schema=False, dependencies=[Depends(validate_token)])
-async def get_backend_docs():
+@app.get("/api/{backend_id}/docs", include_in_schema=False, dependencies=[Depends(validate_token)])
+async def get_backend_docs(backend_id: str):
     """
     Renders actual upstream OpenSandbox Swagger API with custom authentication logic.
     """
-    return render_swagger_ui("/backend/z1sandbox/openapi.json", "Z1 Sandbox — Remote API Docs")
+    return render_swagger_ui(f"/api/{backend_id}/openapi.json", f"{backend_id.upper()} — Remote API Docs")
 
 
-@app.get("/backend/z1sandbox/openapi.json", include_in_schema=False, dependencies=[Depends(validate_token)])
-async def get_backend_openapi_spec():
+@app.get("/api/{backend_id}/openapi.json", include_in_schema=False, dependencies=[Depends(validate_token)])
+async def get_backend_openapi_spec(backend_id: str):
     """Translates and patches explicitly upstream OpenAPI spec."""
-    base_url = opensandbox_base_url()
+    base_url = opensandbox_base_url(backend_id)
 
     for spec_path in ["/openapi.json", "/v1/openapi.json", "/docs/openapi.json"]:
         try:
@@ -600,7 +652,7 @@ async def get_backend_openapi_spec():
                 r = await client.get(f"{base_url}{spec_path}")
                 if r.status_code == 200:
                     spec = r.json()
-                    spec["servers"] = [{"url": "/backend/z1sandbox"}]
+                    spec["servers"] = [{"url": f"/api/{backend_id}"}]
                     spec.setdefault("components", {})
                     spec["components"].setdefault("securitySchemes", {})
                     spec["components"]["securitySchemes"]["BearerAuth"] = {
@@ -614,12 +666,12 @@ async def get_backend_openapi_spec():
         except Exception:
             continue
 
-    raise HTTPException(status_code=404, detail=f"Target upstream openapi.json not found on {base_url}")
+    raise HTTPException(status_code=404, detail=f"Target upstream openapi.json not found on {base_url} for backend {backend_id}")
 
 
-async def _do_proxy(proxy_path: str, request: Request):
+async def _do_proxy(backend_id: str, proxy_path: str, request: Request):
     """Internal proxy routing logic forwarding transparently upstream."""
-    base_url = opensandbox_base_url()
+    base_url = opensandbox_base_url(backend_id)
     target_url = f"{base_url.rstrip('/')}/{proxy_path}"
     
     params = dict(request.query_params)
@@ -658,38 +710,12 @@ async def _do_proxy(proxy_path: str, request: Request):
             )
 
 
-@app.get("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy GET request", dependencies=[Depends(validate_token)])
-async def proxy_get(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.post("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy POST request", dependencies=[Depends(validate_token)])
-async def proxy_post(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.put("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PUT request", dependencies=[Depends(validate_token)])
-async def proxy_put(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.delete("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy DELETE request", dependencies=[Depends(validate_token)])
-async def proxy_delete(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.patch("/backend/z1sandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="Proxy PATCH request", dependencies=[Depends(validate_token)])
-async def proxy_patch(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-# OpenSandbox Cluster Proxy Routes
-@app.get("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="OpenSandbox Proxy GET", dependencies=[Depends(validate_token)])
-async def opensandbox_proxy_get(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.post("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="OpenSandbox Proxy POST", dependencies=[Depends(validate_token)])
-async def opensandbox_proxy_post(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
-
-@app.delete("/backend/opensandbox/{proxy_path:path}", tags=["Proxy Backend"], summary="OpenSandbox Proxy DELETE", dependencies=[Depends(validate_token)])
-async def opensandbox_proxy_delete(proxy_path: str, request: Request):
-    return await _do_proxy(proxy_path, request)
+@app.api_route("/api/{backend_id}/{proxy_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"], tags=["Proxy Backend"], summary="Dynamic Proxy Request", dependencies=[Depends(validate_token)])
+async def dynamic_proxy(backend_id: str, proxy_path: str, request: Request):
+    """
+    Catch-all dynamic proxy route that forwards traffic to any registered backend.
+    """
+    return await _do_proxy(backend_id, proxy_path, request)
 
 
 # ─────────────────────────────────────────────
@@ -819,15 +845,16 @@ async def list_user_api_keys(payload: dict = Depends(validate_token)):
     conn = state.get_db_conn()
     
     # Handle dict behavior difference between sqlite3 and psycopg2
+    now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     if state.use_postgres:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-        query = "SELECT * FROM api_keys WHERE user_id = %s"
+        query = "SELECT * FROM api_keys WHERE user_id = %s AND expires_at > %s"
+        cursor.execute(query, (user_id, now_iso))
     else:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        query = "SELECT * FROM api_keys WHERE user_id = ?"
-        
-    cursor.execute(query, (user_id,))
+        query = "SELECT * FROM api_keys WHERE user_id = ? AND expires_at > ?"
+        cursor.execute(query, (user_id, now_iso))
     rows = cursor.fetchall()
     conn.close()
 
@@ -855,12 +882,28 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
     One-time reveal implementation.
     """
     user_id = payload.get("sub")
+    
+    # Check quota (Max 5 keys per user)
+    conn = state.get_db_conn()
+    cursor = conn.cursor()
+    query_count = "SELECT COUNT(*) FROM api_keys WHERE user_id = %s" if state.use_postgres else "SELECT COUNT(*) FROM api_keys WHERE user_id = ?"
+    cursor.execute(query_count, (user_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    
+    if count >= 5:
+        raise HTTPException(status_code=403, detail="API Key limit reached (Max 5). Please delete an existing key to create a new one.")
+
     conf = jwt_config()
     jti = str(uuid.uuid4())
     now = datetime.datetime.now(datetime.UTC)
     if req.ttl_hours == -1:
         expires_at = now + datetime.timedelta(days=365 * 100) # Effectively never expires
         status_msg = f"Key '{req.name}' generated successfully. Valid indefinitely."
+    elif req.ttl_hours < 1:
+        expires_at = now + datetime.timedelta(hours=req.ttl_hours)
+        minutes = int(req.ttl_hours * 60)
+        status_msg = f"Key '{req.name}' generated successfully. Valid for {minutes} minute(s)."
     else:
         expires_at = now + datetime.timedelta(hours=req.ttl_hours)
         status_msg = f"Key '{req.name}' generated successfully. Valid for {req.ttl_hours} hour(s)."

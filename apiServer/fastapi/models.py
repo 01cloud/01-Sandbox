@@ -108,7 +108,7 @@ class APIKeyCreateRequest(BaseModel):
     """Payload to create a new manageable API key."""
     name: str = Field(..., example="Prod-Scanner-Key")
     backend: APIKeyBackend = Field(APIKeyBackend.Z1_SANDBOX)
-    ttl_hours: int = Field(1, ge=-1) # Default 1 hour, -1 means never expire
+    ttl_hours: float = Field(1.0, ge=-1.0) # Default 1 hour, -1 means never expire
     user_email: Optional[str] = None
 
 class APIKeyRecord(BaseModel):

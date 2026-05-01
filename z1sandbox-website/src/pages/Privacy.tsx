@@ -31,7 +31,7 @@ const Privacy = () => {
                 <ul className="list-disc pl-6 space-y-3 text-muted-foreground">
                   <li><strong className="text-foreground">Execution Metadata:</strong> Logs including execution time, resource usage, and exit codes.</li>
                   <li><strong className="text-foreground">Authentication Data:</strong> API keys and identifiers used to authorize jobs.</li>
-                  <li><strong className="text-foreground">Temporary Code Storage:</strong> Code snippets are stored temporarily in isolated gVisor pods and are destroyed immediately upon job completion.</li>
+                  <li><strong className="text-foreground">Temporary Code Storage:</strong> Code snippets are stored temporarily in isolated hardened pods and are destroyed immediately upon job completion.</li>
                 </ul>
               </section>
 
