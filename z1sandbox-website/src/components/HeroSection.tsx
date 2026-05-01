@@ -1,18 +1,5 @@
 import { motion } from "framer-motion";
-import { useAuth0 } from "@auth0/auth0-react";
-import { useNavigate } from "react-router-dom";
-
 const HeroSection = () => {
-  const { loginWithRedirect, isAuthenticated } = useAuth0();
-  const navigate = useNavigate();
-
-  const handleCTA = () => {
-    if (isAuthenticated) {
-      navigate("/dashboard");
-    } else {
-      loginWithRedirect();
-    }
-  };
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-32 pb-20">
       {/* Background gradient orb */}
@@ -41,20 +28,7 @@ const HeroSection = () => {
             vulnerabilities, secrets, and policy violations — without touching your host kernel.
           </p>
 
-          <div className="flex flex-wrap items-center justify-center gap-4 mt-10 sm:mt-12">
-            <button
-              onClick={handleCTA}
-              className="px-8 sm:px-10 py-4 rounded-full bg-foreground text-background font-bold text-base sm:text-lg hover:opacity-90 transition-all hover:scale-[1.02] active:scale-95 shadow-xl shadow-foreground/10"
-            >
-              {isAuthenticated ? "Go to Dashboard" : "Get Started"}
-            </button>
-            <a
-              href="#pillars"
-              className="px-8 sm:px-10 py-4 rounded-full border border-border bg-background/50 backdrop-blur-sm text-foreground font-bold text-base sm:text-lg hover:bg-muted transition-all hover:scale-[1.02] active:scale-95"
-            >
-              Learn More
-            </a>
-          </div>
+
         </motion.div>
 
         <motion.div
