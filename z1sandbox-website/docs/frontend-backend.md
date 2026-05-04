@@ -22,7 +22,7 @@ During development on `localhost:8080`, browsers enforce strict CORS (Cross-Orig
     ```typescript
     proxy: {
       '/v1': {
-        target: 'https://shininess-enroll-going.ngrok-free.dev',
+        target: 'https://contests-name-publishers-off.trycloudflare.com',
         changeOrigin: true,
         headers: { 'ngrok-skip-browser-warning': 'true' }
       }

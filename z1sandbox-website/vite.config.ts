@@ -6,7 +6,7 @@ import { componentTagger } from "lovable-tagger";
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd());
-  const backendUrl = env.VITE_API_BASE_URL || 'https://shininess-enroll-going.ngrok-free.dev';
+  const backendUrl = env.VITE_API_BASE_URL || 'https://contests-name-publishers-off.trycloudflare.com';
 
   const isNgrok = backendUrl.includes('ngrok');
   const proxyHeaders = isNgrok ? { 'ngrok-skip-browser-warning': 'true' } : {};

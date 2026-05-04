@@ -6,8 +6,8 @@ window._env_ = {
   VITE_AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com",
   VITE_AUTH0_CLIENT_ID: "sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D",
   VITE_AUTH0_AUDIENCE: "https://code-inspector-api",
-  VITE_API_BASE_URL: "https://shininess-enroll-going.ngrok-free.dev",
-  VITE_DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://shininess-enroll-going.ngrok-free.dev/api/z1sandbox","documentationUrl":"https://shininess-enroll-going.ngrok-free.dev/docs"}]'
+  VITE_API_BASE_URL: "https://contests-name-publishers-off.trycloudflare.com",
+  VITE_DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://contests-name-publishers-off.trycloudflare.com/api/z1sandbox","documentationUrl":"https://contests-name-publishers-off.trycloudflare.com/docs"}]'
 };
 
 
