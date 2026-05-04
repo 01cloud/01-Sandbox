@@ -191,17 +191,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.middleware("http")
+
 async def log_headers(request: Request, call_next):
     print(f"[DEBUG HEADERS] {request.method} {request.url.path} Headers: {dict(request.headers)}")
     response = await call_next(request)
     return response
 @app.middleware("http")
 async def cookie_auth_redirect_middleware(request: Request, call_next):
-    if request.url.path == "/docs" or (request.url.path.startswith("/api/") and request.url.path.endswith("/docs")):
-        cookie_val = request.cookies.get("inspector_auth")
-        if not cookie_val:
-            return RedirectResponse(url="/", status_code=307)
+    if request.url.path in ["/docs", "/redoc"] or (request.url.path.startswith("/api/") and request.url.path.endswith(("/docs", "/redoc"))):
+        # Allow documentation to be public to avoid cookie issues during development
+        return await call_next(request)
+
     return await call_next(request)
 
 

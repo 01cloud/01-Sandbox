@@ -55,6 +55,7 @@ interface APIKey {
 }
 
 const Dashboard = () => {
+  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
   const { user, getAccessTokenSilently, isAuthenticated, isLoading: authLoading } = useAuth0();
   const [keys, setKeys] = useState<APIKey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -78,9 +79,17 @@ const Dashboard = () => {
 
   const fetchBackends = async () => {
     try {
-      const response = await fetch("/config/backends.json");
-      if (response.ok) {
-        const data = await response.json();
+      const envBackendsJson = (window as any)._env_?.VITE_DASHBOARD_BACKENDS_JSON || import.meta.env.VITE_DASHBOARD_BACKENDS_JSON;
+      
+      if (envBackendsJson) {
+        let rawJson = typeof envBackendsJson === 'string' ? envBackendsJson.trim() : envBackendsJson;
+        // Strip leading/trailing single quotes if they exist
+        if (typeof rawJson === 'string' && rawJson.startsWith("'") && rawJson.endsWith("'")) {
+          rawJson = rawJson.substring(1, rawJson.length - 1);
+        }
+        
+        const data = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
+
         // Process backends to ensure they have all required fields dynamically
         const processed = data.map((b: any) => ({
           ...b,
@@ -88,15 +97,25 @@ const Dashboard = () => {
           documentationUrl: b.documentationUrl || b.baseUrl || `/api/${b.id.toLowerCase()}/docs`
         }));
         setBackends(processed);
-      } else {
-        console.warn("Backends config not found, using empty list.");
-        setBackends([]);
+        return;
       }
+
+      // Default fallback if no env is set
+      setBackends([{
+        id: "Z1_SANDBOX",
+        name: "Z1 Sandbox",
+        description: "Secure, isolated environment for code execution and security auditing.",
+        icon: "terminal",
+        color: "indigo",
+        baseUrl: "/api/z1sandbox",
+        documentationUrl: "/api/z1sandbox/docs"
+      }]);
     } catch (e) {
-      console.error("Failed to load backends config:", e);
+      console.error("Failed to load backends config from environment:", e);
       setBackends([]);
     }
   };
+
 
 
   const fetchKeys = async () => {

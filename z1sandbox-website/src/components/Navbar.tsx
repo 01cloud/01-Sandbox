@@ -23,7 +23,12 @@ const links = [
 
 const Navbar = () => {
   const [open, setOpen] = useState(false);
-  const { loginWithRedirect, logout, isAuthenticated, user, isLoading } = useAuth0();
+  const { loginWithRedirect, logout, isAuthenticated, user, isLoading, error } = useAuth0();
+
+  if (error) {
+    console.error("Auth0 Error:", error);
+  }
+
 
   return (
     <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[min(1200px,calc(100%-2rem))] sm:w-[min(1200px,calc(100%-3rem))] transition-all duration-300">
