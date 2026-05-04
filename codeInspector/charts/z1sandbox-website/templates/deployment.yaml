@@ -89,9 +89,20 @@ spec:
         - name: z1sandbox-website
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: VITE_RECAPTCHA_SITE_KEY
+              value: {{ .Values.config.recaptchaSiteKey | quote }}
+            - name: VITE_GOOGLE_CHAT_WEBHOOK_URL
+              value: {{ .Values.config.googleChatWebhookUrl | quote }}
+            - name: VITE_AUTH0_DOMAIN
+              value: {{ .Values.config.auth0Domain | quote }}
+            - name: VITE_AUTH0_CLIENT_ID
+              value: {{ .Values.config.auth0ClientId | quote }}
+            - name: VITE_AUTH0_AUDIENCE
+              value: {{ .Values.config.auth0Audience | quote }}
           ports:
             - name: http
-              containerPort: 80
+              containerPort: 3000
               protocol: TCP
           # Mount the templated nginx config from the ConfigMap above
           volumeMounts:
@@ -99,12 +110,12 @@ spec:
               mountPath: /etc/nginx/conf.d/default.conf
               subPath: default.conf
             - name: nginx-config
-              mountPath: /usr/share/nginx/html/config/backends.json
+              mountPath: /app/dist/config/backends.json
               subPath: backends.json
           livenessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 3000
             initialDelaySeconds: 5
             periodSeconds: 15
             timeoutSeconds: 3
@@ -112,7 +123,7 @@ spec:
           readinessProbe:
             httpGet:
               path: /
-              port: 80
+              port: 3000
             initialDelaySeconds: 3
             periodSeconds: 10
             timeoutSeconds: 2
@@ -139,7 +150,7 @@ spec:
   type: {{ .Values.service.type }}
   ports:
     - port: {{ .Values.service.port }}
-      targetPort: 80
+      targetPort: 3000
       protocol: TCP
       name: http
   selector:
