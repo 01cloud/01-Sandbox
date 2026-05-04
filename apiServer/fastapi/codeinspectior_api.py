@@ -194,7 +194,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "https://shininess-enroll-going.ngrok-free.dev",
+        "https://contests-name-publishers-off.trycloudflare.com",
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:8000",
