@@ -55,7 +55,7 @@ interface APIKey {
 }
 
 const Dashboard = () => {
-  const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
+  const API_BASE_URL = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "";
   const { user, getAccessTokenSilently, isAuthenticated, isLoading: authLoading } = useAuth0();
   const [keys, setKeys] = useState<APIKey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -122,7 +122,7 @@ const Dashboard = () => {
     try {
       setIsLoading(true);
       const token = await getAccessTokenSilently();
-      const response = await fetch("/v1/api-keys", {
+      const response = await fetch(`${API_BASE_URL}/v1/api-keys`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();
@@ -162,7 +162,7 @@ const Dashboard = () => {
       else if (form.ttl === "months") ttl_hours = val * 24 * 30;
       else if (form.ttl === "years") ttl_hours = val * 24 * 365;
 
-      const response = await fetch("/v1/api-keys", {
+      const response = await fetch(`${API_BASE_URL}/v1/api-keys`, {
         method: "POST",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -195,7 +195,7 @@ const Dashboard = () => {
 
     try {
       const token = await getAccessTokenSilently();
-      await fetch(`/v1/api-keys/${id}`, {
+      await fetch(`${API_BASE_URL}/v1/api-keys/${id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
