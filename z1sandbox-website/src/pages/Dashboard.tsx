@@ -79,7 +79,7 @@ const Dashboard = () => {
 
   const fetchBackends = async () => {
     try {
-      const envBackendsJson = import.meta.env.VITE_DASHBOARD_BACKENDS_JSON || (window as any)._env_?.VITE_DASHBOARD_BACKENDS_JSON;
+      const envBackendsJson = (window as any)._env_?.VITE_DASHBOARD_BACKENDS_JSON || import.meta.env.VITE_DASHBOARD_BACKENDS_JSON;
       
       if (envBackendsJson) {
         let rawJson = typeof envBackendsJson === 'string' ? envBackendsJson.trim() : envBackendsJson;

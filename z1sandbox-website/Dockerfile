@@ -25,6 +25,12 @@ ENV VITE_RECAPTCHA_SITE_KEY=$VITE_RECAPTCHA_SITE_KEY
 ARG VITE_GOOGLE_CHAT_WEBHOOK_URL="https://chat.googleapis.com/v1/spaces/AAQAQC-SfqE/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=9HUfBxrsiwrTWAyTkwc6qWZ809reZvFb6tGzkJi21uQ"
 ENV VITE_GOOGLE_CHAT_WEBHOOK_URL=$VITE_GOOGLE_CHAT_WEBHOOK_URL
 
+ARG VITE_API_BASE_URL="https://shininess-enroll-going.ngrok-free.dev"
+ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+
+ARG VITE_DASHBOARD_BACKENDS_JSON='[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://shininess-enroll-going.ngrok-free.dev/api/z1sandbox","documentationUrl":"https://shininess-enroll-going.ngrok-free.dev/api/z1sandbox/docs"}]'
+ENV VITE_DASHBOARD_BACKENDS_JSON=$VITE_DASHBOARD_BACKENDS_JSON
+
 # ──────────────────────────────────────────────────────────────────────────
 
 RUN npm run build

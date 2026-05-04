@@ -8,6 +8,7 @@ echo "  VITE_GOOGLE_CHAT_WEBHOOK_URL: \"$VITE_GOOGLE_CHAT_WEBHOOK_URL\"," >> /ap
 echo "  VITE_AUTH0_DOMAIN: \"$VITE_AUTH0_DOMAIN\"," >> /app/dist/env-config.js
 echo "  VITE_AUTH0_CLIENT_ID: \"$VITE_AUTH0_CLIENT_ID\"," >> /app/dist/env-config.js
 echo "  VITE_AUTH0_AUDIENCE: \"$VITE_AUTH0_AUDIENCE\"," >> /app/dist/env-config.js
+echo "  VITE_API_BASE_URL: \"$VITE_API_BASE_URL\"," >> /app/dist/env-config.js
 echo "  VITE_DASHBOARD_BACKENDS_JSON: '$VITE_DASHBOARD_BACKENDS_JSON'" >> /app/dist/env-config.js
 echo "};" >> /app/dist/env-config.js
 
