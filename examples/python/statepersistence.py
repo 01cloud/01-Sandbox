@@ -9,7 +9,7 @@ from opensandbox.config import ConnectionConfig
 
 async def main():
     config = ConnectionConfig(
-        domain="localhost:8080",
+        domain="https://sandbox.01security.com",
         api_key="your-api-key",
         request_timeout=timedelta(seconds=60),
     )

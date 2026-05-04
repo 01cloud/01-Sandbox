@@ -7,7 +7,7 @@ from opensandbox import SandboxSync
 from opensandbox.config import ConnectionConfigSync
 
 config = ConnectionConfigSync(
-    domain="localhost:8080",
+    domain="https://sandbox.01security.com",
     api_key="your-api-key",
     request_timeout=timedelta(seconds=60),
     transport=httpx.HTTPTransport(limits=httpx.Limits(max_connections=20)),
