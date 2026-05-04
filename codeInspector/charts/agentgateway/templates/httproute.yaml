@@ -79,6 +79,9 @@ spec:
         value: /docs
     - path:
         type: PathPrefix
+        value: /redoc
+    - path:
+        type: PathPrefix
         value: /openapi.json
     - path:
         type: PathPrefix
@@ -86,6 +89,7 @@ spec:
     - path:
         type: PathPrefix
         value: /api/z1sandbox/openapi.json
+
     backendRefs:
     - name: sandbox-api-service
       namespace: opensandbox-system

@@ -18,9 +18,9 @@ dependencies:
   - name: apiServer
     version: 0.1.0
     condition: apiServer.enabled
-  - name: z1sandbox-website
-    version: 2.0.0
-    condition: z1sandbox-website.enabled
+#   - name: z1sandbox-website
+#     version: 2.0.0
+#     condition: z1sandbox-website.enabled
   - name: metallb
     version: 0.1.0
     condition: metallb.enabled

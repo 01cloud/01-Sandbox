@@ -1,3 +1,4 @@
+{{- if .Values.enabled }}
 # ─────────────────────────────────────────────────────────────────────────────
 # ConfigMap — Nginx config with API reverse-proxy to sandbox-api-service
 # This is mounted into the container so the service name can be set at
@@ -187,4 +188,5 @@ spec:
                 name: z1sandbox-website-service
                 port:
                   number: {{ .Values.service.port }}
+{{- end }}
 {{- end }}
