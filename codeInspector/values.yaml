@@ -222,8 +222,8 @@ metallb:
   namespace: metallb-system
   ipAddressPool:
     addresses:
-      - 172.18.0.200-172.18.0.250
-      # - 148.113.4.247/32
+      # - 172.18.0.200-172.18.0.250
+      - 148.113.4.247/32
   l2Advertisement:
     enabled: true
 
