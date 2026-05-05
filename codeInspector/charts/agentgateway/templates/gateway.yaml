@@ -5,6 +5,13 @@ metadata:
   namespace: {{ .Values.namespace }}
 spec:
   gatewayClassName: {{ .Values.gateway.gatewayClassName }}
+  {{- if .Values.gateway.addresses }}
+  addresses:
+  {{- range .Values.gateway.addresses }}
+  - type: {{ .type | default "IPAddress" }}
+    value: {{ .value }}
+  {{- end }}
+  {{- end }}
   listeners:
   {{- range .Values.gateway.listeners }}
   - protocol: {{ .protocol }}
@@ -13,4 +20,13 @@ spec:
     allowedRoutes:
       namespaces:
         from: All
+    {{- if .tls }}
+    tls:
+      mode: {{ .tls.mode | default "Terminate" }}
+      certificateRefs:
+      {{- range .tls.certificateRefs }}
+      - name: {{ .name }}
+        kind: {{ .kind | default "Secret" }}
+      {{- end }}
+    {{- end }}
   {{- end }}
