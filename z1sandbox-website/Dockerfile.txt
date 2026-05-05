@@ -55,12 +55,12 @@ RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 RUN chown -R appuser:appgroup /app/dist
 USER appuser
 
-EXPOSE 3000
+EXPOSE 8080
 
 # This runs the script EVERY TIME the container starts in ECS
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
 # -s flag enables SPA mode (rewrites all routes to index.html)
-CMD ["serve", "-s", "dist", "-l", "3000"]
+CMD ["serve", "-s", "dist", "-l", "8080"]
 
 
