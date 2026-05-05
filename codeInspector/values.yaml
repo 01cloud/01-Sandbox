@@ -14,7 +14,7 @@ agentgateway:
   namespace: agentgateway-system
   httproute:
     hostnames:
-      - shininess-enroll-going.ngrok-free.dev
+      - api-sandbox.01security.com
     backendService:
       name: sandbox-api-service
       port: 80
@@ -49,7 +49,7 @@ apiServer:
     JWT_ALGORITHM: "RS256"
     AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com"
     AUTH0_AUDIENCE: "https://code-inspector-api"
-    DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://contests-name-publishers-off.trycloudflare.com/api/z1sandbox","documentationUrl":"https://contests-name-publishers-off.trycloudflare.com/api/z1sandbox/docs"},{"id":"OPEN_SANDBOX","name":"OpenSandbox","description":"Open-source scaling tier for general purpose workloads.","icon":"box","color":"emerald","baseUrl":"https://contests-name-publishers-off.trycloudflare.com/api/opensandbox","documentationUrl":"https://contests-name-publishers-off.trycloudflare.com/api/opensandbox/docs"},{"id":"TENCEND","name":"Tencend","description":"Enterprise telemetry and security analytics engine.","icon":"shield","color":"rose","baseUrl":"https://contests-name-publishers-off.trycloudflare.com/api/tencend","documentationUrl":"https://contests-name-publishers-off.trycloudflare.com/api/tencend/docs"}]'
+    DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com/api/z1sandbox","documentationUrl":"https://api-sandbox.01security.com/api/z1sandbox/docs"}]'
     JWT_PUBLIC_JWKS: |
       {"keys": [{"kty": "RSA", "use": "sig", "kid": "code-inspector-key-01", "alg": "RS256", "n": "6KkEdGr93SpFvr2cuc8fo0XG9fW194KHkcE73TVxxlLbzkQl7S21KsK_JkR0uenaIPsoxBRF9xiZ8rIhvTv8j6Rmdsyk32O6n5GArrN1YnCLomP5oZZ_7o4h2IhNQVIE9V5EeyzYyVPIiJa6XNKB30gvsLqjdrGmkYqAPiL_HKS6-1Z-rpMjZcqFoTf2y8Pxvd0NbVoKiHFpq05CJhzt6EqU_LISspxumq3wrQDyPxKf7ZeGTKaAZwJx3LNdMDc9uRrQMq4UOsRBCbAd7ozOq3jWxL1P5ALaXgYG9TUapfIrB_S2ryA3iALB5bd-YElkJiXuc1p9uTzeU9uDAP0ZAw", "e": "AQAB"}]}
   secret:
@@ -107,7 +107,7 @@ apiServer:
   ingress:
     enabled: true
     className: nginx
-    host: sandbox-api.local
+    host: api-sandbox.01security.com
     annotations:
       nginx.ingress.kubernetes.io/rewrite-target: /
       nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
@@ -178,8 +178,8 @@ apiServer:
 #     - id: "Z1_SANDBOX"
 #       name: "01 Sandbox"
 #       description: "Active remote backend for live code evaluation and execution workloads."
-#       baseUrl: "https://contests-name-publishers-off.trycloudflare.com/api/z1sandbox"
-#       documentationUrl: "https://contests-name-publishers-off.trycloudflare.com/api/z1sandbox/docs"
+#       baseUrl: "https://api-sandbox.01security.com/api/z1sandbox"
+#       documentationUrl: "https://api-sandbox.01security.com/api/z1sandbox/docs"
 #       icon: "terminal"
 #       color: "indigo"
     # To use absolute URLs that automatically update with your hostname:
@@ -222,7 +222,8 @@ metallb:
   namespace: metallb-system
   ipAddressPool:
     addresses:
-      - 172.18.0.200-172.18.0.250
+      # - 172.18.0.200-172.18.0.250
+      - 148.113.4.247/32
   l2Advertisement:
     enabled: true
 
