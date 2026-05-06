@@ -135,7 +135,7 @@ apiServer:
     password: "password123"
     database: "apikeys"
     storage: "5Gi"
-    storageClassName: "sandbox-storage"
+    storageClassName: "longhorn"
   redis:
     enabled: true
     host: "redis-service"
