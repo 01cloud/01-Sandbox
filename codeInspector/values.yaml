@@ -286,6 +286,7 @@ opensandbox:
       size: "10Gi"
       accessMode: "ReadWriteMany"
       mountPath: "/data"
+      storageClassName: "longhorn"
 
 ################################################################
 # OpenSandbox Resource Pool component values
