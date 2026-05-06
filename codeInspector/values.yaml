@@ -127,6 +127,7 @@ apiServer:
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
   postgresql:
+
     enabled: true
     host: "postgresql-service"
     port: 5432
@@ -134,6 +135,7 @@ apiServer:
     password: "password123"
     database: "apikeys"
     storage: "5Gi"
+    storageClassName: "sandbox-storage"
   redis:
     enabled: true
     host: "redis-service"
