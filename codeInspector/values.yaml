@@ -20,10 +20,18 @@ agentgateway:
       port: 80
   gateway:
     gatewayClassName: agentgateway
+    addresses:
+      - value: 148.113.4.247
     listeners:
       - protocol: HTTP
         port: 80
         name: http
+      - protocol: HTTPS
+        port: 443
+        name: https
+        tls:
+          certificateRefs:
+            - name: agentgateway-tls
   policy:
     authenticationType: "jwt"
     jwtMode: "Strict"
@@ -105,7 +113,7 @@ apiServer:
     port: 80
     targetPort: 8000
   ingress:
-    enabled: true
+    enabled: false
     className: nginx
     host: api-sandbox.01security.com
     annotations:
@@ -119,6 +127,7 @@ apiServer:
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
   postgresql:
+
     enabled: true
     host: "postgresql-service"
     port: 5432
@@ -126,6 +135,7 @@ apiServer:
     password: "password123"
     database: "apikeys"
     storage: "5Gi"
+    storageClassName: "longhorn"
   redis:
     enabled: true
     host: "redis-service"
@@ -222,8 +232,8 @@ metallb:
   namespace: metallb-system
   ipAddressPool:
     addresses:
-      - 172.18.0.200-172.18.0.250
-      # - 148.113.4.247/32
+      # - 172.18.0.200-172.18.0.250
+      - 148.113.4.247/32
   l2Advertisement:
     enabled: true
 
@@ -276,6 +286,7 @@ opensandbox:
       size: "10Gi"
       accessMode: "ReadWriteMany"
       mountPath: "/data"
+      storageClassName: "longhorn"
 
 ################################################################
 # OpenSandbox Resource Pool component values
