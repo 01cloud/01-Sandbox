@@ -1,7 +1,7 @@
-apiVersion: storage.k8s.io/v1
-kind: StorageClass
-metadata:
-  name: {{ .Values.postgresql.storageClassName }}
-provisioner: rancher.io/local-path
-reclaimPolicy: Retain
-volumeBindingMode: WaitForFirstConsumer
+# apiVersion: storage.k8s.io/v1
+# kind: StorageClass
+# metadata:
+#   name: {{ .Values.postgresql.storageClassName }}
+# provisioner: rancher.io/local-path
+# reclaimPolicy: Retain
+# volumeBindingMode: WaitForFirstConsumer
