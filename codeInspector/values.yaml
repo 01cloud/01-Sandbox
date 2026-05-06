@@ -113,7 +113,7 @@ apiServer:
     port: 80
     targetPort: 8000
   ingress:
-    enabled: true
+    enabled: false
     className: nginx
     host: api-sandbox.01security.com
     annotations:

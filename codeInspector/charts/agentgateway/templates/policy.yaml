@@ -11,17 +11,4 @@ spec:
       name: agentgateway-api-route
   traffic:
     {}
----
-apiVersion: agentgateway.dev/v1alpha1
-kind: AgentgatewayPolicy
-metadata:
-  name: docs-auth
-  namespace: {{ .Values.namespace }}
-spec:
-  targetRefs:
-    - group: gateway.networking.k8s.io
-      kind: HTTPRoute
-      name: agentgateway-docs-route
-  traffic:
-    {}
 {{- end }}
