@@ -13,7 +13,6 @@ spec:
     kind: Gateway
     name: agentgateway-proxy
     namespace: {{ .Values.namespace }}
-    sectionName: http
   rules:
   - matches:
     - path:
