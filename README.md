@@ -1,581 +1,146 @@
-# CodeInspector - Sandbox Code Execution Platform
+# CodeInspector & Z1 Sandbox Platform
 
 ## Overview
 
-CodeInspector is a Kubernetes-based sandbox code execution platform that provides a stable HTTP API for executing code in isolated environments. The system supports multiple sandbox backends (Mock, Subprocess, Docker, E2B, OpenSandbox) and allows hot-swapping backends at runtime without changing client code.
+CodeInspector (commercially integrated as Z1 Sandbox) is an enterprise-grade Kubernetes-based sandbox code execution platform. It provides a highly stable, hardened, and auditable HTTP API for executing arbitrary untrusted code in isolated distributed environments.
 
-## Architecture
+The system supports multiple backend providers (Mock, Subprocess, Docker, E2B, OpenSandbox), enabling runtime-adaptive execution layers that are hot-swappable strictly without modifying client ingress routing.
+
+## Complete Platform Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           External Traffic                                  │
-│                              (Internet)                                     │
+│                           External Web Traffic                              │
+│  (Z1 Sandbox Frontend / Dashboard / CI Pipelines -> api-sandbox.01security.com)
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Agent Gateway (Gateway API)                          │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  Gateway: agentgateway-proxy                                         │   │
-│  │  - HTTP listener on port 80                                          │   │
-│  │  - API Key authentication (Strict mode)                              │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                        │
-│                                    ▼                                        │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  HTTPRoute: agentgateway-route                                       │   │
-│  │  - Hostname: test.sandbox.com                                        │   │
-│  │  - Routes to: sandbox-api-service (port 80)                          │   │
-│  │  - URL rewrite: / → /                                                │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
+│                        Agent Gateway (API Gateway)                          │
+│                                                                             │
+│  Gateway: agentgateway-proxy (Port: 80 / 443)                               │
+│  HTTPRoute: Matches api-sandbox.01security.com -> sandbox-api-service       │
+│                                                                             │
+│  AgentgatewayPolicy (Authentication): Strict JWT validation                 │
+│  - Blocks any requests missing or possessing invalid RS256 JWTs.            │
+│  - Decodes inline public JWKS configuration natively at edge layer.         │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                           Sandbox Namespace                                 │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  Deployment: sandbox-api                                             │   │
-│  │  - FastAPI application (Python 3.12)                                 │   │
-│  │  - Port: 8000                                                        │   │
-│  │  - Replicas: 1 (auto-scales to 10 via HPA)                           │   │
-│  │  - Security: non-root, read-only filesystem                          │   │
-│  │  - Health checks: /health endpoint                                   │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                        │
-│                                    ▼                                        │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  Service: sandbox-api-service                                        │   │
-│  │  - Type: ClusterIP                                                   │   │
-│  │  - Port: 80 → 8000                                                   │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
-│                                    │                                        │
-│                                    ▼                                        │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  Ingress: sandbox-api-ingress                                        │   │
-│  │  - Host: sandbox-api.local                                           │   │
-│  │  - IngressClass: nginx                                               │   │
-│  │  - Timeouts: 120s                                                    │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
+│                       Sandbox Core API (Python 3.12)                        │
+│                                                                             │
+│  1. Identity Bridge & API Key Management (/v1/api-keys)                     │
+│     - Maps Auth0 user IDs to Developer Keys stored in Postgres / Redis.     │
+│  2. Dynamic Proxy Catch-all (/api/{backend_id}/*)                           │
+│     - Forwards traffic transparently to distinct execution clusters.        │
+│  3. Async Job Tracking & Telemetry                                          │
+│     - Tracks /v1/scan-jobs, /v1/job-id, /v1/scan-status.                    │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│                        Sandbox Backends (Pluggable)                         │
-│  ┌──────────────┐ ┌──────────────┐ ┌──────────────┐ ┌──────────────┐      │
-│  │    Mock      │ │  Subprocess  │ │    Docker    │ │     E2B      │      │
-│  │  (Testing)   │ │   (Local)    │ │ (Isolated)   │ │   (Cloud)    │      │
-│  └──────────────┘ └──────────────┘ └──────────────┘ └──────────────┘      │
-│                                    │                                        │
-│                                    ▼                                        │
-│  ┌─────────────────────────────────────────────────────────────────────┐   │
-│  │  OpenSandbox (via Helm)                                              │   │
-│  │  - Controller: manages sandbox lifecycle                             │   │
-│  │  - Server: executes code in isolated sandboxes                       │   │
-│  └─────────────────────────────────────────────────────────────────────┘   │
+│               Execution Backends (OpenSandbox Controller)                   │
+│                                                                             │
+│  - Receives executed payloads, configures bounded sandbox pod (gVisor).     │
+│  - Allocates shared Longhorn PVC storage for asynchronous job reporting.    │
+│  - Auto-scales pre-warmed sandbox buffers using opensandboxResourcePool.    │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Components
+---
 
-### 1. API Server (FastAPI)
+## Technical Deep-Dive
 
-The core component is a FastAPI application that provides a stable HTTP API for code execution. It implements the **Strategy Pattern** to support multiple sandbox backends.
+### 1. User Authentication (Auth0 + Z1 Dashboard Frontend)
 
-**Key Features:**
-- **Hot-swappable backends**: Switch between sandbox implementations at runtime
-- **Multiple language support**: Python, JavaScript, Bash
-- **Session management**: Create and manage execution sessions
-- **Health checks**: Built-in health monitoring endpoints
-- **Auto-generated API docs**: Swagger UI at `/docs`
+The platform includes a sleek, developer-first dashboard (found in `dashboard/index.html` and bundled into `z1sandbox-website`). When developers visit the site:
+- **Auth0 SDK Initialization**: The frontend (`assets/js/auth.js`) automatically initializes Auth0 via `auth0-spa-js` pointing to the API audience `https://code-inspector-api`.
+- **Login Session & Cookies**: Upon successful Auth0 login, the client receives a token which is saved as a strict cookie `inspector_auth`.
+- **Identity Presentation**: All subsequent dashboard routing passes this cookie. The backend `apiServer` relies heavily on determining whether the token issuer came from Auth0 (remote) or internally (local).
 
-**API Endpoints:**
+### 2. API Key Generation & Verification (Identity Bridge)
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/run` | POST | Execute code in the active backend |
-| `/health` | GET | Check backend health status |
-| `/api/switch` | POST | Hot-swap the active backend |
-| `/backend` | GET | Get current backend info |
-| `/backends` | GET | List all available backends |
-| `/api/{name}` | POST | Execute code in a specific backend |
+Managing long-lived API keys is handled by a sophisticated API server subsystem (`codeinspectior_api.py`):
+- **Generation Logic**: A user posts to `/v1/api-keys`. The system relies on its internal private RSA key to generate a proprietary RS256 JWT representing their new Developer API Key.
+- **Persistent Storage**:
+  - **PostgreSQL**: Stores robust metadata (`jti`, `name`, `backend`, `user_email`, `expires_at`, `is_revoked`, and `last_used_at`).
+  - **Redis Drop-in**: Copies the active `jti` to an `active_api_keys` set providing sub-millisecond line-rate request acceptance at massive scale.
+- **Background Janitor Task**: A background asynchronous worker (`cleanup_expired_keys_task`) loops every 60 seconds to reap keys that have expired, deleting them structurally from both DB logs and Redis cache preventing stale "back doors".
+- **The Identity Bridge**: If a developer accesses a management route using their Auth0 dashboard cookie, the backend detects the Auth0 issuer and dynamically bridges their identity (via Auth0 `sub` ID) to discover their latest active Developer Key to fetch their unique runtime metrics.
 
-**Supported Backends:**
+### 3. AgentGateway Authorization Rules
 
-| Backend | Description | Use Case |
-|---------|-------------|----------|
-| `mock` | Returns mock responses | Testing, development |
-| `subprocess` | Executes code locally via subprocess | Simple execution, no isolation |
-| `docker` | Runs code in Docker containers | Isolated execution, resource limits |
-| `e2b` | Uses E2B cloud sandbox service | Production, scalable execution |
-| `opensandbox` | Uses OpenSandbox operator | Kubernetes-native sandbox management |
+To prevent DDoS and unauthorized executions on the costly Kubernetes pods, routing edge traffic relies on the Kubernetes Gateway API:
+- `agentgateway-httproute.yaml` catches hostname `api-sandbox.01security.com` and directs traffic internally specifically to `sandbox-api-service`.
+- `agentgatewaypolicy.yaml` binds directly to this route, setting `AuthenticationType: jwt` with mode `Strict`.
+- The Gateway intercepts traffic directly rejecting it if the `authorization` header is invalid against the internally signed JWKS matrix baked directly into the policy text. **No unauthorized payload even touches the internal API.**
 
-**Source Files:**
-- [`apiServer/fastapi/sandbox_fastapi.py`](apiServer/fastapi/sandbox_fastapi.py) - Main application
-- [`apiServer/fastapi/Dockerfile`](apiServer/fastapi/Dockerfile) - Multi-stage Docker build
-- [`apiServer/fastapi/requirements.txt`](apiServer/fastapi/requirements.txt) - Python dependencies
+### 4. Code Auditing & Scan Job Sandboxes
 
-### 2. Kubernetes Deployment
+The core responsibility of the platform is dispatching and tracking security audit scripts:
+- **Scan Initialization**: A client invokes `POST /v1/scan-jobs` providing source code maps.
+- **UUID Traceability**: The `apiServer` immediately associates a global `job_id` (UUID), stores it to local state mappings (`state.latest_job_id`), and delegates it to the OpenSandbox backend.
+- **Status Polling**: The frontend subsequently calls `/v1/job-id` to identify the blocking session's ID from alternate tabs, and polls `/v1/scan-status/{job_id}` to retrieve active provision states (e.g., Image Pulling, Container Creating, Auditing).
+- **Execution**: The `opensandbox-server` instructs the `opensandbox-controller` to spin up an isolated `codeinterpreter` container under the `gVisor` RuntimeClass. The execution utilizes an isolated pod network and is heavily bounded via CPU/ Memory limits.
+- **Reporting**: The execution results are streamed out via JSON format and cached on a shared volume, ultimately pulled by the frontend securely through `GET /v1/scan-jobs/{job_id}/report`.
 
-The API server is deployed to Kubernetes with production-grade configurations.
+---
 
-**Deployment Features:**
-- **Namespace isolation**: All resources in `sandbox` namespace
-- **Rolling updates**: Zero-downtime deployments
-- **Auto-scaling**: HorizontalPodAutoscaler (1-10 replicas based on CPU/memory)
-- **Security**: Non-root user, read-only filesystem, dropped capabilities
-- **Health probes**: Liveness, readiness, and startup probes
-- **Resource limits**: CPU 100m-500m, Memory 128Mi-256Mi
-- **Pod topology spread**: Distributes pods across nodes
+## Helm Chart Deployment Options
 
-**Kubernetes Resources:**
+The whole solution is natively wrapped in an omni-chart located in `codeInspector/`. Deployment relies on comprehensive templating via `codeInspector/values.yaml` offering configurable topologies:
 
-| Resource | Name | Purpose |
-|----------|------|---------|
-| Namespace | `sandbox` | Isolates all sandbox resources |
-| ConfigMap | `sandbox-api-config` | Non-sensitive environment configuration |
-| Secret | `sandbox-api-secret` | Sensitive credentials (E2B API key) |
-| Deployment | `sandbox-api` | Runs the FastAPI application |
-| Service | `sandbox-api-service` | Stable internal endpoint (ClusterIP) |
-| Ingress | `sandbox-api-ingress` | External access via nginx |
-| HPA | `sandbox-api-hpa` | Auto-scales based on CPU/memory |
+### MetalLB (`metallb`)
+Configures Layer 2 routing bridging bare-metal/Kind setups globally.
+- **IP Address Pool**: Exposes external ranges natively (e.g., `148.113.4.247/32`).
 
-**Source File:**
-- [`apiServer/k8s/api-deployment.yaml`](apiServer/k8s/api-deployment.yaml)
+### Agent Gateway (`agentgateway`)
+- **Gateway Config**: Sets the `agentgateway` GatewayClass.
+- **TLS Configuration**: Implements references terminating SSL across incoming 443.
 
-### 3. Agent Gateway
+### Core Sandbox API (`apiServer`)
+- **Resources**: Auto-scaling deployed with HPA (targets CPU at 70%, Memory at 80%). Contains strict configurations running as non-root (uid: 1000).
+- **Datastores Configuration**: Contains passwords internally wired linking PostgreSQL and Redis databases for API key state handling.
+- **Crypto Settings**: Central configuration mapping `JWT_PUBLIC_JWKS` and `GATEWAY_SECRET` structures.
 
-The Agent Gateway provides external access to the sandbox API using the Kubernetes Gateway API.
+### Distributed Runtime Setup (`kindCluster`)
+- Hardwires standard cluster runtime to route Pod creations toward `gvisor` strictly ensuring kernel-layer separation.
 
-**Components:**
+### Scaling & Buffering (`opensandboxResourcePool`)
+- For instant evaluation latency, the code defines active pool buffering metrics.
+- Default settings specify a `bufferMin: 3` and `bufferMax: 10` (creating warmed containers anticipating code) that can dynamically scale out to a `poolMax: 50` hard ceiling under heavy user pressure.
 
-#### Gateway (`agentgateway-proxy`)
-- **GatewayClass**: `agentgateway`
-- **Protocol**: HTTP on port 80
-- **Route admission**: Allows routes from all namespaces
+## Quick Start Configuration
 
-#### HTTPRoute (`agentgateway-route`)
-- **Hostname**: `test.sandbox.com`
-- **Backend**: `sandbox-api-service` (port 80)
-- **URL rewrite**: Preserves path prefix
+Deploy the entire architecture locally or against any bare-metal solution instantly via Helm.
 
-#### Authentication Policy (`AgentgatewayPolicy`)
-- **Mode**: Strict API key authentication
-- **Secret reference**: `apikey` secret in `agentgateway-system` namespace
+1. **Install CRDs**:
+    Ensure Gateway API CRDs (`v1.5.0` standard) and `metallb` CRDs are installed on your cluster first.
 
-**Source Files:**
-- [`agentgateway/agentgateway-proxy.yaml`](agentgateway/agentgateway-proxy.yaml)
-- [`agentgateway/agentgateway-httproute.yaml`](agentgateway/agentgateway-httproute.yaml)
-- [`agentgateway/agentgatewaypolicy.yaml`](agentgateway/agentgatewaypolicy.yaml)
-- [`agentgateway/secret.yaml`](agentgateway/secret.yaml)
-
-### 4. OpenSandbox
-
-OpenSandbox is a Kubernetes operator for managing sandbox lifecycles. It's deployed via Helm charts.
-
-**Components:**
-- **Controller**: Manages sandbox lifecycle and resource allocation
-- **Server**: Executes code in isolated sandbox environments
-
-**Helm Chart Structure:**
-```
-opensandbox/
-├── Chart.yaml              # Chart metadata
-├── values.yaml             # Default configuration
-├── charts/
-│   ├── opensandbox-controller/
-│   │   └── templates/
-│   │       └── crds/       # Custom Resource Definitions
-│   └── opensandbox-server/
-│       └── templates/
-```
-
-**Configuration:**
-- Controller replicas: 1
-- Server replicas: 1
-- Log level: info
-
-**Source Files:**
-- [`opensandbox/Chart.yaml`](opensandbox/Chart.yaml)
-- [`opensandbox/values.yaml`](opensandbox/values.yaml)
-
-### 5. Kind Cluster with gVisor
-
-The development environment uses a Kind (Kubernetes in Docker) cluster with gVisor runtime for enhanced security.
-
-**Cluster Configuration:**
-- **Name**: `codebot`
-- **Nodes**: 1 control-plane + 1 worker
-- **Image**: `kindest/node-gvisor:latest`
-- **Runtime**: gVisor (runsc) for container isolation
-
-**gVisor Benefits:**
-- Kernel-level isolation
-- Reduced attack surface
-- Better security than standard containers
-
-**Source Files:**
-- [`kindCluster/kind-config.yaml`](kindCluster/kind-config.yaml)
-- [`kindCluster/Dockerfile`](kindCluster/Dockerfile)
-- [`kindCluster/runtimeclass.yaml`](kindCluster/runtimeclass.yaml)
-
-### 6. MetalLB Load Balancer
-
-MetalLB provides load balancing for bare-metal Kubernetes clusters.
-
-**Configuration:**
-- **IP Pool**: `172.18.0.200-172.18.0.250`
-- **Mode**: L2 advertisement
-- **Namespace**: `metallb-system`
-
-**Source File:**
-- [`k8s/metallb/metallb.yaml`](k8s/metallb/metallb.yaml)
-
-## Data Flow
-
-### Code Execution Request Flow
-
-```
-1. Client sends POST /run with code payload
-   ↓
-2. Agent Gateway validates API key
-   ↓
-3. HTTPRoute routes to sandbox-api-service
-   ↓
-4. FastAPI receives request
-   ↓
-5. Active backend executes code:
-   - Mock: Returns mock response
-   - Subprocess: Runs locally via subprocess
-   - Docker: Spins up container, executes, removes
-   - E2B: Sends to E2B cloud service
-   - OpenSandbox: Delegates to OpenSandbox operator
-   ↓
-6. Returns RunResponse with stdout, stderr, exit code, duration
-```
-
-### Backend Switching Flow
-
-```
-1. Client sends POST /api/switch with backend name
-   ↓
-2. FastAPI validates backend exists
-   ↓
-3. Performs health check on new backend
-   ↓
-4. Updates application state
-   ↓
-5. All subsequent /run requests use new backend
-```
-
-## Security
-
-### Container Security
-- **Non-root execution**: Runs as user 1000
-- **Read-only filesystem**: Prevents runtime modifications
-- **Dropped capabilities**: All Linux capabilities dropped
-- **No privilege escalation**: Prevents privilege escalation attacks
-
-### Network Security
-- **API key authentication**: Strict mode via Agent Gateway
-- **Namespace isolation**: Resources isolated in `sandbox` namespace
-- **ClusterIP service**: Internal-only access by default
-
-### Sandbox Isolation
-- **gVisor runtime**: Kernel-level isolation for containers
-- **Resource limits**: CPU and memory constraints
-- **Network isolation**: Docker containers run with `--network none`
-- **Timeout enforcement**: Prevents runaway executions
-
-## Deployment
-
-### Prerequisites
-- Kubernetes cluster (Kind, minikube, or cloud provider)
-- kubectl configured
-- Helm 3.x
-- Docker (for building images)
-
-### Quick Start
-
-1. **Create Kind cluster with gVisor:**
+2. **Deploy Omni-Chart**:
    ```bash
-   cd kindCluster
-   docker build -t kindest/node-gvisor:latest .
-   kind create cluster --config kind-config.yaml
+   helm install codeInspector ./codeInspector -n opensandbox-system --create-namespace
    ```
 
-2. **Install MetalLB:**
+3. **Validate Architecture Services**:
    ```bash
-   kubectl apply -f https://raw.githubusercontent.com/metallb/metallb/v0.13.7/config/manifests/metallb-native.yaml
-   kubectl apply -f k8s/metallb/crds/crds.yaml
-   kubectl apply -f k8s/metallb/metallb.yaml
+   kubectl get pods -n opensandbox-system
+   kubectl get gateway -n agentgateway-system
    ```
 
-3. **Install Agent Gateway:**
-   ```bash
-   kubectl apply -f agentgateway/agentgateway-proxy.yaml
-   kubectl apply -f agentgateway/secret.yaml
-   kubectl apply -f agentgateway/agentgatewaypolicy.yaml
-   kubectl apply -f agentgateway/agentgateway-httproute.yaml
-   ```
+4. **Using the Gateway directly via curl**:
+    Generate an API key securely via Auth0 Dashboard routing, then POST directly:
+    ```bash
+    curl -X POST https://api-sandbox.01security.com/v1/scan-jobs \
+      -H "Content-Type: application/json" \
+      -H "Authorization: Bearer <API-KEY>" \
+      -d '{
+        "files": {
+           "input.py": "print(\"Executing verified Code!\")"
+        }
+      }'
+    ```
 
-4. **Install OpenSandbox:**
-   ```bash
-   cd opensandbox
-   helm dependency update
-   helm install opensandbox .
-   ```
-
-5. **Deploy API Server:**
-   ```bash
-   cd apiServer/fastapi
-   docker build -t fastapi:1.0.0 .
-   kubectl apply -f ../k8s/api-deployment.yaml
-   ```
-
-6. **Verify deployment:**
-   ```bash
-   kubectl get pods -n sandbox
-   kubectl get svc -n sandbox
-   kubectl get ingress -n sandbox
-   ```
-
-## Usage Examples
-
-### Execute Python Code
-```bash
-curl -X POST http://sandbox-api.local/run \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: N2YwMDIxZTEtNGUzNS1jNzgzLTRkYjAtYjE2YzRkZGVmNjcy" \
-  -d '{
-    "code": "print(\"Hello, World!\")",
-    "language": "python",
-    "timeout": 30
-  }'
-```
-
-### Switch Backend
-```bash
-curl -X POST http://sandbox-api.local/api/switch \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: N2YwMDIxZTEtNGUzNS1jNzgzLTRkYjAtYjE2YzRkZGVmNjcy" \
-  -d '{
-    "backend": "docker",
-    "validate": true
-  }'
-```
-
-### Check Health
-```bash
-curl http://sandbox-api.local/health
-```
-
-### List Available Backends
-```bash
-curl http://sandbox-api.local/backends
-```
-
-## Configuration
-
-### Environment Variables
-
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `PYTHONUNBUFFERED` | Disable Python output buffering | `1` |
-| `APP_ENV` | Application environment | `production` |
-| `PORT` | API server port | `8000` |
-| `BACKEND_URL_OPENSANDBOX` | OpenSandbox server URL | `http://opensandbox-server.opensandbox-system.svc.cluster.local` |
-| `E2B_API_KEY` | E2B cloud sandbox API key | (empty) |
-
-### Resource Limits
-
-| Resource | Request | Limit |
-|----------|---------|-------|
-| CPU | 100m (0.1 core) | 500m (0.5 core) |
-| Memory | 128Mi | 256Mi |
-
-### Auto-scaling
-
-| Metric | Target Utilization |
-|--------|-------------------|
-| CPU | 70% |
-| Memory | 80% |
-
-| Parameter | Value |
-|-----------|-------|
-| Min Replicas | 1 |
-| Max Replicas | 10 |
-
-## Monitoring
-
-### Health Checks
-
-The application provides three types of health probes:
-
-1. **Liveness Probe**: Restarts pod if application hangs
-   - Path: `/health`
-   - Initial delay: 10s
-   - Period: 15s
-   - Failure threshold: 3
-
-2. **Readiness Probe**: Routes traffic only when ready
-   - Path: `/health`
-   - Initial delay: 5s
-   - Period: 10s
-   - Failure threshold: 3
-
-3. **Startup Probe**: Gives application time to start
-   - Path: `/health`
-   - Failure threshold: 10
-   - Period: 5s
-
-### API Documentation
-
-Auto-generated Swagger UI is available at:
-```
-http://sandbox-api.local/docs
-```
-
-## Development
-
-### Local Development
-
-1. **Install dependencies:**
-   ```bash
-   cd apiServer/fastapi
-   pip install -r requirements.txt
-   ```
-
-2. **Run locally:**
-   ```bash
-   uvicorn sandbox_fastapi:app --reload --port 8000
-   ```
-
-3. **Access docs:**
-   ```
-   http://localhost:8000/docs
-   ```
-
-### Testing
-
-```bash
-cd apiServer/fastapi
-pytest
-```
-
-## Troubleshooting
-
-### Common Issues
-
-1. **Pod not starting:**
-   ```bash
-   kubectl describe pod -n sandbox -l app=sandbox-api
-   kubectl logs -n sandbox -l app=sandbox-api
-   ```
-
-2. **Backend health check failing:**
-   ```bash
-   curl http://sandbox-api.local/health
-   kubectl exec -n sandbox <pod-name> -- docker info
-   ```
-
-3. **Ingress not accessible:**
-   ```bash
-   kubectl get ingress -n sandbox
-   kubectl describe ingress -n sandbox sandbox-api-ingress
-   ```
-
-4. **Auto-scaling not working:**
-   ```bash
-   kubectl get hpa -n sandbox
-   kubectl describe hpa -n sandbox sandbox-api-hpa
-   ```
-
-## Project Structure
-
-```
-codeInspector/
-├── README.md                          # This file
-├── docs/                              # Platform documentation
-│   ├── flow.md                        # End-to-end system sequence & process flow
-│   ├── scanning-tools.md              # Security scanning tools overview
-│   └── userguild.md                   # Comprehensive user guide
-├── apiServer/
-│   ├── README.md                      # API server documentation
-│   ├── fastapi/
-│   │   ├── sandbox_fastapi.py         # Main FastAPI application
-│   │   ├── Dockerfile                 # Multi-stage Docker build
-│   │   └── requirements.txt           # Python dependencies
-│   └── k8s/
-│       └── api-deployment.yaml        # Kubernetes manifests
-├── agentgateway/
-│   ├── agentgateway-proxy.yaml        # Gateway definition
-│   ├── agentgateway-httproute.yaml    # HTTP routing rules
-│   ├── agentgatewaypolicy.yaml        # Authentication policy
-│   └── secret.yaml                    # API key secret
-├── k8s/
-│   ├── deployment/                    # Additional deployments
-│   └── metallb/
-│       ├── metallb.yaml               # MetalLB configuration
-│       ├── README.md                  # MetalLB documentation
-│       └── crds/
-│           └── crds.yaml              # MetalLB CRDs
-├── kindCluster/
-│   ├── kind-config.yaml               # Kind cluster configuration
-│   ├── Dockerfile                     # gVisor-enabled node image
-│   └── runtimeclass.yaml              # gVisor RuntimeClass
-└── opensandbox/
-    ├── Chart.yaml                     # Helm chart metadata
-    ├── values.yaml                    # Default values
-    ├── Chart.lock                     # Dependency lock
-    └── charts/
-        ├── opensandbox-controller/    # Controller sub-chart
-        └── opensandbox-server/        # Server sub-chart
-```
-
-## License
-
-See individual component licenses for details.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
-
-## Support
-
-For issues and questions:
-- Check the troubleshooting section
-- Review component-specific READMEs
-- Open an issue on GitHub
-
-
-
-
-
-
-
-curl -X POST http://localhost:8080/v1/sandboxes \
-  -H "Content-Type: application/json" \
-  -H "OPEN-SANDBOX-API-KEY: your-secure-api-key" \
-  -d '{
-    "image": {
-      "uri": "opensandbox/code-interpreter:v1.0.2"
-    },
-    "entrypoint": ["/opt/opensandbox/code-interpreter.sh"],
-    "timeout": 600,
-    "env": {
-      "PYTHON_VERSION": "3.11"
-    },
-    "resourceLimits": {
-      "cpu": "1",
-      "memory": "2Gi"
-    },
-    "metadata": {
-      "project": "my-ai-agent",
-      "environment": "production"
-    }
-  }'
-
+---
+*Powered by 01 Security Advanced Architecture.*
