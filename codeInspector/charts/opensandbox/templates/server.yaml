@@ -119,7 +119,7 @@ kind: ConfigMap
 metadata:
   name: opensandbox-server-config
   namespace: {{ .Values.namespace }}
-data:ktamang-aps1-ovh-dev-lvn-sandbox
+data:
   config.toml: |
     [server]
     host = "0.0.0.0"
