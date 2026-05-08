@@ -4,7 +4,7 @@ This document describes the decoupled architecture of the Z1 Sandbox platform, w
 
 ## Architecture Overview
 
-The system consists of two primary components:
+The system consists of two primary components test:
 1.  **Frontend (z1sandbox-website)**: A Vite-based React application.
 2.  **Backend (apiServer)**: A FastAPI-based service hosted via Helm/Kubernetes and exposed via a public URL (e.g., ngrok).
 
