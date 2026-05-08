@@ -35,6 +35,16 @@ import {
   DialogTrigger
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -61,6 +71,7 @@ const Dashboard = () => {
   const [isCreating, setIsCreating] = useState(false);
   const [newKey, setNewKey] = useState<{ id: string; key: string } | null>(null);
   const [form, setForm] = useState({ name: "", backend: "Z1_SANDBOX", ttl: "never", ttlValue: "1" });
+  const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
 
   const [scannerConfig, setScannerConfig] = useState<{
     isOpen: boolean;
@@ -190,8 +201,6 @@ const Dashboard = () => {
   };
 
   const handleRevokeKey = async (id: string) => {
-    if (!confirm("Are you sure you want to revoke this key?")) return;
-
     try {
       const token = await getAccessTokenSilently();
       await fetch(`${API_BASE_URL}/v1/api-keys/${id}`, {
@@ -512,25 +521,15 @@ const Dashboard = () => {
                           </div>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 lg:pl-6 lg:border-l border-border/30">
-                          <div className="space-y-1.5">
-                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">Prefix Pattern</div>
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-foreground/[0.03] border border-border/50">
-                              <code className="text-sm font-mono text-foreground font-bold">{key.prefix}</code>
-                              <span className="text-muted-foreground/30">••••••••••••••</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              className="h-11 px-4 rounded-xl border-border/50 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all active:scale-95 flex items-center gap-2 font-bold text-xs uppercase tracking-wider"
-                              onClick={() => handleRevokeKey(key.id)}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              Delete
-                            </Button>
-                          </div>
+                        <div className="flex items-center">
+                          <Button
+                            variant="outline"
+                            className="h-11 px-4 rounded-xl border-border/50 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all active:scale-95 flex items-center gap-2 font-bold text-xs uppercase tracking-wider"
+                            onClick={() => setKeyToDelete(key.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete
+                          </Button>
                         </div>
                       </div>
                     </div>
@@ -555,6 +554,34 @@ const Dashboard = () => {
         baseUrl={scannerConfig.baseUrl}
         apiKey={scannerConfig.apiKey}
       />
+
+      <AlertDialog open={!!keyToDelete} onOpenChange={(open) => !open && setKeyToDelete(null)}>
+        <AlertDialogContent className="rounded-[2.5rem] border-border/50 p-8 bg-background/95 backdrop-blur-xl">
+          <AlertDialogHeader>
+            <div className="w-16 h-16 rounded-[2rem] bg-destructive/10 text-destructive flex items-center justify-center mb-6 mx-auto sm:mx-0">
+              <Trash2 className="w-8 h-8" />
+            </div>
+            <AlertDialogTitle className="text-2xl font-black">Revoke API Key?</AlertDialogTitle>
+            <AlertDialogDescription className="text-base text-muted-foreground">
+              This action is permanent. Any systems or scripts currently using this key will immediately lose access to the security backends.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="mt-8 gap-3">
+            <AlertDialogCancel className="rounded-2xl h-12 font-bold border-border/50">Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              className="rounded-2xl h-12 font-bold bg-destructive hover:bg-destructive/90 text-destructive-foreground shadow-lg shadow-destructive/20"
+              onClick={() => {
+                if (keyToDelete) {
+                  handleRevokeKey(keyToDelete);
+                  setKeyToDelete(null);
+                }
+              }}
+            >
+              Confirm Revocation
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };
