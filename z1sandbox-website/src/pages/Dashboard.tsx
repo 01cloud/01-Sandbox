@@ -538,10 +538,10 @@ const Dashboard = () => {
               )}
             </CardContent>
             <CardFooter className="p-8 border-t border-border/50 bg-muted/10">
-              <p className="text-xs text-muted-foreground font-medium flex items-center gap-2">
+              {/* <p className="text-xs text-muted-foreground font-medium flex items-center gap-2">
                 <ShieldCheck className="w-3.5 h-3.5" />
                 Your security keys are encrypted with AES-256-GCM. Never share your production keys.
-              </p>
+              </p> */}
             </CardFooter>
           </Card>
         </TabsContent>
@@ -568,7 +568,7 @@ const Dashboard = () => {
           </AlertDialogHeader>
           <AlertDialogFooter className="mt-8 gap-3">
             <AlertDialogCancel className="rounded-2xl h-12 font-bold border-border/50">Cancel</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogAction
               className="rounded-2xl h-12 font-bold bg-destructive hover:bg-destructive/90 text-destructive-foreground shadow-lg shadow-destructive/20"
               onClick={() => {
                 if (keyToDelete) {
