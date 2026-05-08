@@ -112,8 +112,6 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Values.storage.pvcName | default "scan-pvc" }}
         {{- end }}
-      nodeSelector:
-        kubernetes.io/hostname: codebot-worker
       restartPolicy: Always
 ---
 apiVersion: v1
@@ -121,7 +119,7 @@ kind: ConfigMap
 metadata:
   name: opensandbox-server-config
   namespace: {{ .Values.namespace }}
-data:
+data:ktamang-aps1-ovh-dev-lvn-sandbox
   config.toml: |
     [server]
     host = "0.0.0.0"
@@ -157,8 +155,6 @@ data:
           labels:
             app: opensandbox-sandbox
         spec:
-          nodeSelector:
-            kubernetes.io/hostname: codebot-worker
           restartPolicy: Never
           tolerations:
             - operator: "Exists"
