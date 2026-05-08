@@ -35,12 +35,41 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
 
   const detectLanguage = (code: string) => {
     const text = code.trim();
-    if (text.startsWith("{") || text.startsWith("[")) return "json";
-    if (text.startsWith("---") || /^(apiVersion|metadata|version|services|spec|kind|items):/m.test(text)) return "yaml";
-    if (/\bpackage\s+main\b/.test(text) || /\bfunc\s+main\b/.test(text)) return "go";
-    if (text.startsWith("#!") || /\b(sudo|apt-get|yum|printf|exec|export\s+[A-Z_]+=)/m.test(text)) return "sh";
-    if (/\b(const|let|var|function|console\.log|require\(|module\.exports|async\s+function|await\s)\b/.test(text)) return "js";
-    if (/\b(def\s|class\s|import\s|from\s.*import|if\s+__name__\s+==)/m.test(text) || /\bprint\(/.test(text)) return "py";
+    if (!text) return "py";
+
+    // 1. JSON Detection (Structural)
+    if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+      try {
+        JSON.parse(text);
+        return "json";
+      } catch (e) { /* ignore and continue */ }
+    }
+
+    // 2. Shell Script (Shebang is a strong indicator)
+    if (text.startsWith("#!") || /\b(sudo|apt-get|yum|export\s+[A-Z_]+=)\b/.test(text) || /\b(if\s+\[|elif\s+\[|then|fi|done)\b/.test(text)) {
+      return "sh";
+    }
+
+    // 3. Go Detection (Specific keywords)
+    if (/\bpackage\s+\w+/.test(text) && (/\bfunc\s+\w+\(/.test(text) || /\bimport\s+\(/.test(text) || /\btype\s+\w+\s+struct\b/.test(text))) {
+      return "go";
+    }
+
+    // 4. YAML Detection (Look for k8s markers or KV pairs)
+    if (text.startsWith("---") || /^(apiVersion|kind|metadata|spec|services|version):/m.test(text) || /^\s*[\w.-]+\s*:\s*.+/m.test(text)) {
+      return "yaml";
+    }
+
+    // 5. JavaScript / TypeScript Detection
+    if (/\b(import\s+.*from|export\s+(const|let|var|function|class|default)|const\s+\w+\s*=|function\s+\w+\s*\(|console\.log|await\s+)\b/.test(text)) {
+      return "js";
+    }
+
+    // 6. Python Detection (Fallback)
+    if (/\b(def\s+\w+\(|class\s+\w+\(|import\s+\w+|from\s+\w+\s+import|if\s+__name__\s*==\s*['"]__main__['"])\b/.test(text) || /\bprint\(/.test(text)) {
+      return "py";
+    }
+
     return "py";
   };
 

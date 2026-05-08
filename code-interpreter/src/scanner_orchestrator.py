@@ -31,45 +31,63 @@ class ScannerOrchestrator:
         self.enabled_tools = self._get_enabled_tools()
 
     def _get_enabled_tools(self) -> List[str]:
-        """Determines which tools should be run. Defaults to all requested tools."""
-        all_files = []
-        for root, _, files in os.walk(self.target_dir):
-            for file in files:
-                all_files.append(os.path.join(root, file))
-        
-        self.results["files_scanned"] = [os.path.relpath(f, self.target_dir) for f in all_files]
-        
-        logging.info("=============================================")
-        logging.info(f" Discovering files in {self.target_dir}:")
-        for f in self.results["files_scanned"]:
-            logging.info(f"  - {f}")
-        logging.info("=============================================")
+        """Determines tools based on explicit file classification."""
+        self.classified_files = {
+            "k8s": [],
+            "yaml": [],
+            "python": [],
+            "shell": [],
+            "polyglot": []
+        }
 
-        if SCAN_TOOLS_ENV:
-            requested = [t.strip().lower() for t in SCAN_TOOLS_ENV.split(",") if t.strip()]
-            return requested
-
-        # Dynamic tool detection for efficiency
-        enabled = ["gitleaks"] # Gitleaks always runs to detect secrets
-        
-        # Extract unique extensions (lowercase)
-        extensions = {os.path.splitext(f)[1].lower() for f in self.results["files_scanned"]}
-        
-        # Python detection
-        if ".py" in extensions:
-            enabled.append("bandit")
-            
-        # Kubernetes & YAML detection
-        if ".yaml" in extensions or ".yml" in extensions:
-            enabled.extend(["yamllint", "kubelinter", "kubeconform", "kubescore"])
-            
-        # General purpose detection (Semgrep) for other common languages
         polyglot_exts = {".js", ".jsx", ".ts", ".tsx", ".go", ".java", ".c", ".cpp", ".php", ".rb"}
-        if extensions.intersection(polyglot_exts):
+
+        for f in self.results["files_scanned"]:
+            ext = os.path.splitext(f)[1].lower()
+            
+            if ext in (".yaml", ".yml"):
+                if self._is_k8s_manifest(f):
+                    self.classified_files["k8s"].append(f)
+                else:
+                    self.classified_files["yaml"].append(f)
+            elif ext == ".py":
+                self.classified_files["python"].append(f)
+            elif ext in (".sh", ".bash"):
+                self.classified_files["shell"].append(f)
+            elif ext in polyglot_exts:
+                self.classified_files["polyglot"].append(f)
+
+        # Build enabled tools list
+        enabled = ["gitleaks"]
+        
+        if self.classified_files["python"]:
+            enabled.append("bandit")
+        
+        if self.classified_files["yaml"]:
+            enabled.append("yamllint")
+            
+        if self.classified_files["k8s"]:
+            enabled.extend(["kubelinter", "kubeconform", "kubescore"])
+            
+        if self.classified_files["shell"]:
+            enabled.append("shellcheck")
+
+        if self.classified_files["polyglot"]:
             enabled.append("semgrep")
 
-        logging.info(f" Enabled tools based on detection: {', '.join(enabled)}")
+        logging.info(f" Classified Files: K8s({len(self.classified_files['k8s'])}), YAML({len(self.classified_files['yaml'])}), Shell({len(self.classified_files['shell'])})")
+        logging.info(f" Enabled tools: {', '.join(enabled)}")
         return enabled
+
+    def _is_k8s_manifest(self, file_path: str) -> bool:
+        """Heuristic to detect K8s manifests by checking for apiVersion and kind."""
+        full_path = os.path.join(self.target_dir, file_path)
+        try:
+            with open(full_path, 'r', errors='ignore') as f:
+                content = f.read()
+                return "apiVersion:" in content and "kind:" in content
+        except Exception:
+            return False
         
         # Default to running all comprehensive tools as requested (Commented for future reference)
         # return ["semgrep", "gitleaks", "trivy", "bandit", "yamllint", "kubelinter", "kubeconform", "kubescore"]
@@ -174,12 +192,13 @@ class ScannerOrchestrator:
         self.results["scans"]["gitleaks"] = res
 
     def scan_yamllint(self):
-        """Runs YAMLlint for configuration files."""
-        if not any(f.endswith((".yaml", ".yml")) for f in self.results["files_scanned"]):
-            self.results["scans"]["yamllint"] = {"status": "SKIPPED", "reason": "No YAML files"}
+        """Runs YAMLlint exclusively for non-Kubernetes YAML configuration files."""
+        yaml_files = self.classified_files.get("yaml", [])
+        if not yaml_files:
+            self.results["scans"]["yamllint"] = {"status": "SKIPPED", "reason": "No general YAML files"}
             return
 
-        cmd = ["/usr/local/bin/yamllint", "-d", "{extends: relaxed, rules: {line-length: disable}}", self.target_dir]
+        cmd = ["/usr/local/bin/yamllint", "-d", "{extends: relaxed, rules: {line-length: disable}}"] + [os.path.join(self.target_dir, f) for f in yaml_files]
         res = self.run_command(cmd, "YAMLlint")
         if res["status"] == "NOT_FOUND":
             cmd[0] = "yamllint"
@@ -266,12 +285,13 @@ class ScannerOrchestrator:
         self.results["scans"]["trivy"] = res
 
     def scan_kubelinter(self):
-        """Runs kube-linter for Kubernetes manifests and parses JSON findings."""
-        if not any(f.endswith((".yaml", ".yml")) for f in self.results["files_scanned"]):
-            self.results["scans"]["kubelinter"] = {"status": "SKIPPED", "reason": "No YAML files"}
+        """Runs kube-linter exclusively for detected Kubernetes manifests."""
+        k8s_files = self.classified_files.get("k8s", [])
+        if not k8s_files:
+            self.results["scans"]["kubelinter"] = {"status": "SKIPPED", "reason": "No K8s manifests"}
             return
 
-        cmd = ["/usr/local/bin/kube-linter", "lint", self.target_dir, "--format", "json", "--add-all-built-in"]
+        cmd = ["/usr/local/bin/kube-linter", "lint", "--format", "json", "--add-all-built-in"] + [os.path.join(self.target_dir, f) for f in k8s_files]
         res = self.run_command(cmd, "Kube-Linter")
         if res["status"] == "NOT_FOUND":
             cmd[0] = "kube-linter"
@@ -333,12 +353,13 @@ class ScannerOrchestrator:
         self.results["scans"]["kubelinter"] = res
 
     def scan_kubeconform(self):
-        """Runs kubeconform for strict Kubernetes schema validation and parses JSON findings."""
-        if not any(f.endswith((".yaml", ".yml")) for f in self.results["files_scanned"]):
-            self.results["scans"]["kubeconform"] = {"status": "SKIPPED", "reason": "No YAML files"}
+        """Runs kubeconform exclusively for detected Kubernetes manifests."""
+        k8s_files = self.classified_files.get("k8s", [])
+        if not k8s_files:
+            self.results["scans"]["kubeconform"] = {"status": "SKIPPED", "reason": "No K8s manifests"}
             return
 
-        cmd = ["/usr/local/bin/kubeconform", "-summary", "-output", "json", "-strict", self.target_dir]
+        cmd = ["/usr/local/bin/kubeconform", "-summary", "-output", "json", "-strict"] + [os.path.join(self.target_dir, f) for f in k8s_files]
         res = self.run_command(cmd, "Kube-Conform")
         if res["status"] == "NOT_FOUND":
             cmd[0] = "kubeconform"
@@ -370,15 +391,14 @@ class ScannerOrchestrator:
         self.results["scans"]["kubeconform"] = res
 
     def scan_kubescore(self):
-        """Runs kube-score for deep best-practice analysis and parses JSON output."""
-        # Use relative paths and set cwd for better reliability
-        yaml_files = [f for f in self.results["files_scanned"] if f.endswith((".yaml", ".yml"))]
-        if not yaml_files:
-            self.results["scans"]["kubescore"] = {"status": "SKIPPED", "reason": "No YAML files"}
+        """Runs kube-score exclusively for detected Kubernetes manifests."""
+        k8s_files = self.classified_files.get("k8s", [])
+        if not k8s_files:
+            self.results["scans"]["kubescore"] = {"status": "SKIPPED", "reason": "No K8s manifests"}
             return
 
         # Pass local file paths and run in target directory
-        cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json"] + yaml_files
+        cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json"] + k8s_files
         res = self.run_command(cmd, "Kube-Score", cwd=self.target_dir)
         
         # Fallback 1: Try without full path to binary
@@ -460,6 +480,39 @@ class ScannerOrchestrator:
         
         self.results["scans"]["kubescore"] = res
 
+    def scan_shellcheck(self):
+        """Runs ShellCheck for shell scripts and parses JSON results."""
+        shell_files = self.classified_files.get("shell", [])
+        if not shell_files:
+            self.results["scans"]["shellcheck"] = {"status": "SKIPPED", "reason": "No shell scripts"}
+            return
+
+        cmd = ["/usr/local/bin/shellcheck", "-f", "json"] + [os.path.join(self.target_dir, f) for f in shell_files]
+        res = self.run_command(cmd, "ShellCheck")
+        if res["status"] == "NOT_FOUND":
+            cmd[0] = "shellcheck"
+            res = self.run_command(cmd, "ShellCheck")
+
+        if res.get("stdout"):
+            try:
+                data = json.loads(res["stdout"])
+                res["stdout"] = data
+                if data:
+                    res["status"] = "ISSUES_FOUND"
+                for issue in data:
+                    sev_map = {1: "INFO", 2: "LOW", 3: "MEDIUM", 4: "HIGH"}
+                    self.results["findings"].append({
+                        "tool": "shellcheck",
+                        "file": issue.get("file"),
+                        "line": issue.get("line"),
+                        "issue": f"SC{issue.get('code')}: {issue.get('message')}",
+                        "severity": sev_map.get(issue.get("level"), "MEDIUM")
+                    })
+            except Exception as e:
+                logging.error(f" Failed to parse ShellCheck JSON: {e}")
+        
+        self.results["scans"]["shellcheck"] = res
+
     def run_all(self):
         """Executes enabled scanners."""
         if "semgrep" in self.enabled_tools: self.scan_semgrep()
@@ -473,6 +526,7 @@ class ScannerOrchestrator:
         if "kubelinter" in self.enabled_tools: self.scan_kubelinter()
         if "kubeconform" in self.enabled_tools: self.scan_kubeconform()
         if "kubescore" in self.enabled_tools: self.scan_kubescore()
+        if "shellcheck" in self.enabled_tools: self.scan_shellcheck()
         self._calculate_summary()
         self.save_results()
 
@@ -530,7 +584,7 @@ class ScannerOrchestrator:
         print(header)
         print(" " + "─"*12 + "╁" + "─"*17 + "╁" + "─"*37)
         
-        for tool in ["semgrep", "gitleaks", "yamllint", "bandit", "trivy", "kubelinter", "kubeconform", "kubescore"]:
+        for tool in ["semgrep", "gitleaks", "yamllint", "bandit", "shellcheck", "kubelinter", "kubeconform", "kubescore"]:
             if tool not in self.results["scans"]:
                 continue
                 
@@ -545,6 +599,7 @@ class ScannerOrchestrator:
                 if tool == "gitleaks": summary = "Credential/Secret leak detected!"
                 elif tool == "semgrep": summary = "Code logic vulnerabilities found."
                 elif tool == "bandit":  summary = "Python security anti-patterns detected."
+                elif tool == "shellcheck": summary = "Shell script vulnerabilities and POSIX violations."
                 elif tool == "kubelinter": summary = "K8s manifest security/best-practice issues."
                 elif tool == "kubeconform": summary = "Strict K8s schema/apiVersion violations."
                 elif tool == "kubescore": summary = "Production-readiness & security hardening risks."
