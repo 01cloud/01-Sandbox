@@ -196,4 +196,36 @@
     50% { transform: translateX(0%); }
     100% { transform: translateX(100%); }
   }
+
+  @keyframes segment-spin {
+    0% { opacity: 1; }
+    100% { opacity: 0.15; }
+  }
+
+  .segmented-spinner {
+    position: relative;
+    width: 40px;
+    height: 40px;
+  }
+
+  .segmented-spinner div {
+    position: absolute;
+    width: 10%;
+    height: 30%;
+    background: currentColor;
+    left: 45%;
+    top: 35%;
+    transform-origin: 50% 50%;
+    border-radius: 50px;
+    animation: segment-spin 0.8s linear infinite;
+  }
+
+  .segmented-spinner div:nth-child(1) { transform: rotate(0deg) translate(0, -130%); animation-delay: 0s; }
+  .segmented-spinner div:nth-child(2) { transform: rotate(45deg) translate(0, -130%); animation-delay: -0.7s; }
+  .segmented-spinner div:nth-child(3) { transform: rotate(90deg) translate(0, -130%); animation-delay: -0.6s; }
+  .segmented-spinner div:nth-child(4) { transform: rotate(135deg) translate(0, -130%); animation-delay: -0.5s; }
+  .segmented-spinner div:nth-child(5) { transform: rotate(180deg) translate(0, -130%); animation-delay: -0.4s; }
+  .segmented-spinner div:nth-child(6) { transform: rotate(225deg) translate(0, -130%); animation-delay: -0.3s; }
+  .segmented-spinner div:nth-child(7) { transform: rotate(270deg) translate(0, -130%); animation-delay: -0.2s; }
+  .segmented-spinner div:nth-child(8) { transform: rotate(315deg) translate(0, -130%); animation-delay: -0.1s; }
 }

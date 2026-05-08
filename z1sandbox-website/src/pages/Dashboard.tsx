@@ -20,6 +20,7 @@ import {
   Clock,
   Calendar
 } from "lucide-react";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -478,7 +479,7 @@ const Dashboard = () => {
                         >
                           {isCreating ? (
                             <div className="flex items-center gap-2">
-                              <RefreshCw className="w-4 h-4 animate-spin" />
+                              <LoadingSpinner size="sm" className="text-current" />
                               <span className="uppercase tracking-widest text-[10px]">Generating...</span>
                             </div>
                           ) : keys.length >= 5 ? (
@@ -496,13 +497,8 @@ const Dashboard = () => {
             <CardContent className="p-0">
               {isLoading ? (
                 <div className="p-20 flex flex-col items-center justify-center text-center space-y-6">
-                  <div className="space-y-3">
-                    <h3 className="text-2xl font-black uppercase tracking-tighter text-foreground">Synchronizing Tokens...</h3>
-                    <p className="text-[10px] text-muted-foreground font-black uppercase tracking-[0.2em] opacity-60">Verifying endpoint authenticity</p>
-                  </div>
-                  <div className="max-w-xs w-full h-1.5 bg-muted rounded-full overflow-hidden p-0.5 border border-border/50">
-                    <div className="h-full bg-primary rounded-full w-1/2 animate-[progress_2s_infinite]" />
-                  </div>
+                  <LoadingSpinner className="text-primary/40" />
+                  <p className="text-[10px] text-muted-foreground font-black uppercase tracking-[0.2em] opacity-60 animate-pulse">Synchronizing Tokens...</p>
                 </div>
               ) : keys.length === 0 ? (
                 <div className="p-20 flex flex-col items-center gap-6 text-center">
