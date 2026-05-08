@@ -74,12 +74,6 @@ const Dashboard = () => {
   const [newKey, setNewKey] = useState<{ id: string; key: string; status?: string } | null>(null);
   const [form, setForm] = useState({ name: "", backend: "Z1_SANDBOX", ttl: "never", ttlValue: "1" });
   const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
-  const [now, setNow] = useState(new Date());
-
-  useEffect(() => {
-    const timer = setInterval(() => setNow(new Date()), 1000);
-    return () => clearInterval(timer);
-  }, []);
 
   const [scannerConfig, setScannerConfig] = useState<{
     isOpen: boolean;
@@ -530,10 +524,11 @@ const Dashboard = () => {
                                 <span>
                                   {(() => {
                                     const exp = new Date(key.expires_at);
+                                    const now = new Date();
                                     const diffMs = exp.getTime() - now.getTime();
-                                    
+
                                     if (diffMs <= 0) return "Expired";
-                                    
+
                                     const diffYears = exp.getFullYear() - now.getFullYear();
                                     if (diffYears > 50) return "Never Expires";
 
@@ -541,7 +536,7 @@ const Dashboard = () => {
                                     const diffMinutes = Math.floor(diffSeconds / 60);
                                     const diffHours = Math.floor(diffMinutes / 60);
                                     const diffDays = Math.floor(diffHours / 24);
-                                    
+
                                     if (diffDays >= 365) {
                                       const years = Math.floor(diffDays / 365);
                                       return `Expires in ${years} year${years > 1 ? 's' : ''}`;
@@ -557,9 +552,9 @@ const Dashboard = () => {
                                       return `Expires in ${diffHours} hour${diffHours > 1 ? 's' : ''}`;
                                     }
                                     if (diffMinutes > 0) {
-                                      return `Expires in ${diffMinutes}m ${diffSeconds % 60}s`;
+                                      return `Expires in ${diffMinutes} minute${diffMinutes > 1 ? 's' : ''}`;
                                     }
-                                    return `Expires in ${diffSeconds}s`;
+                                    return "Expiring soon";
                                   })()}
                                 </span>
                               </div>
