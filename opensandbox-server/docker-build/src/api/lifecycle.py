@@ -283,7 +283,7 @@ async def create_scan_job(
         )
 
     sandbox_req = CreateSandboxRequest(
-        image=ImageSpec(uri=os.getenv("SANDBOX_IMAGE", "kamalberrybytes/codeinterpreter:1.0.0")),
+        image=ImageSpec(uri=os.getenv("SANDBOX_IMAGE", "kamalberrybytes/codeinterpreter:1.0.1")),
         resourceLimits=SchemaResourceLimits(root={"cpu": "1", "memory": "2Gi"}),
         entrypoint=["/opt/opensandbox/code-interpreter.sh"],
         timeout=scan_request.timeout if scan_request and scan_request.timeout else 300,

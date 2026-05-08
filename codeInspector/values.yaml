@@ -268,10 +268,10 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
-    sandboxImage: "kamalberrybytes/codeinterpreter:1.0.0"
+    sandboxImage: "kamalberrybytes/codeinterpreter:1.0.1"
     image:
       repository: kamalberrybytes/opensandbox-server
-      tag: 1.0.0
+      tag: 1.0.1
       pullPolicy: Always
     resources:
       requests:
@@ -297,7 +297,7 @@ opensandboxResourcePool:
   pool:
     name: my-sandbox-pool
     container:
-      image: kamalberrybytes/codeinterpreter:1.0.0
+      image: kamalberrybytes/codeinterpreter:1.0.1
       ports:
         - containerPort: 44772
         - containerPort: 54321
