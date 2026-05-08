@@ -32,6 +32,14 @@ class ScannerOrchestrator:
 
     def _get_enabled_tools(self) -> List[str]:
         """Determines tools based on explicit file classification."""
+        # 1. Discover all files first
+        all_files = []
+        for root, _, files in os.walk(self.target_dir):
+            for file in files:
+                all_files.append(os.path.join(root, file))
+        
+        self.results["files_scanned"] = [os.path.relpath(f, self.target_dir) for f in all_files]
+
         self.classified_files = {
             "k8s": [],
             "yaml": [],

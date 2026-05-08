@@ -178,6 +178,7 @@ _check_tool "yamllint" "yamllint --version"
 _check_tool "bandit"   "bandit --version"
 _check_tool "gitleaks" "gitleaks version"
 _check_tool "trivy"    "trivy --version"
+_check_tool "shellcheck" "shellcheck --version"
 
 echo "---------------------------------------------"
 echo " PATH: ${PATH}"
@@ -192,12 +193,13 @@ run_security_scans() {
     # Ensure global binary paths are at the front of the PATH
     export PATH="/usr/local/bin:/root/.local/bin:$PATH"
 
-    echo -n "Checking for scanners: semgrep, gitleaks, bandit, yamllint, trivy, kube-linter, kubeconform, kube-score... "
+    echo -n "Checking for scanners: semgrep, gitleaks, bandit, yamllint, trivy, shellcheck, kube-linter, kubeconform, kube-score... "
     if ! command -v semgrep >/dev/null 2>&1 || \
        ! command -v gitleaks >/dev/null 2>&1 || \
        ! command -v bandit >/dev/null 2>&1 || \
        ! command -v yamllint >/dev/null 2>&1 || \
        ! command -v trivy >/dev/null 2>&1 || \
+       ! command -v shellcheck >/dev/null 2>&1 || \
        ! command -v kube-linter >/dev/null 2>&1 || \
        ! command -v kubeconform >/dev/null 2>&1 || \
        ! command -v kube-score >/dev/null 2>&1; then

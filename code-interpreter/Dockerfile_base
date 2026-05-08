@@ -109,7 +109,7 @@ ENV GOROOT=${GO_ROOT}/${GO_V1_25} \
 # 8. Install Security Scanning Tools
 # Install system-level dependencies for tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libseccomp2 \
+    libseccomp2 shellcheck \
     && rm -rf /var/lib/apt/lists/*
 
 # Install Python-based tools directly into /usr/local/bin
@@ -203,7 +203,8 @@ RUN set -eux; \
     trivy --version; \
     kube-linter version; \
     kubeconform -v; \
-    kube-score version
+    kube-score version; \
+    shellcheck --version
 
 # 9. Install kubectl
 RUN set -eux; \
