@@ -162,6 +162,12 @@ const Dashboard = () => {
       return;
     }
 
+    const safeNameRegex = /^[a-zA-Z0-9\s\-_]+$/;
+    if (!safeNameRegex.test(form.name)) {
+      toast.error("Invalid key name. Only alphanumeric characters, spaces, hyphens and underscores are allowed.");
+      return;
+    }
+
     try {
       setIsCreating(true);
       const token = await getAccessTokenSilently();

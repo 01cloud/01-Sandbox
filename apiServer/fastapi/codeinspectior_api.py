@@ -22,13 +22,15 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 import json
+import re
 
 # Modular Imports
 from models import (
     RunRequest, RunResponse, StatusResponse, 
     CreateSandboxRequest, SandboxResponse,
     ScanJobRequest, ScanJobResponse,
-    GenerateAPIResponse
+    GenerateAPIResponse, APIKeyCreateRequest,
+    APIKeyListResponse, APIKeyRecord
 )
 from config import opensandbox_base_url, opensandbox_headers, gateway_secret_config, jwt_config
 from backends import SandboxBackend, GenericHTTPBackend
@@ -36,7 +38,6 @@ from backends import SandboxBackend, GenericHTTPBackend
 import secrets
 import base64
 import jwt
-from starlette.requests import Request
 import datetime
 from kubernetes import client, config
 import sqlite3
@@ -195,6 +196,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://contests-name-publishers-off.trycloudflare.com",
+        "https://sandbox.01security.com",
         "http://localhost:3000",
         "http://localhost:5173",
         "http://localhost:8000",
@@ -897,6 +899,11 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
     """
     user_id = payload.get("sub")
     
+    # Strict Whitelist Sanitization: Allow only alphanumeric, spaces, dashes, and underscores
+    sanitized_name = re.sub(r'[^a-zA-Z0-9\s\-_]', '', req.name).strip()
+    if not sanitized_name:
+        sanitized_name = "Untitled Key"
+    
     # Check quota (Max 5 keys per user)
     conn = state.get_db_conn()
     cursor = conn.cursor()
@@ -913,14 +920,14 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
     now = datetime.datetime.now(datetime.UTC)
     if req.ttl_hours == -1:
         expires_at = now + datetime.timedelta(days=365 * 100) # Effectively never expires
-        status_msg = f"Key '{req.name}' generated successfully. Valid indefinitely."
+        status_msg = f"Key '{sanitized_name}' generated successfully. Valid indefinitely."
     elif req.ttl_hours < 1:
         expires_at = now + datetime.timedelta(hours=req.ttl_hours)
         minutes = int(req.ttl_hours * 60)
-        status_msg = f"Key '{req.name}' generated successfully. Valid for {minutes} minute(s)."
+        status_msg = f"Key '{sanitized_name}' generated successfully. Valid for {minutes} minute(s)."
     else:
         expires_at = now + datetime.timedelta(hours=req.ttl_hours)
-        status_msg = f"Key '{req.name}' generated successfully. Valid for {req.ttl_hours} hour(s)."
+        status_msg = f"Key '{sanitized_name}' generated successfully. Valid for {req.ttl_hours} hour(s)."
 
     
     token_payload = {
@@ -946,7 +953,7 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
         VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
     """ if state.use_postgres else "INSERT INTO api_keys (id, name, backend, user_id, user_email, created_at, expires_at, prefix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
     
-    cursor.execute(query, (jti, req.name, req.backend.value, user_id, user_email, now.isoformat(), expires_at.isoformat(), f"ci_{jti[:8]}"))
+    cursor.execute(query, (jti, sanitized_name, req.backend.value, user_id, user_email, now.isoformat(), expires_at.isoformat(), f"ci_{jti[:8]}"))
     conn.commit()
     conn.close()
     
