@@ -1,5 +1,6 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import { useEffect, useState } from "react";
+import DOMPurify from 'dompurify';
 import {
   Plus,
   Trash2,
@@ -157,13 +158,17 @@ const Dashboard = () => {
   }, [isAuthenticated]);
 
   const handleCreateKey = async () => {
-    if (!form.name) {
-      toast.error("Please enter a key name");
+    // 1. Sanitize using lightweight DOMPurify to strip any HTML/Script tags
+    const sanitizedName = DOMPurify.sanitize(form.name).trim();
+
+    if (!sanitizedName) {
+      toast.error("Please enter a valid key name");
       return;
     }
 
+    // 2. Enforce strict character whitelist
     const safeNameRegex = /^[a-zA-Z0-9\s\-_]+$/;
-    if (!safeNameRegex.test(form.name)) {
+    if (!safeNameRegex.test(sanitizedName)) {
       toast.error("Invalid key name. Only alphanumeric characters, spaces, hyphens and underscores are allowed.");
       return;
     }
@@ -187,7 +192,7 @@ const Dashboard = () => {
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          name: form.name,
+          name: sanitizedName,
           backend: form.backend,
           ttl_hours,
           user_email: user?.email,

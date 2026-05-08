@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Red
 from fastapi.middleware.cors import CORSMiddleware
 import json
 import re
+import bleach
 
 # Modular Imports
 from models import (
@@ -898,8 +899,12 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
     """
     user_id = payload.get("sub")
     
-    # Strict Whitelist Sanitization: Allow only alphanumeric, spaces, dashes, and underscores
-    sanitized_name = re.sub(r'[^a-zA-Z0-9\s\-_]', '', req.name).strip()
+    # 1. Strip all HTML/Script tags using bleach
+    clean_name = bleach.clean(req.name, tags=[], strip=True).strip()
+
+    # 2. Strict Whitelist Sanitization: Allow only alphanumeric, spaces, dashes, and underscores
+    sanitized_name = re.sub(r'[^a-zA-Z0-9\s\-_]', '', clean_name).strip()
+    
     if not sanitized_name:
         sanitized_name = "Untitled Key"
     
