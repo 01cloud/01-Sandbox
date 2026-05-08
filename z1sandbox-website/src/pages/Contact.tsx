@@ -1,5 +1,5 @@
 import { motion } from "framer-motion";
-import { Mail, MessageSquare, Github, Globe, Linkedin } from "lucide-react";
+import { Mail, MessageSquare, Github, Globe, Linkedin, Calendar } from "lucide-react";
 
 const XIcon = ({ className }: { className?: string }) => (
   <svg viewBox="0 0 300 300" className={className} fill="currentColor">
@@ -9,7 +9,7 @@ const XIcon = ({ className }: { className?: string }) => (
 
 const Contact = () => {
   const contactMethods = [
-    { label: "Email", icon: Mail, href: "mailto:info@01security.com", desc: "info@01security.com" },
+    { label: "Book a Demo", icon: Calendar, href: "/book-a-demo", desc: "Schedule a walkthrough" },
     // { label: "GitHub", icon: Github, href: "https://github.com/11security", desc: "01 Sandbox" },
     // { label: "Slack", icon: MessageSquare, href: "https://join.slack.com/t/01securitycommunity/shared_invite/zt-2d1f1997c-~yJz7LNDkU5W2b4B~o~h0A", desc: "01 Security" },
   ];
@@ -82,22 +82,32 @@ const Contact = () => {
 
           {/* Minimalist Office Section */}
           <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 1, delay: 0.8 }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.8, delay: 0.5 }}
             className="flex flex-col items-center pt-24 border-t border-border/10"
           >
-            <div className="flex items-center gap-2 mb-8 text-muted-foreground/20">
-              <Globe className="w-5 h-5" />
-              <span className="text-[10px] font-black uppercase tracking-[0.4em]">Headquarters</span>
+            <div className="flex items-center gap-2 mb-10 text-accent font-bold bg-accent/10 px-6 py-2 rounded-full border border-accent/20">
+              <Globe className="w-4 h-4" />
+              <span className="text-[10px] font-black uppercase tracking-[0.4em]">Global Headquarters</span>
             </div>
-            <div className="text-center group cursor-default">
-              <h2 className="text-3xl font-black tracking-tight mb-4 group-hover:text-accent transition-colors">United States</h2>
-              <p className="text-muted-foreground/50 leading-relaxed text-base font-medium max-w-sm">
+            
+            <div className="text-center group cursor-default p-12 md:p-16 rounded-[3.5rem] bg-card/30 backdrop-blur-2xl border border-border/30 hover:border-accent/40 transition-all duration-700 shadow-2xl shadow-accent/5 max-w-2xl w-full">
+              <h2 className="text-4xl md:text-5xl font-black tracking-tightest mb-6 text-foreground group-hover:text-accent transition-colors duration-500">
+                United States
+              </h2>
+              <p className="text-muted-foreground/80 leading-relaxed text-xl font-medium max-w-md mx-auto italic">
                 Z1 Security LLC<br />
-                10989 Tower PI, <br className="sm:hidden" />
-                Manassas, Virginia 20109
+                <span className="text-foreground/90 font-black not-italic mt-2 block">
+                  10989 Tower PI, <br className="sm:hidden" />
+                  Manassas, Virginia 20109
+                </span>
               </p>
+              
+              <div className="mt-10 pt-10 border-t border-border/10 flex items-center justify-center gap-6">
+                <div className="w-1.5 h-1.5 rounded-full bg-accent animate-ping" />
+                <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/40">Verified Location</span>
+              </div>
             </div>
           </motion.div>
 
