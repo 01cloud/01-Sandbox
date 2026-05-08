@@ -74,6 +74,12 @@ const Dashboard = () => {
   const [newKey, setNewKey] = useState<{ id: string; key: string; status?: string } | null>(null);
   const [form, setForm] = useState({ name: "", backend: "Z1_SANDBOX", ttl: "never", ttlValue: "1" });
   const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
+  const [now, setNow] = useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
 
   const [scannerConfig, setScannerConfig] = useState<{
     isOpen: boolean;
@@ -524,7 +530,6 @@ const Dashboard = () => {
                                 <span>
                                   {(() => {
                                     const exp = new Date(key.expires_at);
-                                    const now = new Date();
                                     const diffMs = exp.getTime() - now.getTime();
                                     
                                     if (diffMs <= 0) return "Expired";
@@ -552,9 +557,9 @@ const Dashboard = () => {
                                       return `Expires in ${diffHours} hour${diffHours > 1 ? 's' : ''}`;
                                     }
                                     if (diffMinutes > 0) {
-                                      return `Expires in ${diffMinutes} minute${diffMinutes > 1 ? 's' : ''}`;
+                                      return `Expires in ${diffMinutes}m ${diffSeconds % 60}s`;
                                     }
-                                    return "Expiring soon";
+                                    return `Expires in ${diffSeconds}s`;
                                   })()}
                                 </span>
                               </div>
