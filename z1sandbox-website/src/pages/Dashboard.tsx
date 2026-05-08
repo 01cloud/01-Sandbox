@@ -521,25 +521,15 @@ const Dashboard = () => {
                           </div>
                         </div>
 
-                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 lg:pl-6 lg:border-l border-border/30">
-                          <div className="space-y-1.5">
-                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">Prefix Pattern</div>
-                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-foreground/[0.03] border border-border/50">
-                              <code className="text-sm font-mono text-foreground font-bold">{key.prefix}</code>
-                              <span className="text-muted-foreground/30">••••••••••••••</span>
-                            </div>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <Button
-                              variant="outline"
-                              className="h-11 px-4 rounded-xl border-border/50 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all active:scale-95 flex items-center gap-2 font-bold text-xs uppercase tracking-wider"
-                              onClick={() => setKeyToDelete(key.id)}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                              Delete
-                            </Button>
-                          </div>
+                        <div className="flex items-center">
+                          <Button
+                            variant="outline"
+                            className="h-11 px-4 rounded-xl border-border/50 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all active:scale-95 flex items-center gap-2 font-bold text-xs uppercase tracking-wider"
+                            onClick={() => setKeyToDelete(key.id)}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                            Delete
+                          </Button>
                         </div>
                       </div>
                     </div>
