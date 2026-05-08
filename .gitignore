@@ -1,3 +1,23 @@
 venv
 .venv
 .env
+
+# Local Python dependencies (Local Shadowing)
+apiServer/fastapi/fastapi/
+apiServer/fastapi/pydantic/
+apiServer/fastapi/pydantic_core/
+apiServer/fastapi/starlette/
+apiServer/fastapi/httpx/
+apiServer/fastapi/httpcore/
+apiServer/fastapi/anyio/
+apiServer/fastapi/h11/
+apiServer/fastapi/jwt/
+apiServer/fastapi/redis/
+apiServer/fastapi/psycopg2/
+apiServer/fastapi/uvicorn/
+apiServer/fastapi/kubernetes/
+apiServer/fastapi/annotated_types/
+apiServer/fastapi/typing_extensions.py
+apiServer/fastapi/venv/
+apiServer/fastapi/bleach/
+apiServer/fastapi/webencodings/
