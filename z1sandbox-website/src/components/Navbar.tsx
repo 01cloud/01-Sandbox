@@ -13,7 +13,6 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const links = [
-  { href: "/#pillars", label: "Pillars" },
   { href: "/#features", label: "Features" },
   { href: "/#security", label: "Security" },
   // { href: "/#architecture", label: "Architecture" },
@@ -48,9 +47,9 @@ const Navbar = () => {
 
           <div className="hidden md:flex items-center gap-1 xl:gap-2 text-sm font-medium">
             {links.map((l) => (
-              <a 
-                key={l.href} 
-                href={l.href} 
+              <a
+                key={l.href}
+                href={l.href}
                 className="px-4 py-2 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-foreground/[0.03] transition-all relative group"
               >
                 {l.label}
@@ -62,7 +61,7 @@ const Navbar = () => {
           <div className="hidden md:flex items-center gap-3">
             <ThemeToggle />
             <div className="w-px h-5 bg-border mx-1" />
-            
+
             {!isLoading && (
               <>
                 {isAuthenticated ? (
@@ -91,7 +90,7 @@ const Navbar = () => {
                         </a>
                       </DropdownMenuItem>
                       <DropdownMenuSeparator className="bg-border/50 mx-2" />
-                      <DropdownMenuItem 
+                      <DropdownMenuItem
                         className="rounded-xl px-3 py-3 focus:bg-destructive/10 focus:text-destructive font-bold cursor-pointer text-destructive/80"
                         onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
                       >
@@ -147,9 +146,9 @@ const Navbar = () => {
                 {!isLoading && (
                   <>
                     {isAuthenticated ? (
-                      <a 
-                        href="/dashboard" 
-                        onClick={() => setOpen(false)} 
+                      <a
+                        href="/dashboard"
+                        onClick={() => setOpen(false)}
                         className="w-full py-4 px-6 flex items-center justify-between text-base font-bold text-foreground rounded-2xl border border-border/50 bg-secondary/20"
                       >
                         <div className="flex items-center gap-3">
@@ -162,8 +161,8 @@ const Navbar = () => {
                         <LayoutDashboard className="w-5 h-5 text-muted-foreground" />
                       </a>
                     ) : (
-                      <button 
-                        onClick={() => { loginWithRedirect(); setOpen(false); }} 
+                      <button
+                        onClick={() => { loginWithRedirect(); setOpen(false); }}
                         className="w-full py-4 text-center text-base font-bold text-muted-foreground hover:text-foreground rounded-2xl border border-border/50 flex items-center justify-center gap-2"
                       >
                         <LogIn className="w-5 h-5" />
@@ -180,7 +179,7 @@ const Navbar = () => {
                   Book a Demo
                 </a>
                 {isAuthenticated && (
-                   <button 
+                  <button
                     onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
                     className="w-full py-3 text-center text-sm font-bold text-destructive/80 hover:text-destructive"
                   >
