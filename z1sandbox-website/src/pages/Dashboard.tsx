@@ -16,8 +16,7 @@ import {
   ExternalLink as ExternalLinkIcon,
   Search,
   Code,
-  Clock,
-  LogOut
+  Clock
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -80,14 +79,14 @@ const Dashboard = () => {
   const fetchBackends = async () => {
     try {
       const envBackendsJson = (window as any)._env_?.VITE_DASHBOARD_BACKENDS_JSON || import.meta.env.VITE_DASHBOARD_BACKENDS_JSON;
-      
+
       if (envBackendsJson) {
         let rawJson = typeof envBackendsJson === 'string' ? envBackendsJson.trim() : envBackendsJson;
         // Strip leading/trailing single quotes if they exist
         if (typeof rawJson === 'string' && rawJson.startsWith("'") && rawJson.endsWith("'")) {
           rawJson = rawJson.substring(1, rawJson.length - 1);
         }
-        
+
         const data = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
 
         // Process backends to ensure they have all required fields dynamically
@@ -450,9 +449,9 @@ const Dashboard = () => {
                       )}
 
                       <DialogFooter className="mt-8 pt-6 border-t border-border/50">
-                        <Button 
-                          className="w-full rounded-2xl h-12 font-bold" 
-                          disabled={isCreating || keys.length >= 5} 
+                        <Button
+                          className="w-full rounded-2xl h-12 font-bold"
+                          disabled={isCreating || keys.length >= 5}
                           onClick={handleCreateKey}
                         >
                           {isCreating ? <RefreshCw className="w-5 h-5 animate-spin" /> : keys.length >= 5 ? "Limit Reached" : "Generate Key"}
@@ -480,63 +479,63 @@ const Dashboard = () => {
                   </div>
                 </div>
               ) : (
-                  <div className="grid grid-cols-1 gap-4 p-2">
-                    {keys.map((key) => (
-                      <div 
-                        key={key.id} 
-                        className="group relative p-5 rounded-[2rem] bg-card/30 border border-border/40 hover:border-primary/30 transition-all duration-500 hover:shadow-2xl hover:shadow-primary/5 overflow-hidden"
-                      >
-                        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-                        
-                        <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                          <div className="flex items-start gap-5 flex-1">
-                            <div className="mt-1 p-3.5 rounded-2xl bg-primary/10 text-primary border border-primary/20 shadow-inner group-hover:scale-110 transition-transform duration-500">
-                              <ShieldCheck className="w-6 h-6" />
-                            </div>
-                            <div className="space-y-2">
-                              <div className="flex items-center gap-3">
-                                <h3 className="font-display font-black text-xl tracking-tight">{key.name}</h3>
-                                <Badge variant="outline" className="rounded-lg bg-primary/5 border-primary/20 text-[10px] font-black uppercase tracking-widest px-2 py-0.5">
-                                  {key.backend}
-                                </Badge>
-                              </div>
-                              <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground/70">
-                                <div className="flex items-center gap-1.5">
-                                  <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                                  <span className="font-mono">ID: {key.id.substring(0, 12)}...</span>
-                                </div>
-                                <div className="flex items-center gap-1.5">
-                                  <Clock className="w-3.5 h-3.5" />
-                                  <span>Created {new Date(key.created_at).toLocaleDateString()}</span>
-                                </div>
-                              </div>
-                            </div>
+                <div className="grid grid-cols-1 gap-4 p-2">
+                  {keys.map((key) => (
+                    <div
+                      key={key.id}
+                      className="group relative p-5 rounded-[2rem] bg-card/30 border border-border/40 hover:border-primary/30 transition-all duration-500 hover:shadow-2xl hover:shadow-primary/5 overflow-hidden"
+                    >
+                      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                      <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-6">
+                        <div className="flex items-start gap-5 flex-1">
+                          <div className="mt-1 p-3.5 rounded-2xl bg-primary/10 text-primary border border-primary/20 shadow-inner group-hover:scale-110 transition-transform duration-500">
+                            <ShieldCheck className="w-6 h-6" />
                           </div>
-
-                          <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 lg:pl-6 lg:border-l border-border/30">
-                            <div className="space-y-1.5">
-                              <div className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">Prefix Pattern</div>
-                              <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-foreground/[0.03] border border-border/50">
-                                <code className="text-sm font-mono text-foreground font-bold">{key.prefix}</code>
-                                <span className="text-muted-foreground/30">••••••••••••••</span>
-                              </div>
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-3">
+                              <h3 className="font-display font-black text-xl tracking-tight">{key.name}</h3>
+                              <Badge variant="outline" className="rounded-lg bg-primary/5 border-primary/20 text-[10px] font-black uppercase tracking-widest px-2 py-0.5">
+                                {key.backend}
+                              </Badge>
                             </div>
-
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="w-11 h-11 rounded-xl border-border/50 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all active:scale-90"
-                                onClick={() => handleRevokeKey(key.id)}
-                              >
-                                <LogOut className="w-4 h-4" />
-                              </Button>
+                            <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground/70">
+                              <div className="flex items-center gap-1.5">
+                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
+                                <span className="font-mono">ID: {key.id.substring(0, 12)}...</span>
+                              </div>
+                              <div className="flex items-center gap-1.5">
+                                <Clock className="w-3.5 h-3.5" />
+                                <span>Created {new Date(key.created_at).toLocaleDateString()}</span>
+                              </div>
                             </div>
                           </div>
                         </div>
+
+                        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6 lg:pl-6 lg:border-l border-border/30">
+                          <div className="space-y-1.5">
+                            <div className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/40">Prefix Pattern</div>
+                            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-foreground/[0.03] border border-border/50">
+                              <code className="text-sm font-mono text-foreground font-bold">{key.prefix}</code>
+                              <span className="text-muted-foreground/30">••••••••••••••</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              className="h-11 px-4 rounded-xl border-border/50 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all active:scale-95 flex items-center gap-2 font-bold text-xs uppercase tracking-wider"
+                              onClick={() => handleRevokeKey(key.id)}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                              Delete
+                            </Button>
+                          </div>
+                        </div>
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
+                </div>
               )}
             </CardContent>
             <CardFooter className="p-8 border-t border-border/50 bg-muted/10">
