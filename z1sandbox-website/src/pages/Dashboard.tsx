@@ -71,7 +71,7 @@ const Dashboard = () => {
   const [keys, setKeys] = useState<APIKey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
-  const [newKey, setNewKey] = useState<{ id: string; key: string } | null>(null);
+  const [newKey, setNewKey] = useState<{ id: string; key: string; status?: string } | null>(null);
   const [form, setForm] = useState({ name: "", backend: "Z1_SANDBOX", ttl: "never", ttlValue: "1" });
   const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
 
@@ -191,7 +191,7 @@ const Dashboard = () => {
       const data = await response.json();
       if (!response.ok) throw new Error(data.detail || "Failed to create key");
 
-      setNewKey({ id: data.api_key_id, key: data.api_key });
+      setNewKey({ id: data.api_key_id, key: data.api_key, status: data.status });
       localStorage.setItem(`bound_key_${data.api_key_id}`, data.api_key);
       fetchKeys();
       toast.success("API Key generated successfully!");
@@ -383,7 +383,7 @@ const Dashboard = () => {
                       <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-start gap-4">
                         <CheckCircle2 className="w-5 h-5 mt-0.5 shrink-0" />
                         <div className="text-sm font-medium">
-                          Key generated successfully. Copy it now, as it won't be shown again.
+                          {newKey.status || "Key generated successfully. Copy it now, as it won't be shown again."}
                         </div>
                       </div>
                       <div
@@ -525,9 +525,36 @@ const Dashboard = () => {
                                   {(() => {
                                     const exp = new Date(key.expires_at);
                                     const now = new Date();
+                                    const diffMs = exp.getTime() - now.getTime();
+                                    
+                                    if (diffMs <= 0) return "Expired";
+                                    
                                     const diffYears = exp.getFullYear() - now.getFullYear();
                                     if (diffYears > 50) return "Never Expires";
-                                    return `Expires ${exp.toLocaleDateString()}`;
+
+                                    const diffSeconds = Math.floor(diffMs / 1000);
+                                    const diffMinutes = Math.floor(diffSeconds / 60);
+                                    const diffHours = Math.floor(diffMinutes / 60);
+                                    const diffDays = Math.floor(diffHours / 24);
+                                    
+                                    if (diffDays >= 365) {
+                                      const years = Math.floor(diffDays / 365);
+                                      return `Expires in ${years} year${years > 1 ? 's' : ''}`;
+                                    }
+                                    if (diffDays >= 30) {
+                                      const months = Math.floor(diffDays / 30);
+                                      return `Expires in ${months} month${months > 1 ? 's' : ''}`;
+                                    }
+                                    if (diffDays > 0) {
+                                      return `Expires in ${diffDays} day${diffDays > 1 ? 's' : ''}`;
+                                    }
+                                    if (diffHours > 0) {
+                                      return `Expires in ${diffHours} hour${diffHours > 1 ? 's' : ''}`;
+                                    }
+                                    if (diffMinutes > 0) {
+                                      return `Expires in ${diffMinutes} minute${diffMinutes > 1 ? 's' : ''}`;
+                                    }
+                                    return "Expiring soon";
                                   })()}
                                 </span>
                               </div>
