@@ -16,7 +16,8 @@ import {
   ExternalLink as ExternalLinkIcon,
   Search,
   Code,
-  Clock
+  Clock,
+  Calendar
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
@@ -60,6 +61,7 @@ interface APIKey {
   backend: string;
   prefix: string;
   created_at: string;
+  expires_at: string;
   is_revoked: boolean;
 }
 
@@ -516,6 +518,18 @@ const Dashboard = () => {
                               <div className="flex items-center gap-1.5">
                                 <Clock className="w-3.5 h-3.5" />
                                 <span>Created {new Date(key.created_at).toLocaleDateString()}</span>
+                              </div>
+                              <div className="flex items-center gap-1.5 ml-1 pl-4 border-l border-border/30">
+                                <Calendar className="w-3.5 h-3.5" />
+                                <span>
+                                  {(() => {
+                                    const exp = new Date(key.expires_at);
+                                    const now = new Date();
+                                    const diffYears = exp.getFullYear() - now.getFullYear();
+                                    if (diffYears > 50) return "Never Expires";
+                                    return `Expires ${exp.toLocaleDateString()}`;
+                                  })()}
+                                </span>
                               </div>
                             </div>
                           </div>
