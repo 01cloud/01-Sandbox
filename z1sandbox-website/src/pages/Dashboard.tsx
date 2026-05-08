@@ -476,7 +476,16 @@ const Dashboard = () => {
                           disabled={isCreating || keys.length >= 5}
                           onClick={handleCreateKey}
                         >
-                          {isCreating ? <RefreshCw className="w-5 h-5 animate-spin" /> : keys.length >= 5 ? "Limit Reached" : "Generate Key"}
+                          {isCreating ? (
+                            <div className="flex items-center gap-2">
+                              <RefreshCw className="w-4 h-4 animate-spin" />
+                              <span className="uppercase tracking-widest text-[10px]">Generating...</span>
+                            </div>
+                          ) : keys.length >= 5 ? (
+                            "Limit Reached"
+                          ) : (
+                            "Generate Key"
+                          )}
                         </Button>
                       </DialogFooter>
                     </div>
@@ -486,9 +495,14 @@ const Dashboard = () => {
             </CardHeader>
             <CardContent className="p-0">
               {isLoading ? (
-                <div className="p-20 flex flex-col items-center gap-4">
-                  <RefreshCw className="w-10 h-10 animate-spin text-primary/30" />
-                  <p className="text-muted-foreground font-medium">Synchronizing tokens...</p>
+                <div className="p-20 flex flex-col items-center justify-center text-center space-y-6">
+                  <div className="space-y-3">
+                    <h3 className="text-2xl font-black uppercase tracking-tighter text-foreground">Synchronizing Tokens...</h3>
+                    <p className="text-[10px] text-muted-foreground font-black uppercase tracking-[0.2em] opacity-60">Verifying endpoint authenticity</p>
+                  </div>
+                  <div className="max-w-xs w-full h-1.5 bg-muted rounded-full overflow-hidden p-0.5 border border-border/50">
+                    <div className="h-full bg-primary rounded-full w-1/2 animate-[progress_2s_infinite]" />
+                  </div>
                 </div>
               ) : keys.length === 0 ? (
                 <div className="p-20 flex flex-col items-center gap-6 text-center">
