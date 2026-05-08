@@ -39,7 +39,6 @@ import secrets
 import base64
 import jwt
 import datetime
-from kubernetes import client, config
 import sqlite3
 import psycopg2
 from psycopg2.extras import RealDictCursor
