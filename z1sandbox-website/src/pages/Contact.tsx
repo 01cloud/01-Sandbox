@@ -91,19 +91,19 @@ const Contact = () => {
               <Globe className="w-4 h-4" />
               <span className="text-[10px] font-black uppercase tracking-[0.4em]">Global Headquarters</span>
             </div>
-            
+
             <div className="text-center group cursor-default p-12 md:p-16 rounded-[3.5rem] bg-card/30 backdrop-blur-2xl border border-border/30 hover:border-accent/40 transition-all duration-700 shadow-2xl shadow-accent/5 max-w-2xl w-full">
               <h2 className="text-4xl md:text-5xl font-black tracking-tightest mb-6 text-foreground group-hover:text-accent transition-colors duration-500">
                 United States
               </h2>
-              <p className="text-muted-foreground/80 leading-relaxed text-xl font-medium max-w-md mx-auto italic">
+              <p className="text-muted-foreground/80 leading-relaxed text-xl font-medium max-w-md mx-auto">
                 Z1 Security LLC<br />
                 <span className="text-foreground/90 font-black not-italic mt-2 block">
                   10989 Tower PI, <br className="sm:hidden" />
                   Manassas, Virginia 20109
                 </span>
               </p>
-              
+
               <div className="mt-10 pt-10 border-t border-border/10 flex items-center justify-center gap-6">
                 <div className="w-1.5 h-1.5 rounded-full bg-accent animate-ping" />
                 <span className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground/40">Verified Location</span>
