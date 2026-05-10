@@ -92,7 +92,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
       const ext = detectLanguage(code);
       const filename = `input.${ext}`;
 
-      const response = await fetch(`${baseUrl}/v1/scan-jobs`, {
+      const response = await fetch(`${baseUrl}/scan-jobs`, {
         method: "POST",
         headers: {
           "accept": "application/json",
