@@ -105,11 +105,15 @@ const Dashboard = () => {
         const data = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
 
         // Process backends to ensure they have all required fields dynamically
-        const processed = data.map((b: any) => ({
-          ...b,
-          baseUrl: b.baseUrl || `/api/${b.id.toLowerCase()}`,
-          documentationUrl: b.documentationUrl || b.baseUrl || `/api/${b.id.toLowerCase()}/docs`
-        }));
+        const processed = data.map((b: any) => {
+          // If a backend misses a baseUrl, dynamically compose one relative to 'v1'
+          const defaultBase = b.baseUrl || `/api/v1/${b.id.toLowerCase()}`;
+          return {
+            ...b,
+            baseUrl: defaultBase,
+            documentationUrl: b.documentationUrl || `${defaultBase}/docs`
+          };
+        });
         setBackends(processed);
         return;
       }
