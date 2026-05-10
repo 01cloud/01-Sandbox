@@ -6,7 +6,7 @@ import httpx
 from typing import Optional
 
 from models import RunResponse, SessionResponse, CreateSandboxRequest, SandboxResponse
-from config import opensandbox_headers
+from config import opensandbox_headers, opensandbox_route_prefix
 
 
 class SandboxBackend(abc.ABC):
@@ -71,10 +71,11 @@ class GenericHTTPBackend(SandboxBackend):
         """Transmits JSON payload explicitly dictating remote execution instructions."""
         payload = {"code": code, "language": language, "timeout": timeout}
         t0 = time.perf_counter()
+        prefix = opensandbox_route_prefix()
         
         try:
             with httpx.Client(timeout=timeout + 5) as client:
-                r = client.post(f"{self._url}/run", json=payload, headers=opensandbox_headers())
+                r = client.post(f"{self._url}{prefix}/run", json=payload, headers=opensandbox_headers())
                 r.raise_for_status()
                 data = r.json()
                 
@@ -114,9 +115,10 @@ class GenericHTTPBackend(SandboxBackend):
 
     def create_sandbox(self, req: CreateSandboxRequest) -> SandboxResponse:
         """Directly provisions a sandbox on the remote OpenSandbox server."""
+        prefix = opensandbox_route_prefix()
         with httpx.Client(timeout=30) as client:
             r = client.post(
-                f"{self._url}/v1/sandboxes",
+                f"{self._url}{prefix}/sandboxes",
                 json=req.dict(exclude_none=True),
                 headers=opensandbox_headers()
             )
@@ -126,9 +128,10 @@ class GenericHTTPBackend(SandboxBackend):
 
     async def create_scan_job(self, req_body: dict) -> dict:
         """Triggers the isolated scan pipeline and blocks asynchronously for the final result."""
+        prefix = opensandbox_route_prefix()
         async with httpx.AsyncClient(timeout=300) as client:
             r = await client.post(
-                f"{self._url}/v1/scan-jobs",
+                f"{self._url}{prefix}/scan-jobs",
                 json=req_body,
                 headers=opensandbox_headers()
             )
@@ -137,9 +140,10 @@ class GenericHTTPBackend(SandboxBackend):
 
     def get_scan_report(self, job_id: str) -> dict:
         """Retrieves a persistent scan report from the remote OpenSandbox PVC."""
+        prefix = opensandbox_route_prefix()
         with httpx.Client(timeout=10) as client:
             r = client.get(
-                f"{self._url}/scan-jobs/{job_id}/report",
+                f"{self._url}{prefix}/scan-jobs/{job_id}/report",
                 headers=opensandbox_headers()
             )
             r.raise_for_status()
@@ -147,9 +151,10 @@ class GenericHTTPBackend(SandboxBackend):
 
     def get_scan_status(self, job_id: str) -> dict:
         """Retrieves the live scanning status mapped to the backend OpenSandbox service."""
+        prefix = opensandbox_route_prefix()
         with httpx.Client(timeout=5) as client:
             r = client.get(
-                f"{self._url}/scan-status/{job_id}",
+                f"{self._url}{prefix}/scan-status/{job_id}",
                 headers=opensandbox_headers()
             )
             r.raise_for_status()
@@ -157,8 +162,9 @@ class GenericHTTPBackend(SandboxBackend):
 
     def list_sandboxes(self) -> list[SandboxResponse]:
         """Retrieves active sandboxes from the remote OpenSandbox server."""
+        prefix = opensandbox_route_prefix()
         with httpx.Client(timeout=10) as client:
-            r = client.get(f"{self._url}/v1/sandboxes", headers=opensandbox_headers())
+            r = client.get(f"{self._url}{prefix}/sandboxes", headers=opensandbox_headers())
             r.raise_for_status()
             data = r.json()
             items = data if isinstance(data, list) else data.get("items", [])

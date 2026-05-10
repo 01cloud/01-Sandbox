@@ -21,6 +21,13 @@ def backend_mappings() -> dict[str, str]:
             print(f"[config] Failed to parse BACKEND_MAPPINGS_JSON: {e}")
             
     return default_mappings
+    
+def opensandbox_route_prefix() -> str:
+    """
+    Returns the versioned prefix for the internal Opensandbox backend.
+    Example: /api/v1/01sbx
+    """
+    return os.environ.get("OPENSANDBOX_ROUTE_PREFIX", "/api/v1/01sbx").rstrip("/")
 
 def opensandbox_base_url(backend_id: str = "opensandbox") -> str:
     """
