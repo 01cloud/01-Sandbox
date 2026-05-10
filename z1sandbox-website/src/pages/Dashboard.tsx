@@ -115,15 +115,7 @@ const Dashboard = () => {
       }
 
       // Default fallback if no env is set
-      setBackends([{
-        id: "Z1_SANDBOX",
-        name: "Z1 Sandbox",
-        description: "Secure, isolated environment for code execution and security auditing.",
-        icon: "terminal",
-        color: "indigo",
-        baseUrl: "/api/z1sandbox",
-        documentationUrl: "/api/z1sandbox/docs"
-      }]);
+      setBackends([]);
     } catch (e) {
       console.error("Failed to load backends config from environment:", e);
       setBackends([]);
