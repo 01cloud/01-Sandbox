@@ -35,9 +35,9 @@ service:
 # Auth0 configuration — baked into the JS bundle at docker build time
 # These values are passed as --build-arg to docker build
 auth0:
-  domain: "dev-axwc0ui527kw0c5d.us.auth0.com"
-  clientId: "sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D"
-  audience: "https://code-inspector-api"
+  domain: ""
+  clientId: ""
+  audience: ""
 
 # The nginx upstream service name for API proxying.
 # Must match the ClusterIP service name of the FastAPI backend in the same namespace.

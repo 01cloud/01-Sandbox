@@ -1,66 +1,66 @@
-# Stage 1: Build the application
-FROM node:22-alpine AS build
-WORKDIR /app
+# # Stage 1: Build the application
+# FROM node:22-alpine AS build
+# WORKDIR /app
 
-# Copy package files and install dependencies
-COPY package*.json ./
-RUN npm install
+# # Copy package files and install dependencies
+# COPY package*.json ./
+# RUN npm install
 
-# Copy the rest of the application code
-COPY . .
+# # Copy the rest of the application code
+# COPY . .
 
-# Auth0 configuration (Still build-time as they are public)
-ARG VITE_AUTH0_DOMAIN="dev-axwc0ui527kw0c5d.us.auth0.com"
-ENV VITE_AUTH0_DOMAIN=$VITE_AUTH0_DOMAIN
+# # Auth0 configuration (Still build-time as they are public)
+# ARG VITE_AUTH0_DOMAIN=""
+# ENV VITE_AUTH0_DOMAIN=$VITE_AUTH0_DOMAIN
 
-ARG VITE_AUTH0_CLIENT_ID="sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D"
-ENV VITE_AUTH0_CLIENT_ID=$VITE_AUTH0_CLIENT_ID
+# ARG VITE_AUTH0_CLIENT_ID=""
+# ENV VITE_AUTH0_CLIENT_ID=$VITE_AUTH0_CLIENT_ID
 
-ARG VITE_AUTH0_AUDIENCE="https://code-inspector-api"
-ENV VITE_AUTH0_AUDIENCE=$VITE_AUTH0_AUDIENCE
+# ARG VITE_AUTH0_AUDIENCE=""
+# ENV VITE_AUTH0_AUDIENCE=$VITE_AUTH0_AUDIENCE
 
-ARG VITE_RECAPTCHA_SITE_KEY="6LeKiswsAAAAAMF_8fxlr1z7VCRQ0zr-oFfncfd0"
-ENV VITE_RECAPTCHA_SITE_KEY=$VITE_RECAPTCHA_SITE_KEY
+# ARG VITE_RECAPTCHA_SITE_KEY="6LeKiswsAAAAAMF_8fxlr1z7VCRQ0zr-oFfncfd0"
+# ENV VITE_RECAPTCHA_SITE_KEY=$VITE_RECAPTCHA_SITE_KEY
 
-ARG VITE_GOOGLE_CHAT_WEBHOOK_URL="https://chat.googleapis.com/v1/spaces/AAQAQC-SfqE/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=9HUfBxrsiwrTWAyTkwc6qWZ809reZvFb6tGzkJi21uQ"
-ENV VITE_GOOGLE_CHAT_WEBHOOK_URL=$VITE_GOOGLE_CHAT_WEBHOOK_URL
+# ARG VITE_GOOGLE_CHAT_WEBHOOK_URL="https://chat.googleapis.com/v1/spaces/AAQAQC-SfqE/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=9HUfBxrsiwrTWAyTkwc6qWZ809reZvFb6tGzkJi21uQ"
+# ENV VITE_GOOGLE_CHAT_WEBHOOK_URL=$VITE_GOOGLE_CHAT_WEBHOOK_URL
 
-ARG VITE_API_BASE_URL="https://api-sandbox.01security.com"
-ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
+# ARG VITE_API_BASE_URL="https://api-sandbox.01security.com"
+# ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
-ARG VITE_DASHBOARD_BACKENDS_JSON='[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com/api/z1sandbox","documentationUrl":"https://api-sandbox.01security.com/api/z1sandbox/docs"}]'
-ENV VITE_DASHBOARD_BACKENDS_JSON=$VITE_DASHBOARD_BACKENDS_JSON
+# ARG VITE_DASHBOARD_BACKENDS_JSON='[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com/api/z1sandbox","documentationUrl":"https://api-sandbox.01security.com/api/z1sandbox/docs"}]'
+# ENV VITE_DASHBOARD_BACKENDS_JSON=$VITE_DASHBOARD_BACKENDS_JSON
 
-# ──────────────────────────────────────────────────────────────────────────
+# # ──────────────────────────────────────────────────────────────────────────
 
-RUN npm run build
+# RUN npm run build
 
-# Stage 2: Serve with 'serve' (lightweight static file server)
-FROM node:20-alpine
-WORKDIR /app
+# # Stage 2: Serve with 'serve' (lightweight static file server)
+# FROM node:20-alpine
+# WORKDIR /app
 
-# Install serve globally
-RUN npm install -g serve
+# # Install serve globally
+# RUN npm install -g serve
 
-# Copy built assets from build stage
-COPY --from=build /app/dist ./dist
+# # Copy built assets from build stage
+# COPY --from=build /app/dist ./dist
 
-# Copy the entrypoint script and make sure it's executable
-COPY docker-entrypoint.sh /app/docker-entrypoint.sh
-USER root
-RUN chmod +x /app/docker-entrypoint.sh
+# # Copy the entrypoint script and make sure it's executable
+# COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+# USER root
+# RUN chmod +x /app/docker-entrypoint.sh
 
-# Run as non-root user for security best practices
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup
-RUN chown -R appuser:appgroup /app/dist
-USER appuser
+# # Run as non-root user for security best practices
+# RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+# RUN chown -R appuser:appgroup /app/dist
+# USER appuser
 
-EXPOSE 8080
+# EXPOSE 8080
 
-# This runs the script EVERY TIME the container starts in ECS
-ENTRYPOINT ["/app/docker-entrypoint.sh"]
+# # This runs the script EVERY TIME the container starts in ECS
+# ENTRYPOINT ["/app/docker-entrypoint.sh"]
 
-# -s flag enables SPA mode (rewrites all routes to index.html)
-CMD ["serve", "-s", "dist", "-l", "8080"]
+# # -s flag enables SPA mode (rewrites all routes to index.html)
+# CMD ["serve", "-s", "dist", "-l", "8080"]
 
 

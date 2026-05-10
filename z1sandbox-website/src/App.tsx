@@ -21,10 +21,10 @@ const queryClient = new QueryClient();
 
 const Auth0ProviderWithHistory = ({ children }: { children: React.ReactNode }) => {
   const navigate = useNavigate();
-  
-  const domain = (window as any)._env_?.VITE_AUTH0_DOMAIN || import.meta.env.VITE_AUTH0_DOMAIN || "dev-axwc0ui527kw0c5d.us.auth0.com";
-  const clientId = (window as any)._env_?.VITE_AUTH0_CLIENT_ID || import.meta.env.VITE_AUTH0_CLIENT_ID || "sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D";
-  const audience = (window as any)._env_?.VITE_AUTH0_AUDIENCE || import.meta.env.VITE_AUTH0_AUDIENCE || "https://code-inspector-api";
+
+  const domain = (window as any)._env_?.VITE_AUTH0_DOMAIN || import.meta.env.VITE_AUTH0_DOMAIN || "";
+  const clientId = (window as any)._env_?.VITE_AUTH0_CLIENT_ID || import.meta.env.VITE_AUTH0_CLIENT_ID || "";
+  const audience = (window as any)._env_?.VITE_AUTH0_AUDIENCE || import.meta.env.VITE_AUTH0_AUDIENCE || "";
 
   const onRedirectCallback = (appState: any) => {
     navigate(appState?.returnTo || "/dashboard");

@@ -53,10 +53,10 @@ apiServer:
     GATEWAY_SECRET_KEY: "api-key"
     JWT_ALGORITHM: "HS256"
     JWT_EXPIRATION_MINUTES: "60"
-    JWT_ISSUER: "code-inspector"
+    JWT_ISSUER: ""
     JWT_ALGORITHM: "RS256"
-    AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com"
-    AUTH0_AUDIENCE: "https://code-inspector-api"
+    AUTH0_DOMAIN: ""
+    AUTH0_AUDIENCE: ""
     DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com/api/z1sandbox","documentationUrl":"https://api-sandbox.01security.com/api/z1sandbox/docs"}]'
     JWT_PUBLIC_JWKS: |
       {"keys": [{"kty": "RSA", "use": "sig", "kid": "code-inspector-key-01", "alg": "RS256", "n": "6KkEdGr93SpFvr2cuc8fo0XG9fW194KHkcE73TVxxlLbzkQl7S21KsK_JkR0uenaIPsoxBRF9xiZ8rIhvTv8j6Rmdsyk32O6n5GArrN1YnCLomP5oZZ_7o4h2IhNQVIE9V5EeyzYyVPIiJa6XNKB30gvsLqjdrGmkYqAPiL_HKS6-1Z-rpMjZcqFoTf2y8Pxvd0NbVoKiHFpq05CJhzt6EqU_LISspxumq3wrQDyPxKf7ZeGTKaAZwJx3LNdMDc9uRrQMq4UOsRBCbAd7ozOq3jWxL1P5ALaXgYG9TUapfIrB_S2ryA3iALB5bd-YElkJiXuc1p9uTzeU9uDAP0ZAw", "e": "AQAB"}]}
@@ -149,11 +149,11 @@ apiServer:
 # Build the image first:
 #   cd /home/berrybytes/Desktop/z1sandbox-website
 #   docker build \
-#     --build-arg VITE_AUTH0_DOMAIN=dev-axwc0ui527kw0c5d.us.auth0.com \
-#     --build-arg VITE_AUTH0_CLIENT_ID=sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D \
-#     --build-arg VITE_AUTH0_AUDIENCE=https://code-inspector-api \
-#     --build-arg VITE_RECAPTCHA_SITE_KEY=6LeKiswsAAAAAMF_8fxlr1z7VCRQ0zr-oFfncfd0 \
-#     -t z1sandbox-website:latest .
+#     --build-arg VITE_AUTH0_DOMAIN= \
+#     --build-arg VITE_AUTH0_CLIENT_ID= \
+#     --build-arg VITE_AUTH0_AUDIENCE= \
+#     --build-arg VITE_RECAPTCHA_SITE_KEY= \
+#     -t z1sandbox-website:latest .`
 # ─────────────────────────────────────────────────────────────────────────────
 # z1sandbox-website:
 #   enabled: false
@@ -168,19 +168,19 @@ apiServer:
 #     port: 80
 #   # Auth0 values are baked at build time — document them here for reference
 #   auth0:
-#     domain: "dev-axwc0ui527kw0c5d.us.auth0.com"
-#     clientId: "sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D"
-#     audience: "https://code-inspector-api"
+#     domain: ""
+#     clientId: ""
+#     audience: ""
 #   # In-cluster ClusterIP service name of the FastAPI backend
 #   apiServiceName: "sandbox-api-service"
 # 
 #   # Configuration for runtime injection
 #   config:
-#     recaptchaSiteKey: "6LeKiswsAAAAAMF_8fxlr1z7VCRQ0zr-oFfncfd0"
-#     googleChatWebhookUrl: "https://chat.googleapis.com/v1/spaces/AAQAQC-SfqE/messages?key=AIzaSyDdI0hCZtE6vySjMm-WEfRq3CPzqKqqsHI&token=9HUfBxrsiwrTWAyTkwc6qWZ809reZvFb6tGzkJi21uQ"
-#     auth0Domain: "dev-axwc0ui527kw0c5d.us.auth0.com"
-#     auth0ClientId: "sqVN3z2Er7YxXYK4FxbpOaYOqL2ju22D"
-#     auth0Audience: "https://code-inspector-api"
+#     recaptchaSiteKey: ""
+#     googleChatWebhookUrl: ""
+#     auth0Domain: ""
+#     auth0ClientId: ""
+#     auth0Audience: ""
 #   
 #   # Dashboard Applications Config
 #   # Adding items here will automatically create new cards in the dashboard.
