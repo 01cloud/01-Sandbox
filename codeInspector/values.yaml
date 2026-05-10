@@ -53,10 +53,10 @@ apiServer:
     GATEWAY_SECRET_KEY: "api-key"
     JWT_ALGORITHM: "HS256"
     JWT_EXPIRATION_MINUTES: "60"
-    JWT_ISSUER: "api-sandbox"
+    JWT_ISSUER: "code-inspector"
     JWT_ALGORITHM: "RS256"
-    AUTH0_DOMAIN: "dev-1u502t8piuwyzb28.us.auth0.com"
-    AUTH0_AUDIENCE: "https://api-sandbox"
+    AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com"
+    AUTH0_AUDIENCE: "https://code-inspector-api"
     DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com/api/z1sandbox","documentationUrl":"https://api-sandbox.01security.com/api/z1sandbox/docs"}]'
     JWT_PUBLIC_JWKS: |
       {"keys": [{"kty": "RSA", "use": "sig", "kid": "code-inspector-key-01", "alg": "RS256", "n": "6KkEdGr93SpFvr2cuc8fo0XG9fW194KHkcE73TVxxlLbzkQl7S21KsK_JkR0uenaIPsoxBRF9xiZ8rIhvTv8j6Rmdsyk32O6n5GArrN1YnCLomP5oZZ_7o4h2IhNQVIE9V5EeyzYyVPIiJa6XNKB30gvsLqjdrGmkYqAPiL_HKS6-1Z-rpMjZcqFoTf2y8Pxvd0NbVoKiHFpq05CJhzt6EqU_LISspxumq3wrQDyPxKf7ZeGTKaAZwJx3LNdMDc9uRrQMq4UOsRBCbAd7ozOq3jWxL1P5ALaXgYG9TUapfIrB_S2ryA3iALB5bd-YElkJiXuc1p9uTzeU9uDAP0ZAw", "e": "AQAB"}]}
@@ -94,8 +94,8 @@ apiServer:
   deployment:
     replicaCount: 1
     image:
-      repository: kamalberrybytes/sandboxapi
-      tag: "1.0.1"
+      repository: 01community/01sandbox-api
+      tag: "1.0.0"
       pullPolicy: Always
     resources:
       requests:
@@ -174,7 +174,7 @@ opensandbox:
   controller:
     replicaCount: 1
     image:
-      repository: kamalberrybytes/opensandbox-controller
+      repository: 01community/01sandbox-opensandbox-controller
       tag: 1.0.0
       pullPolicy: Always
     resources:
@@ -186,10 +186,10 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
-    sandboxImage: "kamalberrybytes/codeinterpreter:1.0.1"
+    sandboxImage: "01community/01sandbox-codeinterpreter:1.0.0"
     image:
-      repository: kamalberrybytes/opensandbox-server
-      tag: 1.0.1
+      repository: 01community/01sandbox-opensandbox-server
+      tag: 1.0.0
       pullPolicy: Always
     resources:
       requests:
@@ -215,7 +215,7 @@ opensandboxResourcePool:
   pool:
     name: my-sandbox-pool
     container:
-      image: kamalberrybytes/codeinterpreter:1.0.1
+      image: 01community/01sandbox-codeinterpreter:1.0.0
       ports:
         - containerPort: 44772
         - containerPort: 54321
