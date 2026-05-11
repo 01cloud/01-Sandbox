@@ -76,8 +76,9 @@ def detect_extension(content: str) -> str:
 
     # Check for YAML & K8s
     if content.startswith("---") or re.search(r"^(apiVersion|metadata|version|services|spec|kind):", content, re.MULTILINE):
-        if "apiVersion:" in content and "kind:" in content:
-            return "k8s"
+        # We return 'yaml' even for K8s manifests to ensure scanner tools (kube-score, etc.)
+        # correctly identify the file type by extension. The orchestrator will still
+        # classify it as 'k8s' based on content.
         return "yaml"
     
     # Check for Go

@@ -105,11 +105,17 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
 
     // --- Conflicts & Contextual Adjustments ---
     
-    // If it has strong Python keywords, it's very unlikely to be YAML
-    if (scores.py > 5) scores.yaml -= 15;
+    // If it has strong Python keywords, it's very unlikely to be YAML or K8S
+    if (scores.py > 5) {
+      scores.yaml -= 15;
+      scores.k8s -= 15;
+    }
     
-    // If it has strong JS keywords, it's very unlikely to be YAML
-    if (scores.js > 5) scores.yaml -= 15;
+    // If it has strong JS keywords, it's very unlikely to be YAML or K8S
+    if (scores.js > 5) {
+      scores.yaml -= 15;
+      scores.k8s -= 15;
+    }
 
     // Find the winner
     let maxScore = -1;
@@ -141,8 +147,9 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
       setStatus("AUDITING");
       setResult(null);
 
-      const ext = detectLanguage(code);
-      const filename = `input.${ext}`;
+      const lang = detectLanguage(code);
+      const apiExt = lang === 'k8s' ? 'yaml' : lang;
+      const filename = `input.${apiExt}`;
 
       const response = await fetch(`${baseUrl}/scan-jobs`, {
         method: "POST",
