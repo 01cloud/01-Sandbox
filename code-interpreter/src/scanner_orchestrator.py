@@ -52,11 +52,24 @@ class ScannerOrchestrator:
 
         for f in self.results["files_scanned"]:
             ext = os.path.splitext(f)[1].lower()
+            full_path = os.path.join(self.target_dir, f)
             
             # Identify K8s manifests by extension or content
             is_k8s = (ext == ".k8s") or self._is_k8s_manifest(f)
             
             if is_k8s:
+                # CRITICAL FIX: Many tools (kube-linter, kubeconform) IGNORE files without .yaml/.yml extension.
+                # We normalize these by creating a symlink with a .yaml extension.
+                if ext not in (".yaml", ".yml"):
+                    normalized_name = f"{f}.yaml"
+                    normalized_path = os.path.join(self.target_dir, normalized_name)
+                    try:
+                        if not os.path.exists(normalized_path):
+                            os.symlink(full_path, normalized_path)
+                        f = normalized_name # Update reference to the normalized name for scanners
+                    except Exception as e:
+                        logging.warning(f" Failed to normalize K8s file {f}: {e}")
+                
                 self.classified_files["k8s"].append(f)
             elif ext in (".yaml", ".yml"):
                 self.classified_files["yaml"].append(f)
@@ -67,18 +80,20 @@ class ScannerOrchestrator:
             elif ext in polyglot_exts:
                 self.classified_files["polyglot"].append(f)
 
-        # Build enabled tools list
-        enabled = ["gitleaks", "trivy"]
+        # Build enabled tools list (Default universal tools)
+        enabled = ["gitleaks"]
         
         if self.classified_files["python"]:
-            enabled.extend(["bandit", "semgrep"])
+            # Python security stack
+            enabled.extend(["bandit", "semgrep", "trivy"])
         
         if self.classified_files["yaml"]:
+            # ONLY yamllint for general YAML
             enabled.append("yamllint")
             
         if self.classified_files["k8s"]:
-            # Standard K8s Security Stack
-            enabled.extend(["kubelinter", "kubeconform", "kubescore"])
+            # Specialized K8s Security Stack (Yamllint is skipped here by user preference)
+            enabled.extend(["kubelinter", "kubeconform", "kubescore", "trivy"])
             
         if self.classified_files["shell"]:
             enabled.append("shellcheck")
@@ -96,12 +111,12 @@ class ScannerOrchestrator:
         full_path = os.path.join(self.target_dir, file_path)
         import re
         try:
-            # We check the first 4KB for efficiency
+            # We check the first 8KB for accuracy
             with open(full_path, 'r', errors='ignore') as f:
-                content = f.read(4096)
-                # Broadened detection matching the API server's heuristic
-                markers = r"^(apiVersion|metadata|version|services|spec|kind):"
-                return bool(re.search(markers, content, re.MULTILINE)) or "---" in content
+                content = f.read(8192)
+                # Strict check for K8s indicators
+                is_k8s_markers = r"^(apiVersion|kind|metadata|spec):"
+                return bool(re.search(is_k8s_markers, content, re.MULTILINE))
         except Exception:
             return False
         
@@ -391,18 +406,13 @@ class ScannerOrchestrator:
             self.results["scans"]["kubescore"] = {"status": "SKIPPED", "reason": "No K8s manifests"}
             return
 
+        # Pass local file paths and run in target directory
         cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json", "--ignore-container-cpu-limit", "false"] + k8s_files
         res = self.run_command(cmd, "Kube-Score", cwd=self.target_dir)
-        res = self.run_command(cmd, "Kube-Score", cwd=self.target_dir)
         
-        # Fallback 1: Try without full path to binary
-        if res["status"] == "NOT_FOUND":
-            cmd[0] = "kube-score"
-            res = self.run_command(cmd, "Kube-Score", cwd=self.target_dir)
-        
-        # Fallback 2: If we got "null" or empty, try scanning the directory directly
-        if res.get("stdout") in ("", "null", "None"):
-            logging.info(" Kube-Score produced empty/null output for specific files. Retrying on directory '.'...")
+        # Fallback: If specific files failed or returned null, try the whole directory
+        if res.get("stdout") in ("", "null", "None") or res["status"] == "ERROR":
+            logging.info(" Kube-Score produced empty/error output. Retrying on directory '.'...")
             fallback_cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json", "."]
             res = self.run_command(fallback_cmd, "Kube-Score-Fallback", cwd=self.target_dir)
 
@@ -425,38 +435,49 @@ class ScannerOrchestrator:
                     return
 
                 has_issues = False
+                total_checks = 0
+                passed_checks = 0
+                
                 for item in data:
                     if not isinstance(item, dict): continue
-                    
-                    # Extract object meta
                     obj_meta = item.get("object_meta") or item.get("ObjectMeta") or {}
                     obj_name = obj_meta.get("name") if isinstance(obj_meta, dict) else "unknown"
                     
                     for check in item.get("checks") or item.get("Checks") or []:
                         if not isinstance(check, dict): continue
-                        skipped = check.get("skipped", False)
-                        if skipped: continue
+                        total_checks += 1
                         
+                        skipped = check.get("skipped", False)
                         grade = check.get("grade", 0)
-                        if grade > 0:
+                        
+                        if grade == 0 or skipped:
+                            passed_checks += 1
+                        else:
                             has_issues = True
-                            
                             comments = check.get("comments") or check.get("Comments") or []
-                            if comments is None: comments = []
                             comment = comments[0] if isinstance(comments, list) and len(comments) > 0 else {}
-                            
                             check_meta = check.get("check") or check.get("Check") or {}
-                            check_name = check_meta.get("name") or check_meta.get("id") or "unknown" if isinstance(check_meta, dict) else "unknown"
+                            check_name = check_meta.get("name") or check_meta.get("id") or "unknown"
                             
                             self.results["findings"].append({
                                 "tool": "kubescore",
                                 "file": obj_name,
                                 "line": None,
-                                "issue": check_name,
+                                "issue": f"{check_name} (Grade: {grade})",
                                 "severity": "HIGH" if grade >= 10 else "MEDIUM",
                                 "remediation": comment.get('summary', 'Hardening required for production readiness.')
                             })
                 
+                # Calculate Numerical Security Score
+                score = 100
+                if total_checks > 0:
+                    score = int((passed_checks / total_checks) * 100)
+                
+                res["security_score"] = score
+                res["checks_total"] = total_checks
+                res["checks_passed"] = passed_checks
+                logging.info(f" Kube-Score calculation complete. Final Security Score: {score}%")
+
                 if has_issues:
                     res["status"] = "ISSUES_FOUND"
                 else:
@@ -548,6 +569,7 @@ class ScannerOrchestrator:
                 
         self.results["summary"] = {
             "overall_status": "RISKS_FOUND" if risks > 0 else ("CLEAN" if (errors == 0 and risks == 0) else "ERROR"),
+            "security_score": scans.get("kubescore", {}).get("security_score"),
             "total_tools_run": total_tools,
             "risks_detected": risks,
             "findings_count": len(self.results["findings"]),
