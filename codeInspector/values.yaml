@@ -4,8 +4,7 @@
 
 global:
   apiRoutePrefix: "/api/v1/01sbx"
-  JWT_PUBLIC_JWKS: |
-    {"keys": [{"kty": "RSA", "use": "sig", "kid": "code-inspector-key-01", "alg": "RS256", "n": "6KkEdGr93SpFvr2cuc8fo0XG9fW194KHkcE73TVxxlLbzkQl7S21KsK_JkR0uenaIPsoxBRF9xiZ8rIhvTv8j6Rmdsyk32O6n5GArrN1YnCLomP5oZZ_7o4h2IhNQVIE9V5EeyzYyVPIiJa6XNKB30gvsLqjdrGmkYqAPiL_HKS6-1Z-rpMjZcqFoTf2y8Pxvd0NbVoKiHFpq05CJhzt6EqU_LISspxumq3wrQDyPxKf7ZeGTKaAZwJx3LNdMDc9uRrQMq4UOsRBCbAd7ozOq3jWxL1P5ALaXgYG9TUapfIrB_S2ryA3iALB5bd-YElkJiXuc1p9uTzeU9uDAP0ZAw", "e": "AQAB"}]}
+  JWT_PUBLIC_JWKS: "" # MOVED TO SECRET FOR SECURITY
 
 ################################################################
 # Agent Gateway component values
