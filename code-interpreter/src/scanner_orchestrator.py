@@ -106,16 +106,19 @@ class ScannerOrchestrator:
         return enabled
 
     def _is_k8s_manifest(self, file_path: str) -> bool:
-        """Heuristic to detect K8s manifests by checking for key Kubernetes markers."""
+        """Heuristic to detect K8s manifests: Requires apiVersion AND (kind OR metadata)."""
         full_path = os.path.join(self.target_dir, file_path)
         import re
         try:
             # We check the first 8KB for accuracy
             with open(full_path, 'r', errors='ignore') as f:
                 content = f.read(8192)
-                # Strict check for K8s indicators
-                is_k8s_markers = r"^(apiVersion|kind|metadata|spec):"
-                return bool(re.search(is_k8s_markers, content, re.MULTILINE))
+                # Strict check for K8s structure
+                has_apiversion = bool(re.search(r"^apiVersion:", content, re.MULTILINE))
+                has_kind = bool(re.search(r"^kind:", content, re.MULTILINE))
+                has_metadata = bool(re.search(r"^metadata:", content, re.MULTILINE))
+                
+                return has_apiversion and (has_kind or has_metadata)
         except Exception:
             return False
         
