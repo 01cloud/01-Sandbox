@@ -14,30 +14,6 @@ spec:
       labels:
         app: postgresql
     spec:
-      securityContext:
-        fsGroup: 999
-        runAsUser: 999
-        runAsGroup: 999
-      initContainers:
-      - name: fix-corruption
-        image: postgres:15-alpine
-        securityContext:
-          runAsUser: 0  # Run as root to fix permissions
-        command: ["/bin/sh", "-c"]
-        args:
-          - |
-            mkdir -p /var/lib/postgresql/data
-            chown -R 999:999 /var/lib/postgresql/data
-            if [ -f /var/lib/postgresql/data/global/pg_control ]; then
-              echo "Existing database found, checking for corruption..."
-              pg_resetwal -f /var/lib/postgresql/data || echo "Recovery not needed or failed."
-            else
-              echo "New database, skipping recovery."
-            fi
-        volumeMounts:
-        - name: postgres-storage
-          mountPath: /var/lib/postgresql/data
-          subPath: pgdata
       containers:
       - name: postgres
         image: postgres:15-alpine
@@ -48,8 +24,6 @@ spec:
           value: {{ .Values.postgresql.password | quote }}
         - name: POSTGRES_DB
           value: {{ .Values.postgresql.database | quote }}
-        - name: PGDATA
-          value: /var/lib/postgresql/data
         ports:
         - containerPort: 5432
         volumeMounts:
