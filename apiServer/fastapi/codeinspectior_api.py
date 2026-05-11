@@ -844,7 +844,11 @@ async def generate_api(user_id: str = "default-user"):
             "aud": "code-inspector-api"
         }
         
-        token = jwt.encode(payload, private_key, algorithm=algorithm, headers={"kid": "code-inspector-key-01"})
+        try:
+            token = jwt.encode(payload, private_key, algorithm=algorithm, headers={"kid": "code-inspector-key-01"})
+        except jwt.exceptions.InvalidKeyError as e:
+            print(f"[security] Legacy JWT Signing Failed: Invalid Key Format. Error: {str(e)}")
+            raise HTTPException(status_code=500, detail="JWT Signing Failed: The provided private key is malformed.")
         
         return GenerateAPIResponse(
             api_key=token,
@@ -955,7 +959,14 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
         "backend": req.backend.value
     }
     
-    token = jwt.encode(token_payload, conf["private_key"], algorithm=conf["algorithm"], headers={"kid": "code-inspector-key-01"})
+    try:
+        token = jwt.encode(token_payload, conf["private_key"], algorithm=conf["algorithm"], headers={"kid": "code-inspector-key-01"})
+    except jwt.exceptions.InvalidKeyError as e:
+        print(f"[security] JWT Signing Failed: Invalid Key Format. Check JWT_PRIVATE_KEY environment variable. Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="JWT Signing Failed: The provided private key is malformed or invalid for the chosen algorithm.")
+    except Exception as e:
+        print(f"[security] JWT Signing Failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"JWT Signing Failed: {str(e)}")
     
     # Persist metadata with User identity
     # Priority: Explicit request field -> Token claim -> Namespaced claim

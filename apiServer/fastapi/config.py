@@ -59,9 +59,18 @@ def gateway_secret_config():
 def jwt_config():
     """
     Returns configuration for JWT signing (Issuer role).
+    Automatically repairs common PEM formatting issues from env vars.
     """
+    raw_key = os.environ.get("JWT_PRIVATE_KEY", "")
+    
+    # Repair literal \n characters and handle whitespace
+    if "\\n" in raw_key:
+        processed_key = raw_key.replace("\\n", "\n").strip()
+    else:
+        processed_key = raw_key.strip()
+        
     return {
-        "private_key": os.environ.get("JWT_PRIVATE_KEY", ""),
+        "private_key": processed_key,
         "public_jwks": os.environ.get("JWT_PUBLIC_JWKS", ""),
         "algorithm": os.environ.get("JWT_ALGORITHM", "RS256"),
         "expiration_minutes": int(os.environ.get("JWT_EXPIRATION_MINUTES", "60")),
