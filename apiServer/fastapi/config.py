@@ -61,14 +61,37 @@ def jwt_config():
     Returns configuration for JWT signing (Issuer role).
     Automatically repairs common PEM formatting issues from env vars.
     """
-    raw_key = os.environ.get("JWT_PRIVATE_KEY", "")
+    import base64
+    raw_key = os.environ.get("JWT_PRIVATE_KEY", "").strip()
+    processed_key = raw_key
+
+    # Strategy 1: Handle literal \n (common in env vars)
+    if "\\n" in processed_key:
+        processed_key = processed_key.replace("\\n", "\n")
     
-    # Repair literal \n characters and handle whitespace
-    if "\\n" in raw_key:
-        processed_key = raw_key.replace("\\n", "\n").strip()
-    else:
-        processed_key = raw_key.strip()
-        
+    # Strategy 2: Check if it's Base64 encoded (common in K8s secrets)
+    if processed_key and not processed_key.startswith("---"):
+        try:
+            # Try to decode. If it succeeds and contains PEM headers, use it.
+            decoded = base64.b64decode(processed_key).decode("utf-8")
+            if "---" in decoded:
+                processed_key = decoded
+        except Exception:
+            pass 
+
+    # Strategy 3: Final cleanup
+    processed_key = processed_key.strip()
+
+    # Strategy 4: Diagnostic Validation
+    if processed_key.startswith("-----BEGIN PUBLIC KEY-----"):
+        print("[config] ERROR: JWT_PRIVATE_KEY appears to be a PUBLIC KEY. Signing requires a PRIVATE KEY.")
+    elif processed_key and not processed_key.startswith("-----BEGIN"):
+         print("[config] WARNING: JWT_PRIVATE_KEY is missing PEM headers (-----BEGIN...). Signing may fail.")
+
+    # Diagnostic (Safe masking)
+    key_peek = processed_key[:20].replace("\n", " ") + "..." if processed_key else "EMPTY"
+    print(f"[config] JWT Key loaded (peek: {key_peek})")
+
     return {
         "private_key": processed_key,
         "public_jwks": os.environ.get("JWT_PUBLIC_JWKS", ""),
