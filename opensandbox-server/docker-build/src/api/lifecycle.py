@@ -74,8 +74,10 @@ def detect_extension(content: str) -> str:
     if (stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]")):
         return "json"
 
-    # Check for YAML
-    if content.startswith("---") or re.search(r"^(apiVersion|metadata|version|services|spec):", content, re.MULTILINE):
+    # Check for YAML & K8s
+    if content.startswith("---") or re.search(r"^(apiVersion|metadata|version|services|spec|kind):", content, re.MULTILINE):
+        if "apiVersion:" in content and "kind:" in content:
+            return "k8s"
         return "yaml"
     
     # Check for Go
