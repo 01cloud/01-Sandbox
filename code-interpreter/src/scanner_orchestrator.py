@@ -80,28 +80,27 @@ class ScannerOrchestrator:
             elif ext in polyglot_exts:
                 self.classified_files["polyglot"].append(f)
 
-        # Build enabled tools list (Default universal tools)
+        # Build enabled tools list (Gitleaks is the universal baseline)
         enabled = ["gitleaks"]
         
         if self.classified_files["python"]:
-            # Python security stack
-            enabled.extend(["bandit", "semgrep", "trivy"])
+            # Python: ONLY bandit + gitleaks
+            enabled.append("bandit")
         
         if self.classified_files["yaml"]:
-            # ONLY yamllint for general YAML
+            # General YAML: ONLY yamllint + gitleaks
             enabled.append("yamllint")
             
         if self.classified_files["k8s"]:
-            # Specialized K8s Security Stack (Yamllint is skipped here by user preference)
-            enabled.extend(["kubelinter", "kubeconform", "kubescore", "trivy"])
+            # K8s YAML: ONLY Kube suite + gitleaks
+            enabled.extend(["kubelinter", "kubeconform", "kubescore"])
             
         if self.classified_files["shell"]:
+            # Shell: Only shellcheck + gitleaks
             enabled.append("shellcheck")
 
-        if self.classified_files["polyglot"]:
-            if "semgrep" not in enabled:
-                enabled.append("semgrep")
-
+        # Semgrep and Trivy are now explicitly disabled per user request
+        
         logging.info(f" Classified Files: K8s({len(self.classified_files['k8s'])}), YAML({len(self.classified_files['yaml'])}), Python({len(self.classified_files['python'])}), Shell({len(self.classified_files['shell'])})")
         logging.info(f" Enabled tools: {', '.join(enabled)}")
         return enabled
