@@ -47,6 +47,12 @@ spec:
                   name: sandbox-api-secret
                   key: E2B_API_KEY
                   optional: true
+            - name: JWT_PUBLIC_JWKS
+              valueFrom:
+                secretKeyRef:
+                  name: sandbox-api-secret
+                  key: JWT_PUBLIC_JWKS
+                  optional: true
             - name: JWT_PRIVATE_KEY
               valueFrom:
                 secretKeyRef:
