@@ -53,8 +53,8 @@ class ScannerOrchestrator:
         for f in self.results["files_scanned"]:
             ext = os.path.splitext(f)[1].lower()
             
-            if ext in (".yaml", ".yml"):
-                if self._is_k8s_manifest(f):
+            if ext in (".yaml", ".yml", ".k8s"):
+                if ext == ".k8s" or self._is_k8s_manifest(f):
                     self.classified_files["k8s"].append(f)
                 else:
                     self.classified_files["yaml"].append(f)
@@ -66,10 +66,10 @@ class ScannerOrchestrator:
                 self.classified_files["polyglot"].append(f)
 
         # Build enabled tools list
-        enabled = ["gitleaks"]
+        enabled = ["gitleaks", "trivy"]
         
         if self.classified_files["python"]:
-            enabled.append("bandit")
+            enabled.extend(["bandit", "semgrep"])
         
         if self.classified_files["yaml"]:
             enabled.append("yamllint")
@@ -81,9 +81,11 @@ class ScannerOrchestrator:
             enabled.append("shellcheck")
 
         if self.classified_files["polyglot"]:
-            enabled.append("semgrep")
+            # Semgrep already added if Python, but for other polyglot exts:
+            if "semgrep" not in enabled:
+                enabled.append("semgrep")
 
-        logging.info(f" Classified Files: K8s({len(self.classified_files['k8s'])}), YAML({len(self.classified_files['yaml'])}), Shell({len(self.classified_files['shell'])})")
+        logging.info(f" Classified Files: K8s({len(self.classified_files['k8s'])}), YAML({len(self.classified_files['yaml'])}), Python({len(self.classified_files['python'])}), Shell({len(self.classified_files['shell'])})")
         logging.info(f" Enabled tools: {', '.join(enabled)}")
         return enabled
 
@@ -160,7 +162,8 @@ class ScannerOrchestrator:
                         "file": result.get("path"),
                         "line": result.get("start", {}).get("line"),
                         "issue": result.get("extra", {}).get("message"),
-                        "severity": result.get("extra", {}).get("severity", "MEDIUM")
+                        "severity": result.get("extra", {}).get("severity", "MEDIUM"),
+                        "remediation": result.get("extra", {}).get("metadata", {}).get("remediation") or "Audit code logic and follow secure coding patterns."
                     })
             except Exception as e:
                 logging.error(f" Failed to parse Semgrep JSON: {e}")
@@ -238,7 +241,8 @@ class ScannerOrchestrator:
                         "file": issue.get("filename"),
                         "line": issue.get("line_number"),
                         "issue": issue.get("issue_text"),
-                        "severity": issue.get("issue_severity")
+                        "severity": issue.get("issue_severity"),
+                        "remediation": f"Refactor code at line {issue.get('line_number')}. See: {issue.get('more_info')}"
                     })
             except Exception as e:
                 logging.error(f" Failed to parse Bandit JSON: {e}")
@@ -352,8 +356,9 @@ class ScannerOrchestrator:
                         "tool": "kubelinter",
                         "file": file_name,
                         "line": None,
-                        "issue": issue_text,
-                        "severity": "MEDIUM"
+                        "issue": check_name,
+                        "severity": "HIGH",
+                        "remediation": remediation or message or "Apply Kubernetes best practices for this resource."
                     })
             except Exception as e:
                 logging.error(f" Failed to parse Kube-Linter JSON: {e}")
@@ -386,8 +391,9 @@ class ScannerOrchestrator:
                             "tool": "kubeconform",
                             "file": resource.get("filename", "unknown"),
                             "line": None,
-                            "issue": f"Schema Error: {resource.get('msg')} ({resource.get('kind')} - {resource.get('version')})",
-                            "severity": "CRITICAL"
+                            "issue": f"Schema Violation: {resource.get('kind')}",
+                            "severity": "CRITICAL",
+                            "remediation": f"Fix schema error: {resource.get('msg')} for version {resource.get('version')}"
                         })
                 if has_errors:
                     res["status"] = "ISSUES_FOUND"
@@ -466,8 +472,9 @@ class ScannerOrchestrator:
                                 "tool": "kubescore",
                                 "file": obj_name,
                                 "line": None,
-                                "issue": f"[Score: {grade}] {check_name}: {comment.get('summary', 'No summary provided')}",
-                                "severity": "HIGH" if grade >= 10 else "MEDIUM"
+                                "issue": check_name,
+                                "severity": "HIGH" if grade >= 10 else "MEDIUM",
+                                "remediation": comment.get('summary', 'Hardening required for production readiness.')
                             })
                 
                 if has_issues:
@@ -528,8 +535,7 @@ class ScannerOrchestrator:
         if "yamllint" in self.enabled_tools: self.scan_yamllint()
         if "bandit" in self.enabled_tools: self.scan_bandit()
         
-        # Trivy is disabled by default for efficiency, comment back in to use
-        # if "trivy" in self.enabled_tools: self.scan_trivy()
+        if "trivy" in self.enabled_tools: self.scan_trivy()
         
         if "kubelinter" in self.enabled_tools: self.scan_kubelinter()
         if "kubeconform" in self.enabled_tools: self.scan_kubeconform()
@@ -592,7 +598,7 @@ class ScannerOrchestrator:
         print(header)
         print(" " + "─"*12 + "╁" + "─"*17 + "╁" + "─"*37)
         
-        for tool in ["semgrep", "gitleaks", "yamllint", "bandit", "shellcheck", "kubelinter", "kubeconform", "kubescore"]:
+        for tool in ["semgrep", "gitleaks", "trivy", "yamllint", "bandit", "shellcheck", "kubelinter", "kubeconform", "kubescore"]:
             if tool not in self.results["scans"]:
                 continue
                 
@@ -607,6 +613,7 @@ class ScannerOrchestrator:
                 if tool == "gitleaks": summary = "Credential/Secret leak detected!"
                 elif tool == "semgrep": summary = "Code logic vulnerabilities found."
                 elif tool == "bandit":  summary = "Python security anti-patterns detected."
+                elif tool == "trivy": summary = "Filesystem & vulnerability risks identified."
                 elif tool == "shellcheck": summary = "Shell script vulnerabilities and POSIX violations."
                 elif tool == "kubelinter": summary = "K8s manifest security/best-practice issues."
                 elif tool == "kubeconform": summary = "Strict K8s schema/apiVersion violations."
