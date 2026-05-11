@@ -53,11 +53,13 @@ class ScannerOrchestrator:
         for f in self.results["files_scanned"]:
             ext = os.path.splitext(f)[1].lower()
             
-            if ext in (".yaml", ".yml", ".k8s"):
-                if ext == ".k8s" or self._is_k8s_manifest(f):
-                    self.classified_files["k8s"].append(f)
-                else:
-                    self.classified_files["yaml"].append(f)
+            # Identify K8s manifests by extension or content
+            is_k8s = (ext == ".k8s") or self._is_k8s_manifest(f)
+            
+            if is_k8s:
+                self.classified_files["k8s"].append(f)
+            elif ext in (".yaml", ".yml"):
+                self.classified_files["yaml"].append(f)
             elif ext == ".py":
                 self.classified_files["python"].append(f)
             elif ext in (".sh", ".bash"):
@@ -75,13 +77,13 @@ class ScannerOrchestrator:
             enabled.append("yamllint")
             
         if self.classified_files["k8s"]:
+            # Standard K8s Security Stack
             enabled.extend(["kubelinter", "kubeconform", "kubescore"])
             
         if self.classified_files["shell"]:
             enabled.append("shellcheck")
 
         if self.classified_files["polyglot"]:
-            # Semgrep already added if Python, but for other polyglot exts:
             if "semgrep" not in enabled:
                 enabled.append("semgrep")
 
@@ -90,12 +92,16 @@ class ScannerOrchestrator:
         return enabled
 
     def _is_k8s_manifest(self, file_path: str) -> bool:
-        """Heuristic to detect K8s manifests by checking for apiVersion and kind."""
+        """Heuristic to detect K8s manifests by checking for key Kubernetes markers."""
         full_path = os.path.join(self.target_dir, file_path)
+        import re
         try:
+            # We check the first 4KB for efficiency
             with open(full_path, 'r', errors='ignore') as f:
-                content = f.read()
-                return "apiVersion:" in content and "kind:" in content
+                content = f.read(4096)
+                # Broadened detection matching the API server's heuristic
+                markers = r"^(apiVersion|metadata|version|services|spec|kind):"
+                return bool(re.search(markers, content, re.MULTILINE)) or "---" in content
         except Exception:
             return False
         
