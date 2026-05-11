@@ -408,15 +408,15 @@ class ScannerOrchestrator:
             self.results["scans"]["kubescore"] = {"status": "SKIPPED", "reason": "No K8s manifests"}
             return
 
-        # Pass local file paths and run in target directory
-        cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json", "--ignore-container-cpu-limit", "false"] + k8s_files
+        # Score specific files directly. Do NOT use '.' fallback as it fails in this environment.
+        cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json"] + k8s_files
         res = self.run_command(cmd, "Kube-Score", cwd=self.target_dir)
         
-        # Fallback: If specific files failed or returned null, try the whole directory
         if res.get("stdout") in ("", "null", "None") or res["status"] == "ERROR":
-            logging.info(" Kube-Score produced empty/error output. Retrying on directory '.'...")
-            fallback_cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json", "."]
-            res = self.run_command(fallback_cmd, "Kube-Score-Fallback", cwd=self.target_dir)
+            logging.error(f" Kube-Score failed or returned empty: {res.get('stderr')}")
+            res["status"] = "ERROR"
+            self.results["scans"]["kubescore"] = res
+            return
 
         if res.get("stdout"):
             try:
