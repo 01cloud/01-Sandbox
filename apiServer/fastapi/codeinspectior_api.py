@@ -955,7 +955,13 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
         "backend": req.backend.value
     }
     
-    token = jwt.encode(token_payload, conf["private_key"], algorithm=conf["algorithm"], headers={"kid": "code-inspector-key-01"})
+    try:
+        # Use pre-loaded object if available for better reliability with RS256
+        signing_key = conf.get("private_key_obj") or conf["private_key"]
+        token = jwt.encode(token_payload, signing_key, algorithm=conf["algorithm"], headers={"kid": "code-inspector-key-01"})
+    except Exception as e:
+        print(f"[Security] CRITICAL: JWT Encoding Failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Authentication setup failed: {str(e)}")
     
     # Persist metadata with User identity
     # Priority: Explicit request field -> Token claim -> Namespaced claim
