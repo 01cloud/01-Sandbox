@@ -4,7 +4,7 @@
 
 global:
   apiRoutePrefix: "/api/v1/01sbx"
-  JWT_PUBLIC_JWKS: "" # MOVED TO SECRET FOR SECURITY
+  JWT_PUBLIC_JWKS: "" 
 
 ################################################################
 # Agent Gateway component values
@@ -35,7 +35,7 @@ agentgateway:
   policy:
     authenticationType: "jwt"
     jwtMode: "Strict"
-  # No secret section needed for gateway as JWKS is inline in policy
+
 
 ################################################################
 # API Server component values
@@ -59,11 +59,11 @@ apiServer:
     AUTH0_AUDIENCE: "https://api-sandbox"
     OPENSANDBOX_ROUTE_PREFIX: "{{ .Values.global.apiRoutePrefix }}"
     DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}","documentationUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}/docs"}]'
-    JWT_PUBLIC_JWKS: "" # MOVED TO SECRET FOR SECURITY
+    JWT_PUBLIC_JWKS: "" 
 
   secret:
     E2B_API_KEY: ""
-    JWT_PRIVATE_KEY: "" # MOVED TO SECRET FOR SECURITY
+    JWT_PRIVATE_KEY: "" 
   deployment:
     replicaCount: 1
     image:
