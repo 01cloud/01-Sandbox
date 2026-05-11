@@ -282,8 +282,15 @@ async def create_scan_job(
             detail={"code": "FILE_SYSTEM_ERROR", "message": f"Failed to write scan files: {str(e)}"}
         )
 
+    sandbox_image = os.environ.get("SANDBOX_IMAGE")
+    if not sandbox_image:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"code": "MISSING_CONFIGURATION", "message": "SANDBOX_IMAGE environment variable is not set."}
+        )
+
     sandbox_req = CreateSandboxRequest(
-        image=ImageSpec(uri=os.getenv("SANDBOX_IMAGE", "kamalberrybytes/codeinterpreter:1.0.0")),
+        image=ImageSpec(uri=sandbox_image),
         resourceLimits=SchemaResourceLimits(root={"cpu": "1", "memory": "2Gi"}),
         entrypoint=["/opt/opensandbox/code-interpreter.sh"],
         timeout=scan_request.timeout if scan_request and scan_request.timeout else 300,

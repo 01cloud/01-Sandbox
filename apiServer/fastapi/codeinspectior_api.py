@@ -688,7 +688,12 @@ async def get_backend_openapi_spec(backend_id: str):
 async def _do_proxy(backend_id: str, proxy_path: str, request: Request):
     """Internal proxy routing logic forwarding transparently upstream."""
     base_url = opensandbox_base_url(backend_id)
-    target_url = f"{base_url.rstrip('/')}/{proxy_path}"
+    # If the proxy_path doesn't already start with the required prefix for the backend, 
+    # we might need to prepend it, but let's assume for now the client sends 
+    # the correct full path that the backend expects.
+    # We'll normalize the proxy_path to ensure it starts with / for joining
+    normalized_path = proxy_path if proxy_path.startswith("/") else f"/{proxy_path}"
+    target_url = f"{base_url.rstrip('/')}{normalized_path}"
     
     params = dict(request.query_params)
     body = await request.body()
@@ -726,12 +731,24 @@ async def _do_proxy(backend_id: str, proxy_path: str, request: Request):
             )
 
 
-@app.api_route("/api/{backend_id}/{proxy_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"], tags=["Proxy Backend"], summary="Dynamic Proxy Request", dependencies=[Depends(validate_token)])
+@app.api_route("/api/{version}/{backend_id}/{proxy_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"], tags=["Proxy Backend"], summary="Dynamic Versioned Proxy Request", dependencies=[Depends(validate_token)])
+async def dynamic_versioned_proxy(version: str, backend_id: str, proxy_path: str, request: Request):
+    """
+    Catch-all for URLs like /api/v1/01sbx/scan-jobs
+    Funnels directly to the backend while preserving the full path.
+    """
+    full_proxy_path = f"/api/{version}/{backend_id}/{proxy_path}"
+    # Use the backend_id to find the internal URL, but fallback to opensandbox
+    return await _do_proxy(backend_id, full_proxy_path, request)
+
+
+@app.api_route("/api/{backend_id}/{proxy_path:path}", methods=["GET", "POST", "PUT", "DELETE", "PATCH"], tags=["Proxy Backend"], summary="Legacy Dynamic Proxy Request", dependencies=[Depends(validate_token)])
 async def dynamic_proxy(backend_id: str, proxy_path: str, request: Request):
     """
-    Catch-all dynamic proxy route that forwards traffic to any registered backend.
+    Legacy support for /api/z1sandbox/docs style URLs
     """
-    return await _do_proxy(backend_id, proxy_path, request)
+    full_proxy_path = f"/api/{backend_id}/{proxy_path}"
+    return await _do_proxy(backend_id, full_proxy_path, request)
 
 
 # ─────────────────────────────────────────────

@@ -114,14 +114,18 @@ async def lifespan(app: FastAPI):
     await app.state.http_client.aclose()
 
 
+import os
+API_PREFIX = os.getenv("API_ROUTE_PREFIX", "/api/v1/01sbx")
+
 # Initialize FastAPI application
 app = FastAPI(
     title="z1Sandbox Lifecycle API",
     version="0.1.0",
     description="The Sandbox Lifecycle API coordinates how untrusted workloads are created, "
                 "executed, paused, resumed, and finally disposed.",
-    docs_url="/docs",
-    redoc_url="/redoc",
+    docs_url=f"{API_PREFIX}/docs",
+    redoc_url=f"{API_PREFIX}/redoc",
+    openapi_url=f"{API_PREFIX}/openapi.json",
     lifespan=lifespan,
 )
 
@@ -142,9 +146,8 @@ app.add_middleware(
 # 401 from AuthMiddleware) gets X-Request-ID and logs have request_id in context.
 app.add_middleware(RequestIdMiddleware)
 
-# Include API routes at root and versioned prefix
-app.include_router(router)
-app.include_router(router, prefix="/v1")
+# Include API routes strictly at the versioned backend-specific prefix
+app.include_router(router, prefix=API_PREFIX)
 
 DEFAULT_ERROR_CODE = "GENERAL::UNKNOWN_ERROR"
 DEFAULT_ERROR_MESSAGE = "An unexpected error occurred."

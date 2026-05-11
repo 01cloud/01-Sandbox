@@ -30,12 +30,14 @@ RUN set -eux; \
     which kube-linter; \
     which kubeconform; \
     which kube-score; \
+    which shellcheck; \
     # Full versions check
     semgrep --version; \
     trivy --version; \
     kube-linter version; \
     kubeconform -v; \
-    kube-score version
+    kube-score version; \
+    shellcheck --version
 # ─────────────────────────────────────────────────────────────────────────────
 
 ARG TARGETARCH

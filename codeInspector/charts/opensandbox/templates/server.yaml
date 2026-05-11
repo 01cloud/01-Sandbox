@@ -69,6 +69,8 @@ spec:
               value: "http://opensandbox-controller.{{ .Values.namespace }}.svc.cluster.local:8080"
             - name: SANDBOX_CONFIG_PATH
               value: "/etc/opensandbox/config.toml"
+            - name: API_ROUTE_PREFIX
+              value: {{ .Values.global.apiRoutePrefix | default "/api/v1/01sbx" | quote }}
             - name: SANDBOX_IMAGE
               value: {{ .Values.server.sandboxImage | quote }}
           volumeMounts:
@@ -112,8 +114,6 @@ spec:
           persistentVolumeClaim:
             claimName: {{ .Values.storage.pvcName | default "scan-pvc" }}
         {{- end }}
-      nodeSelector:
-        kubernetes.io/hostname: codebot-worker
       restartPolicy: Always
 ---
 apiVersion: v1
@@ -157,8 +157,6 @@ data:
           labels:
             app: opensandbox-sandbox
         spec:
-          nodeSelector:
-            kubernetes.io/hostname: codebot-worker
           restartPolicy: Never
           tolerations:
             - operator: "Exists"

@@ -20,6 +20,7 @@ import {
   Clock,
   Calendar
 } from "lucide-react";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -104,25 +105,21 @@ const Dashboard = () => {
         const data = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
 
         // Process backends to ensure they have all required fields dynamically
-        const processed = data.map((b: any) => ({
-          ...b,
-          baseUrl: b.baseUrl || `/api/${b.id.toLowerCase()}`,
-          documentationUrl: b.documentationUrl || b.baseUrl || `/api/${b.id.toLowerCase()}/docs`
-        }));
+        const processed = data.map((b: any) => {
+          // If a backend misses a baseUrl, dynamically compose one relative to 'v1'
+          const defaultBase = b.baseUrl || `/api/v1/${b.id.toLowerCase()}`;
+          return {
+            ...b,
+            baseUrl: defaultBase,
+            documentationUrl: b.documentationUrl || `${defaultBase}/docs`
+          };
+        });
         setBackends(processed);
         return;
       }
 
       // Default fallback if no env is set
-      setBackends([{
-        id: "Z1_SANDBOX",
-        name: "Z1 Sandbox",
-        description: "Secure, isolated environment for code execution and security auditing.",
-        icon: "terminal",
-        color: "indigo",
-        baseUrl: "/api/z1sandbox",
-        documentationUrl: "/api/z1sandbox/docs"
-      }]);
+      setBackends([]);
     } catch (e) {
       console.error("Failed to load backends config from environment:", e);
       setBackends([]);
@@ -476,7 +473,16 @@ const Dashboard = () => {
                           disabled={isCreating || keys.length >= 5}
                           onClick={handleCreateKey}
                         >
-                          {isCreating ? <RefreshCw className="w-5 h-5 animate-spin" /> : keys.length >= 5 ? "Limit Reached" : "Generate Key"}
+                          {isCreating ? (
+                            <div className="flex items-center gap-2">
+                              <LoadingSpinner size="sm" className="text-current" />
+                              <span className="uppercase tracking-widest text-[10px]">Generating...</span>
+                            </div>
+                          ) : keys.length >= 5 ? (
+                            "Limit Reached"
+                          ) : (
+                            "Generate Key"
+                          )}
                         </Button>
                       </DialogFooter>
                     </div>
@@ -486,9 +492,9 @@ const Dashboard = () => {
             </CardHeader>
             <CardContent className="p-0">
               {isLoading ? (
-                <div className="p-20 flex flex-col items-center gap-4">
-                  <RefreshCw className="w-10 h-10 animate-spin text-primary/30" />
-                  <p className="text-muted-foreground font-medium">Synchronizing tokens...</p>
+                <div className="p-20 flex flex-col items-center justify-center text-center space-y-6">
+                  <LoadingSpinner className="text-primary/40" />
+                  <p className="text-[10px] text-muted-foreground font-black uppercase tracking-[0.2em] opacity-60 animate-pulse">Synchronizing Tokens...</p>
                 </div>
               ) : keys.length === 0 ? (
                 <div className="p-20 flex flex-col items-center gap-6 text-center">

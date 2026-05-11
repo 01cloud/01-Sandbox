@@ -12,7 +12,7 @@ controller:
     limits:
       cpu: 500m
       memory: 512Mi
-  sandboxImage: "kamalberrybytes/codeinterpreter:1.0.0"
+  sandboxImage: "01community/01sandbox-codeinterpreter:1.0.0"
 
 # Storage configuration for Scan Jobs
 storage:
@@ -34,4 +34,4 @@ server:
     limits:
       cpu: 500m
       memory: 512Mi
-  sandboxImage: "kamalberrybytes/codeinterpreter:1.0.0"
+  sandboxImage: "01community/01sandbox-codeinterpreter:1.0.0"
