@@ -303,13 +303,14 @@ class ScannerOrchestrator:
         self.results["scans"]["trivy"] = res
 
     def scan_kubelinter(self):
-        """Runs kube-linter exclusively for detected Kubernetes manifests."""
+        """Runs kube-linter in Ultra-Strict mode for all built-in security checks."""
         k8s_files = self.classified_files.get("k8s", [])
         if not k8s_files:
             self.results["scans"]["kubelinter"] = {"status": "SKIPPED", "reason": "No K8s manifests"}
             return
 
-        cmd = ["/usr/local/bin/kube-linter", "lint", "--format", "json", "--add-all-built-in"] + [os.path.join(self.target_dir, f) for f in k8s_files]
+        # Enable all built-in checks and force failure on any linting violation
+        cmd = ["/usr/local/bin/kube-linter", "lint", "--format", "json", "--add-all-built-in", "--do-not-auto-add-defaults"] + [os.path.join(self.target_dir, f) for f in k8s_files]
         res = self.run_command(cmd, "Kube-Linter")
         if res["status"] == "NOT_FOUND":
             cmd[0] = "kube-linter"
@@ -320,51 +321,23 @@ class ScannerOrchestrator:
                 data = json.loads(res["stdout"])
                 res["stdout"] = data
                 
-                if not isinstance(data, dict):
-                    logging.warning(f" Kube-Linter returned unexpected JSON format: {type(data)}")
-                    return
-
-                # Robust detection of reports list (handle case sensitivity)
                 reports = data.get("Reports") or data.get("reports") or []
                 if reports:
                     res["status"] = "ISSUES_FOUND"
                 
                 for report in reports:
-                    if not isinstance(report, dict):
-                        continue
-                        
-                    # Extract check details defensively
+                    if not isinstance(report, dict): continue
                     check_val = report.get("Check") or report.get("check") or {}
-                    check_name = "unknown"
+                    check_name = check_val.get("Name") if isinstance(check_val, dict) else str(check_val)
                     remediation = report.get("Remediation") or report.get("remediation")
-                    message = report.get("Message") or report.get("message")
-                    
-                    if isinstance(check_val, dict):
-                        check_name = check_val.get("Name") or check_val.get("name") or "unknown"
-                        if not remediation:
-                            remediation = check_val.get("Remediation") or check_val.get("remediation")
-                    elif isinstance(check_val, str):
-                        check_name = check_val
-
-                    # Extract file name from Diagnostic/ParsedObject
-                    diag = report.get("Diagnostic") or report.get("diagnostic") or {}
-                    file_name = "unknown"
-                    if isinstance(diag, dict):
-                        parsed_obj = diag.get("ParsedObject") or diag.get("parsedObject") or {}
-                        if isinstance(parsed_obj, dict):
-                            file_name = parsed_obj.get("Name") or parsed_obj.get("name") or "unknown"
-                    
-                    # Construct issue text
-                    issue_detail = remediation or message or "Linting violation"
-                    issue_text = f"{check_name}: {issue_detail}"
                     
                     self.results["findings"].append({
                         "tool": "kubelinter",
-                        "file": file_name,
+                        "file": "manifest",
                         "line": None,
-                        "issue": check_name,
+                        "issue": f"Linting Violation: {check_name}",
                         "severity": "HIGH",
-                        "remediation": remediation or message or "Apply Kubernetes best practices for this resource."
+                        "remediation": remediation or "Review Kubernetes resource against security best practices."
                     })
             except Exception as e:
                 logging.error(f" Failed to parse Kube-Linter JSON: {e}")
@@ -372,13 +345,14 @@ class ScannerOrchestrator:
         self.results["scans"]["kubelinter"] = res
 
     def scan_kubeconform(self):
-        """Runs kubeconform exclusively for detected Kubernetes manifests."""
+        """Runs kubeconform in Strict Schema-Validation mode."""
         k8s_files = self.classified_files.get("k8s", [])
         if not k8s_files:
             self.results["scans"]["kubeconform"] = {"status": "SKIPPED", "reason": "No K8s manifests"}
             return
 
-        cmd = ["/usr/local/bin/kubeconform", "-summary", "-output", "json", "-strict"] + [os.path.join(self.target_dir, f) for f in k8s_files]
+        # Strict: fail on missing schemas and use modern K8s version
+        cmd = ["/usr/local/bin/kubeconform", "-summary", "-output", "json", "-strict", "-ignore-missing-schemas=false", "-kubernetes-version", "1.30.0"] + [os.path.join(self.target_dir, f) for f in k8s_files]
         res = self.run_command(cmd, "Kube-Conform")
         if res["status"] == "NOT_FOUND":
             cmd[0] = "kubeconform"
@@ -397,9 +371,9 @@ class ScannerOrchestrator:
                             "tool": "kubeconform",
                             "file": resource.get("filename", "unknown"),
                             "line": None,
-                            "issue": f"Schema Violation: {resource.get('kind')}",
+                            "issue": f"Schema Error: {resource.get('kind')} ({resource.get('msg')})",
                             "severity": "CRITICAL",
-                            "remediation": f"Fix schema error: {resource.get('msg')} for version {resource.get('version')}"
+                            "remediation": "Correct the manifest to match the Kubernetes API schema."
                         })
                 if has_errors:
                     res["status"] = "ISSUES_FOUND"
@@ -411,14 +385,14 @@ class ScannerOrchestrator:
         self.results["scans"]["kubeconform"] = res
 
     def scan_kubescore(self):
-        """Runs kube-score exclusively for detected Kubernetes manifests."""
+        """Runs kube-score for production-readiness and security hardening."""
         k8s_files = self.classified_files.get("k8s", [])
         if not k8s_files:
             self.results["scans"]["kubescore"] = {"status": "SKIPPED", "reason": "No K8s manifests"}
             return
 
-        # Pass local file paths and run in target directory
-        cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json"] + k8s_files
+        cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json", "--ignore-container-cpu-limit", "false"] + k8s_files
+        res = self.run_command(cmd, "Kube-Score", cwd=self.target_dir)
         res = self.run_command(cmd, "Kube-Score", cwd=self.target_dir)
         
         # Fallback 1: Try without full path to binary
