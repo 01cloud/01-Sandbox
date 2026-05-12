@@ -2,6 +2,7 @@
 # Dockerfile — Sandbox FastAPI App
 # Build:  docker build -t sandbox-api .
 # Run:    docker run -p 8000:8000 sandbox-api
+# Test:   docker build --no-cache -t sandbox-api .
 # ─────────────────────────────────────────────
 
 # ── Stage 1: builder ─────────────────────────

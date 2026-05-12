@@ -13,17 +13,6 @@ on:
     branches: [ main ]
 
 jobs:
-  release-please:
-    runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-    steps:
-      - uses: google-github-actions/release-please-action@v4
-        id: release
-        with:
-          release-type: simple
-          package-name: 01-sandbox
   filter:
     runs-on: ubuntu-latest
     outputs:
@@ -61,11 +50,11 @@ jobs:
       - name: Build and push API Server
         uses: docker/build-push-action@v5
         with:
-          context: ./apiServer
+          context: ./apiServer/fastapi/
           push: true
           tags: |
-            01community/01sandbox-opensandbox-server:latest
-            01community/01sandbox-opensandbox-server:${{ github.sha }}
+            01community/01sandbox-api:latest
+            01community/01sandbox-api:${{ github.sha }}
 
   build-scanner:
     needs: filter
@@ -152,4 +141,8 @@ jobs:
             -n default \
             --atomic \
             --timeout 5m0s \
-            --values ./codeInspector/values.yaml
+            --values ./codeInspector/values.yaml \
+            --set apiServer.deployment.image.tag=${{ github.sha }} \
+            --set opensandbox.controller.image.tag=${{ github.sha }} \
+            --set opensandbox.server.image.tag=${{ github.sha }} \
+            --set opensandbox.server.sandboxImage=01community/01sandbox-codeinterpreter:${{ github.sha }}
