@@ -167,7 +167,7 @@ jobs:
         run: helm lint ./codeInspector
       - name: Cleanup Stuck Helm Release
         run: |
-          echo "🔍 Checking for stuck Helm releases..."
+          echo "Checking for stuck Helm releases..."
           # Delete any Helm secrets that are stuck in 'pending' state
           kubectl delete secret -n default -l "owner=helm,name=codeinspector,status=pending-upgrade" || true
           kubectl delete secret -n default -l "owner=helm,name=codeinspector,status=pending-install" || true
@@ -176,7 +176,7 @@ jobs:
         run: |
           set -x
           VERSION=${{ needs.versioning.outputs.version }}
-          echo "🚀 Starting deployment..."
+          echo "Starting deployment..."
           
           # Build the Helm command dynamically
           HELM_CMD="helm upgrade --install codeinspector ./codeInspector -n default --rollback-on-failure --debug --timeout 5m0s --values ./codeInspector/values.yaml"
@@ -206,28 +206,28 @@ jobs:
           
           # Update API Tag
           if [ "${{ needs.filter.outputs.api }}" == "true" ]; then
-            echo "📝 Updating API Server tag..."
+            echo "Updating API Server tag..."
             sed -i "/apiServer:/,/tag:/ s/tag: [\"']\?[0-9.]*[\"']\?/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
             UPDATED=true
           fi
           
           # Update Controller Tag
           if [ "${{ needs.filter.outputs.controller }}" == "true" ]; then
-            echo "📝 Updating Controller tag..."
+            echo "Updating Controller tag..."
             sed -i "/controller:/,/tag:/ s/tag: [\"']\?[0-9.]*[\"']\?/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
             UPDATED=true
           fi
           
           # Update Server Tag
           if [ "${{ needs.filter.outputs.server }}" == "true" ]; then
-            echo "📝 Updating Server tag..."
+            echo "Updating Server tag..."
             sed -i "/server:/,/tag:/ s/tag: [\"']\?[0-9.]*[\"']\?/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
             UPDATED=true
           fi
 
           # Update Sandbox Image (Scanner)
           if [ "${{ needs.filter.outputs.scanner }}" == "true" ]; then
-            echo "📝 Updating Sandbox Scanner image..."
+            echo "Updating Sandbox Scanner image..."
             # Update the specialized sandboxImage field (handles quotes)
             sed -i "s|sandboxImage: [\"']\?01community/01sandbox-codeinterpreter:[0-9.]*[\"']\?|sandboxImage: \"01community/01sandbox-codeinterpreter:${VERSION}\"|g" ./codeInspector/values.yaml
             # Update the Resource Pool image if it exists
@@ -236,7 +236,7 @@ jobs:
           fi
           
           if [ "$UPDATED" == "true" ]; then
-            echo "✅ Changes applied. Checking if commit is needed..."
+            echo "Changes applied. Checking if commit is needed..."
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
             git add ./codeInspector/values.yaml
@@ -245,14 +245,14 @@ jobs:
             if ! git diff --cached --quiet; then
               git commit -m "chore: bump versions to ${VERSION} [skip ci]"
             else
-              echo "ℹ️ No changes to values.yaml, skipping commit."
+              echo "No changes to values.yaml, skipping commit."
             fi
             
             # Always try to push tags for versioning persistence
             git tag -f "v${VERSION}"
             git push origin main --tags --force
           else
-            echo "⏭️ No component changes detected, skipping repository update."
+            echo "⏭No component changes detected, skipping repository update."
           fi
 
       - name: Sync Remote Server
