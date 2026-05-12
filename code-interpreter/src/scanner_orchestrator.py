@@ -148,14 +148,14 @@ class ScannerOrchestrator:
             return {"status": "ERROR", "error": str(e)}
 
     def scan_semgrep(self):
-        """Runs Semgrep static analysis and parses JSON results."""
-        # Only run if there are relevant files (common extensions)
-        remm_exts = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".yaml", ".yml", ".json"}
+        """Runs Semgrep static analysis with multi-language security patterns."""
+        # Expanded extension support for all requested languages
+        remm_exts = {".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".yaml", ".yml", ".json", ".k8s"}
         if not any(f.endswith(tuple(remm_exts)) for f in self.results["files_scanned"]):
             self.results["scans"]["semgrep"] = {"status": "SKIPPED", "reason": "No supported files"}
             return
 
-        # Strict Mode: Use comprehensive security configurations
+        # Multi-language security configurations
         cmd = [
             "/usr/local/bin/semgrep", "scan", 
             "--config=auto", 
@@ -163,12 +163,12 @@ class ScannerOrchestrator:
             "--config=p/secrets", 
             "--config=p/python",
             "--config=p/javascript",
+            "--config=p/golang",
+            "--config=p/kubernetes",
+            "--config=p/yaml",
             "--json", "--quiet", self.target_dir
         ]
         res = self.run_command(cmd, "Semgrep")
-        if res["status"] == "NOT_FOUND":
-            cmd[0] = "semgrep"
-            res = self.run_command(cmd, "Semgrep")
         
         if res.get("stdout"):
             try:
