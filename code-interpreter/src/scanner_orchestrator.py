@@ -224,17 +224,34 @@ class ScannerOrchestrator:
         self.results["scans"]["gitleaks"] = res
 
     def scan_yamllint(self):
-        """Runs YAMLlint exclusively for non-Kubernetes YAML configuration files."""
-        yaml_files = self.classified_files.get("yaml", [])
+        """Runs yamllint and parses output into findings."""
+        yaml_files = self.classified_files.get("yaml", []) + self.classified_files.get("k8s", [])
         if not yaml_files:
-            self.results["scans"]["yamllint"] = {"status": "SKIPPED", "reason": "No general YAML files"}
+            self.results["scans"]["yamllint"] = {"status": "SKIPPED", "reason": "No YAML files"}
             return
 
-        cmd = ["/usr/local/bin/yamllint", "-d", "{extends: relaxed, rules: {line-length: disable}}"] + [os.path.join(self.target_dir, f) for f in yaml_files]
-        res = self.run_command(cmd, "YAMLlint")
-        if res["status"] == "NOT_FOUND":
-            cmd[0] = "yamllint"
-            res = self.run_command(cmd, "YAMLlint")
+        # Use parsable format to extract findings
+        cmd = ["/usr/local/bin/yamllint", "-f", "parsable"] + yaml_files
+        res = self.run_command(cmd, "Yamllint", cwd=self.target_dir)
+        
+        if res.get("stdout"):
+            for line in res["stdout"].splitlines():
+                if ":" in line:
+                    parts = line.split(":")
+                    if len(parts) >= 4:
+                        file_path = parts[0].strip()
+                        line_num = parts[1].strip()
+                        issue = parts[3].strip()
+                        self.results["findings"].append({
+                            "tool": "yamllint",
+                            "file": file_path,
+                            "line": int(line_num) if line_num.isdigit() else None,
+                            "issue": f"YAML Lint: {issue}",
+                            "severity": "MEDIUM",
+                            "remediation": "Correct the YAML formatting/syntax according to best practices."
+                        })
+            res["status"] = "ISSUES_FOUND"
+        
         self.results["scans"]["yamllint"] = res
 
     def scan_bandit(self):
