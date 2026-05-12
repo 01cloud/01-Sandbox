@@ -37,7 +37,16 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
     const text = code.trim();
     if (!text) return "py";
 
-    // 1. JSON Detection (Structural)
+    const scores: Record<string, number> = {
+      py: 0,
+      yaml: 0,
+      k8s: 0,
+      js: 0,
+      go: 0,
+      sh: 0
+    };
+
+    // 1. Structural JSON Detection (Highest Priority)
     if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
       try {
         JSON.parse(text);
@@ -45,32 +54,81 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
       } catch (e) { /* ignore and continue */ }
     }
 
-    // 2. Shell Script (Shebang is a strong indicator)
-    if (text.startsWith("#!") || /\b(sudo|apt-get|yum|export\s+[A-Z_]+=)\b/.test(text) || /\b(if\s+\[|elif\s+\[|then|fi|done)\b/.test(text)) {
-      return "sh";
+    // 2. Shebang Detection (Strong Shell indicator)
+    if (text.startsWith("#!")) return "sh";
+
+    // --- Scoring Logic ---
+
+    // Python Indicators
+    if (/\b(import|from)\s+\w+/.test(text)) scores.py += 10;
+    if (/\bdef\s+\w+\(/.test(text)) scores.py += 10;
+    if (/\bclass\s+\w+[:\(]/.test(text)) scores.py += 10;
+    if (/\bprint\(/.test(text)) scores.py += 5;
+    if (/\bif\s+__name__\s*==/.test(text)) scores.py += 20;
+    if (/\bself\b/.test(text)) scores.py += 5;
+    if (/\basync\s+def\b/.test(text)) scores.py += 10;
+    if (/\b(try|except|finally):/m.test(text)) scores.py += 5;
+
+    // YAML & K8s Indicators
+    if (text.startsWith("---")) scores.yaml += 15;
+    
+    const hasApiVersion = /apiVersion:/m.test(text);
+    const hasKind = /kind:/m.test(text);
+    const isK8s = hasApiVersion && hasKind;
+    
+    if (isK8s) {
+      scores.k8s = (scores.k8s || 0) + 30;
+    } else if (hasApiVersion || hasKind || /^(metadata|spec|services|version):/m.test(text)) {
+      scores.yaml += 10;
+    }
+    
+    const kvPairs = (text.match(/^\s*[\w.-]+\s*:\s*.+/gm) || []).length;
+    scores.yaml += Math.min(kvPairs * 2, 20); // Cap KV pairs contribution
+
+    // JavaScript / TypeScript Indicators
+    if (/\b(const|let|var)\s+\w+\s*=/.test(text)) scores.js += 5;
+    if (/\bimport\s+.*from\s+['"]/.test(text)) scores.js += 10;
+    if (/\bexport\s+(default|const|class|function)\b/.test(text)) scores.js += 10;
+    if (/\bconsole\.log\(/.test(text)) scores.js += 5;
+    if (/\bfunction\s+\w+\s*\(/.test(text)) scores.js += 5;
+    if (/\binterface\s+\w+\s*{/.test(text)) scores.js += 10;
+    if (/\b(await|async)\b/.test(text) && !scores.py) scores.js += 5;
+
+    // Go Indicators
+    if (/\bpackage\s+\w+/.test(text)) scores.go += 15;
+    if (/\bfunc\s+\w+\(/.test(text)) scores.go += 10;
+    if (/\btype\s+\w+\s+struct\b/.test(text)) scores.go += 10;
+
+    // Shell Indicators
+    if (/\b(sudo|apt-get|yum|export|grep|awk|sed)\b/.test(text)) scores.sh += 5;
+    if (/\b(if\s+\[|then|fi|done|do)\b/.test(text)) scores.sh += 10;
+
+    // --- Conflicts & Contextual Adjustments ---
+    
+    // If it has strong Python keywords, it's very unlikely to be YAML or K8S
+    if (scores.py > 5) {
+      scores.yaml -= 15;
+      scores.k8s -= 15;
+    }
+    
+    // If it has strong JS keywords, it's very unlikely to be YAML or K8S
+    if (scores.js > 5) {
+      scores.yaml -= 15;
+      scores.k8s -= 15;
     }
 
-    // 3. Go Detection (Specific keywords)
-    if (/\bpackage\s+\w+/.test(text) && (/\bfunc\s+\w+\(/.test(text) || /\bimport\s+\(/.test(text) || /\btype\s+\w+\s+struct\b/.test(text))) {
-      return "go";
+    // Find the winner
+    let maxScore = -1;
+    let detected = "py";
+
+    for (const lang in scores) {
+      if (scores[lang] > maxScore) {
+        maxScore = scores[lang];
+        detected = lang;
+      }
     }
 
-    // 4. YAML Detection (Look for k8s markers or KV pairs)
-    if (text.startsWith("---") || /^(apiVersion|kind|metadata|spec|services|version):/m.test(text) || /^\s*[\w.-]+\s*:\s*.+/m.test(text)) {
-      return "yaml";
-    }
-
-    // 5. JavaScript / TypeScript Detection
-    if (/\b(import\s+.*from|export\s+(const|let|var|function|class|default)|const\s+\w+\s*=|function\s+\w+\s*\(|console\.log|await\s+)\b/.test(text)) {
-      return "js";
-    }
-
-    // 6. Python Detection (Fallback)
-    if (/\b(def\s+\w+\(|class\s+\w+\(|import\s+\w+|from\s+\w+\s+import|if\s+__name__\s*==\s*['"]__main__['"])\b/.test(text) || /\bprint\(/.test(text)) {
-      return "py";
-    }
-
-    return "py";
+    return maxScore > 0 ? detected : "py";
   };
 
   const runScan = async () => {
@@ -89,8 +147,9 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
       setStatus("AUDITING");
       setResult(null);
 
-      const ext = detectLanguage(code);
-      const filename = `input.${ext}`;
+      const lang = detectLanguage(code);
+      const apiExt = lang === 'k8s' ? 'yaml' : lang;
+      const filename = `input.${apiExt}`;
 
       const response = await fetch(`${baseUrl}/scan-jobs`, {
         method: "POST",
@@ -254,18 +313,40 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                                  <ScrollArea className="flex-1 border-t pt-4">
                                     {result.findings && result.findings.length > 0 ? (
                                        <div className="space-y-4 pr-4">
-                                          {result.findings.map((f: any, i: number) => (
-                                             <div key={i} className="p-5 rounded-xl border bg-muted/10 hover:bg-muted/20 transition-all group">
-                                                <div className="flex items-center justify-between mb-3">
-                                                   <Badge variant="destructive" className="text-[8px] font-black px-1.5 py-0">HIGH</Badge>
-                                                   <span className="text-[9px] font-mono opacity-30">{f.tool || "PROBE"}</span>
+                                          {result.findings.map((f: any, i: number) => {
+                                             const severity = (f.severity || "MEDIUM").toUpperCase();
+                                             const sevColor = severity === "CRITICAL" ? "bg-red-500/10 text-red-500 border-red-500/20" :
+                                                              severity === "HIGH" ? "bg-orange-500/10 text-orange-500 border-orange-500/20" :
+                                                              severity === "MEDIUM" ? "bg-amber-500/10 text-amber-500 border-amber-500/20" :
+                                                              "bg-blue-500/10 text-blue-500 border-blue-500/20";
+                                             
+                                             return (
+                                                <div key={i} className="p-5 rounded-xl border bg-muted/10 hover:bg-muted/20 transition-all group relative overflow-hidden">
+                                                   <div className="flex items-center justify-between mb-3">
+                                                      <div className="flex items-center gap-2">
+                                                         <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0 uppercase", sevColor)}>
+                                                            {severity}
+                                                         </Badge>
+                                                         <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{f.tool}</span>
+                                                      </div>
+                                                      {f.line && <span className="text-[9px] font-mono opacity-40">L:{f.line}</span>}
+                                                   </div>
+                                                   
+                                                   <h4 className="text-sm font-black uppercase tracking-tight mb-2">{f.issue || "Security Violation"}</h4>
+                                                   
+                                                   <div className="flex flex-col gap-2 mt-4">
+                                                      <span className="text-[9px] font-black uppercase tracking-[0.1em] text-muted-foreground/60">Remediation Insight</span>
+                                                      <div className="p-4 rounded-lg bg-background/50 text-[11px] font-medium text-foreground/80 border border-border/40 leading-relaxed italic">
+                                                         {f.remediation || "Analyze the specific code structure and apply industry security standards to mitigate this risk."}
+                                                      </div>
+                                                   </div>
+
+                                                   <div className="mt-3 flex items-center justify-between text-[9px] font-mono opacity-40">
+                                                      <span>FILE: {f.file || "unknown"}</span>
+                                                   </div>
                                                 </div>
-                                                <h4 className="text-sm font-black uppercase tracking-tight line-clamp-1">{f.description || "Violation"}</h4>
-                                                <div className="mt-4 p-3 rounded-lg bg-background text-[11px] font-mono text-amber-600/90 border border-border/40 line-clamp-2 italic">
-                                                   "{f.snippet?.trim() || "Dynamic signature verification required."}"
-                                                </div>
-                                             </div>
-                                          ))}
+                                             );
+                                          })}
                                        </div>
                                     ) : (
                                        <div className="h-full flex flex-col items-center justify-center text-center opacity-30">

@@ -1,0 +1,155 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'apiServer/**'
+      - 'code-interpreter/**'
+      - 'codeInspector/**'
+      - 'opensandbox-server/**'
+      - 'opensandbox-controller/**'
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+    steps:
+      - uses: google-github-actions/release-please-action@v4
+        id: release
+        with:
+          release-type: simple
+          package-name: 01-sandbox
+  filter:
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+      scanner: ${{ steps.filter.outputs.scanner }}
+      infra: ${{ steps.filter.outputs.infra }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            api:
+              - 'apiServer/**'
+            scanner:
+              - 'code-interpreter/**'
+            infra:
+              - 'codeInspector/**'
+            server:
+              - 'opensandbox-server/**'
+            controller:
+              - 'opensandbox-controller/**'
+
+  build-api:
+    needs: filter
+    if: needs.filter.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push API Server
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apiServer
+          push: true
+          tags: |
+            01community/01sandbox-opensandbox-server:latest
+            01community/01sandbox-opensandbox-server:${{ github.sha }}
+
+  build-scanner:
+    needs: filter
+    if: needs.filter.outputs.scanner == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push Scanner
+        uses: docker/build-push-action@v5
+        with:
+          context: ./code-interpreter
+          push: true
+          tags: |
+            01community/01sandbox-codeinterpreter:latest
+            01community/01sandbox-codeinterpreter:${{ github.sha }}
+  
+  build-server:
+    needs: filter
+    if: needs.filter.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push Server
+        uses: docker/build-push-action@v5
+        with:
+          context: ./opensandbox-server
+          push: true
+          tags: |
+            01community/01sandbox-opensandbox-server:latest
+            01community/01sandbox-opensandbox-server:${{ github.sha }}
+
+  build-controller:
+    needs: filter
+    if: needs.filter.outputs.controller == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Build and push Controller
+        uses: docker/build-push-action@v5
+        with:
+          context: ./opensandbox-controller
+          push: true
+          tags: |
+            01community/01sandbox-opensandbox-controller:latest
+            01community/01sandbox-opensandbox-controller:${{ github.sha }}
+
+  deploy:
+    needs: [filter, build-api, build-scanner, build-server, build-controller]
+    if: |
+      always() &&
+      (needs.filter.outputs.infra == 'true' || 
+       needs.build-api.result == 'success' || 
+       needs.build-scanner.result == 'success')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Kubeconfig
+        run: |
+          mkdir -p ~/.kube
+          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+          chmod 600 ~/.kube/config
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+      - name: Helm Lint
+        run: helm lint ./codeInspector
+      - name: Deploy to RKE2
+        run: |
+          helm upgrade --install codeinspector ./codeInspector \
+            -n default \
+            --atomic \
+            --timeout 5m0s \
+            --values ./codeInspector/values.yaml

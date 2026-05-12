@@ -30,7 +30,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 
 # Copy application code
 
-COPY *.py .
+COPY *.py *.pem ./
 
 # Switch to non-root user
 USER appuser
