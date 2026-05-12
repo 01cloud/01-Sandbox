@@ -1,0 +1,40 @@
+name: Automated GitHub Release
+
+on:
+  workflow_run:
+    workflows: ["CI/CD Pipeline"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get Latest Tag
+        id: get_tag
+        run: |
+          # Fetch all tags from origin
+          git fetch --tags
+          # Get the most recent tag
+          LATEST_TAG=$(git describe --tags `git rev-list --tags --max-count=1`)
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "🚀 Identified latest tag: $LATEST_TAG"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.get_tag.outputs.tag }}
+          name: Release ${{ steps.get_tag.outputs.tag }}
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
