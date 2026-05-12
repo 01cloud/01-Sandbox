@@ -233,13 +233,21 @@ jobs:
           fi
           
           if [ "$UPDATED" == "true" ]; then
-            echo "✅ Changes applied. Tagging and pushing..."
+            echo "✅ Changes applied. Checking if commit is needed..."
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
             git add ./codeInspector/values.yaml
-            git commit -m "chore: bump versions to ${VERSION} [skip ci]"
-            git tag "v${VERSION}"
-            git push origin main --tags
+            
+            # Only commit if there are actual changes
+            if ! git diff --cached --quiet; then
+              git commit -m "chore: bump versions to ${VERSION} [skip ci]"
+            else
+              echo "ℹ️ No changes to values.yaml, skipping commit."
+            fi
+            
+            # Always try to push tags for versioning persistence
+            git tag -f "v${VERSION}"
+            git push origin main --tags --force
           else
             echo "⏭️ No component changes detected, skipping repository update."
           fi
