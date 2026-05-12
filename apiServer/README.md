@@ -362,5 +362,4 @@ curl -X DELETE http://localhost:8000/session/<session_id>
 
 ---
 
-## License
 

@@ -207,31 +207,31 @@ jobs:
           # Update API Tag
           if [ "${{ needs.filter.outputs.api }}" == "true" ]; then
             echo "📝 Updating API Server tag..."
-            sed -i "/apiServer:/,/tag:/ s/tag: \"[0-9.]*\"/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
+            sed -i "/apiServer:/,/tag:/ s/tag: [\"']\?[0-9.]*[\"']\?/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
             UPDATED=true
           fi
           
           # Update Controller Tag
           if [ "${{ needs.filter.outputs.controller }}" == "true" ]; then
             echo "📝 Updating Controller tag..."
-            sed -i "/controller:/,/tag:/ s/tag: \"[0-9.]*\"/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
+            sed -i "/controller:/,/tag:/ s/tag: [\"']\?[0-9.]*[\"']\?/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
             UPDATED=true
           fi
           
           # Update Server Tag
           if [ "${{ needs.filter.outputs.server }}" == "true" ]; then
             echo "📝 Updating Server tag..."
-            sed -i "/server:/,/tag:/ s/tag: \"[0-9.]*\"/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
+            sed -i "/server:/,/tag:/ s/tag: [\"']\?[0-9.]*[\"']\?/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
             UPDATED=true
           fi
 
           # Update Sandbox Image (Scanner)
           if [ "${{ needs.filter.outputs.scanner }}" == "true" ]; then
             echo "📝 Updating Sandbox Scanner image..."
-            # Update the specialized sandboxImage field
-            sed -i "s|sandboxImage: \"01community/01sandbox-codeinterpreter:[0-9.]*\"|sandboxImage: \"01community/01sandbox-codeinterpreter:${VERSION}\"|g" ./codeInspector/values.yaml
+            # Update the specialized sandboxImage field (handles quotes)
+            sed -i "s|sandboxImage: [\"']\?01community/01sandbox-codeinterpreter:[0-9.]*[\"']\?|sandboxImage: \"01community/01sandbox-codeinterpreter:${VERSION}\"|g" ./codeInspector/values.yaml
             # Update the Resource Pool image if it exists
-            sed -i "s|image: 01community/01sandbox-codeinterpreter:[0-9.]*|image: 01community/01sandbox-codeinterpreter:${VERSION}|g" ./codeInspector/values.yaml
+            sed -i "s|image: [\"']\?01community/01sandbox-codeinterpreter:[0-9.]*[\"']\?|image: \"01community/01sandbox-codeinterpreter:${VERSION}\"|g" ./codeInspector/values.yaml
             UPDATED=true
           fi
           
