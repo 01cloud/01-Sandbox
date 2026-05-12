@@ -16,7 +16,7 @@
 FROM 01community/01sandbox-codeinterpreter-base-image:1.0.0
 
 # ── Base Image Verification ──────────────────────────────────────────────────
-# Verify that all required security tools are present in the base image.
+# Verify that all required security tools are present in the base image.fasdfa
 # This prevents building a runtime image on top of an outdated or broken base.
 RUN set -eux; \
     echo "Build PATH: $PATH"; \
