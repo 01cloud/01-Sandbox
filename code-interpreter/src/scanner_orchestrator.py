@@ -476,19 +476,6 @@ class ScannerOrchestrator:
             "checks_passed": passed_checks
         }
 
-            except Exception as e:
-                logging.error(f" Failed to parse Kube-Score JSON: {e}")
-                if res.get("stdout"): logging.error(f" Raw Kube-Score stdout: {res['stdout'][:500]}")
-                if res.get("stderr"): logging.error(f" Kube-Score stderr: {res['stderr']}")
-        else:
-            # Handle empty output cases
-            status = "COMPLETED" if res.get("exit_code") == 0 else "ERROR"
-            res["status"] = status
-            if status == "ERROR" and res.get("stderr"):
-                logging.error(f" Kube-Score error: {res['stderr']}")
-        
-        self.results["scans"]["kubescore"] = res
-
     def scan_shellcheck(self):
         """Runs ShellCheck for shell scripts and parses JSON results."""
         shell_files = self.classified_files.get("shell", [])
