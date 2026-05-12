@@ -9,6 +9,7 @@ on:
       - 'codeInspector/**'
       - 'opensandbox-server/**'
       - 'opensandbox-controller/**'
+      - 'codeInspector/**'
   pull_request:
     branches: [ main ]
 
@@ -35,6 +36,8 @@ jobs:
               - 'opensandbox-server/**'
             controller:
               - 'opensandbox-controller/**'
+            codeInspector:
+              - 'codeInspector/**'
 
   build-api:
     needs: filter

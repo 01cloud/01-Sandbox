@@ -7,7 +7,7 @@ global:
   JWT_PUBLIC_JWKS: "" 
 
 ################################################################
-# Agent Gateway component values
+# Agent Gateway  values
 ################################################################
 agentgateway:
   enabled: true
