@@ -402,18 +402,33 @@ class ScannerOrchestrator:
         self.results["scans"]["kubeconform"] = res
 
     def scan_kubescore(self):
-        """Runs kube-score for production-readiness and security hardening."""
+        """Runs kube-score and converts parse errors into actionable findings."""
         k8s_files = self.classified_files.get("k8s", [])
         if not k8s_files:
             self.results["scans"]["kubescore"] = {"status": "SKIPPED", "reason": "No K8s manifests"}
             return
 
-        # Score specific files directly. Do NOT use '.' fallback as it fails in this environment.
         cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json"] + k8s_files
         res = self.run_command(cmd, "Kube-Score", cwd=self.target_dir)
         
-        if res.get("stdout") in ("", "null", "None") or res["status"] == "ERROR":
-            logging.error(f" Kube-Score failed or returned empty: {res.get('stderr')}")
+        # Handle Parse Errors (like 'replicas: "two"')
+        if res["status"] == "ERROR" or res.get("stdout") in ("", "null", "None"):
+            stderr = res.get("stderr", "")
+            if "failed to parse" in stderr.lower() or "cannot unmarshal" in stderr.lower():
+                # Extract the specific error message for the user
+                err_msg = stderr.split("err=")[-1] if "err=" in stderr else stderr
+                self.results["findings"].append({
+                    "tool": "kubescore",
+                    "file": "manifest",
+                    "line": None,
+                    "issue": "K8s Parsing Failure (Critical)",
+                    "severity": "CRITICAL",
+                    "remediation": f"Fix Syntax Error: {err_msg.strip()}"
+                })
+                res["status"] = "ISSUES_FOUND"
+                self.results["scans"]["kubescore"] = res
+                return
+            
             res["status"] = "ERROR"
             self.results["scans"]["kubescore"] = res
             return
