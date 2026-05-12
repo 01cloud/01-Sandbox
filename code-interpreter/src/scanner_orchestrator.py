@@ -466,6 +466,9 @@ class ScannerOrchestrator:
         score = 100
         if total_checks > 0:
             score = int((passed_checks / total_checks) * 100)
+        elif has_issues:
+            # If we had issues (like syntax errors) but 0 checks, score is 0
+            score = 0
         
         self.results["scans"]["kubescore"] = {
             "status": "ISSUES_FOUND" if has_issues else "COMPLETED",
