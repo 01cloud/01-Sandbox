@@ -402,103 +402,79 @@ class ScannerOrchestrator:
         self.results["scans"]["kubeconform"] = res
 
     def scan_kubescore(self):
-        """Runs kube-score and converts parse errors into actionable findings."""
+        """Runs kube-score per-file to ensure syntax errors don't block the entire scan."""
         k8s_files = self.classified_files.get("k8s", [])
         if not k8s_files:
             self.results["scans"]["kubescore"] = {"status": "SKIPPED", "reason": "No K8s manifests"}
             return
 
-        cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json"] + k8s_files
-        res = self.run_command(cmd, "Kube-Score", cwd=self.target_dir)
-        
-        # Handle Parse Errors (like 'replicas: "two"')
-        if res["status"] == "ERROR" or res.get("stdout") in ("", "null", "None"):
-            stderr = res.get("stderr", "")
-            if "failed to parse" in stderr.lower() or "cannot unmarshal" in stderr.lower():
-                # Extract the specific error message for the user
-                err_msg = stderr.split("err=")[-1] if "err=" in stderr else stderr
-                self.results["findings"].append({
-                    "tool": "kubescore",
-                    "file": "manifest",
-                    "line": None,
-                    "issue": "K8s Parsing Failure (Critical)",
-                    "severity": "CRITICAL",
-                    "remediation": f"Fix Syntax Error: {err_msg.strip()}"
-                })
-                res["status"] = "ISSUES_FOUND"
-                self.results["scans"]["kubescore"] = res
-                return
+        total_checks = 0
+        passed_checks = 0
+        has_issues = False
+
+        for f_path in k8s_files:
+            cmd = ["/usr/local/bin/kube-score", "score", "--output-format", "json", f_path]
+            res = self.run_command(cmd, f"Kube-Score-{f_path}", cwd=self.target_dir)
             
-            res["status"] = "ERROR"
-            self.results["scans"]["kubescore"] = res
-            return
+            # Fatal Parse Error for this specific file
+            if res["status"] == "ERROR" or res.get("stdout") in ("", "null", "None"):
+                stderr = res.get("stderr", "")
+                if "failed to parse" in stderr.lower() or "cannot unmarshal" in stderr.lower():
+                    err_msg = stderr.split("err=")[-1] if "err=" in stderr else stderr
+                    self.results["findings"].append({
+                        "tool": "kubescore",
+                        "file": f_path,
+                        "line": None,
+                        "issue": "K8s Parsing Failure (Critical)",
+                        "severity": "CRITICAL",
+                        "remediation": f"Fix Syntax Error in {f_path}: {err_msg.strip()}"
+                    })
+                    has_issues = True
+                continue
 
-        if res.get("stdout"):
+            # Successful parse, extract scores
             try:
-                # Debug: Handle explicit "null" string
-                raw_out = res["stdout"].strip()
-                if raw_out == "null":
-                    logging.warning(" Kube-Score explicitly returned 'null'. Checking stderr for clues...")
-                    if res.get("stderr"): logging.error(f" Kube-Score stderr: {res['stderr']}")
-                    res["status"] = "COMPLETED"
-                    return
-
-                data = json.loads(raw_out)
-                res["stdout"] = data
-                
-                if not isinstance(data, list):
-                    logging.warning(f" Kube-Score returned unexpected JSON format: {type(data)}")
-                    if res.get("stderr"): logging.error(f" Kube-Score stderr: {res['stderr']}")
-                    return
-
-                has_issues = False
-                total_checks = 0
-                passed_checks = 0
-                
+                data = json.loads(res["stdout"])
                 for item in data:
                     if not isinstance(item, dict): continue
                     obj_meta = item.get("object_meta") or item.get("ObjectMeta") or {}
-                    obj_name = obj_meta.get("name") if isinstance(obj_meta, dict) else "unknown"
+                    obj_name = obj_meta.get("name") or f_path
                     
                     for check in item.get("checks") or item.get("Checks") or []:
                         if not isinstance(check, dict): continue
                         total_checks += 1
-                        
-                        skipped = check.get("skipped", False)
                         grade = check.get("grade", 0)
-                        
-                        if grade == 0 or skipped:
+                        if grade == 0 or check.get("skipped"):
                             passed_checks += 1
                         else:
                             has_issues = True
                             comments = check.get("comments") or check.get("Comments") or []
                             comment = comments[0] if isinstance(comments, list) and len(comments) > 0 else {}
                             check_meta = check.get("check") or check.get("Check") or {}
-                            check_name = check_meta.get("name") or check_meta.get("id") or "unknown"
+                            check_name = check_meta.get("name") or "unknown"
                             
                             self.results["findings"].append({
                                 "tool": "kubescore",
-                                "file": obj_name,
+                                "file": f"{f_path} ({obj_name})",
                                 "line": None,
                                 "issue": f"{check_name} (Grade: {grade})",
                                 "severity": "HIGH" if grade >= 10 else "MEDIUM",
-                                "remediation": comment.get('summary', 'Hardening required for production readiness.')
+                                "remediation": comment.get('summary', 'Review hardening best practices.')
                             })
-                
-                # Calculate Numerical Security Score
-                score = 100
-                if total_checks > 0:
-                    score = int((passed_checks / total_checks) * 100)
-                
-                res["security_score"] = score
-                res["checks_total"] = total_checks
-                res["checks_passed"] = passed_checks
-                logging.info(f" Kube-Score calculation complete. Final Security Score: {score}%")
+            except Exception as e:
+                logging.error(f" Failed to parse kube-score JSON for {f_path}: {e}")
 
-                if has_issues:
-                    res["status"] = "ISSUES_FOUND"
-                else:
-                    res["status"] = "COMPLETED"
+        # Calculate Final Quantified Score
+        score = 100
+        if total_checks > 0:
+            score = int((passed_checks / total_checks) * 100)
+        
+        self.results["scans"]["kubescore"] = {
+            "status": "ISSUES_FOUND" if has_issues else "COMPLETED",
+            "security_score": score,
+            "checks_total": total_checks,
+            "checks_passed": passed_checks
+        }
 
             except Exception as e:
                 logging.error(f" Failed to parse Kube-Score JSON: {e}")
