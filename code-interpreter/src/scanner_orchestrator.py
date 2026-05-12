@@ -527,8 +527,32 @@ class ScannerOrchestrator:
         
         self.results["scans"]["shellcheck"] = res
 
+    def _ensure_vulnerability_insights(self):
+        """Safety net: Ensure every failed tool has at least one finding in the insights panel."""
+        for tool, scan_res in self.results["scans"].items():
+            if not isinstance(scan_res, dict): continue
+            
+            status = scan_res.get("status")
+            if status in ("ERROR", "ISSUES_FOUND"):
+                # Check if this tool already has findings
+                tool_findings = [f for f in self.results["findings"] if f.get("tool") == tool]
+                
+                if not tool_findings:
+                    # No findings recorded yet, but tool failed. Create an auto-insight.
+                    logging.warning(f" Tool {tool} failed but provided no insights. Generating auto-insight.")
+                    error_msg = scan_res.get("stderr") or scan_res.get("error") or "Unknown security or execution error."
+                    
+                    self.results["findings"].append({
+                        "tool": tool,
+                        "file": "Pipeline Error",
+                        "line": None,
+                        "issue": f"Tool Execution Failure: {tool.upper()}",
+                        "severity": "CRITICAL",
+                        "remediation": f"Review tool error: {error_msg[:200]}..."
+                    })
+
     def run_all(self):
-        """Executes enabled scanners."""
+        """Executes enabled scanners and enforces dashboard insights."""
         if "semgrep" in self.enabled_tools: self.scan_semgrep()
         if "gitleaks" in self.enabled_tools: self.scan_gitleaks()
         if "yamllint" in self.enabled_tools: self.scan_yamllint()
@@ -540,7 +564,11 @@ class ScannerOrchestrator:
         if "kubeconform" in self.enabled_tools: self.scan_kubeconform()
         if "kubescore" in self.enabled_tools: self.scan_kubescore()
         if "shellcheck" in self.enabled_tools: self.scan_shellcheck()
-        self._calculate_summary()
+
+        # Enforce that all failures result in dashboard insights
+        self._ensure_vulnerability_insights()
+        
+        return self._calculate_summary()
         self.save_results()
 
     def _calculate_summary(self):
