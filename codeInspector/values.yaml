@@ -162,7 +162,7 @@ opensandbox:
     sandboxImage: "01community/01sandbox-codeinterpreter:0.0.5"
     image:
       repository: 01community/01sandbox-opensandbox-server
-      tag: "0.0.7"
+      tag: "0.0.8"
       pullPolicy: Always
     resources:
       requests:
