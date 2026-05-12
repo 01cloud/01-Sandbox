@@ -568,8 +568,9 @@ class ScannerOrchestrator:
         # Enforce that all failures result in dashboard insights
         self._ensure_vulnerability_insights()
         
-        return self._calculate_summary()
+        summary = self._calculate_summary()
         self.save_results()
+        return summary
 
     def _calculate_summary(self):
         """Generates a high-level summary object for machine/AI parsing."""
