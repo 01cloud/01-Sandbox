@@ -84,8 +84,8 @@ class ScannerOrchestrator:
         enabled = ["gitleaks", "semgrep"]
         
         if self.classified_files["python"]:
-            # Python: bandit + universal tools
-            enabled.append("bandit")
+            # Python: bandit + syntax check + universal tools
+            enabled.extend(["bandit", "py_compile"])
         
         if self.classified_files["yaml"]:
             # General YAML: yamllint + universal tools
@@ -147,6 +147,35 @@ class ScannerOrchestrator:
             logging.error(f" Error running {tool_name}: {str(e)}")
             return {"status": "ERROR", "error": str(e)}
 
+    def scan_py_compile(self) -> List[Dict]:
+        """Performs a static syntax check using py_compile to catch broken code early."""
+        findings = []
+        logging.info("Running Python Syntax Validation (py_compile)...")
+        import py_compile
+        import os
+        
+        for file_path in self.classified_files["python"]:
+            full_path = os.path.join(self.target_dir, file_path)
+            try:
+                # compile() with doraise=True will throw an exception on syntax error
+                py_compile.compile(full_path, doraise=True)
+            except py_compile.PyCompileError as e:
+                # Clean up the error message to be user-friendly
+                err_msg = str(e).split('\n')[-2] if '\n' in str(e) else str(e)
+                self.results["findings"].append({
+                    "tool": "py_compile",
+                    "file": file_path,
+                    "line": "N/A", 
+                    "issue": "Critical Python Syntax Fault",
+                    "severity": "CRITICAL",
+                    "description": f"Code is syntactically invalid: {err_msg}. This will prevent execution and may indicate hidden malicious intent or corrupted logic."
+                })
+                self.results["scans"]["py_compile"] = {"status": "ISSUES_FOUND", "error": err_msg}
+                return findings
+        
+        self.results["scans"]["py_compile"] = {"status": "COMPLETED"}
+        return findings
+
     def scan_semgrep(self):
         """Runs Semgrep static analysis with multi-language security patterns."""
         # Expanded extension support for all requested languages
@@ -155,11 +184,12 @@ class ScannerOrchestrator:
             self.results["scans"]["semgrep"] = {"status": "SKIPPED", "reason": "No supported files"}
             return
 
-        # Multi-language security configurations
+        # Multi-language security configurations + Harmful Logic Audits
         cmd = [
             "/usr/local/bin/semgrep", "scan", 
             "--config=auto", 
             "--config=p/security-audit", 
+            "--config=p/r2c-security-audit",
             "--config=p/secrets", 
             "--config=p/python",
             "--config=p/javascript",
@@ -553,6 +583,7 @@ class ScannerOrchestrator:
 
     def run_all(self):
         """Executes enabled scanners and enforces dashboard insights."""
+        if "py_compile" in self.enabled_tools: self.scan_py_compile()
         if "semgrep" in self.enabled_tools: self.scan_semgrep()
         if "gitleaks" in self.enabled_tools: self.scan_gitleaks()
         if "yamllint" in self.enabled_tools: self.scan_yamllint()
