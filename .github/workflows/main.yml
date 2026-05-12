@@ -143,7 +143,9 @@ jobs:
       always() &&
       (needs.filter.outputs.infra == 'true' || 
        needs.build-api.result == 'success' || 
-       needs.build-scanner.result == 'success')
+       needs.build-scanner.result == 'success' ||
+       needs.build-server.result == 'success' ||
+       needs.build-controller.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -162,17 +164,25 @@ jobs:
         run: |
           set -x
           VERSION=${{ needs.versioning.outputs.version }}
-          echo "🚀 Deploying version: ${VERSION}"
-          helm upgrade --install codeinspector ./codeInspector \
-            -n default \
-            --atomic \
-            --debug \
-            --timeout 5m0s \
-            --values ./codeInspector/values.yaml \
-            --set apiServer.deployment.image.tag=${VERSION} \
-            --set opensandbox.controller.image.tag=${VERSION} \
-            --set opensandbox.server.image.tag=${VERSION} \
-            --set opensandbox.server.sandboxImage=01community/01sandbox-codeinterpreter:${VERSION}
+          echo "🚀 Starting deployment..."
+          
+          # Build the Helm command dynamically
+          HELM_CMD="helm upgrade --install codeinspector ./codeInspector -n default --atomic --debug --timeout 5m0s --values ./codeInspector/values.yaml"
+          
+          if [ "${{ needs.filter.outputs.api }}" == "true" ]; then
+            HELM_CMD="$HELM_CMD --set apiServer.deployment.image.tag=${VERSION}"
+          fi
+          if [ "${{ needs.filter.outputs.controller }}" == "true" ]; then
+            HELM_CMD="$HELM_CMD --set opensandbox.controller.image.tag=${VERSION}"
+          fi
+          if [ "${{ needs.filter.outputs.server }}" == "true" ]; then
+            HELM_CMD="$HELM_CMD --set opensandbox.server.image.tag=${VERSION}"
+          fi
+          if [ "${{ needs.filter.outputs.scanner }}" == "true" ]; then
+            HELM_CMD="$HELM_CMD --set opensandbox.server.sandboxImage=01community/01sandbox-codeinterpreter:${VERSION}"
+          fi
+          
+          eval $HELM_CMD
             
       - name: Update values.yaml in Repository
         run: |
