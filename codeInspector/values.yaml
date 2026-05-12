@@ -68,7 +68,7 @@ apiServer:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-api
-      tag: "0.0.4"
+      tag: "0.0.5"
       pullPolicy: Always
     resources:
       requests:
@@ -148,7 +148,7 @@ opensandbox:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-opensandbox-controller
-      tag: 1.0.0
+      tag: "0.0.5"
       pullPolicy: Always
     resources:
       requests:
@@ -159,10 +159,10 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
-    sandboxImage: "01community/01sandbox-codeinterpreter:0.0.4"
+    sandboxImage: "01community/01sandbox-codeinterpreter:0.0.5"
     image:
       repository: 01community/01sandbox-opensandbox-server
-      tag: 1.0.0
+      tag: "0.0.5"
       pullPolicy: Always
     resources:
       requests:
@@ -188,7 +188,7 @@ opensandboxResourcePool:
   pool:
     name: my-sandbox-pool
     container:
-      image: 01community/01sandbox-codeinterpreter:0.0.4
+      image: "01community/01sandbox-codeinterpreter:0.0.5"
       ports:
         - containerPort: 44772
         - containerPort: 54321
