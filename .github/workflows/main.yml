@@ -10,8 +10,6 @@ on:
       - 'opensandbox-server/**'
       - 'opensandbox-controller/**'
       - 'codeInspector/**'
-  pull_request:
-    branches: [ main ]
 
 permissions:
   contents: write
@@ -202,7 +200,7 @@ jobs:
           VERSION=${{ needs.versioning.outputs.version }}
           UPDATED=false
           
-          echo "🔍 Checking for changes to apply version ${VERSION}..."
+          echo "Checking for changes to apply version ${VERSION}..."
           
           # Update API Tag
           if [ "${{ needs.filter.outputs.api }}" == "true" ]; then
