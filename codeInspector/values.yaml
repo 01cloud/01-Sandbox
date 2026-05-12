@@ -159,7 +159,7 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
-    sandboxImage: "01community/01sandbox-codeinterpreter:1.0.6"
+    sandboxImage: "01community/01sandbox-codeinterpreter:1.0.7"
     image:
       repository: 01community/01sandbox-opensandbox-server
       tag: 1.0.0
