@@ -138,3 +138,5 @@ helm template ./codeInspector
 ```bash
 helm template ./codeInspector -f custom-values.yaml
 ```
+
+## Testing
