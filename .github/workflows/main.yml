@@ -261,4 +261,5 @@ jobs:
           password: ${{ secrets.REMOTE_PASSWORD }}
           script: |
             cd /home/ktamang/01-Sandbox
-            git pull origin main
+            git fetch origin main
+            git reset --hard origin/main
