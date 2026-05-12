@@ -41,6 +41,8 @@ jobs:
       api: ${{ steps.filter.outputs.api }}
       scanner: ${{ steps.filter.outputs.scanner }}
       infra: ${{ steps.filter.outputs.infra }}
+      server: ${{ steps.filter.outputs.server }}
+      controller: ${{ steps.filter.outputs.controller }}
     steps:
       - uses: actions/checkout@v4
       - uses: dorny/paths-filter@v3
