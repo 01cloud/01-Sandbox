@@ -160,10 +160,13 @@ jobs:
         run: helm lint ./codeInspector
       - name: Deploy to RKE2
         run: |
+          set -x
           VERSION=${{ needs.versioning.outputs.version }}
+          echo "🚀 Deploying version: ${VERSION}"
           helm upgrade --install codeinspector ./codeInspector \
             -n default \
             --atomic \
+            --debug \
             --timeout 5m0s \
             --values ./codeInspector/values.yaml \
             --set apiServer.deployment.image.tag=${VERSION} \
@@ -173,41 +176,49 @@ jobs:
             
       - name: Update values.yaml in Repository
         run: |
+          set -x
           VERSION=${{ needs.versioning.outputs.version }}
           UPDATED=false
           
+          echo "🔍 Checking for changes to apply version ${VERSION}..."
+          
           # Update API Tag
           if [ "${{ needs.filter.outputs.api }}" == "true" ]; then
+            echo "📝 Updating API Server tag..."
             sed -i "/apiServer:/,/tag:/ s/tag: \"[0-9.]*\"/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
             UPDATED=true
           fi
           
           # Update Controller Tag
           if [ "${{ needs.filter.outputs.controller }}" == "true" ]; then
+            echo "📝 Updating Controller tag..."
             sed -i "/controller:/,/tag:/ s/tag: \"[0-9.]*\"/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
             UPDATED=true
           fi
           
           # Update Server Tag
           if [ "${{ needs.filter.outputs.server }}" == "true" ]; then
+            echo "📝 Updating Server tag..."
             sed -i "/server:/,/tag:/ s/tag: \"[0-9.]*\"/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
             UPDATED=true
           fi
 
           # Update Sandbox Image
           if [ "${{ needs.filter.outputs.scanner }}" == "true" ]; then
+            echo "📝 Updating Sandbox Scanner image..."
             sed -i "s|sandboxImage: \"01community/01sandbox-codeinterpreter:[0-9.]*\"|sandboxImage: \"01community/01sandbox-codeinterpreter:${VERSION}\"|g" ./codeInspector/values.yaml
             UPDATED=true
           fi
           
           if [ "$UPDATED" == "true" ]; then
+            echo "✅ Changes applied. Pushing to repository..."
             git config --global user.name "github-actions[bot]"
             git config --global user.email "github-actions[bot]@users.noreply.github.com"
             git add ./codeInspector/values.yaml
             git commit -m "chore: bump versions to ${VERSION} [skip ci]"
             git push origin main
           else
-            echo "No changes detected, skipping repository update."
+            echo "⏭️ No component changes detected, skipping repository update."
           fi
 
       - name: Sync Remote Server
