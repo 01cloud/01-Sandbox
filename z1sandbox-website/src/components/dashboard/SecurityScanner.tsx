@@ -365,9 +365,11 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                                              <span className="text-[11px] font-black uppercase tracking-wider">{name}</span>
                                              <Badge className={cn(
                                                 "text-[8px] font-black uppercase",
-                                                scan.exit_code === 0 ? "bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20" : "bg-destructive/10 text-destructive hover:bg-destructive/20"
+                                                scan.status === "SKIPPED" ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20" :
+                                                scan.exit_code === 0 ? "bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20" : 
+                                                "bg-destructive/10 text-destructive hover:bg-destructive/20"
                                              )}>
-                                                {scan.exit_code === 0 ? "PASSED" : "FAILED"}
+                                                {scan.status === "SKIPPED" ? "SKIPPED" : (scan.exit_code === 0 ? "PASSED" : "FAILED")}
                                              </Badge>
                                           </div>
                                        ))}
