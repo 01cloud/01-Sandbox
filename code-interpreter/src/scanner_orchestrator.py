@@ -675,16 +675,12 @@ class ScannerOrchestrator:
             
             if status == "ISSUES_FOUND":
                 status_text = "⚠️  RISK FOUND"
-                if tool == "gitleaks": summary = "Credential/Secret leak detected!"
-                elif tool == "semgrep": summary = "Code logic vulnerabilities found."
-                elif tool == "bandit":  summary = "Python security anti-patterns detected."
-                elif tool == "trivy": summary = "Filesystem & vulnerability risks identified."
-                elif tool == "shellcheck": summary = "Shell script vulnerabilities and POSIX violations."
-                elif tool == "kubelinter": summary = "K8s manifest security/best-practice issues."
-                elif tool == "kubeconform": summary = "Strict K8s schema/apiVersion violations."
-                elif tool == "kubescore": summary = "Production-readiness & security hardening risks."
-                elif tool == "py_compile": summary = "Python syntax validation passed."
-                else: summary = "Items requiring review discovered."
+                # Find the first specific issue reported for this tool
+                tool_findings = [f for f in self.results["findings"] if f.get("tool") == tool]
+                if tool_findings:
+                    summary = tool_findings[0].get("issue", "Review technical findings below.")
+                else:
+                    summary = "Detailed risks detected. See findings section."
             elif status == "COMPLETED":
                 status_text = "✅ CLEAN"
                 summary = "No immediate risks identified."
