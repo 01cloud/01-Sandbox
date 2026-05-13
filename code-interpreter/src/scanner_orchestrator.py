@@ -44,6 +44,7 @@ class ScannerOrchestrator:
             "k8s": [],
             "yaml": [],
             "python": [],
+            "go": [],
             "shell": [],
             "polyglot": []
         }
