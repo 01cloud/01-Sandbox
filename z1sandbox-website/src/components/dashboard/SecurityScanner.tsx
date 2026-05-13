@@ -296,9 +296,9 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                                  </h3>
                               </div>
                               <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group">
-                                  <ScrollArea className="h-full w-full">
-                                     <div className="p-8 overflow-x-auto">
-                                        <pre className="text-[12px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre font-medium min-w-max">
+                                  <ScrollArea className="h-full w-full overflow-x-auto">
+                                     <div className="p-8">
+                                        <pre className="text-[12px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre font-medium min-w-max block">
                                            {JSON.stringify(result.report || result, null, 2)}
                                         </pre>
                                      </div>
