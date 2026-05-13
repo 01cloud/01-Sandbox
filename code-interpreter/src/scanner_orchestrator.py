@@ -91,8 +91,8 @@ class ScannerOrchestrator:
             enabled.extend(["bandit", "py_compile"])
         
         if self.classified_files["go"]:
-            # Go: gosec + staticcheck + go_build
-            enabled.extend(["go_build", "gosec", "staticcheck"])
+            # Go: gosec + staticcheck + go_build + golangci-lint
+            enabled.extend(["go_build", "gosec", "staticcheck", "golangci_lint"])
         
         if self.classified_files["yaml"]:
             # General YAML: yamllint + universal tools
@@ -425,6 +425,41 @@ class ScannerOrchestrator:
         
         self.results["scans"]["staticcheck"] = res
 
+    def scan_golangci_lint(self):
+        """Runs golangci-lint as a meta-linter for Go projects."""
+        if not self.classified_files.get("go"):
+            self.results["scans"]["golangci_lint"] = {"status": "SKIPPED", "reason": "No Go files"}
+            return
+
+        # Disable all-default to avoid too many noisy linters, or keep simple
+        cmd = ["golangci-lint", "run", "--out-format", "json", "./..."] 
+        res = self.run_command(cmd, "GolangCI-Lint", cwd=self.target_dir)
+        
+        if res.get("stdout"):
+            try:
+                data = json.loads(res["stdout"])
+                res["stdout"] = data
+                issues = data.get("Issues", [])
+                if issues:
+                    res["status"] = "ISSUES_FOUND"
+                    res["exit_code"] = 1 # Force failure
+                    for issue in issues:
+                        self.results["findings"].append({
+                            "tool": "golangci-lint",
+                            "file": issue.get("Pos", {}).get("Filename"),
+                            "line": issue.get("Pos", {}).get("Line"),
+                            "issue": f"[{issue.get('FromLinter')}] {issue.get('Text')}",
+                            "severity": "MEDIUM",
+                            "remediation": f"Follow recommendation from {issue.get('FromLinter')} linter."
+                        })
+                else:
+                    res["status"] = "COMPLETED"
+                    res["exit_code"] = 0
+            except Exception as e:
+                logging.error(f" Failed to parse GolangCI-Lint JSON: {e}")
+        
+        self.results["scans"]["golangci_lint"] = res
+
     def scan_trivy(self):
         """Runs Trivy for vulnerabilities and misconfigurations in Strict Mode."""
         cmd = [
@@ -700,6 +735,7 @@ class ScannerOrchestrator:
         if "go_build" in self.enabled_tools: self.scan_go_build()
         if "gosec" in self.enabled_tools: self.scan_gosec()
         if "staticcheck" in self.enabled_tools: self.scan_staticcheck()
+        if "golangci_lint" in self.enabled_tools: self.scan_golangci_lint()
 
         if "trivy" in self.enabled_tools: self.scan_trivy()
         
