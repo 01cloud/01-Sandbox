@@ -228,12 +228,12 @@ class ScannerOrchestrator:
                         with self.results_lock:
                             self.results["findings"].append({
                                 "tool": "semgrep",
-                            "file": result.get("path"),
-                            "line": result.get("start", {}).get("line"),
-                            "issue": result.get("extra", {}).get("message"),
-                            "severity": sev,
-                            "remediation": result.get("extra", {}).get("metadata", {}).get("remediation") or "Audit code logic and follow secure coding patterns."
-                        })
+                                "file": result.get("path"),
+                                "line": result.get("start", {}).get("line"),
+                                "issue": str(result.get("extra", {}).get("message", "")).lower(),
+                                "severity": sev,
+                                "remediation": str(result.get("extra", {}).get("metadata", {}).get("remediation") or "Audit code logic and follow secure coding patterns.").lower()
+                            })
                 else:
                     res["status"] = "COMPLETED"
                     res["exit_code"] = 0
@@ -265,11 +265,12 @@ class ScannerOrchestrator:
                         with self.results_lock:
                             self.results["findings"].append({
                                 "tool": "gitleaks",
-                            "file": leak.get("File"),
-                            "line": leak.get("StartLine"),
-                            "issue": f"Secret detected: {leak.get('Description')}",
-                            "severity": "CRITICAL"
-                        })
+                                "file": leak.get("File"),
+                                "line": leak.get("StartLine"),
+                                "issue": f"secret detected: {leak.get('Description')}".lower(),
+                                "severity": "CRITICAL",
+                                "remediation": "immediately revoke the exposed secret and rotate credentials.".lower()
+                            })
             except Exception as e:
                 logging.error(f" Failed to parse Gitleaks JSON: {e}")
             finally:
@@ -328,6 +329,16 @@ class ScannerOrchestrator:
                 results = data.get("results", [])
                 if results:
                     res["status"] = "ISSUES_FOUND"
+                    for result in results:
+                        with self.results_lock:
+                            self.results["findings"].append({
+                                "tool": "bandit",
+                                "file": result.get("filename"),
+                                "line": result.get("line_number"),
+                                "issue": str(result.get("test_name", "") + ": " + result.get("issue_text", "")).lower(),
+                                "severity": str(result.get("issue_severity", "MEDIUM")).lower(),
+                                "remediation": str(result.get("more_info", "Review Python security best practices.")).lower()
+                            })
                 else:
                     res["status"] = "COMPLETED"
                     res["exit_code"] = 0
@@ -387,12 +398,12 @@ class ScannerOrchestrator:
                         with self.results_lock:
                             self.results["findings"].append({
                                 "tool": "gosec",
-                            "file": issue.get("file"),
-                            "line": issue.get("line"),
-                            "issue": issue.get("details"),
-                            "severity": issue.get("severity"),
-                            "remediation": f"Security concern in {issue.get('file')}. Review Go security best practices."
-                        })
+                                "file": issue.get("file"),
+                                "line": issue.get("line"),
+                                "issue": str(issue.get("details", "")).lower(),
+                                "severity": str(issue.get("severity", "medium")).lower(),
+                                "remediation": f"refer to gosec rule {issue.get('rule_id')}: {issue.get('details')}".lower()
+                            })
                 else:
                     res["status"] = "COMPLETED"
                     res["exit_code"] = 0
@@ -421,12 +432,12 @@ class ScannerOrchestrator:
                     with self.results_lock:
                         self.results["findings"].append({
                             "tool": "staticcheck",
-                        "file": issue.get("location", {}).get("file"),
-                        "line": issue.get("location", {}).get("line"),
-                        "issue": issue.get("message"),
-                        "severity": "MEDIUM",
-                        "remediation": f"Refactor code to resolve: {issue.get('code')}"
-                    })
+                            "file": issue.get("location", {}).get("file"),
+                            "line": issue.get("location", {}).get("line"),
+                            "issue": str(issue.get("message", "")).lower(),
+                            "severity": "MEDIUM",
+                            "remediation": f"refactor code to resolve: {issue.get('code')}".lower()
+                        })
                 res["status"] = "ISSUES_FOUND" if issues_found else "COMPLETED"
                 res["exit_code"] = 1 if issues_found else 0 # Force failure for UI highlighting
             except Exception as e:
@@ -456,12 +467,12 @@ class ScannerOrchestrator:
                         with self.results_lock:
                             self.results["findings"].append({
                                 "tool": "golangci-lint",
-                            "file": issue.get("Pos", {}).get("Filename"),
-                            "line": issue.get("Pos", {}).get("Line"),
-                            "issue": f"[{issue.get('FromLinter')}] {issue.get('Text')}",
-                            "severity": "MEDIUM",
-                            "remediation": f"Follow recommendation from {issue.get('FromLinter')} linter."
-                        })
+                                "file": issue.get("Pos", {}).get("Filename"),
+                                "line": issue.get("Pos", {}).get("Line"),
+                                "issue": f"[{issue.get('FromLinter')}] {issue.get('Text')}".lower(),
+                                "severity": "MEDIUM",
+                                "remediation": f"follow recommendation from {issue.get('FromLinter')} linter.".lower()
+                            })
                 else:
                     res["status"] = "COMPLETED"
                     res["exit_code"] = 0
@@ -497,10 +508,11 @@ class ScannerOrchestrator:
                             self.results["findings"].append({
                                 "tool": "trivy",
                                 "file": result.get("Target"),
-                            "line": None,
-                            "issue": f"{vuln.get('VulnerabilityID')}: {vuln.get('Title')}",
-                            "severity": vuln.get("Severity")
-                        })
+                                "line": None,
+                                "issue": f"{vuln.get('VulnerabilityID')}: {vuln.get('Title')}".lower(),
+                                "severity": str(vuln.get("Severity", "MEDIUM")).lower(),
+                                "remediation": "review vulnerability details and update dependency version.".lower()
+                            })
                     # Parse misconfigurations
                     for conf in result.get("Misconfigurations", []):
                         issues_found = True
@@ -553,9 +565,9 @@ class ScannerOrchestrator:
                             "tool": "kubelinter",
                             "file": "manifest",
                             "line": None,
-                            "issue": f"Linting Violation: {check_name}",
+                            "issue": f"linting violation: {check_name}".lower(),
                             "severity": "HIGH",
-                            "remediation": remediation or "Review Kubernetes resource against security best practices."
+                            "remediation": str(remediation or "review kubernetes resource against security best practices.").lower()
                         })
             except Exception as e:
                 logging.error(f" Failed to parse Kube-Linter JSON: {e}")
@@ -590,9 +602,9 @@ class ScannerOrchestrator:
                                 "tool": "kubeconform",
                                 "file": resource.get("filename", "unknown"),
                                 "line": None,
-                                "issue": f"K8s Schema Validation Conflict: {resource.get('kind')} ({resource.get('msg')})",
+                                "issue": f"k8s schema validation conflict: {resource.get('kind')} ({resource.get('msg')})".lower(),
                                 "severity": "CRITICAL",
-                                "remediation": "Update the manifest fields (like replicas or ports) to use correct data types (e.g., use integers instead of strings)."
+                                "remediation": "update the manifest fields (like replicas or ports) to use correct data types (e.g., use integers instead of strings)."
                             })
                 if has_errors:
                     res["status"] = "ISSUES_FOUND"
@@ -661,9 +673,9 @@ class ScannerOrchestrator:
                                     "tool": "kubescore",
                                     "file": f"{f_path} ({obj_name})",
                                     "line": None,
-                                    "issue": f"{check_name} (Grade: {grade})",
+                                    "issue": f"{check_name} (grade: {grade})".lower(),
                                     "severity": "HIGH" if grade >= 10 else "MEDIUM",
-                                    "remediation": comment.get('summary', 'Review hardening best practices.')
+                                    "remediation": str(comment.get('summary', 'review hardening best practices.')).lower()
                                 })
             except Exception as e:
                 logging.error(f" Failed to parse kube-score JSON for {f_path}: {e}")
@@ -716,9 +728,9 @@ class ScannerOrchestrator:
                             "tool": "shellcheck",
                             "file": issue.get("file"),
                             "line": issue.get("line"),
-                            "issue": f"SC{issue.get('code')}: {issue.get('message')}",
+                            "issue": f"sc{issue.get('code')}: {issue.get('message')}".lower(),
                             "severity": sev,
-                            "remediation": f"Review fix at: https://github.com/koalaman/shellcheck/wiki/SC{issue.get('code')}"
+                            "remediation": f"review fix at: https://github.com/koalaman/shellcheck/wiki/sc{issue.get('code')}".lower()
                         })
             except Exception as e:
                 logging.error(f" Failed to parse ShellCheck JSON: {e}")
@@ -783,11 +795,11 @@ class ScannerOrchestrator:
         
         summary = self._calculate_summary()
         
-        # Post-process: Normalize all finding text to lowercase for the UI Insights panel
+        # Final Safety Pass: Force all finding text to lowercase for UI aesthetics
         for finding in self.results["findings"]:
-            if "issue" in finding: finding["issue"] = str(finding["issue"]).lower()
-            if "remediation" in finding: finding["remediation"] = str(finding["remediation"]).lower()
-            if "description" in finding: finding["description"] = str(finding["description"]).lower()
+            for key in ["issue", "remediation", "description"]:
+                if key in finding and finding[key]:
+                    finding[key] = str(finding[key]).lower()
 
         self.save_results()
         return summary
