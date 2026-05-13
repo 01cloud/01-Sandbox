@@ -703,15 +703,23 @@ class ScannerOrchestrator:
                 if data:
                     res["status"] = "ISSUES_FOUND"
                 for issue in data:
-                    sev_map = {1: "INFO", 2: "LOW", 3: "MEDIUM", 4: "HIGH"}
+                    # ShellCheck uses string levels: error, warning, info, style
+                    raw_sev = str(issue.get("level", "info")).lower()
+                    sev = "MEDIUM"
+                    if raw_sev == "error": sev = "CRITICAL"
+                    elif raw_sev == "warning": sev = "HIGH"
+                    elif raw_sev == "style": sev = "LOW"
+                    elif raw_sev == "info": sev = "INFO"
+
                     with self.results_lock:
                         self.results["findings"].append({
                             "tool": "shellcheck",
-                        "file": issue.get("file"),
-                        "line": issue.get("line"),
-                        "issue": f"SC{issue.get('code')}: {issue.get('message')}",
-                        "severity": sev_map.get(issue.get("level"), "MEDIUM")
-                    })
+                            "file": issue.get("file"),
+                            "line": issue.get("line"),
+                            "issue": f"SC{issue.get('code')}: {issue.get('message')}",
+                            "severity": sev,
+                            "remediation": f"Review fix at: https://github.com/koalaman/shellcheck/wiki/SC{issue.get('code')}"
+                        })
             except Exception as e:
                 logging.error(f" Failed to parse ShellCheck JSON: {e}")
         
