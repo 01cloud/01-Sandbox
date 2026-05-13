@@ -748,6 +748,13 @@ class ScannerOrchestrator:
         self._ensure_vulnerability_insights()
         
         summary = self._calculate_summary()
+        
+        # Post-process: Normalize all finding text to lowercase for the UI Insights panel
+        for finding in self.results["findings"]:
+            if "issue" in finding: finding["issue"] = str(finding["issue"]).lower()
+            if "remediation" in finding: finding["remediation"] = str(finding["remediation"]).lower()
+            if "description" in finding: finding["description"] = str(finding["description"]).lower()
+
         self.save_results()
         return summary
 
