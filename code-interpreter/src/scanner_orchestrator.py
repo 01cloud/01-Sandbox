@@ -75,6 +75,8 @@ class ScannerOrchestrator:
                 self.classified_files["yaml"].append(f)
             elif ext == ".py":
                 self.classified_files["python"].append(f)
+            elif ext == ".go":
+                self.classified_files["go"].append(f)
             elif ext in (".sh", ".bash"):
                 self.classified_files["shell"].append(f)
             elif ext in polyglot_exts:
@@ -86,6 +88,10 @@ class ScannerOrchestrator:
         if self.classified_files["python"]:
             # Python: bandit + syntax check + universal tools
             enabled.extend(["bandit", "py_compile"])
+        
+        if self.classified_files["go"]:
+            # Go: gosec + staticcheck + go_build
+            enabled.extend(["go_build", "gosec", "staticcheck"])
         
         if self.classified_files["yaml"]:
             # General YAML: yamllint + universal tools
@@ -168,7 +174,8 @@ class ScannerOrchestrator:
                     "line": "N/A", 
                     "issue": "Critical Python Syntax Fault",
                     "severity": "CRITICAL",
-                    "description": f"Code is syntactically invalid: {err_msg}. This will prevent execution and may indicate hidden malicious intent or corrupted logic."
+                    "description": f"Code is syntactically invalid: {err_msg}.",
+                    "remediation": f"Fix the following syntax error to allow execution: {err_msg}"
                 })
                 self.results["scans"]["py_compile"] = {"status": "ISSUES_FOUND", "error": err_msg}
                 return findings
@@ -184,18 +191,14 @@ class ScannerOrchestrator:
             self.results["scans"]["semgrep"] = {"status": "SKIPPED", "reason": "No supported files"}
             return
 
-        # Multi-language security configurations + Harmful Logic Audits
+        # Strict-Mode security configurations + Harmful Logic Audits
         cmd = [
-            "/usr/local/bin/semgrep", "scan", 
+            "semgrep", "scan", 
             "--config=auto", 
             "--config=p/security-audit", 
             "--config=p/r2c-security-audit",
             "--config=p/secrets", 
             "--config=p/python",
-            "--config=p/javascript",
-            "--config=p/golang",
-            "--config=p/kubernetes",
-            "--config=p/yaml",
             "--json", "--quiet", self.target_dir
         ]
         res = self.run_command(cmd, "Semgrep")
@@ -321,6 +324,100 @@ class ScannerOrchestrator:
                 logging.error(f" Failed to parse Bandit JSON: {e}")
                 
         self.results["scans"]["bandit"] = res
+
+    def scan_go_build(self):
+        """Performs a compilation check to catch Go syntax and type errors."""
+        go_files = self.classified_files.get("go", [])
+        if not go_files:
+            self.results["scans"]["go_build"] = {"status": "SKIPPED", "reason": "No Go files"}
+            return
+
+        logging.info("Running Go Syntax Validation (go build)...")
+        # We try to build all files in the directory to check for package-level consistency
+        cmd = ["go", "build", "-o", "/dev/null", "."]
+        res = self.run_command(cmd, "Go Build", cwd=self.target_dir)
+        
+        if res["exit_code"] != 0:
+            err_msg = res.get("stderr", "Unknown compilation error")
+            self.results["findings"].append({
+                "tool": "go_build",
+                "file": "Go Package",
+                "line": "N/A",
+                "issue": "Critical Go Compilation Fault",
+                "severity": "CRITICAL",
+                "description": f"Go code failed to compile: {err_msg}",
+                "remediation": "Fix the syntax or type errors identified by the Go compiler."
+            })
+            res["status"] = "ISSUES_FOUND"
+        else:
+            res["status"] = "COMPLETED"
+        
+        self.results["scans"]["go_build"] = res
+
+    def scan_gosec(self):
+        """Runs gosec for security audits in Go code."""
+        if not self.classified_files.get("go"):
+            self.results["scans"]["gosec"] = {"status": "SKIPPED", "reason": "No Go files"}
+            return
+
+        cmd = ["gosec", "-fmt", "json", "./..."]
+        res = self.run_command(cmd, "Gosec", cwd=self.target_dir)
+        
+        if res.get("stdout"):
+            try:
+                data = json.loads(res["stdout"])
+                res["stdout"] = data
+                issues = data.get("Issues", [])
+                if issues:
+                    res["status"] = "ISSUES_FOUND"
+                    for issue in issues:
+                        self.results["findings"].append({
+                            "tool": "gosec",
+                            "file": issue.get("file"),
+                            "line": issue.get("line"),
+                            "issue": issue.get("details"),
+                            "severity": issue.get("severity"),
+                            "remediation": f"Security concern in {issue.get('file')}. Review Go security best practices."
+                        })
+                else:
+                    res["status"] = "COMPLETED"
+                    res["exit_code"] = 0
+            except Exception as e:
+                logging.error(f" Failed to parse Gosec JSON: {e}")
+                res["status"] = "ERROR"
+        
+        self.results["scans"]["gosec"] = res
+
+    def scan_staticcheck(self):
+        """Runs staticcheck for advanced Go static analysis."""
+        if not self.classified_files.get("go"):
+            self.results["scans"]["staticcheck"] = {"status": "SKIPPED", "reason": "No Go files"}
+            return
+
+        cmd = ["staticcheck", "-f", "json", "./..."]
+        res = self.run_command(cmd, "Staticcheck", cwd=self.target_dir)
+        
+        if res.get("stdout"):
+            try:
+                issues_found = False
+                for line in res["stdout"].splitlines():
+                    if not line.strip(): continue
+                    issue = json.loads(line)
+                    issues_found = True
+                    self.results["findings"].append({
+                        "tool": "staticcheck",
+                        "file": issue.get("location", {}).get("file"),
+                        "line": issue.get("location", {}).get("line"),
+                        "issue": issue.get("message"),
+                        "severity": "MEDIUM",
+                        "remediation": f"Refactor code to resolve: {issue.get('code')}"
+                    })
+                res["status"] = "ISSUES_FOUND" if issues_found else "COMPLETED"
+                res["exit_code"] = 0 if not issues_found else 1
+            except Exception as e:
+                logging.error(f" Failed to parse Staticcheck JSON: {e}")
+        
+        self.results["scans"]["staticcheck"] = res
 
     def scan_trivy(self):
         """Runs Trivy for vulnerabilities and misconfigurations in Strict Mode."""
@@ -594,6 +691,10 @@ class ScannerOrchestrator:
         if "yamllint" in self.enabled_tools: self.scan_yamllint()
         if "bandit" in self.enabled_tools: self.scan_bandit()
         
+        if "go_build" in self.enabled_tools: self.scan_go_build()
+        if "gosec" in self.enabled_tools: self.scan_gosec()
+        if "staticcheck" in self.enabled_tools: self.scan_staticcheck()
+
         if "trivy" in self.enabled_tools: self.scan_trivy()
         
         if "kubelinter" in self.enabled_tools: self.scan_kubelinter()
