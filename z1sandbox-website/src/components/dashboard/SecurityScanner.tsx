@@ -308,7 +308,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
 
                            {/* Secondary: Vulnerabilities & Breakdown */}
                            <div className="flex flex-col gap-8 overflow-hidden">
-                              <section className="flex flex-col gap-4 h-2/3 overflow-hidden">
+                               <section className="flex flex-col gap-4 h-[75%] overflow-hidden">
                                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground shrink-0">Vulnerability Insights</h3>
                                  <ScrollArea className="flex-1 border-t pt-4">
                                     {result.findings && result.findings.length > 0 ? (
