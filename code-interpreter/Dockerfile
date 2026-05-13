@@ -13,10 +13,10 @@
 # limitations under the License.
 
 
-FROM 01community/01sandbox-codeinterpreter-base-image:1.0.0
+FROM 01community/01sandbox-codeinterpreter-base-image:1.0.1
 
 # ── Base Image Verification ──────────────────────────────────────────────────
-# Verify that all required security tools are present in the base image.fasdfa
+# Verify that all required security tools are present in the base image.
 # This prevents building a runtime image on top of an outdated or broken base.
 RUN set -eux; \
     echo "Build PATH: $PATH"; \
@@ -30,13 +30,19 @@ RUN set -eux; \
     which kubeconform; \
     which kube-score; \
     which shellcheck; \
+    which go; \
+    which gosec; \
+    which staticcheck; \
     # Full versions check
     semgrep --version; \
     trivy --version; \
     kube-linter version; \
     kubeconform -v; \
     kube-score version; \
-    shellcheck --version
+    shellcheck --version; \
+    go version; \
+    gosec --version; \
+    staticcheck --version
 # ─────────────────────────────────────────────────────────────────────────────
 
 ARG TARGETARCH
@@ -103,21 +109,8 @@ RUN set -euo pipefail \
     done \
     && echo "Setting up gonb done"
 
-##
-
-# ARG JUPYTER_TOKEN=opensandboxcodeinterpreterjupyter
-# ENV JUPYTER_HOST=http://127.0.0.1:44771 \
-#     JUPYTER_PORT=44771 \
-#     JUPYTER_TOKEN=${JUPYTER_TOKEN} \
-#     PYTHON_VERSION=3.14 \
-#     NODE_VERSION=22 \
-#     GO_VERSION=1.25 \
-#     JAVA_VERSION=21
-
-# Copy modularized application code and scripts
 COPY src/ /opt/opensandbox/src/
 COPY scripts/code-interpreter.sh /opt/opensandbox/code-interpreter.sh
-# COPY scripts/jupyter_notebook_config.py /root/.jupyter/
 
 RUN chmod +x /opt/opensandbox/code-interpreter.sh
 
