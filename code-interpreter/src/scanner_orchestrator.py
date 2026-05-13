@@ -3,6 +3,8 @@ import subprocess
 import os
 import json
 import logging
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from typing import List, Dict, Any
 
 # Configure logging for structured output inside the sandbox
@@ -21,6 +23,7 @@ class ScannerOrchestrator:
 
     def __init__(self, target_dir: str):
         self.target_dir = target_dir
+        self.results_lock = threading.Lock()
         self.results = {
             "summary": {},
             "findings": [],
@@ -169,8 +172,9 @@ class ScannerOrchestrator:
             except py_compile.PyCompileError as e:
                 # Clean up the error message to be user-friendly
                 err_msg = str(e).split('\n')[-2] if '\n' in str(e) else str(e)
-                self.results["findings"].append({
-                    "tool": "py_compile",
+                with self.results_lock:
+                    self.results["findings"].append({
+                        "tool": "py_compile",
                     "file": file_path,
                     "line": "N/A", 
                     "issue": "Critical Python Syntax Fault",
@@ -221,8 +225,9 @@ class ScannerOrchestrator:
                         sev = result.get("extra", {}).get("severity", "MEDIUM")
                         if sev == "ERROR": sev = "CRITICAL"
                         
-                        self.results["findings"].append({
-                            "tool": "semgrep",
+                        with self.results_lock:
+                            self.results["findings"].append({
+                                "tool": "semgrep",
                             "file": result.get("path"),
                             "line": result.get("start", {}).get("line"),
                             "issue": result.get("extra", {}).get("message"),
@@ -257,8 +262,9 @@ class ScannerOrchestrator:
                     if leaks:
                         res["status"] = "ISSUES_FOUND"
                     for leak in leaks:
-                        self.results["findings"].append({
-                            "tool": "gitleaks",
+                        with self.results_lock:
+                            self.results["findings"].append({
+                                "tool": "gitleaks",
                             "file": leak.get("File"),
                             "line": leak.get("StartLine"),
                             "issue": f"Secret detected: {leak.get('Description')}",
@@ -290,8 +296,9 @@ class ScannerOrchestrator:
                         file_path = parts[0].strip()
                         line_num = parts[1].strip()
                         issue = parts[3].strip()
-                        self.results["findings"].append({
-                            "tool": "yamllint",
+                        with self.results_lock:
+                            self.results["findings"].append({
+                                "tool": "yamllint",
                             "file": file_path,
                             "line": int(line_num) if line_num.isdigit() else None,
                             "issue": f"YAML Lint: {issue}",
@@ -377,8 +384,9 @@ class ScannerOrchestrator:
                     res["status"] = "ISSUES_FOUND"
                     res["exit_code"] = 1 # Force failure for UI highlighting
                     for issue in issues:
-                        self.results["findings"].append({
-                            "tool": "gosec",
+                        with self.results_lock:
+                            self.results["findings"].append({
+                                "tool": "gosec",
                             "file": issue.get("file"),
                             "line": issue.get("line"),
                             "issue": issue.get("details"),
@@ -410,8 +418,9 @@ class ScannerOrchestrator:
                     if not line.strip(): continue
                     issue = json.loads(line)
                     issues_found = True
-                    self.results["findings"].append({
-                        "tool": "staticcheck",
+                    with self.results_lock:
+                        self.results["findings"].append({
+                            "tool": "staticcheck",
                         "file": issue.get("location", {}).get("file"),
                         "line": issue.get("location", {}).get("line"),
                         "issue": issue.get("message"),
@@ -444,8 +453,9 @@ class ScannerOrchestrator:
                     res["status"] = "ISSUES_FOUND"
                     res["exit_code"] = 1 # Force failure
                     for issue in issues:
-                        self.results["findings"].append({
-                            "tool": "golangci-lint",
+                        with self.results_lock:
+                            self.results["findings"].append({
+                                "tool": "golangci-lint",
                             "file": issue.get("Pos", {}).get("Filename"),
                             "line": issue.get("Pos", {}).get("Line"),
                             "issue": f"[{issue.get('FromLinter')}] {issue.get('Text')}",
@@ -483,9 +493,10 @@ class ScannerOrchestrator:
                     # Parse vulnerabilities
                     for vuln in result.get("Vulnerabilities", []):
                         issues_found = True
-                        self.results["findings"].append({
-                            "tool": "trivy",
-                            "file": result.get("Target"),
+                        with self.results_lock:
+                            self.results["findings"].append({
+                                "tool": "trivy",
+                                "file": result.get("Target"),
                             "line": None,
                             "issue": f"{vuln.get('VulnerabilityID')}: {vuln.get('Title')}",
                             "severity": vuln.get("Severity")
@@ -493,9 +504,10 @@ class ScannerOrchestrator:
                     # Parse misconfigurations
                     for conf in result.get("Misconfigurations", []):
                         issues_found = True
-                        self.results["findings"].append({
-                            "tool": "trivy",
-                            "file": result.get("Target"),
+                        with self.results_lock:
+                            self.results["findings"].append({
+                                "tool": "trivy",
+                                "file": result.get("Target"),
                             "line": conf.get("IOMetadata", {}).get("Line"),
                             "issue": conf.get("Title"),
                             "severity": conf.get("Severity")
@@ -536,14 +548,15 @@ class ScannerOrchestrator:
                     check_name = check_val.get("Name") if isinstance(check_val, dict) else str(check_val)
                     remediation = report.get("Remediation") or report.get("remediation")
                     
-                    self.results["findings"].append({
-                        "tool": "kubelinter",
-                        "file": "manifest",
-                        "line": None,
-                        "issue": f"Linting Violation: {check_name}",
-                        "severity": "HIGH",
-                        "remediation": remediation or "Review Kubernetes resource against security best practices."
-                    })
+                    with self.results_lock:
+                        self.results["findings"].append({
+                            "tool": "kubelinter",
+                            "file": "manifest",
+                            "line": None,
+                            "issue": f"Linting Violation: {check_name}",
+                            "severity": "HIGH",
+                            "remediation": remediation or "Review Kubernetes resource against security best practices."
+                        })
             except Exception as e:
                 logging.error(f" Failed to parse Kube-Linter JSON: {e}")
         
@@ -572,14 +585,15 @@ class ScannerOrchestrator:
                 for resource in resources:
                     if resource.get("status") != "valid":
                         has_errors = True
-                        self.results["findings"].append({
-                            "tool": "kubeconform",
-                            "file": resource.get("filename", "unknown"),
-                            "line": None,
-                            "issue": f"Schema Error: {resource.get('kind')} ({resource.get('msg')})",
-                            "severity": "CRITICAL",
-                            "remediation": "Correct the manifest to match the Kubernetes API schema."
-                        })
+                        with self.results_lock:
+                            self.results["findings"].append({
+                                "tool": "kubeconform",
+                                "file": resource.get("filename", "unknown"),
+                                "line": None,
+                                "issue": f"K8s Schema Validation Conflict: {resource.get('kind')} ({resource.get('msg')})",
+                                "severity": "CRITICAL",
+                                "remediation": "Update the manifest fields (like replicas or ports) to use correct data types (e.g., use integers instead of strings)."
+                            })
                 if has_errors:
                     res["status"] = "ISSUES_FOUND"
                 else:
@@ -609,8 +623,9 @@ class ScannerOrchestrator:
                 stderr = res.get("stderr", "")
                 if "failed to parse" in stderr.lower() or "cannot unmarshal" in stderr.lower():
                     err_msg = stderr.split("err=")[-1] if "err=" in stderr else stderr
-                    self.results["findings"].append({
-                        "tool": "kubescore",
+                    with self.results_lock:
+                        self.results["findings"].append({
+                            "tool": "kubescore",
                         "file": f_path,
                         "line": None,
                         "issue": "K8s Parsing Failure (Critical)",
@@ -641,14 +656,15 @@ class ScannerOrchestrator:
                             check_meta = check.get("check") or check.get("Check") or {}
                             check_name = check_meta.get("name") or "unknown"
                             
-                            self.results["findings"].append({
-                                "tool": "kubescore",
-                                "file": f"{f_path} ({obj_name})",
-                                "line": None,
-                                "issue": f"{check_name} (Grade: {grade})",
-                                "severity": "HIGH" if grade >= 10 else "MEDIUM",
-                                "remediation": comment.get('summary', 'Review hardening best practices.')
-                            })
+                            with self.results_lock:
+                                self.results["findings"].append({
+                                    "tool": "kubescore",
+                                    "file": f"{f_path} ({obj_name})",
+                                    "line": None,
+                                    "issue": f"{check_name} (Grade: {grade})",
+                                    "severity": "HIGH" if grade >= 10 else "MEDIUM",
+                                    "remediation": comment.get('summary', 'Review hardening best practices.')
+                                })
             except Exception as e:
                 logging.error(f" Failed to parse kube-score JSON for {f_path}: {e}")
 
@@ -688,8 +704,9 @@ class ScannerOrchestrator:
                     res["status"] = "ISSUES_FOUND"
                 for issue in data:
                     sev_map = {1: "INFO", 2: "LOW", 3: "MEDIUM", 4: "HIGH"}
-                    self.results["findings"].append({
-                        "tool": "shellcheck",
+                    with self.results_lock:
+                        self.results["findings"].append({
+                            "tool": "shellcheck",
                         "file": issue.get("file"),
                         "line": issue.get("line"),
                         "issue": f"SC{issue.get('code')}: {issue.get('message')}",
@@ -715,8 +732,9 @@ class ScannerOrchestrator:
                     logging.warning(f" Tool {tool} failed but provided no insights. Generating auto-insight.")
                     error_msg = scan_res.get("stderr") or scan_res.get("error") or "Unknown security or execution error."
                     
-                    self.results["findings"].append({
-                        "tool": tool,
+                    with self.results_lock:
+                        self.results["findings"].append({
+                            "tool": tool,
                         "file": "Pipeline Error",
                         "line": None,
                         "issue": f"Tool Execution Failure: {tool.upper()}",
@@ -725,24 +743,32 @@ class ScannerOrchestrator:
                     })
 
     def run_all(self):
-        """Executes enabled scanners and enforces dashboard insights."""
-        if "py_compile" in self.enabled_tools: self.scan_py_compile()
-        if "semgrep" in self.enabled_tools: self.scan_semgrep()
-        if "gitleaks" in self.enabled_tools: self.scan_gitleaks()
-        if "yamllint" in self.enabled_tools: self.scan_yamllint()
-        if "bandit" in self.enabled_tools: self.scan_bandit()
-        
-        if "go_build" in self.enabled_tools: self.scan_go_build()
-        if "gosec" in self.enabled_tools: self.scan_gosec()
-        if "staticcheck" in self.enabled_tools: self.scan_staticcheck()
-        if "golangci_lint" in self.enabled_tools: self.scan_golangci_lint()
+        """Executes enabled scanners in parallel to prevent request timeouts."""
+        scanner_map = {
+            "py_compile": self.scan_py_compile,
+            "semgrep": self.scan_semgrep,
+            "gitleaks": self.scan_gitleaks,
+            "yamllint": self.scan_yamllint,
+            "bandit": self.scan_bandit,
+            "go_build": self.scan_go_build,
+            "gosec": self.scan_gosec,
+            "staticcheck": self.scan_staticcheck,
+            "golangci_lint": self.scan_golangci_lint,
+            "trivy": self.scan_trivy,
+            "kubelinter": self.scan_kubelinter,
+            "kubeconform": self.scan_kubeconform,
+            "kubescore": self.scan_kubescore,
+            "shellcheck": self.scan_shellcheck
+        }
 
-        if "trivy" in self.enabled_tools: self.scan_trivy()
+        # Identify which tools to actually run
+        tools_to_run = [tool for tool in self.enabled_tools if tool in scanner_map]
         
-        if "kubelinter" in self.enabled_tools: self.scan_kubelinter()
-        if "kubeconform" in self.enabled_tools: self.scan_kubeconform()
-        if "kubescore" in self.enabled_tools: self.scan_kubescore()
-        if "shellcheck" in self.enabled_tools: self.scan_shellcheck()
+        logging.info(f"Starting parallel execution for {len(tools_to_run)} tools...")
+        
+        with ThreadPoolExecutor(max_workers=len(tools_to_run) or 1) as executor:
+            for tool in tools_to_run:
+                executor.submit(scanner_map[tool])
 
         # Enforce that all failures result in dashboard insights
         self._ensure_vulnerability_insights()
