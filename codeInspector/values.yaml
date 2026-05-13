@@ -159,7 +159,7 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
-    sandboxImage: "01community/01sandbox-codeinterpreter:0.0.16"
+    sandboxImage: "01community/01sandbox-codeinterpreter:0.0.17"
     image:
       repository: 01community/01sandbox-opensandbox-server
       tag: "0.0.10"
@@ -188,7 +188,7 @@ opensandboxResourcePool:
   pool:
     name: my-sandbox-pool
     container:
-      image: "01community/01sandbox-codeinterpreter:0.0.16"
+      image: "01community/01sandbox-codeinterpreter:0.0.17"
       ports:
         - containerPort: 44772
         - containerPort: 54321
