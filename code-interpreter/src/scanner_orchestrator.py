@@ -214,17 +214,19 @@ class ScannerOrchestrator:
                 data = json.loads(clean_stdout)
                 res["stdout"] = data
                 results = data.get("results", [])
-                
                 if results:
                     res["status"] = "ISSUES_FOUND"
                     res["exit_code"] = 1
                     for result in results:
+                        sev = result.get("extra", {}).get("severity", "MEDIUM")
+                        if sev == "ERROR": sev = "CRITICAL"
+                        
                         self.results["findings"].append({
                             "tool": "semgrep",
                             "file": result.get("path"),
                             "line": result.get("start", {}).get("line"),
                             "issue": result.get("extra", {}).get("message"),
-                            "severity": result.get("extra", {}).get("severity", "MEDIUM"),
+                            "severity": sev,
                             "remediation": result.get("extra", {}).get("metadata", {}).get("remediation") or "Audit code logic and follow secure coding patterns."
                         })
                 else:
