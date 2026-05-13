@@ -226,6 +226,34 @@ RUN set -eux; \
     rm kubectl && \
     kubectl version --client
 
+# --- Install Golang & Go Security Tools ---
+RUN GO_VERSION="1.22.2" && \
+    case "$(uname -m)" in \
+        x86_64) ARCH="amd64" ;; \
+        aarch64) ARCH="arm64" ;; \
+    esac && \
+    curl -fsSL "https://golang.org/dl/go${GO_VERSION}.linux-${ARCH}.tar.gz" -o go.tar.gz && \
+    tar -C /usr/local -xzf go.tar.gz && \
+    rm go.tar.gz
+ENV PATH=$PATH:/usr/local/go/bin
+
+RUN GOSEC_VERSION="2.19.0" && \
+    case "$(uname -m)" in \
+        x86_64) ARCH="amd64" ;; \
+        aarch64) ARCH="arm64" ;; \
+    esac && \
+    curl -sfL "https://raw.githubusercontent.com/securego/gosec/master/install.sh" | sh -s -- -b /usr/local/bin v${GOSEC_VERSION}
+
+RUN STATICCHECK_VERSION="2023.1.7" && \
+    case "$(uname -m)" in \
+        x86_64) ARCH="amd64" ;; \
+        aarch64) ARCH="arm64" ;; \
+    esac && \
+    curl -fsSL "https://github.com/dominikh/go-tools/releases/download/${STATICCHECK_VERSION}/staticcheck_linux_${ARCH}.tar.gz" -o staticcheck.tar.gz && \
+    tar -C /tmp -xzf staticcheck.tar.gz && \
+    mv /tmp/staticcheck/staticcheck /usr/local/bin/staticcheck && \
+    rm -rf staticcheck.tar.gz /tmp/staticcheck
+
 RUN mkdir -p /opt/opensandbox
 COPY scripts/code-interpreter-env.sh /opt/opensandbox/code-interpreter-env.sh
 RUN chmod +x /opt/opensandbox/code-interpreter-env.sh
