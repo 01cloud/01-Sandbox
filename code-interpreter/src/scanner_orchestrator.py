@@ -138,7 +138,7 @@ class ScannerOrchestrator:
                 "exit_code": process.returncode,
                 "stdout": process.stdout if process.stdout else "",
                 "stderr": process.stderr if process.stderr else "",
-                "status": "COMPLETED" if process.returncode == 0 else "ISSUES_FOUND"
+                "status": "COMPLETED" # Default to completed; scanners will determine ISSUES_FOUND
             }
         except FileNotFoundError:
             logging.warning(f" {tool_name} not found on the PATH.")
@@ -202,22 +202,32 @@ class ScannerOrchestrator:
         
         if res.get("stdout"):
             try:
-                data = json.loads(res["stdout"])
+                # Cleanup stdout: semgrep sometimes prints headers/updates before the JSON
+                clean_stdout = res["stdout"]
+                if "{" in clean_stdout:
+                    clean_stdout = clean_stdout[clean_stdout.find("{"):]
+                
+                data = json.loads(clean_stdout)
                 res["stdout"] = data
                 results = data.get("results", [])
+                
                 if results:
                     res["status"] = "ISSUES_FOUND"
-                for result in results:
-                    self.results["findings"].append({
-                        "tool": "semgrep",
-                        "file": result.get("path"),
-                        "line": result.get("start", {}).get("line"),
-                        "issue": result.get("extra", {}).get("message"),
-                        "severity": result.get("extra", {}).get("severity", "MEDIUM"),
-                        "remediation": result.get("extra", {}).get("metadata", {}).get("remediation") or "Audit code logic and follow secure coding patterns."
-                    })
+                    for result in results:
+                        self.results["findings"].append({
+                            "tool": "semgrep",
+                            "file": result.get("path"),
+                            "line": result.get("start", {}).get("line"),
+                            "issue": result.get("extra", {}).get("message"),
+                            "severity": result.get("extra", {}).get("severity", "MEDIUM"),
+                            "remediation": result.get("extra", {}).get("metadata", {}).get("remediation") or "Audit code logic and follow secure coding patterns."
+                        })
+                else:
+                    res["status"] = "COMPLETED"
             except Exception as e:
                 logging.error(f" Failed to parse Semgrep JSON: {e}")
+                res["status"] = "ERROR"
+                res["error"] = str(e)
         
         self.results["scans"]["semgrep"] = res
 
