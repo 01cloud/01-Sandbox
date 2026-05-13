@@ -296,19 +296,19 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                                  </h3>
                               </div>
                               <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group">
-                                 <ScrollArea className="h-full w-full">
-                                    <div className="p-8">
-                                       <pre className="text-[12px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre font-medium">
-                                          {JSON.stringify(result.report || result, null, 2)}
-                                       </pre>
-                                    </div>
-                                 </ScrollArea>
+                                  <ScrollArea className="h-full w-full">
+                                     <div className="p-8 overflow-x-auto">
+                                        <pre className="text-[12px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre font-medium min-w-max">
+                                           {JSON.stringify(result.report || result, null, 2)}
+                                        </pre>
+                                     </div>
+                                  </ScrollArea>
                               </div>
                            </section>
 
                            {/* Secondary: Vulnerabilities & Breakdown */}
                            <div className="flex flex-col gap-8 overflow-hidden">
-                              <section className="flex flex-col gap-4 h-1/2 overflow-hidden">
+                              <section className="flex flex-col gap-4 h-2/3 overflow-hidden">
                                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground shrink-0">Vulnerability Insights</h3>
                                  <ScrollArea className="flex-1 border-t pt-4">
                                     {result.findings && result.findings.length > 0 ? (
@@ -324,20 +324,20 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                                                 <div key={i} className="p-5 rounded-xl border bg-muted/10 hover:bg-muted/20 transition-all group relative overflow-hidden">
                                                    <div className="flex items-center justify-between mb-3">
                                                       <div className="flex items-center gap-2">
-                                                         <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0 uppercase", sevColor)}>
+                                                         <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0", sevColor)}>
                                                             {severity}
                                                          </Badge>
-                                                         <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest">{f.tool}</span>
+                                                         <span className="text-[10px] font-black text-muted-foreground tracking-widest lowercase">{f.tool}</span>
                                                       </div>
                                                       {f.line && <span className="text-[9px] font-mono opacity-40">L:{f.line}</span>}
                                                    </div>
                                                    
-                                                   <h4 className="text-sm font-black uppercase tracking-tight mb-2">{f.issue || "Security Violation"}</h4>
+                                                   <h4 className="text-sm font-black tracking-tight mb-2 lowercase">{f.issue || "security violation"}</h4>
                                                    
                                                    <div className="flex flex-col gap-2 mt-4">
-                                                      <span className="text-[9px] font-black uppercase tracking-[0.1em] text-muted-foreground/60">Remediation Insight</span>
-                                                      <div className="p-4 rounded-lg bg-background/50 text-[11px] font-medium text-foreground/80 border border-border/40 leading-relaxed italic">
-                                                         {f.remediation || "Analyze the specific code structure and apply industry security standards to mitigate this risk."}
+                                                      <span className="text-[9px] font-black tracking-[0.1em] text-muted-foreground/60 lowercase">remediation insight</span>
+                                                      <div className="p-4 rounded-lg bg-background/50 text-[11px] font-medium text-foreground/80 border border-border/40 leading-relaxed italic lowercase">
+                                                         {f.remediation || "analyze the specific code structure and apply industry security standards to mitigate this risk."}
                                                       </div>
                                                    </div>
 
