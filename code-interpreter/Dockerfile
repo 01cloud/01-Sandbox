@@ -33,6 +33,7 @@ RUN set -eux; \
     which go; \
     which gosec; \
     which staticcheck; \
+    which golangci-lint; \
     # Full versions check
     semgrep --version; \
     trivy --version; \
@@ -42,7 +43,8 @@ RUN set -eux; \
     shellcheck --version; \
     go version; \
     gosec --version; \
-    staticcheck --version
+    staticcheck --version; \
+    golangci-lint --version
 # ─────────────────────────────────────────────────────────────────────────────
 
 ARG TARGETARCH

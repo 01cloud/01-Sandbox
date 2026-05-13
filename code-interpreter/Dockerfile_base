@@ -254,6 +254,8 @@ RUN STATICCHECK_VERSION="2023.1.7" && \
     mv /tmp/staticcheck/staticcheck /usr/local/bin/staticcheck && \
     rm -rf staticcheck.tar.gz /tmp/staticcheck
 
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v1.57.2
+
 RUN mkdir -p /opt/opensandbox
 COPY scripts/code-interpreter-env.sh /opt/opensandbox/code-interpreter-env.sh
 RUN chmod +x /opt/opensandbox/code-interpreter-env.sh
