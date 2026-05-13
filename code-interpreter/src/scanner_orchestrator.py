@@ -217,6 +217,7 @@ class ScannerOrchestrator:
                 
                 if results:
                     res["status"] = "ISSUES_FOUND"
+                    res["exit_code"] = 1
                     for result in results:
                         self.results["findings"].append({
                             "tool": "semgrep",
@@ -372,6 +373,7 @@ class ScannerOrchestrator:
                 issues = data.get("Issues", [])
                 if issues:
                     res["status"] = "ISSUES_FOUND"
+                    res["exit_code"] = 1 # Force failure for UI highlighting
                     for issue in issues:
                         self.results["findings"].append({
                             "tool": "gosec",
@@ -415,7 +417,7 @@ class ScannerOrchestrator:
                         "remediation": f"Refactor code to resolve: {issue.get('code')}"
                     })
                 res["status"] = "ISSUES_FOUND" if issues_found else "COMPLETED"
-                res["exit_code"] = 0 if not issues_found else 1
+                res["exit_code"] = 1 if issues_found else 0 # Force failure for UI highlighting
             except Exception as e:
                 logging.error(f" Failed to parse Staticcheck JSON: {e}")
         
