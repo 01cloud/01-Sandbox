@@ -181,7 +181,7 @@ class ScannerOrchestrator:
                 self.results["scans"]["py_compile"] = {"status": "ISSUES_FOUND", "error": err_msg}
                 return findings
         
-        self.results["scans"]["py_compile"] = {"status": "COMPLETED"}
+        self.results["scans"]["py_compile"] = {"status": "COMPLETED", "exit_code": 0}
         return findings
 
     def scan_semgrep(self):
@@ -352,6 +352,7 @@ class ScannerOrchestrator:
             res["status"] = "ISSUES_FOUND"
         else:
             res["status"] = "COMPLETED"
+            res["exit_code"] = 0
         
         self.results["scans"]["go_build"] = res
 
