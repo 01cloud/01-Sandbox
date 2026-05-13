@@ -363,7 +363,7 @@ class ScannerOrchestrator:
             self.results["scans"]["gosec"] = {"status": "SKIPPED", "reason": "No Go files"}
             return
 
-        cmd = ["gosec", "-fmt", "json", "./..."]
+        cmd = ["gosec", "-fmt", "json", "./..."]   
         res = self.run_command(cmd, "Gosec", cwd=self.target_dir)
         
         if res.get("stdout"):
