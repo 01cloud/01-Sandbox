@@ -16,7 +16,8 @@ sequenceDiagram
     participant POD as Scanner Pod (gVisor)
 
     User->>Auth0: Login & Obtain JWT
-    Auth0-->>User: JWT (inspector_auth cookie)
+    Auth0-->>User: JWT (Stored in LocalStorage)
+    User->>User: Set inspector_auth Cookie (JIT on Nav)
     User->>GW: HTTP Request (Cookie)
     GW->>API: Funnel Traffic (sandbox.01security.com)
     API->>API: Path-Aware Auth & Identity Bridge
@@ -33,7 +34,17 @@ sequenceDiagram
 ## Step 1: Identity Provisioning (Origin)
 
 ### A. Auth0 Identity Lifecycle
-Users authenticate via **Auth0** to obtain an RS256 JWT, which is stored in the `inspector_auth` cookie.
+Users authenticate via **Auth0** to obtain an RS256 JWT. This identity is managed in two stages to balance security and interoperability:
+
+1.  **Primary Persistence (Local Storage)**: The Auth0 SDK stores the main session and refresh tokens in **Browser Local Storage** (typically under keys starting with `@@auth0spajs@@`).
+2.  **JIT Cookie Binding (The Security Bridge)**: To allow external components (like Swagger UI or the Edge Gateway) to access the token, the system uses a **Just-In-Time (JIT)** binding. The `inspector_auth` cookie is only injected into the browser context when a user explicitly navigates to a backend service or documentation.
+
+**Reference: JIT Implementation** (`z1sandbox-website/src/pages/Dashboard.tsx`)
+```javascript
+// Triggered on navigation to backends
+const token = await getAccessTokenSilently();
+document.cookie = `inspector_auth=${token}; SameSite=Lax; Path=/; Max-Age=86400`;
+```
 
 **Reference: Config** (`codeInspector/values.yaml`)
 ```yaml
@@ -65,10 +76,28 @@ spec:
 ### A. Authentication Handling & Keys
 The `apiServer` validates the token's signature using dynamically fetched Auth0 public keys.
 
+#### 1. Key Generation & Infrastructure
+*   **Provider**: Auth0 (Identity Provider) maintains an asymmetric **RS256 (RSA Signature with SHA-256)** key pair.
+*   **Private Key**: Held securely by Auth0 to sign tokens.
+*   **Public Key**: Derived from the private key and exposed via a standard JWKS (JSON Web Key Set) format.
+
+#### 2. Key Location (JWKS Endpoint)
+Public keys are fetched dynamically from the "well-known" discovery endpoint:
+`https://{AUTH0_DOMAIN}/.well-known/jwks.json`
+
+#### 3. Validation Logic
+The backend performs the following cryptographic handshake:
+1.  **Extract `kid`**: Reads the "Key ID" from the JWT header.
+2.  **Fetch & Cache**: Fetches the JWKS and caches it (1-hour TTL) to minimize latency.
+3.  **Match**: Finds the specific key entry in the JWKS matching the `kid`.
+4.  **Verify**: Uses the public modulus (`n`) and exponent (`e`) to mathematically prove the signature's integrity via `PyJWT`.
+
 **Reference: JWKS Discovery** (`apiServer/fastapi/codeinspectior_api.py`)
 ```python
 # Fetch Auth0 JWKS from the IdP
 target_jwks = await get_remote_jwks(f"{issuer.rstrip('/')}/.well-known/jwks.json")
+# Verify signature using the matched public key
+payload = jwt.decode(token, signing_key.key, algorithms=["RS256"], ...)
 ```
 
 ### B. Path-Aware Enforcement
