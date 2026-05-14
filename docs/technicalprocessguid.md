@@ -18,7 +18,7 @@ sequenceDiagram
     User->>Auth0: Login (Obtain Passport)
     Auth0-->>User: JWT
     
-    rect(240, 240, 240)
+    rect rgba(255, 255, 255, 0.05)
     Note over User, API: Phase 1: Ingress & Provisioning
     User->>GW: Request + Cookie
     GW->>API: Promote & Create API Key
