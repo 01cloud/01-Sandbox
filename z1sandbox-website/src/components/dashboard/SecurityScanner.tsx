@@ -25,13 +25,59 @@ interface SecurityScannerProps {
   backend: string;
   baseUrl: string;
   apiKey: string;
+  historicalJobId?: string;
 }
 
-const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: SecurityScannerProps) => {
+const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, historicalJobId }: SecurityScannerProps) => {
   const [code, setCode] = useState("# Simple Code Example\ndef greet(name):\n    return f\"Hello, {name}!\"\n\nprint(greet(\"User\"))");
   const [isScanning, setIsScanning] = useState(false);
   const [result, setResult] = useState<any>(null);
   const [status, setStatus] = useState<"READY" | "AUDITING" | "SUCCESS" | "FAILED">("READY");
+
+  useEffect(() => {
+    if (isOpen && historicalJobId) {
+      loadHistoricalReport(historicalJobId);
+    } else if (isOpen && !historicalJobId) {
+        // Reset for new scan
+        setStatus("READY");
+        setResult(null);
+    }
+  }, [isOpen, historicalJobId]);
+
+  const loadHistoricalReport = async (jobId: string) => {
+    try {
+      setIsScanning(true);
+      setStatus("AUDITING");
+      setResult(null);
+
+      // The history endpoints are on the main API server, but baseUrl passed here might be the backend.
+      // We assume the caller (Dashboard) provides the correct base.
+      // Actually, Dashboard uses API_BASE_URL for history.
+      
+      const response = await fetch(`${baseUrl}/v1/history/${jobId}/report`, {
+        headers: {
+          "Authorization": `Bearer ${apiKey}`
+        }
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.detail || "Failed to load historical report");
+
+      const normalized = data.report || data;
+      setResult({
+        ...normalized,
+        total_findings: normalized.findings?.length || normalized.summary?.findings_count || 0
+      });
+      setStatus("SUCCESS");
+    } catch (error: any) {
+      console.error("History load error:", error);
+      setStatus("FAILED");
+      setResult({ error: error.message });
+      toast.error("Failed to retrieve historical record");
+    } finally {
+      setIsScanning(false);
+    }
+  };
 
   const detectLanguage = (code: string) => {
     const text = code.trim();

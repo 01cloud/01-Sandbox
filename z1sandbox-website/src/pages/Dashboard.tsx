@@ -16,9 +16,9 @@ import {
   CheckCircle2,
   ExternalLink as ExternalLinkIcon,
   Search,
-  Code,
   Clock,
-  Calendar
+  Calendar,
+  History
 } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Button } from "@/components/ui/button";
@@ -56,6 +56,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import SecurityScanner from "@/components/dashboard/SecurityScanner";
+import ScanHistory from "@/components/dashboard/ScanHistory";
 
 interface APIKey {
   id: string;
@@ -82,11 +83,13 @@ const Dashboard = () => {
     backend: string;
     baseUrl: string;
     apiKey: string;
+    historicalJobId?: string;
   }>({
     isOpen: false,
     backend: "Z1_SANDBOX",
     baseUrl: "",
-    apiKey: ""
+    apiKey: "",
+    historicalJobId: undefined
   });
 
   const [backends, setBackends] = useState<any[]>([]);
@@ -251,7 +254,36 @@ const Dashboard = () => {
       isOpen: true,
       backend,
       baseUrl,
-      apiKey: foundKey
+      apiKey: foundKey,
+      historicalJobId: undefined
+    });
+  };
+
+  const handleViewHistoryReport = (jobId: string) => {
+    // History needs a valid API key for the backend call.
+    // We'll try to find the last active key for Z1_SANDBOX.
+    const z1Keys = keys.filter(k => k.backend === "Z1_SANDBOX");
+    let foundKey = "";
+
+    for (const k of z1Keys) {
+      const saved = localStorage.getItem(`bound_key_${k.id}`);
+      if (saved) {
+        foundKey = saved;
+        break;
+      }
+    }
+
+    if (!foundKey) {
+      toast.error("Please ensure you have an active API Key for Z1 Sandbox in your management tab to view historical reports.");
+      return;
+    }
+
+    setScannerConfig({
+      isOpen: true,
+      backend: "Z1_SANDBOX",
+      baseUrl: API_BASE_URL, // History is on the main API server
+      apiKey: foundKey,
+      historicalJobId: jobId
     });
   };
 
@@ -311,6 +343,10 @@ const Dashboard = () => {
           <TabsTrigger value="apis" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
             <Key className="w-4 h-4" />
             API Management
+          </TabsTrigger>
+          <TabsTrigger value="history" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
+            <History className="w-4 h-4" />
+            Scan History
           </TabsTrigger>
         </TabsList>
 
@@ -603,6 +639,13 @@ const Dashboard = () => {
             </CardFooter>
           </Card>
         </TabsContent>
+
+        <TabsContent value="history" className="animate-in fade-in-50 slide-in-from-bottom-5 duration-500 min-h-[600px]">
+           <ScanHistory 
+            baseUrl={API_BASE_URL} 
+            onViewReport={handleViewHistoryReport} 
+          />
+        </TabsContent>
       </Tabs>
 
       <SecurityScanner
@@ -611,6 +654,7 @@ const Dashboard = () => {
         backend={scannerConfig.backend}
         baseUrl={scannerConfig.baseUrl}
         apiKey={scannerConfig.apiKey}
+        historicalJobId={scannerConfig.historicalJobId}
       />
 
       <AlertDialog open={!!keyToDelete} onOpenChange={(open) => !open && setKeyToDelete(null)}>

@@ -50,115 +50,16 @@ from typing import List, Dict
  
 
 # ─────────────────────────────────────────────
-# 1. Application State
+# 1. Modular Integration
 # ─────────────────────────────────────────────
 
-class AppState:
-    """Manages active proxy mapping configurations and centralized high-scale persistence."""
-    def __init__(self):
-        self.backend: SandboxBackend = GenericHTTPBackend(
-            "opensandbox",
-            opensandbox_base_url()
-        )
-        self.latest_job_id: str | None = None
-        
-        # Persistence Config
-        self.use_postgres = os.environ.get("PG_HOST") is not None
-        self.use_redis = os.environ.get("REDIS_HOST") is not None
-        
-        self.db_path = os.environ.get("DB_PATH", "/tmp/apikeys.db")
-        self.redis_client = None
-        
-        if self.use_redis:
-            try:
-                self.redis_client = redis.Redis(
-                    host=os.environ.get("REDIS_HOST"),
-                    port=int(os.environ.get("REDIS_PORT", 6379)),
-                    password=os.environ.get("REDIS_PASSWORD", ""),
-                    decode_responses=True
-                )
-                print(f"[startup] Connected to Redis at {os.environ.get('REDIS_HOST')}")
-            except Exception as e:
-                print(f"[startup] FAILED to connect to Redis: {str(e)}")
-                self.use_redis = False
+from state import state
+from auth import validate_token
+import history
 
-    def get_db_conn(self):
-        if self.use_postgres:
-            return psycopg2.connect(
-                host=os.environ.get("PG_HOST"),
-                port=os.environ.get("PG_PORT"),
-                user=os.environ.get("PG_USER"),
-                password=os.environ.get("PG_PASSWORD"),
-                dbname=os.environ.get("PG_DATABASE")
-            )
-        return sqlite3.connect(self.db_path)
-
-    def init_db(self):
-        conn = self.get_db_conn()
-        cursor = conn.cursor()
-        
-        # Postgres uses slightly different syntax for PRIMARY KEY and types
-        if self.use_postgres:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS api_keys (
-                    id TEXT PRIMARY KEY,
-                    name TEXT,
-                    backend TEXT,
-                    user_id TEXT,
-                    user_email TEXT,
-                    created_at TEXT,
-                    expires_at TEXT,
-                    last_used_at TEXT,
-                    is_revoked INTEGER DEFAULT 0,
-                    prefix TEXT
-                )
-            """)
-        else:
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS api_keys (
-                    id TEXT PRIMARY KEY,
-                    name TEXT,
-                    backend TEXT,
-                    user_id TEXT,
-                    user_email TEXT,
-                    created_at TEXT,
-                    expires_at TEXT,
-                    last_used_at TEXT,
-                    is_revoked INTEGER DEFAULT 0,
-                    prefix TEXT
-                )
-            """)
-        
-        conn.commit()
-        
-        # Schema Guard: Ensure user_email exists (Migration)
-        try:
-            cursor.execute("ALTER TABLE api_keys ADD COLUMN user_email TEXT" if self.use_postgres else "ALTER TABLE api_keys ADD COLUMN user_email TEXT")
-            conn.commit()
-            print("[startup] Database migration: Added user_email column to api_keys")
-        except Exception:
-            conn.rollback()
-            pass
-
-        # Sync Active Registry to Redis for line-rate validation
-        if self.use_redis:
-            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
-            cursor.execute("SELECT id FROM api_keys WHERE is_revoked = 0 AND expires_at > %s" if self.use_postgres else "SELECT id FROM api_keys WHERE is_revoked = 0 AND expires_at > ?", (now_iso,))
-            active_jtis = cursor.fetchall()
-            if active_jtis:
-                # Add all active JTIs to a Redis set called 'active_api_keys'
-                pipe = self.redis_client.pipeline()
-                pipe.delete("active_api_keys") # Refresh
-                for (jti,) in active_jtis:
-                    pipe.sadd("active_api_keys", jti)
-                pipe.execute()
-                print(f"[startup] Synced {len(active_jtis)} active keys to Redis registry.")
-                
-        conn.commit()
-        conn.close()
-
-state = AppState()
+# Initialize databases
 state.init_db()
+history.init_history_db()
 
 
 # ─────────────────────────────────────────────
@@ -206,6 +107,9 @@ async def log_headers(request: Request, call_next):
     print(f"[DEBUG HEADERS] {request.method} {request.url.path} Headers: {dict(request.headers)}")
     response = await call_next(request)
     return response
+
+# Include Modular Routers
+app.include_router(history.router)
 @app.middleware("http")
 async def cookie_auth_redirect_middleware(request: Request, call_next):
     if request.url.path in ["/docs", "/redoc"] or (request.url.path.startswith("/api/") and request.url.path.endswith(("/docs", "/redoc"))):
@@ -215,229 +119,7 @@ async def cookie_auth_redirect_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-# Cache for remote JWKS (Auth0)
-jwks_cache = {
-    "last_updated": 0,
-    "jwks": None
-}
-
-async def get_remote_jwks(url: str):
-    """
-    Fetches and caches the remote JWKS (e.g., from Auth0).
-    """
-    now = time.time()
-    if jwks_cache["jwks"] and (now - jwks_cache["last_updated"] < 3600):
-        return jwks_cache["jwks"]
-    
-    async with httpx.AsyncClient() as client:
-        r = await client.get(url)
-        r.raise_for_status()
-        jwks_data = r.json()
-        jwks = jwt.PyJWKSet.from_dict(jwks_data)
-        jwks_cache["jwks"] = jwks
-        jwks_cache["last_updated"] = now
-        return jwks
-
-async def validate_token(request: Request):
-    """
-    Decodes and validates the RS256 JWT produced by the Edge Gateway's 
-    cookie transformation.
-    """
-    # 1. Path-Aware Enforcement: Decide if we allow Cookie Fallbacks
-    path = request.url.path
-    # Execution routes MUST use a header. No 'Ghost Authorization' via cookies allowed for execution.
-    is_execution_route = path.startswith("/v1/run") or ("/api/z1sandbox/" in path and "/docs" not in path and "/openapi.json" not in path)
-    
-    auth_header = request.headers.get("authorization") or request.headers.get("Authorization")
-    raw_token = None
-    source = "header"
-
-    if auth_header:
-        # Accept both "Bearer <token>" and raw "<token>"
-        raw_token = auth_header.replace("Bearer ", "", 1) if auth_header.startswith("Bearer ") else auth_header
-    elif not is_execution_route:
-        # ALLOW Cookie Fallback ONLY for Management/Docs/UI routes
-        exec_cookie = request.cookies.get("execution_token")
-        auth0_cookie = request.cookies.get("inspector_auth")
-        
-        if exec_cookie:
-            raw_token = exec_cookie
-            source = "execution_cookie"
-        elif auth0_cookie:
-            raw_token = auth0_cookie
-            source = "management_cookie"
-
-    if not raw_token:
-        error_msg = "Execution required an explicit API Key in the Authorization header. Please use the 'Authorize' padlock." if is_execution_route else "Authentication required (API Key or Session missing)"
-        print(f"[DEBUG SECURITY] REJECTION: No credentials found for {path} (Is Execution: {is_execution_route})")
-        raise HTTPException(status_code=401, detail=error_msg)
-    
-    token = raw_token
-    conf = jwt_config()
-    print(f"[DEBUG SECURITY] Validating {source} token: {token[:10]}...{token[-10:]}")
-    
-    try:
-        # 1. Get unverified info to determine issuer
-        unverified_payload = jwt.decode(token, options={"verify_signature": False})
-        issuer = unverified_payload.get("iss")
-        header = jwt.get_unverified_header(token)
-        kid = header.get("kid")
-        
-        if not kid:
-            raise HTTPException(status_code=401, detail="Missing 'kid' in token header")
-        
-        # 2. Determine which JWKS to use
-        if issuer and issuer.startswith("https://") and conf["auth0_domain"] and conf["auth0_domain"] in issuer:
-            print(f"[DEBUG SECURITY] Detected Auth0 token from issuer: {issuer}")
-            # Remote Issuer (Auth0)
-            target_jwks = await get_remote_jwks(f"{issuer.rstrip('/')}/.well-known/jwks.json")
-            target_audience = conf["auth0_audience"]
-            target_issuer = issuer
-        else:
-            print(f"[DEBUG SECURITY] Detected Internal token from issuer: {issuer}")
-            # Local Issuer
-            jwks_data = json.loads(conf["public_jwks"])
-            target_jwks = jwt.PyJWKSet.from_dict(jwks_data)
-            target_audience = "code-inspector-api"
-            target_issuer = conf["issuer"]
-        
-        # 3. Get matching key
-        signing_key = None
-        for key in target_jwks.keys:
-            if key.key_id == kid:
-                signing_key = key
-                break
-        
-        # 4. Decode and verify signature
-        try:
-            payload = jwt.decode(
-                token, 
-                signing_key.key, 
-                algorithms=[conf["algorithm"]],
-                audience=target_audience,
-                issuer=target_issuer
-            )
-        except Exception as e:
-            print(f"[DEBUG SECURITY] JWT Decode ERROR: {str(e)}")
-            raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
-        
-        # 5. --- IDENTITY BRIDGE ---
-        # If this is an Auth0 token (browser session), map it to the user's REAL Developer Key in Postgres
-        jti = payload.get("jti")
-        user_id = payload.get("sub")
-        
-        # --- IDENTITY BRIDGE ---
-        is_management_route = any(request.url.path.startswith(p) for p in ["/v1/api-keys", "/v1/generate-api", "/v1/revoke-api-key"])
-        
-        if issuer != conf["issuer"]:
-            if is_management_route:
-                print(f"[Security] Allowing management operation for Auth0 user: {user_id}")
-                return payload
-            
-            print(f"[Identity Bridge] Mapping Auth0 user {user_id} to their primary Developer API Key...")
-            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
-            conn = state.get_db_conn()
-            cursor = conn.cursor()
-            query = """
-                SELECT id FROM api_keys 
-                WHERE user_id = %s AND is_revoked = 0 AND expires_at > %s
-                ORDER BY created_at DESC LIMIT 1
-            """ if state.use_postgres else "SELECT id FROM api_keys WHERE user_id = ? AND is_revoked = 0 AND expires_at > ? ORDER BY created_at DESC LIMIT 1"
-            cursor.execute(query, (user_id, now_iso))
-            row = cursor.fetchone()
-            conn.close()
-            
-            if row:
-                jti = row[0]
-                print(f"[Identity Bridge] SUCCESS: Auth0 session now acting as Developer Key ID: {jti}")
-            else:
-                print(f"[Identity Bridge] WARNING: No active/non-expired Developer Key found for {user_id}")
-                raise HTTPException(status_code=403, detail="No active or non-expired Developer API Key found. Please create a NEW API Key to enable sandbox operations.")
-
-        if not jti:
-            raise HTTPException(status_code=401, detail="Invalid token: Missing JTI/Key ID")
-
-        # --- DISTRIBUTED VALIDATION (Redis -> Postgres) ---
-        is_valid = False
-            
-        # Step A: High-speed check via Redis (hits all pods instantly)
-        if state.use_redis:
-            is_valid = state.redis_client.sismember("active_api_keys", jti)
-        
-        # Step B: Fallback/Integrity check via Central Database
-        if not is_valid:
-            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
-            conn = state.get_db_conn()
-            cursor = conn.cursor()
-            query = "SELECT is_revoked, expires_at FROM api_keys WHERE id = %s" if state.use_postgres else "SELECT is_revoked, expires_at FROM api_keys WHERE id = ?"
-            cursor.execute(query, (jti,))
-            row = cursor.fetchone()
-            conn.close()
-            
-            if not row:
-                raise HTTPException(status_code=401, detail="API Key has been deactivated or deleted")
-            
-            if row[0] == 1:
-                raise HTTPException(status_code=401, detail="API Key has been revoked")
-                
-            # Check expiration timestamp
-            if row[1] < now_iso:
-                if state.use_redis:
-                    state.redis_client.srem("active_api_keys", jti)
-                raise HTTPException(status_code=401, detail="API Key has expired")
-            
-            # Self-healing Redis cache
-            if state.use_redis:
-                state.redis_client.sadd("active_api_keys", jti)
-            is_valid = True
-        
-        print(f"[DEBUG SECURITY] SUCCESS: Session Verified (Key ID: {jti})")
-        
-        # Update last_used_at in background
-        asyncio.create_task(update_last_used(jti))
-
-        # 6. Session Identity Lockdown
-        # Security Policy: If a browser session exists, the API Key MUST belong to that user.
-        auth_header_raw = request.headers.get("authorization") or request.headers.get("Authorization")
-        auth0_cookie = request.cookies.get("inspector_auth")
-        
-        if auth_header_raw and auth0_cookie:
-            apikey_sub = payload.get("sub")
-            try:
-                # We decode the cookie without signature verification just to get the identity (Gateway already verified it)
-                cookie_payload = jwt.decode(auth0_cookie, options={"verify_signature": False})
-                cookie_sub = cookie_payload.get("sub")
-                
-                if cookie_sub and apikey_sub and cookie_sub != apikey_sub:
-                    print(f"[SECURITY ALERT] IDENTITY MISMATCH: User {cookie_sub} attempted to use API Key belonging to User {apikey_sub}")
-                    raise HTTPException(
-                        status_code=403, 
-                        detail="Identity Lockdown: You cannot use an API key that belongs to another user."
-                    )
-            except Exception as e:
-                if isinstance(e, HTTPException): raise e
-                pass
-
-        return payload
-        
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status_code=401, detail="Token has expired")
-    except jwt.InvalidTokenError as e:
-        # Provide actionable feedback if the token is opaque or undefined
-        hint = "Ensure Auth0 is returning an RS256 JWT, not an opaque token. Check that the API Audience is registered."
-        if token == "undefined" or not token:
-            hint = "Token was passed as empty or undefined. Please re-login on the dashboard."
-        elif "." not in token:
-            hint = "Received an opaque token (missing JWT segments). Check Auth0 API Audience configuration."
-        
-        token_snippet = f"{token[:10]}..." if len(token) > 10 else token
-        raise HTTPException(
-            status_code=401, 
-            detail=f"Invalid token format ({str(e)}). Token snippet: '{token_snippet}'. {hint}"
-        )
-    except Exception as e:
-        if isinstance(e, HTTPException): raise e
-        raise HTTPException(status_code=401, detail=f"Authorization failed: {str(e)}")
+# Modularized Authentication & History System
 
 
 async def update_last_used(jti: str):
@@ -744,15 +426,14 @@ async def dynamic_proxy(backend_id: str, proxy_path: str, request: Request):
     full_proxy_path = f"/api/{backend_id}/{proxy_path}"
     return await _do_proxy(backend_id, full_proxy_path, request)
 
-
 # ─────────────────────────────────────────────
 # 5. Native Sandbox Management (V1)
 # ─────────────────────────────────────────────
 
-@app.post("/v1/sandboxes", response_model=SandboxResponse, tags=["Sandboxes"], summary="Provision a new isolated sandbox", dependencies=[Depends(validate_token)])
-def create_sandbox(req: CreateSandboxRequest):
-    """Creates a new sandbox environment using the active backend."""
-    return state.backend.create_sandbox(req)
+@app.post("/v1/run", tags=["Legacy Code Interpreter"])
+async def create_sandbox_session(req: CreateSandboxRequest, payload: dict = Depends(validate_token)):
+    """Legacy entry point for sandbox execution."""
+    return await state.backend.create_sandbox(req)
 
 
 @app.get("/v1/sandboxes", response_model=list[SandboxResponse], tags=["Sandboxes"], summary="List all active sandboxes", dependencies=[Depends(validate_token)])
@@ -761,8 +442,8 @@ def list_sandboxes():
     return state.backend.list_sandboxes()
 
 
-@app.post("/v1/scan-jobs", response_model=ScanJobResponse, tags=["Security Scan Pipeline"], dependencies=[Depends(validate_token)])
-async def create_scan_job(req: ScanJobRequest):
+@app.post("/v1/scan-jobs", response_model=ScanJobResponse, tags=["Security Scan Pipeline"])
+async def create_scan_job(req: ScanJobRequest, payload: dict = Depends(validate_token)):
     """
     Submits files for unified security scanning.
     Every submission is isolated by a unique UUID in the PVC.
@@ -776,6 +457,11 @@ async def create_scan_job(req: ScanJobRequest):
     req.metadata["job_id"] = job_id
 
     data = await state.backend.create_scan_job(req.dict(exclude_none=True))
+    
+    # Persistent History: Record the scan metadata in Postgres
+    user_id = payload.get("sub")
+    history.record_scan(job_id, user_id, "COMPLETED", data.get("report"))
+    
     return ScanJobResponse(**data)
 
 
@@ -808,14 +494,10 @@ async def get_latest_job_id():
     return {"job_id": state.latest_job_id}
 
 
-@app.get("/v1/job-status", tags=["Security Scan Pipeline"], dependencies=[Depends(validate_token)])
-async def get_latest_job_status():
-    """
-    Retrieves the status of the most recently initiated scan job in the current session.
-    """
-    if not state.latest_job_id:
-        raise HTTPException(status_code=404, detail="No scan jobs have been initiated yet.")
-    return state.backend.get_scan_status(state.latest_job_id)
+@app.post("/api/z1sandbox/v1/run", tags=["Cloud Sandbox Pipeline"])
+async def create_sandbox_session_full(req: CreateSandboxRequest, payload: dict = Depends(validate_token)):
+    """Primary entry point for gVisor-isolated sandbox execution."""
+    return await state.backend.create_sandbox(req)
 
 
 # ─────────────────────────────────────────────
@@ -865,8 +547,8 @@ async def generate_api(user_id: str = "default-user"):
 
 from models import APIKeyCreateRequest, APIKeyRecord, APIKeyListResponse
 
-@app.get("/v1/api-keys", response_model=APIKeyListResponse, tags=["Security"], dependencies=[Depends(validate_token)])
-async def list_user_api_keys(payload: dict = Depends(validate_token)):
+@app.get("/v1/api-keys", tags=["Key Management"])
+async def list_api_keys(payload: dict = Depends(validate_token)):
     """Retrieves all active and revoked keys for the authenticated user from central store."""
     user_id = payload.get("sub")
     conn = state.get_db_conn()
@@ -902,7 +584,7 @@ async def list_user_api_keys(payload: dict = Depends(validate_token)):
     return APIKeyListResponse(keys=keys)
 
 
-@app.post("/v1/api-keys", response_model=GenerateAPIResponse, tags=["Security"], dependencies=[Depends(validate_token)])
+@app.post("/v1/api-keys", tags=["Key Management"])
 async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(validate_token)):
     """
     Generates a new signed API key (JWT) and persists metadata for revocation/management.
@@ -989,8 +671,8 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
     )
 
 
-@app.delete("/v1/api-keys/{jti}", tags=["Security"], dependencies=[Depends(validate_token)])
-async def delete_api_key(jti: str, payload: dict = Depends(validate_token)):
+@app.delete("/v1/api-keys/{jti}", tags=["Key Management"])
+async def revoke_api_key(jti: str, payload: dict = Depends(validate_token)):
     """Deletes/Revokes an API key instantly from global registry and cache."""
     user_id = payload.get("sub")
     conn = state.get_db_conn()
