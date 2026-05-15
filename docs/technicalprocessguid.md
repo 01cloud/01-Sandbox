@@ -20,9 +20,12 @@ sequenceDiagram
     
     rect rgb(240, 240, 240)
     Note over User, API: Phase 1: Ingress & Provisioning
-    User->>GW: <span style="color:black">Request + Cookie</span>
-    GW->>API: <span style="color:black">Promote & Create API Key</span>
-    API->>User: <span style="color:black">Platform JWT</span>
+    User->>GW:  
+    Note right of User: Request + Cookie
+    GW->>API:  
+    Note right of GW: Promote & Create API Key
+    API->>User:  
+    Note left of API: Platform JWT
     end
 
     User->>GW: Click "Execute Audit" (Request + Cookie)
