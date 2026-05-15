@@ -165,13 +165,49 @@ Even though the PVC is shared, the scanner pod only sees its own data.
 *   **SubPath Binding**: The pod is started with a mount that points specifically to `/data/{job_id}`.
 *   **Read/Write Access**: The pod has write access to its `/reports` directory to deliver the final verdict.
 
-**Reference Code: Parallel Probes** (`code-interpreter/src/scanner_orchestrator.py`)
+### 3. Comprehensive Toolset (Language-Aware Scanning)
+The orchestrator dynamically selects tools based on file classification to ensure deep coverage without unnecessary overhead.
+
+| Category | Tools | Technical Role |
+| :--- | :--- | :--- |
+| **Universal** | `Semgrep`, `Gitleaks`, `Trivy` | Scans for secrets, multi-language security patterns, and CVEs. |
+| **Python** | `Bandit`, `py_compile` | Security linting (AST analysis) and syntax validation. |
+| **Go** | `Gosec`, `Staticcheck`, `GolangCI-Lint` | Deep security audits, advanced static analysis, and meta-linting. |
+| **Kubernetes** | `Kube-Linter`, `Kubeconform`, `Kube-Score` | Hardening audits, schema validation, and best-practice scoring. |
+| **YAML** | `Yamllint` | Ensures structural integrity and formatting standards. |
+| **Shell** | `ShellCheck` | Detects bugs and enforces best practices in `.sh` and `.bash` scripts. |
+
+**Reference Code: Parallel Execution** (`code-interpreter/src/scanner_orchestrator.py`)
 ```python
 # Running the toolchain in parallel to minimize latency
 with ThreadPoolExecutor() as executor:
-    executor.submit(self.run_semgrep)  # Pattern matching
-    executor.submit(self.run_bandit)   # Python AST analysis
-    executor.submit(self.run_gitleaks) # Secret detection
+    for tool in self.enabled_tools:
+        executor.submit(scanner_map[tool])
+```
+
+### 4. Strict Mode Enforcement
+The platform goes beyond "standard" linting by enabling "Strict Mode" configurations for several key tools. This ensures that even minor security regressions or structural anomalies are caught.
+
+*   **Semgrep (Security Audit Mode)**:
+    *   **Config**: Uses `p/security-audit` and `p/r2c-security-audit` rulesets.
+    *   **Impact**: Scans for harmful logic patterns and complex security anti-patterns that standard "best practice" linters miss.
+*   **Trivy (Comprehensive Scanning)**:
+    *   **Scope**: Configured to scan `vuln, secret, config` simultaneously.
+    *   **Severity**: Captures everything from `LOW` to `CRITICAL`, ensuring no vulnerability is hidden by default filters.
+*   **Kube-Linter (Ultra-Strict)**:
+    *   **Enforcement**: Uses `--add-all-built-in` and `--do-not-auto-add-defaults`.
+    *   **Impact**: Forces every single built-in security check to run, ignoring the tool's default (more permissive) exclusion list.
+*   **Kubeconform (Schema Lockdown)**:
+    *   **Validation**: Uses `-strict` and `-ignore-missing-schemas=false`.
+    *   **Impact**: Any manifest missing a schema or containing an unknown field will trigger a failure, preventing "silent" configuration errors.
+
+**Reference Code: Strict Configs** (`code-interpreter/src/scanner_orchestrator.py`)
+```python
+# Kube-Linter: Add all built-in checks and disable auto-defaults
+cmd = ["kube-linter", "lint", "--add-all-built-in", "--do-not-auto-add-defaults"]
+
+# Kubeconform: Enforce strict schema validation
+cmd = ["kubeconform", "-strict", "-ignore-missing-schemas=false"]
 ```
 
 ---

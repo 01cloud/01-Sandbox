@@ -87,7 +87,7 @@ class ScannerOrchestrator:
                 self.classified_files["polyglot"].append(f)
 
         # Build enabled tools list (Universal security baseline)
-        enabled = ["gitleaks", "semgrep"]
+        enabled = ["gitleaks", "semgrep", "trivy"]
         
         if self.classified_files["python"]:
             # Python: bandit + syntax check + universal tools
