@@ -334,21 +334,30 @@ async def validate_token(request: Request):
                 print(f"[Security] Allowing management operation for Auth0 user: {user_id}")
                 return payload
             
-            print(f"[Identity Bridge] Mapping Auth0 user {user_id} to their primary Developer API Key...")
+            print(f"[Identity Bridge] Mapping Auth0 user {user_id} to an active Developer API Key...")
             now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             conn = state.get_db_conn()
             cursor = conn.cursor()
             query = """
                 SELECT id FROM api_keys 
                 WHERE user_id = %s AND is_revoked = 0 AND expires_at > %s
-                ORDER BY created_at DESC LIMIT 1
-            """ if state.use_postgres else "SELECT id FROM api_keys WHERE user_id = ? AND is_revoked = 0 AND expires_at > ? ORDER BY created_at DESC LIMIT 1"
+                ORDER BY created_at DESC
+            """ if state.use_postgres else "SELECT id FROM api_keys WHERE user_id = ? AND is_revoked = 0 AND expires_at > ? ORDER BY created_at DESC"
             cursor.execute(query, (user_id, now_iso))
-            row = cursor.fetchone()
+            rows = cursor.fetchall()
             conn.close()
             
-            if row:
-                jti = row[0]
+            if rows:
+                from ratelimit import is_key_rate_limited
+                selected_jti = None
+                for row in rows:
+                    candidate_jti = row[0]
+                    if not is_key_rate_limited(state, candidate_jti):
+                        selected_jti = candidate_jti
+                        break
+                
+                # Fallback to the primary key if all are rate-limited
+                jti = selected_jti or rows[0][0]
                 print(f"[Identity Bridge] SUCCESS: Auth0 session now acting as Developer Key ID: {jti}")
             else:
                 print(f"[Identity Bridge] WARNING: No active/non-expired Developer Key found for {user_id}")

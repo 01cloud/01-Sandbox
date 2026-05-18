@@ -87,3 +87,35 @@ async def check_rate_limit(state, jti: str):
             },
             headers={"Retry-After": str(retry_after)}
         )
+
+def is_key_rate_limited(state, jti: str) -> bool:
+    """
+    Checks if a specific API key has already reached its rate limit threshold for the current window.
+    Returns True if the limit is reached/exceeded, False otherwise.
+    """
+    if not jti:
+        return False
+    
+    rl_conf = rate_limit_config()
+    requests_limit = rl_conf["requests"]
+    window_secs = rl_conf["window_secs"]
+    
+    now_ts = int(time.time())
+    window_bucket = now_ts // window_secs
+    
+    current_count = 0
+    
+    if getattr(state, "use_redis", False) and state.redis_client:
+        rl_key = f"ratelimit:{jti}:{window_bucket}"
+        try:
+            val = state.redis_client.get(rl_key)
+            if val is not None:
+                current_count = int(val)
+        except Exception:
+            pass
+    else:
+        if hasattr(state, "local_rate_limits"):
+            rl_key = f"{jti}:{window_bucket}"
+            current_count = state.local_rate_limits.get(rl_key, 0)
+            
+    return current_count >= requests_limit
