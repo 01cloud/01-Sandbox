@@ -647,7 +647,7 @@ async def health(response: Response):
         try:
             if state.redis_client and state.redis_client.ping():
                 cache_healthy = True
-                cache_details = "Redis"
+                cache_details = "Redis Cache Connected"
             else:
                 cache_healthy = False
                 cache_details = "Redis client connection failed"
@@ -655,7 +655,22 @@ async def health(response: Response):
             cache_healthy = False
             cache_details = f"Redis error: {str(e)}"
 
-    # 3. Upstream OpenSandbox Service Check
+    # 3. Redis Queue Check (Background Task Tracker)
+    queue_healthy = True
+    queue_details = "Disabled"
+    if state.use_redis:
+        try:
+            if state.redis_client and state.redis_client.ping():
+                queue_healthy = True
+                queue_details = "Redis Queue Connected"
+            else:
+                queue_healthy = False
+                queue_details = "Redis client connection failed"
+        except Exception as e:
+            queue_healthy = False
+            queue_details = f"Queue error: {str(e)}"
+
+    # 4. Upstream OpenSandbox Service Check
     sandbox_healthy = False
     try:
         sandbox_healthy = state.backend.health_check()
@@ -665,10 +680,10 @@ async def health(response: Response):
 
     # Calculate overall health status
     # Database and Upstream Sandbox are critical dependencies.
-    # Redis cache is critical if enabled.
+    # Redis cache & queue are critical if enabled.
     overall_healthy = db_healthy and sandbox_healthy
     if state.use_redis:
-        overall_healthy = overall_healthy and cache_healthy
+        overall_healthy = overall_healthy and cache_healthy and queue_healthy
 
     status_code = status.HTTP_200_OK if overall_healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
     response.status_code = status_code
@@ -686,6 +701,10 @@ async def health(response: Response):
                 "status": "healthy" if cache_healthy else "unhealthy",
                 "details": cache_details
             },
+            "queue": {
+                "status": "healthy" if queue_healthy else "unhealthy",
+                "details": queue_details
+            },
             "opensandbox": {
                 "status": "healthy" if sandbox_healthy else "unhealthy",
                 "details": sandbox_details
@@ -697,6 +716,83 @@ async def health(response: Response):
 async def health_v1(response: Response):
     """Alias for /health scoped to /v1 for gateway compatibility."""
     return await health(response)
+
+
+@app.get("/api/v1/01sbx/postgresql/health", tags=["System"])
+async def postgresql_health(response: Response):
+    """
+    Lightweight and production-safe health check for the PostgreSQL database.
+    """
+    healthy = False
+    details = ""
+    try:
+        conn = state.get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1;")
+        cursor.fetchone()
+        conn.close()
+        healthy = True
+        details = "PostgreSQL Connected" if state.use_postgres else "SQLite Connected"
+    except Exception as e:
+        details = f"Database error: {str(e)}"
+    
+    response.status_code = status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+    return {
+        "status": "healthy" if healthy else "unhealthy",
+        "dependency": "postgresql" if state.use_postgres else "sqlite",
+        "healthy": healthy,
+        "details": details
+    }
+
+
+@app.get("/api/v1/01sbx/redis/health", tags=["System"])
+async def redis_health(response: Response):
+    """
+    Lightweight and production-safe health check for the Redis cache/queue dependency.
+    """
+    healthy = True
+    details = "Disabled"
+    if state.use_redis:
+        try:
+            if state.redis_client and state.redis_client.ping():
+                healthy = True
+                details = "Redis Cache & Queue Connected"
+            else:
+                healthy = False
+                details = "Redis connection failed"
+        except Exception as e:
+            healthy = False
+            details = f"Redis error: {str(e)}"
+            
+    response.status_code = status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+    return {
+        "status": "healthy" if healthy else "unhealthy",
+        "dependency": "redis",
+        "healthy": healthy,
+        "details": details
+    }
+
+
+@app.get("/api/v1/01sbx/opensandbox/health", tags=["System"])
+async def opensandbox_health(response: Response):
+    """
+    Lightweight and production-safe health check for the upstream OpenSandbox backend service.
+    """
+    healthy = False
+    details = ""
+    try:
+        healthy = state.backend.health_check()
+        details = f"Backend name: {state.backend.name} is responsive" if healthy else "Upstream service unresponsive"
+    except Exception as e:
+        details = f"Upstream service error: {str(e)}"
+        
+    response.status_code = status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+    return {
+        "status": "healthy" if healthy else "unhealthy",
+        "dependency": "opensandbox",
+        "healthy": healthy,
+        "details": details
+    }
 
 
 @app.post("/run", response_model=RunResponse, summary="Dispatch synchronous script explicitly", tags=["System"])
