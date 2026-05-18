@@ -72,7 +72,7 @@ apiServer:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-api
-      tag: "0.0.32"
+      tag: "0.0.33"
       pullPolicy: Always    
     resources:
       requests:
