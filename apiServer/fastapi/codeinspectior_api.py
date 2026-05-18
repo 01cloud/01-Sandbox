@@ -773,8 +773,8 @@ async def redis_health(response: Response):
     }
 
 
-@app.get("/api/v1/01sbx/opensandbox/health", tags=["System"], dependencies=[Depends(validate_token)])
-async def opensandbox_health(response: Response):
+@app.get("/api/v1/01sbx/01sandbox/health", tags=["System"], dependencies=[Depends(validate_token)])
+async def sandbox_core_health(response: Response):
     """
     Lightweight and production-safe health check for the upstream OpenSandbox backend service.
     """
@@ -789,7 +789,7 @@ async def opensandbox_health(response: Response):
     response.status_code = status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
     return {
         "status": "healthy" if healthy else "unhealthy",
-        "dependency": "opensandbox",
+        "dependency": "01sandbox",
         "healthy": healthy,
         "details": details
     }
