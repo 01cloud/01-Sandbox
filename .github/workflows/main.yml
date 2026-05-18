@@ -1,4 +1,4 @@
-name: 01 Sandbox Pipeline
+name: CI/CD Pipeline
 
 on:
   push:
@@ -12,7 +12,7 @@ on:
       - 'codeInspector/**'
 
 permissions:
-  contents: write  
+  contents: write
 
 jobs:
   versioning:
@@ -152,13 +152,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
       - name: Set up Kubeconfig
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
+          # Patch Kubeconfig to use public IP instead of localhost
+          sed -i 's/127.0.0.1/148.113.4.247/g' ~/.kube/config
           chmod 600 ~/.kube/config
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -171,6 +170,30 @@ jobs:
           kubectl delete secret -n default -l "owner=helm,name=codeinspector,status=pending-upgrade" || true
           kubectl delete secret -n default -l "owner=helm,name=codeinspector,status=pending-install" || true
 
+      - name: Deploy to RKE2
+        run: |
+          set -x
+          VERSION=${{ needs.versioning.outputs.version }}
+          echo "Starting deployment..."
+          
+          # Build the Helm command dynamically
+          HELM_CMD="helm upgrade --install codeinspector ./codeInspector -n default --rollback-on-failure --debug --timeout 5m0s --values ./codeInspector/values.yaml"
+          
+          if [ "${{ needs.filter.outputs.api }}" == "true" ]; then
+            HELM_CMD="$HELM_CMD --set apiServer.deployment.image.tag=${VERSION}"
+          fi
+          if [ "${{ needs.filter.outputs.controller }}" == "true" ]; then
+            HELM_CMD="$HELM_CMD --set opensandbox.controller.image.tag=${VERSION}"
+          fi
+          if [ "${{ needs.filter.outputs.server }}" == "true" ]; then
+            HELM_CMD="$HELM_CMD --set opensandbox.server.image.tag=${VERSION}"
+          fi
+          if [ "${{ needs.filter.outputs.scanner }}" == "true" ]; then
+            HELM_CMD="$HELM_CMD --set opensandbox.server.sandboxImage=01community/01sandbox-codeinterpreter:${VERSION}"
+          fi
+          
+          eval $HELM_CMD
+            
       - name: Update values.yaml and Tag Repository
         run: |
           set -x
@@ -229,12 +252,6 @@ jobs:
           else
             echo "No component changes detected, skipping repository update."
           fi
-
-      - name: Deploy to RKE2
-        run: |
-          set -x
-          echo "Starting deployment with updated values.yaml..."
-          helm upgrade --install codeinspector ./codeInspector -n default --rollback-on-failure --debug --timeout 5m0s
 
       - name: Sync Remote Server
         uses: appleboy/ssh-action@v1.0.3
