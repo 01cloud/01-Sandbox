@@ -21,21 +21,46 @@ graph TD
     API_Server -->|HTTP GET /health| Core[opensandbox-server:80]
 ```
 
+### Modular Architecture Design
+
+To maintain high code quality and strict separation of concerns, all health checks are encapsulated inside a standalone, dedicated [health.py](file:///home/berrybytes/Desktop/01-Sandbox/apiServer/fastapi/health.py) module. 
+
+The main application in [codeinspectior_api.py](file:///home/berrybytes/Desktop/01-Sandbox/apiServer/fastapi/codeinspectior_api.py) imports and mounts these routes dynamically using the **Router Factory Pattern**:
+
+```python
+from health import get_health_router
+app.include_router(get_health_router(state, validate_token))
+```
+
+This pattern injects global dependencies (the `state` and the `validate_token` security guard) into the routing namespace without importing the main app file directly inside the module, completely avoiding circular dependencies. 
+
+The core connection logic for each backend service is extracted into isolated helpers:
+*   `check_postgresql_health(state)`: Connects and issues a lightweight SQL ping to PostgreSQL.
+*   `check_redis_health(state)`: Pings the active Redis cache/queue connection.
+*   `check_opensandbox_server_health(state)`: Verifies the upstream OpenSandbox server responds correctly.
+
+These helpers are shared between the aggregate endpoints (`/health` and `/v1/health`) and the secure individual endpoints (`/api/v1/01sbx/...`), guaranteeing identical connection logic and status reports.
+
 ---
 
 ## 2. Health Endpoint Specifications
 
 ### A. Aggregate Checks (Liveness & Readiness Probes)
 *   **Public Route**: `/health`
-*   **Protected Route**: `/v1/health` (requires Authorization JWT header)
+    *   **Full URL**: `https://api-sandbox.01security.com/health`
+*   **Protected Route**: `/v1/health`
+    *   **Full URL**: `https://api-sandbox.01security.com/v1/health` (requires Authorization JWT header)
 *   **Behavior**: Evaluates all dependencies sequentially. If any dependency is offline, the endpoint returns `500 Internal Server Error` and sets the global state to `unhealthy`.
 
 ### B. Secured Individual Sub-Dependency Checks
 *   **Required Header**: `Authorization: Bearer <DEVELOPER_API_KEY>`
 *   **Endpoints**:
     *   **PostgreSQL**: `GET /api/v1/01sbx/postgresql/health`
+        *   **Full URL**: `https://api-sandbox.01security.com/api/v1/01sbx/postgresql/health`
     *   **Redis (Cache & Queue)**: `GET /api/v1/01sbx/redis/health`
+        *   **Full URL**: `https://api-sandbox.01security.com/api/v1/01sbx/redis/health`
     *   **01Sandbox Core Engine**: `GET /api/v1/01sbx/01sandbox/health`
+        *   **Full URL**: `https://api-sandbox.01security.com/api/v1/01sbx/01sandbox/health`
 
 ---
 
