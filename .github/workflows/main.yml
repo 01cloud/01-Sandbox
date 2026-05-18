@@ -12,7 +12,7 @@ on:
       - 'codeInspector/**'
 
 permissions:
-  contents: write
+  contents: write  
 
 jobs:
   versioning:
