@@ -40,6 +40,18 @@ class StatusResponse(BaseModel):
     healthy: bool
 
 
+class DependencyStatus(BaseModel):
+    status: str
+    details: str
+
+
+class HealthResponse(BaseModel):
+    status: str
+    backend: str
+    healthy: bool
+    dependencies: dict[str, DependencyStatus]
+
+
 # --- OpenSandbox Specific Models ---
 
 class ImageSpec(BaseModel):
