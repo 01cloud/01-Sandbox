@@ -56,7 +56,7 @@ const App = () => (
         <Auth0ProviderWithHistory>
           <div className="relative flex min-h-screen flex-col overflow-x-hidden">
 
-            {/* Global Background Elements for depth in Light Mode only */}
+            {/* Global Background Elements for depth in Light Mode only... */}
             <div className="fixed inset-0 pointer-events-none -z-10 bg-background dark:hidden">
               <div className="absolute top-[-10%] left-[-10%] w-[50%] h-[50%] rounded-full bg-[hsl(var(--grad-3))] mix-blend-multiply opacity-[0.05] blur-[100px]" />
               <div className="absolute top-[20%] right-[-5%] w-[40%] h-[40%] rounded-full bg-[hsl(var(--grad-4))] mix-blend-multiply opacity-[0.05] blur-[120px]" />

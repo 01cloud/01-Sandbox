@@ -1,14 +1,14 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { 
-  Database, 
-  Zap, 
-  Cpu, 
-  RefreshCw, 
-  CheckCircle, 
-  AlertTriangle, 
-  Server, 
-  Clock, 
+import {
+  Database,
+  Zap,
+  Cpu,
+  RefreshCw,
+  CheckCircle,
+  AlertTriangle,
+  Server,
+  Clock,
   ArrowRight,
   Copy,
   Check
@@ -56,11 +56,11 @@ const Health = () => {
           "Accept": "application/json",
         }
       });
-      
+
       if (!response.ok && response.status !== 500) {
         throw new Error(`Server returned status ${response.status}`);
       }
-      
+
       const healthJson = await response.json();
       setData(healthJson);
       setError(null);
@@ -87,7 +87,7 @@ const Health = () => {
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Helper to map dependency keys to descriptive names and icons
+  // Helper to map dependency keys to descriptive names and icons ...
   const getDependencyMeta = (key: string) => {
     switch (key) {
       case "database":
@@ -125,13 +125,13 @@ const Health = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-background to-background/95 py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
-      
+
       {/* Decorative Blur Spheres */}
       <div className="absolute top-1/4 left-1/10 w-96 h-96 rounded-full bg-primary/5 blur-[120px] pointer-events-none -z-10" />
       <div className="absolute bottom-1/4 right-1/10 w-96 h-96 rounded-full bg-indigo-500/5 blur-[120px] pointer-events-none -z-10" />
 
       <div className="max-w-4xl mx-auto space-y-8 relative z-10">
-        
+
         {/* Breadcrumb / Title area */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between space-y-4 md:space-y-0 border-b border-border/40 pb-6">
           <div>
@@ -224,15 +224,13 @@ const Health = () => {
               className="space-y-8"
             >
               {/* Overall Status Banner */}
-              <div className={`border rounded-xl p-6 relative overflow-hidden transition-all shadow-md ${
-                data?.healthy 
-                  ? "bg-emerald-500/5 border-emerald-500/20" 
-                  : "bg-amber-500/5 border-amber-500/20"
-              }`}>
+              <div className={`border rounded-xl p-6 relative overflow-hidden transition-all shadow-md ${data?.healthy
+                ? "bg-emerald-500/5 border-emerald-500/20"
+                : "bg-amber-500/5 border-amber-500/20"
+                }`}>
                 <div className="flex items-start gap-4">
-                  <div className={`p-2.5 rounded-xl ${
-                    data?.healthy ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
-                  }`}>
+                  <div className={`p-2.5 rounded-xl ${data?.healthy ? "bg-emerald-500/10 text-emerald-500" : "bg-amber-500/10 text-amber-500"
+                    }`}>
                     {data?.healthy ? (
                       <CheckCircle className="w-8 h-8 animate-pulse" />
                     ) : (
@@ -245,17 +243,16 @@ const Health = () => {
                       <h2 className="text-xl font-bold">
                         {data?.healthy ? "All Systems Operational" : "Service Status Degraded"}
                       </h2>
-                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xxs font-bold uppercase tracking-wider ${
-                        data?.healthy 
-                          ? "bg-emerald-500/20 text-emerald-500 animate-pulse" 
-                          : "bg-amber-500/20 text-amber-500 animate-pulse"
-                      }`}>
+                      <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xxs font-bold uppercase tracking-wider ${data?.healthy
+                        ? "bg-emerald-500/20 text-emerald-500 animate-pulse"
+                        : "bg-amber-500/20 text-amber-500 animate-pulse"
+                        }`}>
                         {data?.status}
                       </span>
                     </div>
                     <p className="text-sm text-muted-foreground max-w-xl">
-                      {data?.healthy 
-                        ? "Every system microservice is actively pinging and executing workflows under safe load parameters." 
+                      {data?.healthy
+                        ? "Every system microservice is actively pinging and executing workflows under safe load parameters."
                         : "One or more background nodes are currently timing out or reporting validation errors. Restarts may trigger automatically."}
                     </p>
                   </div>
@@ -273,8 +270,8 @@ const Health = () => {
                   const meta = getDependencyMeta(key);
                   const isDepHealthy = value.status === "healthy";
                   return (
-                    <div 
-                      key={key} 
+                    <div
+                      key={key}
                       className="group bg-card hover:bg-card/80 border border-border/60 hover:border-primary/40 rounded-xl p-5 shadow-sm hover:shadow-md transition-all duration-300 flex flex-col justify-between"
                     >
                       <div className="space-y-4">
@@ -287,15 +284,13 @@ const Health = () => {
                               {meta.title}
                             </h3>
                           </div>
-                          
-                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xxs font-bold uppercase ${
-                            isDepHealthy 
-                              ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400" 
-                              : "bg-destructive/10 text-destructive"
-                          }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${
-                              isDepHealthy ? "bg-emerald-500 animate-ping" : "bg-destructive animate-ping"
-                            }`} />
+
+                          <span className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xxs font-bold uppercase ${isDepHealthy
+                            ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                            : "bg-destructive/10 text-destructive"
+                            }`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${isDepHealthy ? "bg-emerald-500 animate-ping" : "bg-destructive animate-ping"
+                              }`} />
                             {value.status}
                           </span>
                         </div>
