@@ -151,3 +151,24 @@ curl -i -H "Authorization: Bearer <API_KEY_A>" https://api-sandbox.01security.co
 # Key B - Instant execution: HTTP 200 OK (Unaffected by Key A's block)
 curl -i -H "Authorization: Bearer <API_KEY_B>" https://api-sandbox.01security.com/api/v1/01sbx/postgresql/health
 ```
+
+---
+
+## 6. Web Session Dynamic Key Rotation (Identity Bridge)
+
+To deliver a premium, seamless user experience in the web dashboard and swagger interface, we implemented an **Automatic Active Key Rotation** system within the Identity Bridge:
+
+```mermaid
+graph TD
+    Auth0Session[Auth0 human session] --> IdentityBridge[Identity Bridge Interceptor]
+    IdentityBridge --> QueryKeys[Fetch ALL active keys of user ordered by date]
+    QueryKeys --> LoopKeys{Find key that is not rate-limited}
+    LoopKeys -->|Key A is rate-limited| CheckB[Check Key B]
+    LoopKeys -->|Key B is NOT rate-limited| MapB[Map session to Key B]
+    LoopKeys -->|All keys rate-limited| MapFallback[Fallback to primary key and throw 429]
+```
+
+### Architectural Benefits:
+1.  **Dashboard Scaling**: If a user creates 5 active API keys, their browser/swagger workspace will automatically rotate through their active key pool, allowing them to click, test, and run up to **35 requests per minute** in the UI without getting blocked!
+2.  **Zero Overhead**: Preemptive checks (`is_key_rate_limited`) perform zero-write read checks directly against the fast-cache Redis database, maintaining sub-millisecond execution speeds.
+3.  **Strict Security**: This rotation only affects human sessions (Auth0). Requests using raw API key tokens remain bound strictly to their specific token context.
