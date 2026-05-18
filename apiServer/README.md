@@ -24,7 +24,7 @@ The Sandbox API allows you to execute code securely in isolated environments. Th
 
 ```
 Client  →  POST /run  →  SandboxAPI  →  [Mock | Subprocess | Docker | E2B]
-                          (stable)           (swappable)
+                          (stable)           (swappable)    
 ```
 
 ---

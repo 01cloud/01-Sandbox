@@ -225,7 +225,7 @@ jobs:
             
             # Always try to push tags for versioning persistence
             git tag -f "v${VERSION}"
-            git push origin HEAD:main --tags --force
+            git push origin main --tags --force
           else
             echo "No component changes detected, skipping repository update."
           fi
