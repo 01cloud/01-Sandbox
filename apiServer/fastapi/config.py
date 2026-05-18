@@ -15,7 +15,7 @@ def backend_mappings() -> dict[str, str]:
     custom_json = os.environ.get("BACKEND_MAPPINGS_JSON")
     if custom_json:
         try:
-            import json
+            import json    
             custom_mappings = json.loads(custom_json)
             default_mappings.update(custom_mappings)
         except Exception as e:

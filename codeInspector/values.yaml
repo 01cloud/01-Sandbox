@@ -72,7 +72,7 @@ apiServer:
     image:
       repository: 01community/01sandbox-api
       tag: "0.0.27"
-      pullPolicy: Always
+      pullPolicy: Always    
     resources:
       requests:
         cpu: "100m"
