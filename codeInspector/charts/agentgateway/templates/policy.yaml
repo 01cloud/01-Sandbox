@@ -10,5 +10,10 @@ spec:
       kind: HTTPRoute
       name: agentgateway-api-route
   traffic:
-    {}
+    rateLimit:
+      local:
+        tokenBucket:
+          maxTokens: 7
+          tokensPerFill: 5
+          fillInterval: 60s
 {{- end }}
