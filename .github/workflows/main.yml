@@ -156,8 +156,6 @@ jobs:
         run: |
           mkdir -p ~/.kube
           echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
-          # Patch Kubeconfig to use public IP instead of localhost
-          sed -i 's/127.0.0.1/148.113.4.247/g' ~/.kube/config
           chmod 600 ~/.kube/config
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -256,7 +254,7 @@ jobs:
       - name: Sync Remote Server
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: 148.113.4.247
+          host: ${{ secrets.REMOTE_HOST }}
           username: ${{ secrets.REMOTE_USER }}
           password: ${{ secrets.REMOTE_PASSWORD }}
           script: |
