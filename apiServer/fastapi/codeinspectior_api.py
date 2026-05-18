@@ -718,7 +718,7 @@ async def health_v1(response: Response):
     return await health(response)
 
 
-@app.get("/api/v1/01sbx/postgresql/health", tags=["System"])
+@app.get("/api/v1/01sbx/postgresql/health", tags=["System"], dependencies=[Depends(validate_token)])
 async def postgresql_health(response: Response):
     """
     Lightweight and production-safe health check for the PostgreSQL database.
@@ -745,7 +745,7 @@ async def postgresql_health(response: Response):
     }
 
 
-@app.get("/api/v1/01sbx/redis/health", tags=["System"])
+@app.get("/api/v1/01sbx/redis/health", tags=["System"], dependencies=[Depends(validate_token)])
 async def redis_health(response: Response):
     """
     Lightweight and production-safe health check for the Redis cache/queue dependency.
@@ -773,7 +773,7 @@ async def redis_health(response: Response):
     }
 
 
-@app.get("/api/v1/01sbx/opensandbox/health", tags=["System"])
+@app.get("/api/v1/01sbx/opensandbox/health", tags=["System"], dependencies=[Depends(validate_token)])
 async def opensandbox_health(response: Response):
     """
     Lightweight and production-safe health check for the upstream OpenSandbox backend service.
