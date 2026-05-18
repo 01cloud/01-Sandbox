@@ -9,11 +9,9 @@ spec:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
       name: agentgateway-api-route
-  {{- if .Values.policy.rateLimit.enabled }}
   traffic:
     rateLimit:
       local:
-        - requests: {{ .Values.policy.rateLimit.requests }}
-          unit: {{ .Values.policy.rateLimit.unit }}
-  {{- end }}
+        - requests: {{ if .Values.policy.rateLimit.enabled }}{{ .Values.policy.rateLimit.requests }}{{ else }}10000{{ end }}
+          unit: {{ if .Values.policy.rateLimit.enabled }}{{ .Values.policy.rateLimit.unit }}{{ else }}"Minutes"{{ end }}
 {{- end }}

@@ -37,18 +37,23 @@ By decoupling rate-limiting from the Gateway proxy and implementing it inside th
 
 ## 2. Ingress Layer Configurations (Agent Gateway)
 
-Flat rate limiting is disabled at the gateway to allow requests to reach the API server for granular, key-specific evaluation.
+To satisfy the `AgentgatewayPolicy` custom resource validator, the `traffic` block must always be present under `spec` (the schema requires at least one of `traffic`, `frontend`, or `backend` to be defined). 
+
+To cleanly bypass the gateway-level throttling, we configure the template to automatically substitute a massive fallback threshold of **10,000 requests per minute** when the rate limit is disabled. This passes schema validation perfectly while guaranteeing zero routing blocks at the proxy layer.
 
 ### Modified Files:
-*   [policy.yaml](file:///home/berrybytes/Desktop/01-Sandbox/codeInspector/charts/agentgateway/templates/policy.yaml): Wrapped the traffic/rate-limiting block inside a conditional check:
+*   [policy.yaml](file:///home/berrybytes/Desktop/01-Sandbox/codeInspector/charts/agentgateway/templates/policy.yaml):
     ```yaml
-    {{- if .Values.policy.rateLimit.enabled }}
-    traffic:
-      rateLimit:
-        local:
-          - requests: {{ .Values.policy.rateLimit.requests }}
-            unit: {{ .Values.policy.rateLimit.unit }}
-    {{- end }}
+    spec:
+      targetRefs:
+        - group: gateway.networking.k8s.io
+          kind: HTTPRoute
+          name: agentgateway-api-route
+      traffic:
+        rateLimit:
+          local:
+            - requests: {{ if .Values.policy.rateLimit.enabled }}{{ .Values.policy.rateLimit.requests }}{{ else }}10000{{ end }}
+              unit: {{ if .Values.policy.rateLimit.enabled }}{{ .Values.policy.rateLimit.unit }}{{ else }}"Minutes"{{ end }}
     ```
 *   [agentgateway/values.yaml](file:///home/berrybytes/Desktop/01-Sandbox/codeInspector/charts/agentgateway/values.yaml) & parent [values.yaml](file:///home/berrybytes/Desktop/01-Sandbox/codeInspector/values.yaml): Dispatched `enabled: false` by default:
     ```yaml
