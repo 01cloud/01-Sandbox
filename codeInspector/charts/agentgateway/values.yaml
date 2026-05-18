@@ -18,6 +18,7 @@ gateway:
 policy:
   authenticationType: "jwt"
   rateLimit:
+    enabled: false
     requests: 7
     unit: "Minutes"
 

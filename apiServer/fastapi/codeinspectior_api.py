@@ -393,6 +393,10 @@ async def validate_token(request: Request):
         
         print(f"[DEBUG SECURITY] SUCCESS: Session Verified (Key ID: {jti})")
         
+        # Enforce dynamic key-specific rate limiting
+        from ratelimit import check_rate_limit
+        await check_rate_limit(state, jti)
+        
         # Update last_used_at in background
         asyncio.create_task(update_last_used(jti))
 
