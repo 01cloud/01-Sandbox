@@ -76,7 +76,7 @@ graph TD
 
 ## 4. Sequence & Security Execution Flow
 
-When a client queries one of the individual endpoints, the following step-by-step process is executed:
+When a client queries one of the individual endpoints, the following step-by-step process is executed:   
 
 ```mermaid
 sequenceDiagram
