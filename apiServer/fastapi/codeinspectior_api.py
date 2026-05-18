@@ -321,20 +321,20 @@ async def validate_token(request: Request):
             print(f"[DEBUG SECURITY] JWT Decode ERROR: {str(e)}")
             raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
         
-        # 5. --- IDENTITY BRIDGE ---
-        # If this is an Auth0 token (browser session), map it to the user's REAL Developer Key in Postgres
+        # 5. --- IDENTITY BRIDGE & ACTIVE KEY ROTATION ---
+        # Map rate limits dynamically to active un-limited key tokens in the user's pool
         jti = payload.get("jti")
         user_id = payload.get("sub")
         
-        # --- IDENTITY BRIDGE ---
         is_management_route = any(request.url.path.startswith(p) for p in ["/v1/api-keys", "/v1/generate-api", "/v1/revoke-api-key"])
         
-        if issuer != conf["issuer"]:
-            if is_management_route:
+        if user_id:
+            # If it's an Auth0 session on a management route, bypass mapping to let keys load/revoke
+            if issuer != conf["issuer"] and is_management_route:
                 print(f"[Security] Allowing management operation for Auth0 user: {user_id}")
                 return payload
             
-            print(f"[Identity Bridge] Mapping Auth0 user {user_id} to an active Developer API Key...")
+            print(f"[Identity Bridge] Mapping active developer key pool for User: {user_id}...")
             now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             conn = state.get_db_conn()
             cursor = conn.cursor()
@@ -356,10 +356,15 @@ async def validate_token(request: Request):
                         selected_jti = candidate_jti
                         break
                 
-                # Fallback to the primary key if all are rate-limited
-                jti = selected_jti or rows[0][0]
-                print(f"[Identity Bridge] SUCCESS: Auth0 session now acting as Developer Key ID: {jti}")
-            else:
+                # If we found an un-limited key in the user's pool, dynamically map the call to it!
+                if selected_jti:
+                    jti = selected_jti
+                elif not jti:
+                    jti = rows[0][0]
+                
+                print(f"[Identity Bridge] SUCCESS: Auth0/API-Key mapped to active Key ID: {jti}")
+            elif not jti:
+                # Auth0 session without any API keys created
                 print(f"[Identity Bridge] WARNING: No active/non-expired Developer Key found for {user_id}")
                 raise HTTPException(status_code=403, detail="No active or non-expired Developer API Key found. Please create a NEW API Key to enable sandbox operations.")
 
