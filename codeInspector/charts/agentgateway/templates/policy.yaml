@@ -13,5 +13,5 @@ spec:
     rateLimit:
       local:
         - requests: 7
-          unit: MINUTE
+          unit: Minutes
 {{- end }}
