@@ -47,20 +47,25 @@ These helpers are shared between the aggregate endpoints (`/health` and `/v1/hea
 
 ### A. Aggregate Checks (Liveness & Readiness Probes)
 *   **Public Route**: `/health`
-    *   **Full URL**: `https://api-sandbox.01security.com/health`
+    *   **External Production URL**: `https://sandbox.01security.com/health` (resolved externally via proxy/routing)
+    *   **Internal Gateway URL**: `https://api-sandbox.01security.com/health` (direct cluster route)
 *   **Protected Route**: `/v1/health`
-    *   **Full URL**: `https://api-sandbox.01security.com/v1/health` (requires Authorization JWT header)
+    *   **External Production URL**: `https://sandbox.01security.com/v1/health`
+    *   **Internal Gateway URL**: `https://api-sandbox.01security.com/v1/health` (requires Authorization JWT header)
 *   **Behavior**: Evaluates all dependencies sequentially. If any dependency is offline, the endpoint returns `500 Internal Server Error` and sets the global state to `unhealthy`.
 
 ### B. Secured Individual Sub-Dependency Checks
 *   **Required Header**: `Authorization: Bearer <DEVELOPER_API_KEY>`
 *   **Endpoints**:
     *   **PostgreSQL**: `GET /api/v1/01sbx/postgresql/health`
-        *   **Full URL**: `https://api-sandbox.01security.com/api/v1/01sbx/postgresql/health`
+        *   **External Production URL**: `https://sandbox.01security.com/api/v1/01sbx/postgresql/health`
+        *   **Internal Gateway URL**: `https://api-sandbox.01security.com/api/v1/01sbx/postgresql/health`
     *   **Redis (Cache & Queue)**: `GET /api/v1/01sbx/redis/health`
-        *   **Full URL**: `https://api-sandbox.01security.com/api/v1/01sbx/redis/health`
+        *   **External Production URL**: `https://sandbox.01security.com/api/v1/01sbx/redis/health`
+        *   **Internal Gateway URL**: `https://api-sandbox.01security.com/api/v1/01sbx/redis/health`
     *   **01Sandbox Core Engine**: `GET /api/v1/01sbx/01sandbox/health`
-        *   **Full URL**: `https://api-sandbox.01security.com/api/v1/01sbx/01sandbox/health`
+        *   **External Production URL**: `https://sandbox.01security.com/api/v1/01sbx/01sandbox/health`
+        *   **Internal Gateway URL**: `https://api-sandbox.01security.com/api/v1/01sbx/01sandbox/health`
 
 ---
 
@@ -179,5 +184,43 @@ Within your RKE2 cluster, the local **`kubelet`** agent on each node uses our `/
                 failureThreshold: 3
     ```
 2.  **External Monitoring Alerts**:
-    *   **Aggregate Probe (`https://sandbox.01security.com/health`)**: Point external status checkers (e.g., UptimeRobot, Prometheus Blackbox) here to monitor high-level availability.
-    *   **Service-Level Probes (`/api/v1/01sbx/[postgresql/redis/01sandbox]/health`)**: Map alerts from these secured endpoints directly to your engineering notification systems (Slack, PagerDuty) to pin down precisely which microservice went offline before the entire cluster is impacted.
+    *   **Aggregate Probe**: Point external status checkers (e.g., UptimeRobot, Prometheus Blackbox) to the backend aggregate route `https://api-sandbox.01security.com/health` to monitor high-level availability.
+    *   **Service-Level Probes**: Map alerts from secure endpoints (like `https://api-sandbox.01security.com/api/v1/01sbx/postgresql/health`) directly to your engineering notification systems (Slack, PagerDuty) to pinpoint precisely which microservice went offline.
+
+---
+
+## 7. Troubleshooting: Frontend vs. Backend Routing
+
+When interacting with the health suites via a browser, you may experience a **"404 Oops! Page not found"** error. This section explains why this occurs and how to configure cross-routing properly.
+
+### Why typing `sandbox.01security.com/health` in Chrome displays a 404 Page
+
+1.  **Frontend React Client**: `sandbox.01security.com` hosts your external **React/Vite Website (SPA)**. When a user navigates to `/health` directly in the browser address bar, the frontend React Router attempts to capture the path client-side. Since there is no physical page corresponding to `/health` in your frontend routing, the React client displays its own custom frontend 404 page.
+2.  **FastAPI Backend Domain**: The actual API server is exposed on the dedicated cluster domain **`api-sandbox.01security.com`**. Hitting the URL `https://api-sandbox.01security.com/health` queries the API server directly, returning the expected JSON payload.
+
+### How to configure `sandbox.01security.com/health` to proxy to the health checks
+
+If you want the production user-facing domain to serve the JSON health check or display a health status, choose one of the following methods:
+
+#### Method A: Custom External Proxy (Nginx / Cloudflare Pages / Vercel Redirects)
+If your frontend `sandbox.01security.com` is hosted on a custom web server, add a proxy rewrite or a redirect rule forwarding `/health` requests upstream to the cluster API:
+*   **Nginx Proxy Rule (for custom frontend servers)**:
+    ```nginx
+    location /health {
+        proxy_pass https://api-sandbox.01security.com/health;
+        proxy_set_header Host $host;
+    }
+    ```
+*   **Cloudflare Rules**: Create a redirect rule mapping `sandbox.01security.com/health` -> `https://api-sandbox.01security.com/health`.
+
+#### Method B: React Frontend Status Page (⭐ FULLY IMPLEMENTED)
+We have implemented a premium, high-fidelity real-time status dashboard under the `/health` route in the website frontend:
+*   **Component File**: [Health.tsx](file:///home/berrybytes/Desktop/01-Sandbox/z1sandbox-website/src/pages/Health.tsx)
+*   **Route Registration**: [App.tsx](file:///home/berrybytes/Desktop/01-Sandbox/z1sandbox-website/src/App.tsx)
+
+**Features of the Status Dashboard**:
+1.  **State-of-the-Art Design**: Combines dark-mode friendly card grids with glowing indicator rings for active pings and smooth borders that transition HSL color states dynamically.
+2.  **Lucide Icons**: Integrates intuitive visual helpers for each dependency (e.g. Database for PostgreSQL, Zap for Redis Cache, Server for queues, and CPU for OpenSandbox).
+3.  **Framer Motion Transitions**: Uses liquid-smooth slide and scale-fade micro-animations to shift between loading, success, and error states.
+4.  **Auto-Refresh Engine**: Polls `https://api-sandbox.01security.com/health` every 30 seconds to keep metrics completely in sync, including a manual rotating "Refresh" trigger.
+5.  **Fail-Safe Connection Handler**: If CORS or network firewalls block direct connection, it gracefully switches to an explanatory error state offering a copy-to-clipboard handler for the cluster API.

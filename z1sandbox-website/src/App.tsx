@@ -13,6 +13,7 @@ import Privacy from "./pages/Privacy.tsx";
 import Terms from "./pages/Terms.tsx";
 import NotFound from "./pages/NotFound.tsx";
 import Dashboard from "./pages/Dashboard.tsx";
+import Health from "./pages/Health.tsx";
 import CookieBanner from "./components/CookieBanner.tsx";
 import { Auth0Provider } from "@auth0/auth0-react";
 import { useNavigate } from "react-router-dom";
@@ -71,6 +72,7 @@ const App = () => (
                 <Route path="/contact" element={<Contact />} />
                 <Route path="/privacy" element={<Privacy />} />
                 <Route path="/terms" element={<Terms />} />
+                <Route path="/health" element={<Health />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </main>
