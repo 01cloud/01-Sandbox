@@ -27,7 +27,7 @@ import bleach
 
 # Modular Imports
 from models import (
-    RunRequest, RunResponse, StatusResponse, 
+    RunRequest, RunResponse, StatusResponse, HealthResponse,
     CreateSandboxRequest, SandboxResponse,
     ScanJobRequest, ScanJobResponse,
     GenerateAPIResponse, APIKeyCreateRequest,
@@ -619,18 +619,84 @@ async def get_remote_jwks(url: str):
 
 
 
-@app.get("/health", response_model=StatusResponse, summary="Retrieve active connection tracking properties", tags=["System"])
-def health():
-    """Confirms running state natively mapping logic checks."""
-    return StatusResponse(
+@app.get("/health", response_model=HealthResponse, summary="Retrieve active connection tracking properties", tags=["System"])
+async def health(response: Response):
+    """
+    Perform a lightweight and production-safe health check on all critical internal and external dependencies.
+    Returns 200 OK if all checks pass, and 500 Internal Server Error if any critical dependency fails.
+    """
+    db_healthy = False
+    db_details = ""
+    
+    # 1. Database Check
+    try:
+        conn = state.get_db_conn()
+        cursor = conn.cursor()
+        cursor.execute("SELECT 1;")
+        cursor.fetchone()
+        conn.close()
+        db_healthy = True
+        db_details = "PostgreSQL" if state.use_postgres else "SQLite"
+    except Exception as e:
+        db_details = f"Database error: {str(e)}"
+
+    # 2. Redis Cache Check
+    cache_healthy = True
+    cache_details = "Disabled"
+    if state.use_redis:
+        try:
+            if state.redis_client and state.redis_client.ping():
+                cache_healthy = True
+                cache_details = "Redis"
+            else:
+                cache_healthy = False
+                cache_details = "Redis client connection failed"
+        except Exception as e:
+            cache_healthy = False
+            cache_details = f"Redis error: {str(e)}"
+
+    # 3. Upstream OpenSandbox Service Check
+    sandbox_healthy = False
+    try:
+        sandbox_healthy = state.backend.health_check()
+        sandbox_details = f"Backend name: {state.backend.name}"
+    except Exception as e:
+        sandbox_details = f"Upstream error: {str(e)}"
+
+    # Calculate overall health status
+    # Database and Upstream Sandbox are critical dependencies.
+    # Redis cache is critical if enabled.
+    overall_healthy = db_healthy and sandbox_healthy
+    if state.use_redis:
+        overall_healthy = overall_healthy and cache_healthy
+
+    status_code = status.HTTP_200_OK if overall_healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+    response.status_code = status_code
+
+    return HealthResponse(
+        status="healthy" if overall_healthy else "unhealthy",
         backend=state.backend.name,
-        healthy=state.backend.health_check(),
+        healthy=overall_healthy,
+        dependencies={
+            "database": {
+                "status": "healthy" if db_healthy else "unhealthy",
+                "details": db_details
+            },
+            "cache": {
+                "status": "healthy" if cache_healthy else "unhealthy",
+                "details": cache_details
+            },
+            "opensandbox": {
+                "status": "healthy" if sandbox_healthy else "unhealthy",
+                "details": sandbox_details
+            }
+        }
     )
 
-@app.get("/v1/health", response_model=StatusResponse, summary="Retrieve active connection tracking properties (V1)", tags=["System"], dependencies=[Depends(validate_token)])
-def health_v1():
+@app.get("/v1/health", response_model=HealthResponse, summary="Retrieve active connection tracking properties (V1)", tags=["System"], dependencies=[Depends(validate_token)])
+async def health_v1(response: Response):
     """Alias for /health scoped to /v1 for gateway compatibility."""
-    return health()
+    return await health(response)
 
 
 @app.post("/run", response_model=RunResponse, summary="Dispatch synchronous script explicitly", tags=["System"])

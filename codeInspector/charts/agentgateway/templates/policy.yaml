@@ -12,8 +12,8 @@ spec:
   traffic:
     rateLimit:
       local:
-        tokenBucket:
-          maxTokens: 7
-          tokensPerFill: 5
-          fillInterval: 60s
+        - tokenBucket:
+            maxTokens: 7
+            tokensPerFill: 5
+            fillInterval: 60s
 {{- end }}
