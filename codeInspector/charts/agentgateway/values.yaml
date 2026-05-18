@@ -17,6 +17,9 @@ gateway:
 
 policy:
   authenticationType: "jwt"
+  rateLimit:
+    requests: 7
+    unit: "Minutes"
 
 secret:
   signingKey: "default-signing-secret-change-me"

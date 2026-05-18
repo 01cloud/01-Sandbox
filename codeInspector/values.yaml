@@ -35,6 +35,9 @@ agentgateway:
   policy:
     authenticationType: "jwt"
     jwtMode: "Strict"
+    rateLimit:
+      requests: 7
+      unit: "Minutes"
 
 
 ################################################################

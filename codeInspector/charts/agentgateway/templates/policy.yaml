@@ -12,6 +12,6 @@ spec:
   traffic:
     rateLimit:
       local:
-        - requests: 7
-          unit: Minutes
+        - requests: {{ .Values.policy.rateLimit.requests }}
+          unit: {{ .Values.policy.rateLimit.unit }}
 {{- end }}
