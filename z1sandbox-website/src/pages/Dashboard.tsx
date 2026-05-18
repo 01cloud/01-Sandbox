@@ -344,8 +344,7 @@ const Dashboard = () => {
                       </Button>
                     )}
                     <Button
-                      variant="outline"
-                      className="w-full rounded-2xl h-12 font-bold border-border/50 flex items-center gap-2 group-hover:bg-primary/5 transition-all"
+                      className="w-full bg-white/5 hover:bg-white/10 text-foreground border border-border/50 rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all"
                       onClick={() => bindAndVisit(app.id, app.documentationUrl)}
                     >
                       {app.id === "OPEN_SANDBOX" ? "Go to Application" : "View Documentation"}
