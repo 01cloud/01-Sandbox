@@ -408,15 +408,8 @@ async def validate_token(request: Request):
         print(f"[DEBUG SECURITY] SUCCESS: Session Verified (Key ID: {jti})")
         
         # Enforce dynamic key-specific rate limiting
-        # Skip rate-limiting for health check, static specs, docs, and key management operations
-        exempt_paths = ["/health", "/openapi.json", "/docs", "/redoc", "/favicon.ico", "/v1/api-keys", "/v1/generate-api", "/v1/revoke-api-key"]
-        is_exempt = any(request.url.path.endswith(p) for p in exempt_paths)
-        
-        if not is_exempt:
-            from ratelimit import check_rate_limit
-            await check_rate_limit(state, jti)
-        else:
-            print(f"[SECURITY] Bypassing rate-limiter for exempt path: {request.url.path}")
+        from ratelimit import check_rate_limit
+        await check_rate_limit(state, jti)
         
         # Update last_used_at in background
         asyncio.create_task(update_last_used(jti))
