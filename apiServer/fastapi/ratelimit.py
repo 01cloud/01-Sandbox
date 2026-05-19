@@ -33,7 +33,7 @@ async def check_rate_limit(state, jti: str):
         return
 
     # Load thresholds
-    rl_conf = rate_limit_config()
+    rl_conf = rate_limit_config()  
     requests_limit = rl_conf["requests"]
     window_secs = rl_conf["window_secs"]
 
