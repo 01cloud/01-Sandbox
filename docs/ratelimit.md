@@ -148,6 +148,24 @@ Unlike a **Fixed Window** algorithm (which resets at the beginning of each clock
 
 ## 5. Technology Stack Integration
 
+The platform leverages **PostgreSQL** and **Redis** in a highly complementary manner to ensure that rate-limiting is both persistent/consistent and ultra-fast:
+
+### A. The Role of PostgreSQL (Persistent State Store)
+PostgreSQL is the **Single Source of Truth (SSOT)** for credential authority.
+* **Active Key Validation**: When a request hits the Identity Bridge, the backend queries the `api_keys` table to retrieve all active developer keys belonging to the user (`LOWER(user_id) = LOWER(?)`).
+* **Dynamic Scaling Engine**: By retrieving the list of valid key records (including expiration datetimes), the backend dynamically constructs a pool of eligible candidate keys. This makes it possible to scale rate limits based on database records.
+* **Security Decoupling**: If a key is revoked in PostgreSQL (`is_revoked = 1`), it is instantly dropped from the candidate key pool, resulting in immediate termination of access without waiting for cached token expirations.
+
+### B. The Role of Redis (High-Speed Distributed Cache)
+Redis is the **in-memory caching engine** used to track sliding-window request timestamps and evaluate counts in real-time.
+* **Sorted Sets (ZSET)**: For each active key, a Redis ZSET is maintained under `ratelimit:{jti}` where elements are `timestamp:uuid` and scores are epoch timestamps.
+* **Why Redis is preferred over PostgreSQL for Rate Checks**:
+  - **Latency**: Querying PostgreSQL on every incoming request would introduce high database latency and connection pool exhaustion under heavy traffic. Redis handles thousands of operations per second with sub-millisecond latency.
+  - **Cluster Synchronization**: Redis coordinates rate-limiting states globally across multiple API Server pod replicas in a Kubernetes cluster, preventing split-brain bypasses.
+  - **Self-Healing TTLs**: Redis keys are set to auto-expire (`EXPIRE`) after `window_secs * 2`, ensuring old, unused rate-limiting logs are automatically cleared from memory.
+
+### C. Storage Integration Matrix
+
 | Feature | Production Mode (`use_redis = True`) | Fallback / Local Mode (`use_redis = False`) |
 | :--- | :--- | :--- |
 | **Sliding Window Storage** | **Redis Sorted Sets (ZSET)** under `ratelimit:{jti}` keys. Members are `timestamp:uuid` and scores are epoch timestamps. | Local dictionary (`state.local_rate_limits`) mapping `jti` to lists of float timestamps. |
