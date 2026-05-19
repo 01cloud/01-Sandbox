@@ -335,34 +335,58 @@ async def validate_token(request: Request):
                 return payload
             
             print(f"[Identity Bridge] Mapping active developer key pool for User: {user_id}...")
-            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             conn = state.get_db_conn()
             cursor = conn.cursor()
             query = """
-                SELECT id FROM api_keys 
-                WHERE user_id = %s AND is_revoked = 0 AND expires_at > %s
-                ORDER BY created_at DESC
-            """ if state.use_postgres else "SELECT id FROM api_keys WHERE user_id = ? AND is_revoked = 0 AND expires_at > ? ORDER BY created_at DESC"
-            cursor.execute(query, (user_id, now_iso))
+                SELECT id, expires_at FROM api_keys 
+                WHERE LOWER(user_id) = LOWER(%s) AND is_revoked = 0
+            """ if state.use_postgres else "SELECT id, expires_at FROM api_keys WHERE LOWER(user_id) = LOWER(?) AND is_revoked = 0"
+            cursor.execute(query, (user_id,))
             rows = cursor.fetchall()
             conn.close()
             
-            if rows:
+            print(f"[Identity Bridge] Database query returned {len(rows)} potential keys for User {user_id}")
+            
+            active_keys = []
+            now = datetime.datetime.now(datetime.UTC)
+            for row in rows:
+                k_id, exp_str = row[0], row[1]
+                try:
+                    # Robust timezone-aware ISO date parsing
+                    from datetime import datetime as dt, timezone
+                    exp_dt = dt.fromisoformat(exp_str.replace("Z", "+00:00"))
+                    if exp_dt.tzinfo is None:
+                        exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+                    
+                    if exp_dt > now:
+                        active_keys.append(k_id)
+                        print(f"  -> Key {k_id} is ACTIVE (expires: {exp_str})")
+                    else:
+                        print(f"  -> Key {k_id} is EXPIRED (expires: {exp_str})")
+                except Exception as ex:
+                    print(f"  -> Error parsing expiration '{exp_str}' for Key {k_id}: {ex}")
+                    # Fallback string comparison
+                    if exp_str > now.isoformat():
+                        active_keys.append(k_id)
+                        print(f"  -> Key {k_id} parsed via fallback (expires: {exp_str})")
+            
+            if active_keys:
                 from ratelimit import is_key_rate_limited
                 selected_jti = None
-                for row in rows:
-                    candidate_jti = row[0]
-                    if not is_key_rate_limited(state, candidate_jti):
+                for candidate_jti in active_keys:
+                    limited = is_key_rate_limited(state, candidate_jti)
+                    print(f"  -> Key {candidate_jti} rate limit check: limited={limited}")
+                    if not limited:
                         selected_jti = candidate_jti
                         break
                 
                 # If we found an un-limited key in the user's pool, dynamically map the call to it!
                 if selected_jti:
                     jti = selected_jti
-                elif not jti:
-                    jti = rows[0][0]
-                
-                print(f"[Identity Bridge] SUCCESS: Auth0/API-Key mapped to active Key ID: {jti}")
+                    print(f"[Identity Bridge] SUCCESS: Auth0/API-Key mapped to active non-limited Key ID: {jti}")
+                else:
+                    jti = active_keys[0]
+                    print(f"[Identity Bridge] WARNING: All active developer keys are rate limited. Falling back to key ID: {jti}")
             elif not jti:
                 # Auth0 session without any API keys created
                 print(f"[Identity Bridge] WARNING: No active/non-expired Developer Key found for {user_id}")
@@ -890,12 +914,12 @@ async def list_user_api_keys(payload: dict = Depends(validate_token)):
     now_iso = datetime.datetime.now(datetime.UTC).isoformat()
     if state.use_postgres:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
-        query = "SELECT * FROM api_keys WHERE user_id = %s AND expires_at > %s"
+        query = "SELECT * FROM api_keys WHERE LOWER(user_id) = LOWER(%s) AND expires_at > %s"
         cursor.execute(query, (user_id, now_iso))
     else:
         conn.row_factory = sqlite3.Row
         cursor = conn.cursor()
-        query = "SELECT * FROM api_keys WHERE user_id = ? AND expires_at > ?"
+        query = "SELECT * FROM api_keys WHERE LOWER(user_id) = LOWER(?) AND expires_at > ?"
         cursor.execute(query, (user_id, now_iso))
     rows = cursor.fetchall()
     conn.close()
@@ -937,7 +961,7 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
     # Check quota (Max 5 keys per user)
     conn = state.get_db_conn()
     cursor = conn.cursor()
-    query_count = "SELECT COUNT(*) FROM api_keys WHERE user_id = %s" if state.use_postgres else "SELECT COUNT(*) FROM api_keys WHERE user_id = ?"
+    query_count = "SELECT COUNT(*) FROM api_keys WHERE LOWER(user_id) = LOWER(%s)" if state.use_postgres else "SELECT COUNT(*) FROM api_keys WHERE LOWER(user_id) = LOWER(?)"
     cursor.execute(query_count, (user_id,))
     count = cursor.fetchone()[0]
     conn.close()
