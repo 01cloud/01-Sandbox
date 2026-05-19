@@ -186,3 +186,28 @@ This script validates:
 2.  **Strict Isolation**: Proving that rate-limiting `Key A` does **not** block `Key B`.
 3.  **Sliding Windows**: Ensuring requests are restored automatically after the window expires.
 4.  **Path Routing Enforcements**: Proving that `/openapi.json` and background key management calls correctly bypass the rate-limiter.
+
+---
+
+## 7. Architectural Decisions: Gateway vs. API Server
+
+A frequent engineering question is: *Why can't the `agentgateway` enforce this rate-limiting directly at the Ingress Edge?*
+
+Enforcing dynamic, key-specific sliding-window rate limiting at the ingress gateway layer is highly discouraged due to the following technical constraints:
+
+### A. Lack of Database Integration (PostgreSQL)
+* **The Constraint**: The `agentgateway` is a lightweight, ultra-high-speed reverse proxy (built on Envoy). It does **not** maintain connection pools or have drivers to query the central PostgreSQL/SQLite database.
+* **The Impact**: To perform active key validation and rotation, the system must query PostgreSQL (`SELECT id FROM api_keys WHERE LOWER(user_id) = LOWER(?) AND is_revoked = 0`). Embedding SQL query drivers at the Ingress Edge is a major security vulnerability and performance anti-pattern.
+
+### B. Lack of Custom Logic Runtime
+* **The Constraint**: Ingress proxies match requests using simple declarative rules (e.g. headers, request paths, regex). They do **not** run a dynamic runtime capable of procedurally evaluating variables, handling loops, or executing timezone-aware date logic.
+* **The Impact**: The complex **Identity Bridge** must dynamically check every candidate key in the user's pool, verify its expiration date in UTC, and route the call to the first available non-rate-limited slot. This procedural iteration requires the Python/FastAPI execution layer.
+
+### C. Context & Path Awareness
+* **The Constraint**: Gateways are blind to background application state.
+* **The Impact**: In the API Server, we easily exclude assets and specs (like `/openapi.json`) to prevent double-depletion of rate-limit slots on single button clicks. Managing such micro-path exceptions at the proxy layer results in highly complex, fragile route configurations that are prone to breakage during API upgrades.
+
+### Architectural Division of Labor
+* **Agent Gateway (Proxy Ingress)**: Best for **structural perimeter protection** (e.g. flat rate limits of 10,000 requests/min to protect the cluster from raw DDoS/network flooding attacks).
+* **API Server (Application Brain)**: Best for **business-logic-aware rate limiting** (e.g. dynamic developer key pools, active user rotation, sliding window verification, and dynamic Retry-After computation).
+
