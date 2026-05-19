@@ -433,7 +433,7 @@ async def validate_token(request: Request):
         
         # Enforce dynamic key-specific rate limiting only on Quick Scan and View Documentation actions
         path = request.url.path
-        is_documentation = path.endswith("/docs") or path.endswith("/openapi.json")
+        is_documentation = path.endswith("/docs")
         is_quick_scan = path == "/v1/scan-jobs" or path.endswith("/scan-jobs")
         
         if is_documentation or is_quick_scan:
