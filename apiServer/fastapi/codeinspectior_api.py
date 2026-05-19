@@ -407,9 +407,15 @@ async def validate_token(request: Request):
         
         print(f"[DEBUG SECURITY] SUCCESS: Session Verified (Key ID: {jti})")
         
-        # Enforce dynamic key-specific rate limiting
-        from ratelimit import check_rate_limit
-        await check_rate_limit(state, jti)
+        # Enforce dynamic key-specific rate limiting only on Quick Scan and View Documentation actions
+        path = request.url.path
+        is_documentation = path.endswith("/docs") or path.endswith("/openapi.json")
+        is_quick_scan = path == "/v1/scan-jobs" or path.endswith("/scan-jobs")
+        
+        if is_documentation or is_quick_scan:
+            print(f"[Rate Limit] Enforcing sliding window rate limit for action on path: {path}")
+            from ratelimit import check_rate_limit
+            await check_rate_limit(state, jti)
         
         # Update last_used_at in background
         asyncio.create_task(update_last_used(jti))
