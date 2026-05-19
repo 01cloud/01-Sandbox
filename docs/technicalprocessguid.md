@@ -12,6 +12,8 @@ sequenceDiagram
     participant Auth0 as Auth0 (Identity)
     participant GW as Agent Gateway (Edge)
     participant API as API Server (Brain)
+    participant DB as Central Database
+    participant Cache as Redis Cache / Local Dict
     participant OSS as OpenSandbox (Lifecycle)
     participant POD as Scanner Pod (gVisor)
 
@@ -28,14 +30,30 @@ sequenceDiagram
     Note left of API: Platform JWT
     end
 
+    rect rgb(220, 230, 242)
+    Note over User, Cache: Phase 2: Verification, Lockdown & Rate Limiting
     User->>GW: Click "Execute Audit" (Request + Cookie)
-    GW->>API: Promote & Verify Identity
+    GW->>API: Forward request with promoted headers
+    API->>API: Identity Lockdown (Cookie & Key sub cross-match)
+    API->>DB: Query user's key pool (case-insensitive LOWER)
+    DB-->>API: Returns Key Pool: [Key_A, Key_B, ...]
+    loop For each Key
+        API->>Cache: Check active sliding window count (now - 60s)
+        Cache-->>API: Returns count
+    end
+    API->>API: Route call dynamically to first non-limited Key
+    API->>Cache: Append current timestamp to ZSET (Pre-checked)
+    end
+
+    rect rgb(240, 240, 240)
+    Note over API, POD: Phases 3 & 4: Sandbox & Execution
     API->>OSS: Orchestrate Job (PVC Init)
     OSS->>POD: Provision Isolated Sandbox
     POD->>POD: Parallel Security Scan
     POD-->>OSS: Write Report to PVC
     OSS-->>API: Result Aggregation
     API-->>User: Deliver Sync JSON Report
+    end
 ```
 
 ---
@@ -117,6 +135,52 @@ if auth0_cookie and auth_header:
     apikey_sub = apikey_payload.get("sub")
     if cookie_sub != apikey_sub:
         raise HTTPException(status_code=403, detail="Identity Lockdown: User mismatch")
+```
+
+### 3. Dynamic Key-Specific Rate Limiting (Sliding Window & Key Rotation)
+In addition to Identity Lockdown, the API Server protects system resources by enforcing a highly granular **Sliding Window Rate Limiting** system dynamically rotated across the user's active developer key pool.
+
+#### A. The Mechanics of the Sliding Window
+Instead of rigid fixed-minute windows (which suffer from boundary reset vulnerabilities), the platform tracks exact timestamps inside a rolling 60-second window `[now - 60, now]`.
+*   **Atomic Cleanup**: Old timestamps are removed dynamically from the storage engine (Redis ZSETs score cleanups or float timestamp list slicing) before evaluating the count.
+*   **Pre-Check Protection (Anti-Tarpitting)**: The system checks the current count *before* adding a new timestamp. If a request is blocked (429), no timestamp is recorded, preventing aggressive spamming from indefinitely extending the user's cooldown window.
+*   **Dynamic Retry Calculation**: When blocked, a `Retry-After` header is calculated dynamically, telling the client precisely how many seconds remain until the oldest timestamp falls out of the active window.
+
+#### B. The Identity Bridge & Key Pool Rotation
+If a user creates multiple API keys, the Identity Bridge dynamically rotates incoming requests across all active, non-expired keys:
+1.  **Extraction & Database Check**: The system extracts the user's Auth0 ID (`sub`) and queries the database case-insensitively using `LOWER(user_id) = LOWER(?)`.
+2.  **Robust Expiration Filters**: It parses dates safely in Python utilizing UTC-aware datetime parsing (`datetime.fromisoformat`) to filter out expired keys.
+3.  **Rotation Search**: It loops through the candidate keys and calls `is_key_rate_limited(state, key)`. It binds the request to the first key with available quota.
+4.  **Resulting Limit**: The user's total allowed speed scales linearly with their keys (e.g., 2 keys = 14 requests/min, 5 keys = 35 requests/min).
+
+#### C. Prevention of Double-Depletion (1-Slot Button Clicks)
+To ensure the rate limit corresponds exactly to the number of clicks a user makes in the UI:
+*   **Exclusion List**: Path routing excludes background API queries such as `/openapi.json` or health checks from the rate limiter.
+*   **Action Specific**: Only the main document index page (`/docs`) and the scan trigger (`POST /v1/scan-jobs`) consume rate-limit slots. One click on "View Documentation" or "Quick Scan" consumes exactly **1 slot**, ensuring a flawless 7 actions per minute per key.
+
+**Reference Code: Dynamic Sliding Window Verification** (`apiServer/fastapi/ratelimit.py`)
+```python
+# Sliding Window Check with Atomic Pre-Check and Dynamic Retry-After
+async def check_rate_limit(state, jti: str):
+    rl_conf = rate_limit_config()
+    requests_limit = rl_conf["requests"]
+    window_secs = rl_conf["window_secs"]
+    
+    # 1. Pipeline atomic fetch & cleanup
+    current_count = await get_sliding_window_count(state, jti, window_secs)
+    
+    # 2. Quota validation before commit (Prevents Tarpitting)
+    if current_count >= requests_limit:
+        oldest_ts = await get_oldest_timestamp(state, jti)
+        retry_after = max(1, int(window_secs - (time.time() - oldest_ts)))
+        raise HTTPException(
+            status_code=429,
+            detail={"error": "Rate limit exceeded", "jti": jti, "retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)}
+        )
+    
+    # 3. Safe commit on success
+    await record_timestamp(state, jti)
 ```
 
 ---
