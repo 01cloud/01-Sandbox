@@ -26,39 +26,35 @@ sequenceDiagram
     Developer->>GW: Click "Quick Scan" / "Docs" (with Bearer Token or Session Cookie)
     GW->>API: Proxy Request (transfers Token / Cookies)
     
-    rect rgb(20, 24, 33)
-        note right of API: validate_token Middleware
-        API->>API: Decode Token & Identify auth0/user_id (sub)
-        
-        API->>DB: Query: Get all active keys for user (case-insensitively via LOWER)
-        DB-->>API: Returns Key Pool: [Key_A, Key_B, ...]
-        
-        loop For each Candidate Key in Pool
-            API->>Cache: Check active requests in sliding window for Candidate Key
-            Cache-->>API: Returns current request count
-            note right of API: Is count < 7 ?
-        end
-        
-        alt Found Non-Limited Key (e.g. Key_B)
-            API->>API: Map request dynamically to Key_B (jti)
-        else All Keys Rate-Limited
-            API->>API: Fallback to Key_A
-        end
+    note right of API: validate_token Middleware
+    API->>API: Decode Token & Identify auth0/user_id (sub)
+    
+    API->>DB: Query: Get all active keys for user (case-insensitively via LOWER)
+    DB-->>API: Returns Key Pool: [Key_A, Key_B, ...]
+    
+    loop For each Candidate Key in Pool
+        API->>Cache: Check active requests in sliding window for Candidate Key
+        Cache-->>API: Returns current request count
+        note right of API: Is count < 7 ?
+    end
+    
+    alt Found Non-Limited Key (e.g. Key_B)
+        API->>API: Map request dynamically to Key_B (jti)
+    else All Keys Rate-Limited
+        API->>API: Fallback to Key_A
     end
 
-    rect rgb(30, 20, 30)
-        note right of API: ratelimit.py Enforcement
-        API->>Cache: Retrieve active window count for Key
-        Cache-->>API: Return count & oldest request timestamp
+    note right of API: ratelimit.py Enforcement
+    API->>Cache: Retrieve active window count for Key
+    Cache-->>API: Return count & oldest request timestamp
 
-        alt Count < 7
-            API->>Cache: Append current timestamp to Key's window
-            API->>API: Process actual operation (Scan Code / Render Docs)
-            API-->>Developer: 200 OK Response
-        else Count >= 7 (Blocked)
-            API->>API: Calculate Retry-After (60 - oldest request age)
-            API-->>Developer: 429 Too Many Requests (Retry-After Header)
-        end
+    alt Count < 7
+        API->>Cache: Append current timestamp to Key's window
+        API->>API: Process actual operation (Scan Code / Render Docs)
+        API-->>Developer: 200 OK Response
+    else Count >= 7 (Blocked)
+        API->>API: Calculate Retry-After (60 - oldest request age)
+        API-->>Developer: 429 Too Many Requests (Retry-After Header)
     end
 ```
 

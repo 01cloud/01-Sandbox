@@ -20,7 +20,6 @@ sequenceDiagram
     User->>Auth0: Login (Obtain Passport)
     Auth0-->>User: JWT
     
-    rect rgb(240, 240, 240)
     Note over User, API: Phase 1: Ingress & Provisioning
     User->>GW:  
     Note right of User: Request + Cookie
@@ -28,9 +27,7 @@ sequenceDiagram
     Note right of GW: Promote & Create API Key
     API->>User:  
     Note left of API: Platform JWT
-    end
 
-    rect rgb(220, 230, 242)
     Note over User, Cache: Phase 2: Verification, Lockdown & Rate Limiting
     User->>GW: Click "Execute Audit" (Request + Cookie)
     GW->>API: Forward request with promoted headers
@@ -43,9 +40,7 @@ sequenceDiagram
     end
     API->>API: Route call dynamically to first non-limited Key
     API->>Cache: Append current timestamp to ZSET (Pre-checked)
-    end
 
-    rect rgb(240, 240, 240)
     Note over API, POD: Phases 3 & 4: Sandbox & Execution
     API->>OSS: Orchestrate Job (PVC Init)
     OSS->>POD: Provision Isolated Sandbox
@@ -53,7 +48,6 @@ sequenceDiagram
     POD-->>OSS: Write Report to PVC
     OSS-->>API: Result Aggregation
     API-->>User: Deliver Sync JSON Report
-    end
 ```
 
 ---
