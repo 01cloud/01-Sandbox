@@ -101,9 +101,17 @@ To cleanly bypass the gateway-level throttling, we configure the Envoy policy te
 All rate-limiting logical checks, sliding window operations, and memory tracking are encapsulated in the dedicated module [ratelimit.py](file:///home/berrybytes/Desktop/01-Sandbox/apiServer/fastapi/ratelimit.py).
 
 ### Configurations & Thresholds
-Limits are loaded dynamically from environment variables, allowing fast tuning without rebuilding Docker images:
+Limits are loaded dynamically from environment variables, which are driven directly through the main [values.yaml](file:///home/berrybytes/Desktop/01-Sandbox/codeInspector/values.yaml) inside the `codeInspector` directory under the `apiServer.configMap` section:
+```yaml
+apiServer:
+  configMap:
+    RATE_LIMIT_REQUESTS: "7"
+    RATE_LIMIT_WINDOW_SECS: "60"
+```
 *   `RATE_LIMIT_REQUESTS` (Default: `7`): Maximum number of requests allowed in a window.
 *   `RATE_LIMIT_WINDOW_SECS` (Default: `60` seconds): Duration of the sliding window.
+
+This enables seamless, cluster-wide rate-limit updates without rebuilding the application Docker image or modifying the source code!
 
 ---
 
