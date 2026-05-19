@@ -11,7 +11,7 @@ def backend_mappings() -> dict[str, str]:
         "opensandbox": os.environ.get("BACKEND_URL_OPENSANDBOX", "http://opensandbox-server:80"),
     }
     
-    # Allow override/extension via JSON string
+    # Allow override/extension via JSON string Test
     custom_json = os.environ.get("BACKEND_MAPPINGS_JSON")
     if custom_json:
         try:
