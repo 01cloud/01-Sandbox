@@ -79,27 +79,13 @@ jobs:
       REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
       REGISTRY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
 
-  deploy:
-    name: Deploy
+  update-values:
+    name: Update Values
     needs: [release-please, filter, build]
     if: |
       always() &&
       needs.release-please.outputs.release_created == 'true' &&
       needs.build.result != 'failure'
-    secrets: inherit
-    uses: 01cloud/actions/.github/workflows/deploy-helm.yaml@main
-    with:
-      release-name: ${{ vars.HELM_RELEASE_NAME }}
-      namespace: ${{ vars.K8S_NAMESPACE }}
-      chart-path: ${{ vars.HELM_CHART_PATH }}
-      values-files: ${{ vars.HELM_VALUES_FILES }}
-      atomic: true
-      timeout: 5m0s
-
-  update-values:
-    name: Update Values
-    needs: [release-please, filter, deploy]
-    if: needs.deploy.result == 'success'
     secrets: inherit
     uses: 01cloud/actions/.github/workflows/update-values.yaml@main
     with:
@@ -112,3 +98,20 @@ jobs:
           {"name": "server",     "changed": "${{ needs.filter.outputs.server }}",     "values-key": "opensandbox.server.image.tag",      "value": "__VERSION__"},
           {"name": "controller", "changed": "${{ needs.filter.outputs.controller }}", "values-key": "opensandbox.controller.image.tag",  "value": "__VERSION__"}
         ]
+
+  deploy:
+    name: Deploy
+    needs: [release-please, filter, update-values]
+    if: |
+      always() &&
+      needs.release-please.outputs.release_created == 'true' &&
+      needs.update-values.result == 'success'
+    secrets: inherit
+    uses: 01cloud/actions/.github/workflows/deploy-helm.yaml@main
+    with:
+      release-name: ${{ vars.HELM_RELEASE_NAME }}
+      namespace: ${{ vars.K8S_NAMESPACE }}
+      chart-path: ${{ vars.HELM_CHART_PATH }}
+      values-files: ${{ vars.HELM_VALUES_FILES }}
+      atomic: true
+      timeout: 5m0s
