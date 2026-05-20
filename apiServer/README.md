@@ -1,5 +1,5 @@
 # Sandbox API
-##
+
 A FastAPI-based code execution service that supports **hot-swappable sandbox backends** — switch between Mock, Subprocess, Docker, Firecracker, or E2B without changing a single client request.
 
 ---
