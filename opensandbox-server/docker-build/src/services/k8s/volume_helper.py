@@ -78,12 +78,14 @@ def apply_volumes_to_pod_spec(
 
             if pvc_claim_name not in pvc_to_volume_name:
                 # First use of this PVC: create one volume, use current vol.name as volume name
-                pod_volumes.append({
-                    "name": vol_name,
-                    "persistentVolumeClaim": {
-                        "claimName": pvc_claim_name,
-                    },
-                })
+                pod_volumes.append(
+                    {
+                        "name": vol_name,
+                        "persistentVolumeClaim": {
+                            "claimName": pvc_claim_name,
+                        },
+                    }
+                )
                 pvc_to_volume_name[pvc_claim_name] = vol_name
                 existing_volume_names.add(vol_name)
 
@@ -104,13 +106,15 @@ def apply_volumes_to_pod_spec(
             # Note: hostPath is node-local and not recommended for production
             host_path = vol.host.path
 
-            pod_volumes.append({
-                "name": vol_name,
-                "hostPath": {
-                    "path": host_path,
-                    "type": "DirectoryOrCreate",
-                },
-            })
+            pod_volumes.append(
+                {
+                    "name": vol_name,
+                    "hostPath": {
+                        "path": host_path,
+                        "type": "DirectoryOrCreate",
+                    },
+                }
+            )
 
             mount = {
                 "name": vol_name,

@@ -33,7 +33,7 @@ The pipeline (defined in `.github/workflows/main.yml`) automates the lifecycle f
 
 ### 4. Atomic Cluster Deployment
 - **Mechanism:** Helm upgrade with dynamic overrides.
-- **Self-Healing:** 
+- **Self-Healing:**
   - Automatically clears stuck Helm locks (`pending-upgrade` secrets) before starting.
   - Uses `--rollback-on-failure` to revert to the last stable state if deployment fails.
 - **Dynamic Injections:** Only overrides image tags for components that were actually rebuilt in the current run.

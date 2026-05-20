@@ -6,7 +6,7 @@ You requested an extreme, down-to-the-metal technical breakdown of the provided 
 
 ## 1. High-Level Overview
 
-**Purpose of the Module:** 
+**Purpose of the Module:**
 `codeinspectior_api.py` (typo in original spec, but historically relevant) acts as the central Gateway/Proxy and API Identity Bridge for the CodeInspector platform. Its primary goal is not executing code itself, but rather enforcing strict authentication boundaries (via JWT/Auth0), validating requests, tracking asynchronous execution states, and transparently proxying requests directly to the deep-cluster `opensandbox-server` execution nodes.
 
 **Architectural Fit:**
@@ -65,7 +65,7 @@ import asyncio
 import uuid
 from typing import List, Dict
 ```
-- `secrets` / `base64`: Cryptographic random string/byte generation. 
+- `secrets` / `base64`: Cryptographic random string/byte generation.
 - `jwt`: Provided by `PyJWT` for decoding, verifying signatures (`RS256`), and extracting Auth0 payloads.
 - `datetime`: Manages token expirations (`exp`, `iat`) and Identity bridge timestamps.
 - `kubernetes`: Official k8s library (though arguably unused heavily in this specific file outside potential scaling/debug hooks).
@@ -143,7 +143,7 @@ async def validate_token(request: Request):
         header = jwt.get_unverified_header(token)
         kid = header.get("kid")
 ```
-- **Lines 285-288**: Bypasses signature checking solely to parse the JSON Header and Payload. This allows the system to determine *who* signed it. Is it Auth0 (`dev-axw...us.auth0.com`) or the internal system (`code-inspector`)? 
+- **Lines 285-288**: Bypasses signature checking solely to parse the JSON Header and Payload. This allows the system to determine *who* signed it. Is it Auth0 (`dev-axw...us.auth0.com`) or the internal system (`code-inspector`)?
 ```python
         if issuer and issuer.startswith("https://") and conf["auth0_domain"] in issuer:
             target_jwks = await get_remote_jwks(f"{issuer.rstrip('/')}/.well-known/jwks.json")
@@ -153,7 +153,7 @@ async def validate_token(request: Request):
         # --- IDENTITY BRIDGE ---
         if issuer != conf["issuer"]:
             if is_management_route: return payload
-            
+
             query = """SELECT id FROM api_keys WHERE user_id = %s AND is_revoked = 0 AND expires_at > %s ORDER BY created_at DESC LIMIT 1"""
             cursor.execute(query, (user_id, now_iso))
 ```
@@ -161,7 +161,7 @@ async def validate_token(request: Request):
 ```python
         if state.use_redis:
             is_valid = state.redis_client.sismember("active_api_keys", jti)
-        
+
         if not is_valid:
              query = "SELECT is_revoked, expires_at FROM api_keys WHERE id = %s"
 ```
@@ -203,7 +203,7 @@ async def create_api_key(req: APIKeyCreateRequest, payload: dict = Depends(valid
 
 ## 4. Functions and Classes
 
-- `AppState`: 
+- `AppState`:
   - *Inputs*: N/A
   - *Side effects*: Connects to remote databases directly initializing memory state.
   - *Complexity*: O(1) connection. High latency operation initially masked on cold start.
@@ -254,7 +254,7 @@ Everything passing through `/v1/sendboxes` and `/v1/scan-jobs` relies solely on 
 
 - **Fully Asynchronous (`asyncio`)**: The codebase utilizes python's `async def` pattern meticulously. It almost exclusively relies on non-blocking wrappers (`httpx.AsyncClient`).
 - **Concurrent Request Handling**: Since the server waits massive intervals (300 seconds!) for `/v1/scan-jobs` to run container tests locally, an synchronous thread implementation (`requests`) would immediately freeze Uvicorn on its 10th request holding worker queues hostage. The `async` nature allows one single CPU core to actively manage thousands of 300-second pausing TCP sessions efficiently.
-- **Performance Trade-offs (Bottlenecks)**: `sqlite3` and `psycopg2` are explicitly synchronous wrappers currently used loosely scattered. Blocking on `conn = state.get_db_conn().cursor().execute()` forces the event loop thread to natively pause context swapping briefly yielding heavy I/O waits against heavily burdened remote DB instances occasionally. 
+- **Performance Trade-offs (Bottlenecks)**: `sqlite3` and `psycopg2` are explicitly synchronous wrappers currently used loosely scattered. Blocking on `conn = state.get_db_conn().cursor().execute()` forces the event loop thread to natively pause context swapping briefly yielding heavy I/O waits against heavily burdened remote DB instances occasionally.
 
 ---
 
@@ -311,7 +311,7 @@ Because Redis locally tracks validation parameters avoiding intense disk lookup 
 
 # Extreme Technical Depth Code Analysis: Auxiliary Modules
 
-By request, the architectural breakdown continues below covering all supportive scaffolding layers residing in `apiServer/fastapi/` that power the API platform natively. 
+By request, the architectural breakdown continues below covering all supportive scaffolding layers residing in `apiServer/fastapi/` that power the API platform natively.
 
 ## Module: `backends.py` (The Strategy Layer)
 

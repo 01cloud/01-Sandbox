@@ -1,0 +1,67 @@
+repos:
+  # ==========================================
+  # Pre-commit default hooks
+  # ==========================================
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.4.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+      - id: check-added-large-files
+      - id: check-vcs-permalinks
+      - id: check-symlinks
+      - id: destroyed-symlinks
+
+  # ==========================================
+  # Golang hooks
+  # ==========================================
+  - repo: https://github.com/TekWizely/pre-commit-golang
+    rev: v1.0.0-rc.1
+    hooks:
+      - id: go-fmt
+        args: [-w]
+      - id: go-mod-tidy
+
+  # ==========================================
+  # Python formatting & linting
+  # ==========================================
+  - repo: https://github.com/psf/black
+    rev: 23.9.1
+    hooks:
+      - id: black
+        args: [--line-length=88]
+
+  - repo: https://github.com/PyCQA/isort
+    rev: 5.12.0
+    hooks:
+      - id: isort
+        args: ["--profile=black"]
+
+  - repo: https://github.com/pycqa/flake8
+    rev: 6.1.0
+    hooks:
+      - id: flake8
+        args:
+          - --extend-ignore=E203,W503,E501,F401,F811,E402,E722,F541
+
+
+  # ==========================================
+  # Gitleaks
+  # ==========================================
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.21.0
+    hooks:
+      - id: gitleaks
+        args: ["detect", "--verbose"]
+
+  # ==========================================
+  # FIXED STYLELINT HOOK (No nodeenv)
+  # ==========================================
+  - repo: local
+    hooks:
+      - id: stylelint
+        name: stylelint
+        entry: npx stylelint --fix
+        language: system
+        types: [css, scss]
+        exclude: "node_modules/|dist/|build/"

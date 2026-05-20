@@ -12,10 +12,10 @@ The health checking subsystem provides a modular, lightweight, and production-sa
 graph TD
     Client[Client / Ingress Monitor] -->|1. Public Route /health| API_Server[sandbox-api Pod]
     Client -->|2. Secure Route /api/v1/01sbx/...| Auth_Guard{FastAPI validate_token}
-    
+
     Auth_Guard -->|Unauthorized / Invalid Key| Blocked[401 Unauthorized]
     Auth_Guard -->|Authorized API Key| API_Server
-    
+
     API_Server -->|PostgreSQL Query| DB[(postgresql-service:5432)]
     API_Server -->|Redis ping/pong| Cache[(redis-service:6379)]
     API_Server -->|HTTP GET /health| Core[opensandbox-server:80]
@@ -23,7 +23,7 @@ graph TD
 
 ### Modular Architecture Design
 
-To maintain high code quality and strict separation of concerns, all health checks are encapsulated inside a standalone, dedicated [health.py](file:///home/berrybytes/Desktop/01-Sandbox/apiServer/fastapi/health.py) module. 
+To maintain high code quality and strict separation of concerns, all health checks are encapsulated inside a standalone, dedicated [health.py](file:///home/berrybytes/Desktop/01-Sandbox/apiServer/fastapi/health.py) module.
 
 The main application in [codeinspectior_api.py](file:///home/berrybytes/Desktop/01-Sandbox/apiServer/fastapi/codeinspectior_api.py) imports and mounts these routes dynamically using the **Router Factory Pattern**:
 
@@ -32,7 +32,7 @@ from health import get_health_router
 app.include_router(get_health_router(state, validate_token))
 ```
 
-This pattern injects global dependencies (the `state` and the `validate_token` security guard) into the routing namespace without importing the main app file directly inside the module, completely avoiding circular dependencies. 
+This pattern injects global dependencies (the `state` and the `validate_token` security guard) into the routing namespace without importing the main app file directly inside the module, completely avoiding circular dependencies.
 
 The core connection logic for each backend service is extracted into isolated helpers:
 *   `check_postgresql_health(state)`: Connects and issues a lightweight SQL ping to PostgreSQL.
@@ -88,7 +88,7 @@ These helpers are shared between the aggregate endpoints (`/health` and `/v1/hea
     ```python
     state.redis_client.ping()
     ```
-3.  **Evaluation**: 
+3.  **Evaluation**:
     *   If Redis replies with a literal **`PONG`**, the check passes as `"healthy"`.
     *   If the request times out or throws an error (e.g. connection refused or Out Of Memory state), the check is marked `"unhealthy"`.
 
@@ -106,7 +106,7 @@ These helpers are shared between the aggregate endpoints (`/health` and `/v1/hea
 
 ## 4. Sequence & Security Execution Flow
 
-When a client queries one of the individual endpoints, the following step-by-step process is executed:   
+When a client queries one of the individual endpoints, the following step-by-step process is executed:
 
 ```mermaid
 sequenceDiagram

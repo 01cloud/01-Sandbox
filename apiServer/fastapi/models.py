@@ -1,10 +1,14 @@
 from __future__ import annotations
+
 from enum import Enum
 from typing import Optional
+
 from pydantic import BaseModel, Field
+
 
 class Language(str, Enum):
     """Supported execution languages."""
+
     PYTHON = "python"
     JAVASCRIPT = "javascript"
     BASH = "bash"
@@ -12,6 +16,7 @@ class Language(str, Enum):
 
 class RunRequest(BaseModel):
     """Payload representing a code execution request structure for the backend."""
+
     code: str = Field(..., example="print('hello')")
     language: Language = Field(Language.PYTHON)
     timeout: int = Field(30, ge=1, le=120)
@@ -19,6 +24,7 @@ class RunRequest(BaseModel):
 
 class RunResponse(BaseModel):
     """Response defining code execution results dynamically."""
+
     stdout: str
     stderr: str
     exit_code: int
@@ -29,6 +35,7 @@ class RunResponse(BaseModel):
 
 class SessionResponse(BaseModel):
     """Identifying metadata correlating linked session context internally."""
+
     session_id: str
     backend: str
     metadata: dict = {}
@@ -36,6 +43,7 @@ class SessionResponse(BaseModel):
 
 class StatusResponse(BaseModel):
     """Reports configuration matching backend instances health correctly."""
+
     backend: str
     healthy: bool
 
@@ -54,8 +62,10 @@ class HealthResponse(BaseModel):
 
 # --- OpenSandbox Specific Models ---
 
+
 class ImageSpec(BaseModel):
     """Container image specification."""
+
     uri: Optional[str] = None
     repository: Optional[str] = None
     tag: Optional[str] = "latest"
@@ -63,12 +73,14 @@ class ImageSpec(BaseModel):
 
 class ResourceLimits(BaseModel):
     """Hardware resource constraints."""
+
     cpu: str = "500m"
     memory: str = "512Mi"
 
 
 class CreateSandboxRequest(BaseModel):
     """Request payload to provision a new isolated sandbox."""
+
     image: ImageSpec
     entrypoint: list[str]
     timeout: int = Field(60, ge=1, le=3600)
@@ -79,6 +91,7 @@ class CreateSandboxRequest(BaseModel):
 
 class SandboxResponse(BaseModel):
     """Standardized metadata representing a provisioned sandbox instance."""
+
     id: str
     status: str
     image: ImageSpec
@@ -87,15 +100,23 @@ class SandboxResponse(BaseModel):
 
 class ScanJobRequest(BaseModel):
     """Payload representing a request to submit files for security scanning."""
-    files: Optional[dict[str, str]] = Field(None, description="Map of filename to content")
-    code: Optional[str] = Field(None, description="Single code snippet for auto-detection")
-    tools: Optional[list[str]] = Field(None, description="Optional list of tools to run")
+
+    files: Optional[dict[str, str]] = Field(
+        None, description="Map of filename to content"
+    )
+    code: Optional[str] = Field(
+        None, description="Single code snippet for auto-detection"
+    )
+    tools: Optional[list[str]] = Field(
+        None, description="Optional list of tools to run"
+    )
     timeout: Optional[int] = Field(None, ge=1, le=3600)
     metadata: dict[str, str] = {}
 
 
 class ScanJobResponse(BaseModel):
     """Response returned upon successfully scheduling a scan job."""
+
     job_id: str
     sandbox_id: Optional[str] = None
     status: Optional[str] = None
@@ -105,6 +126,7 @@ class ScanJobResponse(BaseModel):
 
 class GenerateAPIResponse(BaseModel):
     """Response returned upon successfully generating a new API key."""
+
     api_key: str
     api_key_id: str
     status: str
@@ -112,20 +134,26 @@ class GenerateAPIResponse(BaseModel):
 
 # --- API Key Management Models ---
 
+
 class APIKeyBackend(str, Enum):
     """Supported backends for key scoping."""
+
     Z1_SANDBOX = "Z1_SANDBOX"
+
 
 class APIKeyCreateRequest(BaseModel):
     """Payload to create a new manageable API key."""
+
     name: str = Field(..., example="Prod-Scanner-Key")
     backend: APIKeyBackend = Field(APIKeyBackend.Z1_SANDBOX)
-    ttl_hours: float = Field(1.0, ge=-1.0) # Default 1 hour, -1 means never expire
+    ttl_hours: float = Field(1.0, ge=-1.0)  # Default 1 hour, -1 means never expire
     user_email: Optional[str] = None
+
 
 class APIKeyRecord(BaseModel):
     """Metadata record for a stored API key."""
-    id: str # JTI
+
+    id: str  # JTI
     name: str
     backend: str
     user_id: str
@@ -134,8 +162,10 @@ class APIKeyRecord(BaseModel):
     expires_at: str
     last_used_at: Optional[str] = None
     is_revoked: bool = False
-    prefix: str # Partial key for identification (e.g. ci_...)
+    prefix: str  # Partial key for identification (e.g. ci_...)
+
 
 class APIKeyListResponse(BaseModel):
     """Response containing a list of masked API key records."""
+
     keys: list[APIKeyRecord]

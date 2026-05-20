@@ -21,10 +21,10 @@ controller:
     pullPolicy: IfNotPresent
     # -- Overrides the image tag whose default is the chart appVersion
     tag: ""
-  
+
   # -- Number of controller replicas
   replicaCount: 1
-  
+
   # -- Resource requests and limits for the controller
   resources:
     limits:
@@ -33,14 +33,14 @@ controller:
     requests:
       cpu: 10m
       memory: 64Mi
-  
+
   # -- Log level for zap logger (debug, info, error)
   logLevel: info
-  
+
   # -- Enable leader election for controller manager
   leaderElection:
     enabled: true
-  
+
   # -- Liveness probe configuration
   livenessProbe:
     enabled: true
@@ -52,7 +52,7 @@ controller:
     timeoutSeconds: 1
     successThreshold: 1
     failureThreshold: 3
-  
+
   # -- Readiness probe configuration
   readinessProbe:
     enabled: true
@@ -64,22 +64,22 @@ controller:
     timeoutSeconds: 1
     successThreshold: 1
     failureThreshold: 3
-  
+
   # -- Node labels for controller pod assignment
   nodeSelector: {}
-  
+
   # -- Tolerations for controller pod assignment
   tolerations: []
-  
+
   # -- Affinity for controller pod assignment
   affinity: {}
-  
+
   # -- Pod security context
   podSecurityContext:
     runAsNonRoot: true
     seccompProfile:
       type: RuntimeDefault
-  
+
   # -- Container security context
   containerSecurityContext:
     allowPrivilegeEscalation: false
@@ -87,13 +87,13 @@ controller:
       drop:
         - "ALL"
     readOnlyRootFilesystem: false
-  
+
   # -- Additional labels for controller pods
   podLabels: {}
-  
+
   # -- Additional annotations for controller pods
   podAnnotations: {}
-  
+
   # -- Priority class name for controller pods
   priorityClassName: ""
 

@@ -40,9 +40,9 @@ from typing import Any, Dict, Optional
 from uuid import uuid4
 
 import docker
-from docker.errors import DockerException, ImageNotFound, NotFound as DockerNotFound
+from docker.errors import DockerException, ImageNotFound
+from docker.errors import NotFound as DockerNotFound
 from fastapi import HTTPException, status
-
 from src.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
@@ -74,8 +74,8 @@ from src.services.helpers import (
     parse_timestamp,
 )
 from src.services.ossfs_mixin import OSSFSMixin
-from src.services.sandbox_service import SandboxService
 from src.services.runtime_resolver import SecureRuntimeResolver
+from src.services.sandbox_service import SandboxService
 from src.services.validators import (
     calculate_expiration_or_raise,
     ensure_egress_configured,
@@ -142,7 +142,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             raise ValueError("DockerSandboxService requires runtime.type = 'docker'.")
 
         self.execd_image = runtime_config.execd_image
-        self.network_mode = (self.app_config.docker.network_mode or HOST_NETWORK_MODE).lower()
+        self.network_mode = (
+            self.app_config.docker.network_mode or HOST_NETWORK_MODE
+        ).lower()
         self._execd_archive_cache: Optional[bytes] = None
         self._api_timeout = self._resolve_api_timeout()
         try:
@@ -368,7 +370,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         try:
             parsed_mount_keys = json.loads(mount_keys_raw)
             if isinstance(parsed_mount_keys, list):
-                mount_keys = [key for key in parsed_mount_keys if isinstance(key, str) and key]
+                mount_keys = [
+                    key for key in parsed_mount_keys if isinstance(key, str) and key
+                ]
         except (TypeError, json.JSONDecodeError):
             mount_keys = []
 
@@ -474,7 +478,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                     self._cleanup_egress_sidecar(orphan_id)
                 else:
                     logger.warning(
-                        "Failed to check sandbox %s for orphan sidecar cleanup: %s", orphan_id, exc
+                        "Failed to check sandbox %s for orphan sidecar cleanup: %s",
+                        orphan_id,
+                        exc,
                     )
 
         if restored:
@@ -495,7 +501,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                 try:
                     # Prefer a locally built image (e.g., opensandbox/execd:local); pull only if missing.
                     self.docker_client.images.get(self.execd_image)
-                    logger.info("Found execd image %s locally; skipping pull", self.execd_image)
+                    logger.info(
+                        "Found execd image %s locally; skipping pull", self.execd_image
+                    )
                 except ImageNotFound:
                     with self._docker_operation(
                         f"pull execd image {self.execd_image}",
@@ -503,7 +511,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                     ):
                         self.docker_client.images.pull(self.execd_image)
 
-                with self._docker_operation("execd cache create container", "execd-cache"):
+                with self._docker_operation(
+                    "execd cache create container", "execd-cache"
+                ):
                     container = self.docker_client.containers.create(
                         image=self.execd_image,
                         command=["tail", "-f", "/dev/null"],
@@ -511,10 +521,14 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                         detach=True,
                         auto_remove=False,
                     )
-                with self._docker_operation("execd cache start container", "execd-cache"):
+                with self._docker_operation(
+                    "execd cache start container", "execd-cache"
+                ):
                     container.start()
                     container.reload()
-                    logger.info("Created sandbox execd archive for container %s", container.id)
+                    logger.info(
+                        "Created sandbox execd archive for container %s", container.id
+                    )
             except DockerException as exc:
                 raise HTTPException(
                     status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -539,18 +553,23 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             finally:
                 if container:
                     try:
-                        with self._docker_operation("execd cache cleanup container", "execd-cache"):
+                        with self._docker_operation(
+                            "execd cache cleanup container", "execd-cache"
+                        ):
                             container.remove(force=True)
                     except DockerException as cleanup_exc:
                         logger.warning(
-                            "Failed to cleanup temporary execd container: %s", cleanup_exc
+                            "Failed to cleanup temporary execd container: %s",
+                            cleanup_exc,
                         )
 
             self._execd_archive_cache = data
             logger.info("Dumped execd archive to memory")
             return data
 
-    def _container_to_sandbox(self, container, sandbox_id: Optional[str] = None) -> Sandbox:
+    def _container_to_sandbox(
+        self, container, sandbox_id: Optional[str] = None
+    ) -> Sandbox:
         labels = container.attrs.get("Config", {}).get("Labels") or {}
         resolved_id = sandbox_id or labels.get(SANDBOX_ID_LABEL)
         if not resolved_id:
@@ -603,7 +622,12 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         metadata = {
             key: value
             for key, value in labels.items()
-            if key not in {SANDBOX_ID_LABEL, SANDBOX_EXPIRES_AT_LABEL, SANDBOX_MANUAL_CLEANUP_LABEL}
+            if key
+            not in {
+                SANDBOX_ID_LABEL,
+                SANDBOX_EXPIRES_AT_LABEL,
+                SANDBOX_MANUAL_CLEANUP_LABEL,
+            }
         } or None
         entrypoint = container.attrs.get("Config", {}).get("Cmd") or []
         if isinstance(entrypoint, str):
@@ -637,7 +661,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             createdAt=created_at,
         )
 
-    def _ensure_directory(self, container, path: str, sandbox_id: Optional[str] = None) -> None:
+    def _ensure_directory(
+        self, container, path: str, sandbox_id: Optional[str] = None
+    ) -> None:
         """Create a directory within the target container if it does not exist."""
         if not path or path == "/":
             return
@@ -653,7 +679,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             tar.addfile(dir_info)
         tar_stream.seek(0)
         try:
-            with self._docker_operation(f"ensure directory {normalized_path}", sandbox_id):
+            with self._docker_operation(
+                f"ensure directory {normalized_path}", sandbox_id
+            ):
                 container.put_archive(path="/", data=tar_stream.getvalue())
         except DockerException as exc:
             raise HTTPException(
@@ -772,7 +800,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         self._validate_network_exists()
         pvc_inspect_cache = self._validate_volumes(request)
         sandbox_id, created_at, expires_at = self._prepare_creation_context(request)
-        return self._provision_sandbox(sandbox_id, request, created_at, expires_at, pvc_inspect_cache)
+        return self._provision_sandbox(
+            sandbox_id, request, created_at, expires_at, pvc_inspect_cache
+        )
 
     def _async_provision_worker(
         self,
@@ -783,14 +813,22 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         pvc_inspect_cache: Optional[dict[str, dict]] = None,
     ) -> None:
         try:
-            self._provision_sandbox(sandbox_id, request, created_at, expires_at, pvc_inspect_cache)
+            self._provision_sandbox(
+                sandbox_id, request, created_at, expires_at, pvc_inspect_cache
+            )
         except HTTPException as exc:
-            message = exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc)
-            self._mark_pending_failed(sandbox_id, message or "Sandbox provisioning failed.")
+            message = (
+                exc.detail.get("message") if isinstance(exc.detail, dict) else str(exc)
+            )
+            self._mark_pending_failed(
+                sandbox_id, message or "Sandbox provisioning failed."
+            )
             self._cleanup_failed_containers(sandbox_id)
             self._schedule_pending_cleanup(sandbox_id)
         except Exception as exc:  # noqa: BLE001
-            logger.exception("Unexpected error provisioning sandbox %s: %s", sandbox_id, exc)
+            logger.exception(
+                "Unexpected error provisioning sandbox %s: %s", sandbox_id, exc
+            )
             self._mark_pending_failed(sandbox_id, str(exc))
             self._cleanup_failed_containers(sandbox_id)
             self._schedule_pending_cleanup(sandbox_id)
@@ -819,7 +857,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                 all=True, filters={"label": label_selector}
             )
         except DockerException as exc:
-            logger.warning("sandbox=%s | cleanup listing failed containers: %s", sandbox_id, exc)
+            logger.warning(
+                "sandbox=%s | cleanup listing failed containers: %s", sandbox_id, exc
+            )
             self._cleanup_egress_sidecar(sandbox_id)
             return
 
@@ -831,7 +871,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             except (TypeError, json.JSONDecodeError):
                 mount_keys = []
             try:
-                with self._docker_operation("cleanup failed sandbox container", sandbox_id):
+                with self._docker_operation(
+                    "cleanup failed sandbox container", sandbox_id
+                ):
                     container.remove(force=True)
             except DockerException as exc:
                 logger.warning(
@@ -881,7 +923,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             container.update(labels=labels)
         except TypeError:
             # Older docker-py versions do not accept labels; call low-level API directly.
-            url = self.docker_client.api._url(f"/containers/{container.id}/update")  # noqa: SLF001
+            url = self.docker_client.api._url(
+                f"/containers/{container.id}/update"
+            )  # noqa: SLF001
             data = {"Labels": labels}
             self.docker_client.api._post_json(url, data=data)  # noqa: SLF001
         container.reload()
@@ -946,7 +990,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         expires_at: Optional[datetime],
         pvc_inspect_cache: Optional[dict[str, dict]] = None,
     ) -> CreateSandboxResponse:
-        labels, environment = self._build_labels_and_env(sandbox_id, request, expires_at)
+        labels, environment = self._build_labels_and_env(
+            sandbox_id, request, expires_at
+        )
         image_uri, auth_config = self._resolve_image_auth(request, sandbox_id)
         mem_limit, nano_cpus = self._resolve_resource_limits(request)
 
@@ -991,7 +1037,10 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                     mem_limit, nano_cpus, self.network_mode
                 )
                 if self.network_mode != HOST_NETWORK_MODE:
-                    host_execd_port, host_http_port = self._allocate_distinct_host_ports()
+                    (
+                        host_execd_port,
+                        host_http_port,
+                    ) = self._allocate_distinct_host_ports()
                     port_bindings = {
                         "44772": ("0.0.0.0", host_execd_port),
                         "8080": ("0.0.0.0", host_http_port),
@@ -1048,10 +1097,11 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
 
     def _is_user_defined_network(self) -> bool:
         """Return True when network_mode is a named user-defined network (not host/bridge/none/container:*)."""
-        return (
-            self.network_mode not in {HOST_NETWORK_MODE, BRIDGE_NETWORK_MODE, "none"}
-            and not self.network_mode.startswith("container:")
-        )
+        return self.network_mode not in {
+            HOST_NETWORK_MODE,
+            BRIDGE_NETWORK_MODE,
+            "none",
+        } and not self.network_mode.startswith("container:")
 
     def _validate_network_exists(self) -> None:
         """Verify the configured user-defined Docker network exists before creating a sandbox."""
@@ -1172,7 +1222,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         """
         resolved_path = volume.host.path
         if volume.sub_path:
-            resolved_path = os.path.normpath(os.path.join(resolved_path, volume.sub_path))
+            resolved_path = os.path.normpath(
+                os.path.join(resolved_path, volume.sub_path)
+            )
 
         # Defense in depth: re-validate the resolved path against the
         # allowlist.  Even though sub_path traversal (../) is blocked by
@@ -1311,12 +1363,8 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             #    accessible, this detects symlink-escape attacks (e.g., a
             #    malicious symlink datasets -> /).
             try:
-                canonical_mountpoint = os.path.realpath(
-                    mountpoint, strict=True
-                )
-                canonical_resolved = os.path.realpath(
-                    resolved_path, strict=True
-                )
+                canonical_mountpoint = os.path.realpath(mountpoint, strict=True)
+                canonical_resolved = os.path.realpath(resolved_path, strict=True)
                 # os.path.realpath returns OS-native separators, so use
                 # os.sep here (unlike the lexical check above which operates
                 # on POSIX-normalised Docker Mountpoint strings).
@@ -1422,9 +1470,7 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                     binds.append(f"{resolved}:{container_path}:{mode}")
                 else:
                     # No subPath: use claimName directly as Docker volume ref.
-                    binds.append(
-                        f"{volume.pvc.claim_name}:{container_path}:{mode}"
-                    )
+                    binds.append(f"{volume.pvc.claim_name}:{container_path}:{mode}")
             elif volume.ossfs is not None:
                 _, host_path = self._resolve_ossfs_paths(volume)
                 binds.append(f"{host_path}:{container_path}:{mode}")
@@ -1676,11 +1722,15 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
             with self._docker_operation("update sandbox labels", sandbox_id):
                 self._update_container_labels(container, labels)
         except (DockerException, TypeError) as exc:
-            logger.warning("Failed to refresh labels for sandbox %s: %s", sandbox_id, exc)
+            logger.warning(
+                "Failed to refresh labels for sandbox %s: %s", sandbox_id, exc
+            )
 
         return RenewSandboxExpirationResponse(expires_at=new_expiration)
 
-    def get_endpoint(self, sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+    def get_endpoint(
+        self, sandbox_id: str, port: int, resolve_internal: bool = False
+    ) -> Endpoint:
         """
         Get sandbox access endpoint.
 
@@ -1888,7 +1938,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                 all=True, filters={"label": f"{EGRESS_SIDECAR_LABEL}={sandbox_id}"}
             )
         except DockerException as exc:
-            logger.warning("sandbox=%s | failed to list egress sidecar: %s", sandbox_id, exc)
+            logger.warning(
+                "sandbox=%s | failed to list egress sidecar: %s", sandbox_id, exc
+            )
             return
 
         for container in containers:
@@ -1918,10 +1970,14 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         # Ensure sidecar image is available before create/start.
         egress_image = self.app_config.egress.image if self.app_config.egress else None
         if not egress_image:
-            raise ValueError("egress.image must be configured when networkPolicy is provided.")
+            raise ValueError(
+                "egress.image must be configured when networkPolicy is provided."
+            )
         self._ensure_image_available(egress_image, None, sandbox_id)
 
-        policy_payload = json.dumps(network_policy.model_dump(by_alias=True, exclude_none=True))
+        policy_payload = json.dumps(
+            network_policy.model_dump(by_alias=True, exclude_none=True)
+        )
         sidecar_env = [f"{EGRESS_RULES_ENV}={policy_payload}"]
 
         sidecar_host_config_kwargs: dict[str, Any] = {
@@ -1982,8 +2038,12 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                     )
             elif sidecar_container_id:
                 try:
-                    with self._docker_operation("cleanup egress sidecar (API)", sandbox_id):
-                        self.docker_client.api.remove_container(sidecar_container_id, force=True)
+                    with self._docker_operation(
+                        "cleanup egress sidecar (API)", sandbox_id
+                    ):
+                        self.docker_client.api.remove_container(
+                            sidecar_container_id, force=True
+                        )
                 except DockerException as cleanup_exc:
                     logger.warning(
                         "Failed to cleanup egress sidecar for sandbox %s: %s",
@@ -2050,7 +2110,9 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
         except Exception as exc:
             if container is not None:
                 try:
-                    with self._docker_operation("cleanup sandbox container", sandbox_id):
+                    with self._docker_operation(
+                        "cleanup sandbox container", sandbox_id
+                    ):
                         container.remove(force=True)
                 except DockerException as cleanup_exc:
                     logger.warning(
@@ -2060,8 +2122,12 @@ class DockerSandboxService(OSSFSMixin, SandboxService):
                     )
             elif container_id:
                 try:
-                    with self._docker_operation("cleanup sandbox container (API)", sandbox_id):
-                        self.docker_client.api.remove_container(container_id, force=True)
+                    with self._docker_operation(
+                        "cleanup sandbox container (API)", sandbox_id
+                    ):
+                        self.docker_client.api.remove_container(
+                            container_id, force=True
+                        )
                 except DockerException as cleanup_exc:
                     logger.warning(
                         "Failed to cleanup container for sandbox %s: %s",

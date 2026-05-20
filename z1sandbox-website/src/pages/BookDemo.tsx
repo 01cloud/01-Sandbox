@@ -218,8 +218,8 @@ const BookDemo = () => {
                   <ReCAPTCHA
                     ref={recaptchaRef}
                     sitekey={
-                      (window as any)._env_?.VITE_RECAPTCHA_SITE_KEY || 
-                      import.meta.env.VITE_RECAPTCHA_SITE_KEY || 
+                      (window as any)._env_?.VITE_RECAPTCHA_SITE_KEY ||
+                      import.meta.env.VITE_RECAPTCHA_SITE_KEY ||
                       "YOUR_SITE_KEY_MISSING"
                     }
                     theme="dark"

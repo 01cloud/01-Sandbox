@@ -24,7 +24,6 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from kubernetes import client, config
 from kubernetes.client import ApiException, CoreV1Api, CustomObjectsApi, NodeV1Api
-
 from src.config import KubernetesRuntimeConfig
 from src.services.k8s.informer import WorkloadInformer
 from src.services.k8s.rate_limiter import TokenBucketRateLimiter
@@ -59,7 +58,9 @@ class K8sClient:
             else None
         )
         self._write_limiter: Optional[TokenBucketRateLimiter] = (
-            TokenBucketRateLimiter(qps=k8s_config.write_qps, burst=k8s_config.write_burst)
+            TokenBucketRateLimiter(
+                qps=k8s_config.write_qps, burst=k8s_config.write_burst
+            )
             if k8s_config.write_qps > 0
             else None
         )
@@ -97,7 +98,9 @@ class K8sClient:
     # Internal informer pool management
     # ------------------------------------------------------------------
 
-    def _get_informer(self, group: str, version: str, plural: str, namespace: str) -> Optional[WorkloadInformer]:
+    def _get_informer(
+        self, group: str, version: str, plural: str, namespace: str
+    ) -> Optional[WorkloadInformer]:
         """Return the informer for this resource+namespace, starting it lazily."""
         if not self.config.informer_enabled:
             return None
@@ -123,7 +126,9 @@ class K8sClient:
                 try:
                     informer.start()
                 except Exception as exc:  # pragma: no cover - defensive
-                    logger.warning("Failed to start informer for %s/%s: %s", plural, namespace, exc)
+                    logger.warning(
+                        "Failed to start informer for %s/%s: %s", plural, namespace, exc
+                    )
                     self._informers.pop(key, None)
                     return None
         return informer

@@ -24,7 +24,7 @@ const CookieBanner = () => {
     let finalSettings = settings;
     if (type === "all") finalSettings = { essential: true, analytics: true, marketing: true };
     if (type === "rejected") finalSettings = { essential: true, analytics: false, marketing: false };
-    
+
     localStorage.setItem("cookie-consent", JSON.stringify(finalSettings));
     setIsVisible(false);
     toast.success("Preferences saved successfully");
@@ -47,8 +47,8 @@ const CookieBanner = () => {
           >
             {/* Background Accent */}
             <div className="absolute top-0 right-0 w-32 h-32 bg-accent/5 rounded-full blur-[60px] -mr-16 -mt-16" />
-            
-            <button 
+
+            <button
               onClick={() => setIsVisible(false)}
               className="absolute top-4 right-4 p-2 rounded-full hover:bg-secondary/50 text-muted-foreground transition-colors"
             >
@@ -86,7 +86,7 @@ const CookieBanner = () => {
                       <ShieldCheck className="w-4 h-4" />
                       Accept All Cookies
                     </button>
-                    
+
                     <button
                       onClick={() => handleSave("rejected")}
                       className="w-full py-4 rounded-2xl bg-secondary/30 border border-border text-foreground font-black text-sm hover:bg-secondary/50 transition-all"
@@ -111,7 +111,7 @@ const CookieBanner = () => {
                   exit={{ opacity: 0, x: -20 }}
                   className="flex flex-col gap-6"
                 >
-                  <button 
+                  <button
                     onClick={() => setIsSettingsView(false)}
                     className="flex items-center gap-2 text-[10px] uppercase font-black tracking-[0.2em] text-muted-foreground hover:text-foreground transition-colors mb-2"
                   >
@@ -121,26 +121,26 @@ const CookieBanner = () => {
 
                   <div className="space-y-4">
                     {[
-                      { 
-                        id: 'essential', 
-                        label: 'Essential', 
-                        desc: "Critical for the platform's core security. They manage encrypted session tokens, authentication, and your UI preferences. These cannot be disabled.", 
-                        disabled: true 
+                      {
+                        id: 'essential',
+                        label: 'Essential',
+                        desc: "Critical for the platform's core security. They manage encrypted session tokens, authentication, and your UI preferences. These cannot be disabled.",
+                        disabled: true
                       },
-                      { 
-                        id: 'analytics', 
-                        label: 'Analytics', 
-                        desc: 'Provides anonymous insights into platform performance, job execution latency, and page usage trends to help us optimize our gVisor infrastructure.', 
-                        disabled: false 
+                      {
+                        id: 'analytics',
+                        label: 'Analytics',
+                        desc: 'Provides anonymous insights into platform performance, job execution latency, and page usage trends to help us optimize our gVisor infrastructure.',
+                        disabled: false
                       },
-                      { 
-                        id: 'marketing', 
-                        label: 'Marketing', 
-                        desc: 'Helps us deliver relevant security updates and feature announcements via LinkedIn and X, and allows us to track the effectiveness of our industry outreach.', 
-                        disabled: false 
+                      {
+                        id: 'marketing',
+                        label: 'Marketing',
+                        desc: 'Helps us deliver relevant security updates and feature announcements via LinkedIn and X, and allows us to track the effectiveness of our industry outreach.',
+                        disabled: false
                       },
                     ].map((item) => (
-                      <div 
+                      <div
                         key={item.id}
                         onClick={() => !item.disabled && toggleSetting(item.id as keyof typeof settings)}
                         className={`p-4 rounded-2xl border transition-all cursor-pointer ${

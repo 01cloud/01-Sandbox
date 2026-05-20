@@ -43,7 +43,7 @@ If you are an external user looking to integrate the CodeInspector APIs into you
 ### Integration Workflow
 
 1. **Submit the Scan Job:** Send the source code or files to the `/v1/scan-jobs` endpoint.
-2. **Retrieve the `job_id`:** The API will instantly return a JSON response containing a unique `job_id`. 
+2. **Retrieve the `job_id`:** The API will instantly return a JSON response containing a unique `job_id`.
 3. **Poll for Execution Status:** Periodically poll the `/v1/scan-status/{job_id}` endpoint to get real-time terminal-like logs of the sandbox execution process.
 4. **Fetch the Final Report:** Once the status logs indicate completion, retrieve the structured JSON report from the `/v1/scan-jobs/{job_id}/report` endpoint.
 
@@ -75,15 +75,15 @@ def run_security_scan():
     print("[*] Tailing execution logs...")
     while True:
         status_res = requests.get(f"{BASE_URL}/v1/scan-status/{job_id}", headers=HEADERS)
-        
+
         # The scan-status endpoint returns real-time plain text logs
         logs = status_res.text
         print(logs)
-        
+
         # Check if the process has finished
         if "Security scans complete." in logs or "FAILED" in logs:
             break
-            
+
         time.sleep(3) # Wait before polling again
 
     # 3. Retrieve the final report
@@ -114,7 +114,7 @@ curl https://dipper-shun-glowing.ngrok-free.dev/health
 
 ## 4. Interactive API Guide (Swagger UI)
 
-CodeInspector provides an auto-generated, interactive Swagger UI where you can explore and test all available REST APIs directly from your web browser. 
+CodeInspector provides an auto-generated, interactive Swagger UI where you can explore and test all available REST APIs directly from your web browser.
 
 **Accessing Swagger UI:**
 You can access the Swagger UI through the following public URL:

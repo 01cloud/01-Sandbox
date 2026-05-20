@@ -59,7 +59,9 @@ class BaseSandboxTemplateManager:
                     f"got {type(self._template).__name__}"
                 )
 
-            logger.info("Loaded %s template from %s", self._template_kind, template_path)
+            logger.info(
+                "Loaded %s template from %s", self._template_kind, template_path
+            )
         except (FileNotFoundError, ValueError):
             raise
         except Exception as e:
@@ -72,7 +74,9 @@ class BaseSandboxTemplateManager:
             return self._deep_copy(self._template)
         return {}
 
-    def merge_with_runtime_values(self, runtime_manifest: Dict[str, Any]) -> Dict[str, Any]:
+    def merge_with_runtime_values(
+        self, runtime_manifest: Dict[str, Any]
+    ) -> Dict[str, Any]:
         base = self.get_base_template()
 
         if not base:

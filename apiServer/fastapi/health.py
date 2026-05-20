@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 import httpx
 from fastapi import APIRouter, Depends, Response, status
-from models import HealthResponse, DependencyStatus
+from models import DependencyStatus, HealthResponse
 
 
 def check_postgresql_health(state) -> tuple[bool, str]:
@@ -12,7 +13,10 @@ def check_postgresql_health(state) -> tuple[bool, str]:
         cursor.execute("SELECT 1;")
         cursor.fetchone()
         conn.close()
-        return True, "PostgreSQL Connected" if state.use_postgres else "SQLite Connected"
+        return (
+            True,
+            "PostgreSQL Connected" if state.use_postgres else "SQLite Connected",
+        )
     except Exception as e:
         return False, f"Database error: {str(e)}"
 
@@ -33,7 +37,12 @@ def check_opensandbox_server_health(state) -> tuple[bool, str]:
     """Lightweight and production-safe health check for the upstream OpenSandbox backend service."""
     try:
         healthy = state.backend.health_check()
-        return healthy, f"Backend name: {state.backend.name} is responsive" if healthy else "Upstream service unresponsive"
+        return (
+            healthy,
+            f"Backend name: {state.backend.name} is responsive"
+            if healthy
+            else "Upstream service unresponsive",
+        )
     except Exception as e:
         return False, f"Upstream service error: {str(e)}"
 
@@ -45,7 +54,12 @@ def get_health_router(state, validate_token) -> APIRouter:
     """
     router = APIRouter()
 
-    @router.get("/health", response_model=HealthResponse, summary="Retrieve active connection tracking properties", tags=["System"])
+    @router.get(
+        "/health",
+        response_model=HealthResponse,
+        summary="Retrieve active connection tracking properties",
+        tags=["System"],
+    )
     async def health(response: Response):
         """
         Perform a lightweight and production-safe health check on all critical internal and external dependencies.
@@ -59,7 +73,11 @@ def get_health_router(state, validate_token) -> APIRouter:
         if state.use_redis:
             overall_healthy = overall_healthy and redis_healthy
 
-        status_code = status.HTTP_200_OK if overall_healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+        status_code = (
+            status.HTTP_200_OK
+            if overall_healthy
+            else status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
         response.status_code = status_code
 
         # Format details to ensure complete backward compatibility with existing monitors
@@ -79,69 +97,92 @@ def get_health_router(state, validate_token) -> APIRouter:
             healthy=overall_healthy,
             dependencies={
                 "database": DependencyStatus(
-                    status="healthy" if db_healthy else "unhealthy",
-                    details=db_details
+                    status="healthy" if db_healthy else "unhealthy", details=db_details
                 ),
                 "cache": DependencyStatus(
                     status="healthy" if redis_healthy else "unhealthy",
-                    details=cache_details
+                    details=cache_details,
                 ),
                 "queue": DependencyStatus(
                     status="healthy" if redis_healthy else "unhealthy",
-                    details=queue_details
+                    details=queue_details,
                 ),
                 "opensandbox": DependencyStatus(
                     status="healthy" if sandbox_healthy else "unhealthy",
-                    details=sandbox_details
-                )
-            }
+                    details=sandbox_details,
+                ),
+            },
         )
 
-    @router.get("/v1/health", response_model=HealthResponse, summary="Retrieve active connection tracking properties (V1)", tags=["System"], dependencies=[Depends(validate_token)])
+    @router.get(
+        "/v1/health",
+        response_model=HealthResponse,
+        summary="Retrieve active connection tracking properties (V1)",
+        tags=["System"],
+        dependencies=[Depends(validate_token)],
+    )
     async def health_v1(response: Response):
         """Alias for /health scoped to /v1 for gateway compatibility."""
         return await health(response)
 
-    @router.get("/api/v1/01sbx/postgresql/health", tags=["System"], dependencies=[Depends(validate_token)])
+    @router.get(
+        "/api/v1/01sbx/postgresql/health",
+        tags=["System"],
+        dependencies=[Depends(validate_token)],
+    )
     async def postgresql_health(response: Response):
         """
         Lightweight and production-safe health check for the PostgreSQL database.
         """
         healthy, details = check_postgresql_health(state)
-        response.status_code = status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+        response.status_code = (
+            status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
         return {
             "status": "healthy" if healthy else "unhealthy",
             "dependency": "postgresql" if state.use_postgres else "sqlite",
             "healthy": healthy,
-            "details": details
+            "details": details,
         }
 
-    @router.get("/api/v1/01sbx/redis/health", tags=["System"], dependencies=[Depends(validate_token)])
+    @router.get(
+        "/api/v1/01sbx/redis/health",
+        tags=["System"],
+        dependencies=[Depends(validate_token)],
+    )
     async def redis_health(response: Response):
         """
         Lightweight and production-safe health check for the Redis cache/queue dependency.
         """
         healthy, details = check_redis_health(state)
-        response.status_code = status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+        response.status_code = (
+            status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
         return {
             "status": "healthy" if healthy else "unhealthy",
             "dependency": "redis",
             "healthy": healthy,
-            "details": details
+            "details": details,
         }
 
-    @router.get("/api/v1/01sbx/01sandbox/health", tags=["System"], dependencies=[Depends(validate_token)])
+    @router.get(
+        "/api/v1/01sbx/01sandbox/health",
+        tags=["System"],
+        dependencies=[Depends(validate_token)],
+    )
     async def sandbox_core_health(response: Response):
         """
         Lightweight and production-safe health check for the upstream OpenSandbox backend service.
         """
         healthy, details = check_opensandbox_server_health(state)
-        response.status_code = status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+        response.status_code = (
+            status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
+        )
         return {
             "status": "healthy" if healthy else "unhealthy",
             "dependency": "01sandbox",
             "healthy": healthy,
-            "details": details
+            "details": details,
         }
 
     return router

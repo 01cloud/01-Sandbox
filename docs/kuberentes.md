@@ -1,6 +1,6 @@
 # Beginner's Guide: Provisioning OpenSandbox Fully inside Kubernetes
 
-Welcome! If you are new to Kubernetes or OpenSandbox, this guide is written step-by-step just for you. 
+Welcome! If you are new to Kubernetes or OpenSandbox, this guide is written step-by-step just for you.
 
 We will walk through exactly how to set up everything from scratch on your local machine so you can run the `aio-sandbox` (All-in-One Sandbox) using a complete, 100% Kubernetes-driven setup. This means both the OpenSandbox Controller AND the OpenSandbox Server API will run inside your cluster!
 
@@ -37,7 +37,7 @@ kind create cluster
 
 ## 🧠 Step 2: Install OpenSandbox Components onto Kubernetes
 
-We will use Helm to install both the Controller and the Server directly into our cluster. 
+We will use Helm to install both the Controller and the Server directly into our cluster.
 
 In your terminal window, navigate to the folder where you downloaded OpenSandbox.
 ```bash
@@ -84,7 +84,7 @@ You mentioned you want all the steps driven entirely in Kubernetes! Here are two
 
 ### Method A: Hitting the Raw OpenSandbox Server REST API
 
-Since we started the Server in Step 3 and port-forwarded it, we can send a raw HTTP request directly to the API endpoint to spin up the `aio-sandbox`. 
+Since we started the Server in Step 3 and port-forwarded it, we can send a raw HTTP request directly to the API endpoint to spin up the `aio-sandbox`.
 
 In your new terminal window, copy and paste this command:
 
@@ -108,7 +108,7 @@ curl -X POST "http://localhost:8080/v1/sandboxes" \
 **What is happening behind the scenes:**
 1. You just sent a direct API POST request asking for a Sandbox using the AIO image (`ghcr.io/agent-infra/sandbox:latest`).
 2. The `opensandbox-server` API receives this and tells Kubernetes to spin up a Sandbox pod!
-3. The response will instantly output JSON containing your Sandbox's `id` and the port mapping endpoint! 
+3. The response will instantly output JSON containing your Sandbox's `id` and the port mapping endpoint!
 
 *(This method is what the Python `aio-sandbox/main.py` is doing behind the scenes under the hood!)*
 

@@ -17,13 +17,13 @@ Factory for creating WorkloadProvider instances.
 """
 
 import logging
-from typing import Dict, Type, Optional
+from typing import Dict, Optional, Type
 
 from src.config import AppConfig
-from src.services.k8s.workload_provider import WorkloadProvider
-from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from src.services.k8s.agent_sandbox_provider import AgentSandboxProvider
+from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from src.services.k8s.client import K8sClient
+from src.services.k8s.workload_provider import WorkloadProvider
 
 logger = logging.getLogger(__name__)
 
@@ -94,14 +94,14 @@ def create_workload_provider(
 def register_provider(name: str, provider_class: Type[WorkloadProvider]) -> None:
     """
     Register a custom WorkloadProvider implementation.
-    
+
     This allows extending the system with custom provider implementations
     without modifying core code.
-    
+
     Args:
         name: Provider name (used in configuration)
         provider_class: Provider class that implements WorkloadProvider
-        
+
     Example:
         from my_module import CustomProvider
         register_provider("custom", CustomProvider)
@@ -111,21 +111,21 @@ def register_provider(name: str, provider_class: Type[WorkloadProvider]) -> None
             f"Provider class must inherit from WorkloadProvider, "
             f"got {provider_class.__name__}"
         )
-    
+
     name_lower = name.lower()
     if name_lower in _PROVIDER_REGISTRY:
-        logger.warning(
-            f"Overwriting existing provider registration: {name_lower}"
-        )
-    
+        logger.warning(f"Overwriting existing provider registration: {name_lower}")
+
     _PROVIDER_REGISTRY[name_lower] = provider_class
-    logger.info(f"Registered workload provider: {name_lower} -> {provider_class.__name__}")
+    logger.info(
+        f"Registered workload provider: {name_lower} -> {provider_class.__name__}"
+    )
 
 
 def list_available_providers() -> list[str]:
     """
     List all registered provider types.
-    
+
     Returns:
         List of provider type names
     """

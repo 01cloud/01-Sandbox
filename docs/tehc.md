@@ -17,7 +17,7 @@ sequenceDiagram
 
     User->>Auth0: Login (Obtain Passport)
     Auth0-->>User: JWT
-    
+
     rect rgb(240, 240, 240)
     Note over User, API: Optional: API Key Provisioning
     User->>API: Generate Long-Lived Key
@@ -42,7 +42,7 @@ sequenceDiagram
 The entry point for every request. This is where you establish your identity in the browser before interacting with the backends.
 
 ### 1. Primary Entry (Auth0)
-*   **The Passport**: Users authenticate via Auth0 to receive an **RS256 JWT**. 
+*   **The Passport**: Users authenticate via Auth0 to receive an **RS256 JWT**.
 *   **Storage**: Stored in LocalStorage for persistence but bridged to a **JIT Cookie** (`inspector_auth`) during navigation for cross-origin accessibility.
 
 ### 2. Secondary Entry (Service Keys)

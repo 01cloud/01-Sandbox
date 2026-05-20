@@ -18,7 +18,7 @@ Abstract workload provider interface for Kubernetes resources.
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from src.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
 
@@ -26,11 +26,11 @@ from src.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
 class WorkloadProvider(ABC):
     """
     Abstract interface for managing Kubernetes workload resources.
-    
+
     This abstraction allows supporting different K8s resource types
     (Pod, Job, StatefulSet, etc.) with a unified interface.
     """
-    
+
     @abstractmethod
     def create_workload(
         self,
@@ -75,100 +75,104 @@ class WorkloadProvider(ABC):
             ApiException: If creation fails
         """
         pass
-    
+
     @abstractmethod
     def get_workload(self, sandbox_id: str, namespace: str) -> Optional[Any]:
         """
         Get workload by sandbox ID.
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
             namespace: Kubernetes namespace
-            
+
         Returns:
             Workload object or None if not found
         """
         pass
-    
+
     @abstractmethod
     def delete_workload(self, sandbox_id: str, namespace: str) -> None:
         """
         Delete a workload resource.
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
             namespace: Kubernetes namespace
-            
+
         Raises:
             ApiException: If deletion fails
         """
         pass
-    
+
     @abstractmethod
     def list_workloads(self, namespace: str, label_selector: str) -> List[Any]:
         """
         List workloads matching label selector.
-        
+
         Args:
             namespace: Kubernetes namespace
             label_selector: Label selector query
-            
+
         Returns:
             List of workload objects
         """
         pass
-    
+
     @abstractmethod
-    def update_expiration(self, sandbox_id: str, namespace: str, expires_at: datetime) -> None:
+    def update_expiration(
+        self, sandbox_id: str, namespace: str, expires_at: datetime
+    ) -> None:
         """
         Update workload expiration time.
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
             namespace: Kubernetes namespace
             expires_at: New expiration time
-            
+
         Raises:
             Exception: If update fails
         """
         pass
-    
+
     @abstractmethod
     def get_expiration(self, workload: Any) -> Optional[datetime]:
         """
         Get expiration time from workload.
-        
+
         Args:
             workload: Workload object
-            
+
         Returns:
             Expiration datetime or None if not set
         """
         pass
-    
+
     @abstractmethod
     def get_status(self, workload: Any) -> Dict[str, Any]:
         """
         Get status from workload object.
-        
+
         Args:
             workload: Workload object
-            
+
         Returns:
             Dict with state, reason, message, last_transition_at
         """
         pass
-    
+
     @abstractmethod
-    def get_endpoint_info(self, workload: Any, port: int, sandbox_id: str) -> Optional[Endpoint]:
+    def get_endpoint_info(
+        self, workload: Any, port: int, sandbox_id: str
+    ) -> Optional[Endpoint]:
         """
         Get endpoint information from workload.
-        
+
         Args:
             workload: Workload object
             port: Port number
             sandbox_id: Sandbox identifier for ingress-based endpoints
-            
+
         Returns:
             Endpoint object (including optional headers) or None if not available
         """

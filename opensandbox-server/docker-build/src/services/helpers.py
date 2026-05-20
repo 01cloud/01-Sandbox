@@ -27,7 +27,6 @@ from datetime import datetime, timezone
 from typing import Dict, Optional
 
 from src.api.schema import Endpoint, Sandbox, SandboxFilter
-from src.services.constants import OPEN_SANDBOX_INGRESS_HEADER
 from src.config import (
     GATEWAY_ROUTE_MODE_HEADER,
     GATEWAY_ROUTE_MODE_URI,
@@ -35,6 +34,7 @@ from src.config import (
     INGRESS_MODE_GATEWAY,
     IngressConfig,
 )
+from src.services.constants import OPEN_SANDBOX_INGRESS_HEADER
 
 logger = logging.getLogger(__name__)
 
@@ -132,7 +132,9 @@ def parse_timestamp(timestamp: Optional[str]) -> datetime:
         return datetime.now(timezone.utc)
 
 
-def normalize_external_endpoint_url(endpoint: str, default_scheme: str = "https") -> str:
+def normalize_external_endpoint_url(
+    endpoint: str, default_scheme: str = "https"
+) -> str:
     """Normalize host or URL to a full URL with an explicit scheme."""
     endpoint = endpoint.strip()
     if endpoint.startswith("http://") or endpoint.startswith("https://"):

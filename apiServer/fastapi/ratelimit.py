@@ -1,7 +1,9 @@
 # API-Key-Specific Rate Limiting Module (Triggering CI/CD redeploy)
 import os
 import time
+
 from fastapi import HTTPException
+
 
 def rate_limit_config() -> dict:
     """
@@ -18,10 +20,8 @@ def rate_limit_config() -> dict:
     except ValueError:
         window_secs = 60
 
-    return {
-        "requests": requests,
-        "window_secs": window_secs
-    }
+    return {"requests": requests, "window_secs": window_secs}
+
 
 async def check_rate_limit(state, jti: str):
     """
@@ -33,7 +33,7 @@ async def check_rate_limit(state, jti: str):
         return
 
     # Load thresholds
-    rl_conf = rate_limit_config()  
+    rl_conf = rate_limit_config()
     requests_limit = rl_conf["requests"]
     window_secs = rl_conf["window_secs"]
 
@@ -53,20 +53,24 @@ async def check_rate_limit(state, jti: str):
             pipe.zcard(rl_key)
             pipe.zrange(rl_key, 0, 0, withscores=True)
             results = pipe.execute()
-            
+
             current_count = int(results[1])
             oldest_elements = results[2]
-            
+
             if oldest_elements:
                 oldest_ts = oldest_elements[0][1]
                 retry_after = max(1, int(oldest_ts + window_secs - now_ts))
         except Exception as e:
             # Fallback to local logs on connection blip, don't crash core auth
-            print(f"[config] Rate limiting Redis command failed: {e}. Defaulting to unrestricted.")
+            print(
+                f"[config] Rate limiting Redis command failed: {e}. Defaulting to unrestricted."
+            )
             return
-            
+
         if current_count >= requests_limit:
-            print(f"[SECURITY ALERT] RATE LIMIT EXCEEDED: Key ID '{jti}' reached {current_count + 1}/{requests_limit} calls in window.")
+            print(
+                f"[SECURITY ALERT] RATE LIMIT EXCEEDED: Key ID '{jti}' reached {current_count + 1}/{requests_limit} calls in window."
+            )
             raise HTTPException(
                 status_code=429,
                 detail={
@@ -74,14 +78,15 @@ async def check_rate_limit(state, jti: str):
                     "jti": jti,
                     "requests_limit": requests_limit,
                     "window_seconds": window_secs,
-                    "retry_after": retry_after
+                    "retry_after": retry_after,
                 },
-                headers={"Retry-After": str(retry_after)}
+                headers={"Retry-After": str(retry_after)},
             )
-            
+
         # If under quota, add new timestamp to the set
         try:
             import uuid
+
             member = f"{now_ts}:{uuid.uuid4().hex}"
             pipe = state.redis_client.pipeline()
             pipe.zadd(rl_key, {member: now_ts})
@@ -89,7 +94,7 @@ async def check_rate_limit(state, jti: str):
             pipe.execute()
         except Exception as e:
             print(f"[config] Failed to record rate limit hit in Redis: {e}")
-    
+
     # Sandbox / Local Testing Mode: Python In-Memory Fallback
     else:
         if not hasattr(state, "local_rate_limits"):
@@ -104,7 +109,9 @@ async def check_rate_limit(state, jti: str):
             retry_after = max(1, int(timestamps[0] + window_secs - now_ts))
 
         if current_count >= requests_limit:
-            print(f"[SECURITY ALERT] RATE LIMIT EXCEEDED: Key ID '{jti}' reached {current_count + 1}/{requests_limit} calls in window.")
+            print(
+                f"[SECURITY ALERT] RATE LIMIT EXCEEDED: Key ID '{jti}' reached {current_count + 1}/{requests_limit} calls in window."
+            )
             raise HTTPException(
                 status_code=429,
                 detail={
@@ -112,9 +119,9 @@ async def check_rate_limit(state, jti: str):
                     "jti": jti,
                     "requests_limit": requests_limit,
                     "window_seconds": window_secs,
-                    "retry_after": retry_after
+                    "retry_after": retry_after,
                 },
-                headers={"Retry-After": str(retry_after)}
+                headers={"Retry-After": str(retry_after)},
             )
 
         # If under quota, append current timestamp and persist
@@ -124,9 +131,11 @@ async def check_rate_limit(state, jti: str):
         # Self-cleaning local memory: remove old keys if dict gets large
         if len(state.local_rate_limits) > 1000:
             state.local_rate_limits = {
-                k: v for k, v in state.local_rate_limits.items() 
+                k: v
+                for k, v in state.local_rate_limits.items()
                 if any(ts > clear_before for ts in v)
             }
+
 
 def is_key_rate_limited(state, jti: str) -> bool:
     """
@@ -135,16 +144,16 @@ def is_key_rate_limited(state, jti: str) -> bool:
     """
     if not jti:
         return False
-    
+
     rl_conf = rate_limit_config()
     requests_limit = rl_conf["requests"]
     window_secs = rl_conf["window_secs"]
-    
+
     now_ts = time.time()
     clear_before = now_ts - window_secs
-    
+
     current_count = 0
-    
+
     if getattr(state, "use_redis", False) and state.redis_client:
         rl_key = f"ratelimit:{jti}"
         try:
@@ -163,5 +172,5 @@ def is_key_rate_limited(state, jti: str) -> bool:
             # Write back clean list
             state.local_rate_limits[jti] = timestamps
             current_count = len(timestamps)
-            
+
     return current_count >= requests_limit

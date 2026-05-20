@@ -1,0 +1,8 @@
+name: Pre-Commit Check
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+jobs:
+  pre-commit-check:
+    uses: 01cloud/actions/.github/workflows/pre-commit.yaml@main

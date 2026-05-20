@@ -28,7 +28,7 @@ During the deployment of the `codeInspector` helm chart, the `opensandbox-server
 
 ### Issue 2.1: Controller Missing CRDs and RBAC
 - **Symptoms**: The `opensandbox-controller` failed to start as it threw internal API errors regarding the missing `BatchSandbox` and `Pool` CustomResourceDefinitions (CRDs), and encountered standard "Forbidden" RBAC limits.
-- **Fix Applied**: 
+- **Fix Applied**:
   - Rendered and manually applied the CRDs generated inside the `templates/crds/` folder.
   - Updated the standalone `ClusterRole` inside `kubernetes/charts/codeInspector/charts/opensandbox/templates/controller.yaml` to explicitly append the required `sandbox.opensandbox.io` apiGroup permissions.
 
@@ -79,7 +79,6 @@ This indicated that the `BatchSandbox` (and potentially `Pool`) CustomResourceDe
 The CRDs for `BatchSandbox` and `Pool` were originally defined as Helm templates inside the `opensandbox-controller` chart (under `templates/crds/`). Because they contained Helm template syntax `{{ ... }}`, Helm's native CRD loader ignored them, reducing them to standalone components that broke core subchart functionality.
 
 We resolved this by using `helm template` to render the CRDs into purely valid YAML manifests, and directly injected the compiled definitions into `codeInspector/charts/opensandbox/crds/crds.yaml`.
-By leveraging Helm 3's native CRD mechanism, Helm automatically identifies all specs within a chart's (and its subchart's) `crds/` directory, cleanly deploying them *before* rendering any associated templates. 
+By leveraging Helm 3's native CRD mechanism, Helm automatically identifies all specs within a chart's (and its subchart's) `crds/` directory, cleanly deploying them *before* rendering any associated templates.
 
 Now, running `helm install` natively deploys the required Sandbox CRDs, allowing the controller to immediately initialize its workers and transition to a healthy `1/1 Running` state.
-

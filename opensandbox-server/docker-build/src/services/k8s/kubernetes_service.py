@@ -22,10 +22,9 @@ using Kubernetes resources for sandbox lifecycle management.
 import logging
 import time
 from datetime import datetime, timezone
-from typing import Optional, Dict, Any
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
-
 from src.api.schema import (
     CreateSandboxRequest,
     CreateSandboxResponse,
@@ -46,18 +45,18 @@ from src.services.constants import (
     SandboxErrorCodes,
 )
 from src.services.helpers import matches_filter
+from src.services.k8s.client import K8sClient
+from src.services.k8s.provider_factory import create_workload_provider
 from src.services.sandbox_service import SandboxService
 from src.services.validators import (
     calculate_expiration_or_raise,
-    ensure_entrypoint,
     ensure_egress_configured,
+    ensure_entrypoint,
     ensure_future_expiration,
     ensure_metadata_labels,
     ensure_timeout_within_limit,
     ensure_volumes_valid,
 )
-from src.services.k8s.client import K8sClient
-from src.services.k8s.provider_factory import create_workload_provider
 
 logger = logging.getLogger(__name__)
 
@@ -65,35 +64,37 @@ logger = logging.getLogger(__name__)
 class KubernetesSandboxService(SandboxService):
     """
     Kubernetes-based implementation of SandboxService.
-    
+
     This class implements sandbox lifecycle operations using Kubernetes resources.
     """
-    
+
     def __init__(self, config: Optional[AppConfig] = None):
         """
         Initialize Kubernetes sandbox service.
-        
+
         Args:
             config: Application configuration
-            
+
         Raises:
             HTTPException: If initialization fails
         """
         self.app_config = config or get_config()
         runtime_config = self.app_config.runtime
-        
+
         if runtime_config.type != "kubernetes":
-            raise ValueError("KubernetesSandboxService requires runtime.type = 'kubernetes'")
-        
+            raise ValueError(
+                "KubernetesSandboxService requires runtime.type = 'kubernetes'"
+            )
+
         if not self.app_config.kubernetes:
             raise ValueError("Kubernetes configuration is required")
-        
+
         # Ingress configuration (direct/gateway) if provided
         self.ingress_config = self.app_config.ingress
 
         self.namespace = self.app_config.kubernetes.namespace
         self.execd_image = runtime_config.execd_image
-        
+
         # Initialize Kubernetes client
         try:
             self.k8s_client = K8sClient(self.app_config.kubernetes)
@@ -107,7 +108,7 @@ class KubernetesSandboxService(SandboxService):
                     "message": f"Failed to initialize Kubernetes client: {str(e)}",
                 },
             ) from e
-        
+
         # Initialize workload provider
         provider_type = self.app_config.kubernetes.workload_provider
         try:
@@ -128,13 +129,13 @@ class KubernetesSandboxService(SandboxService):
                     "message": f"Invalid workload provider configuration: {str(e)}",
                 },
             ) from e
-        
+
         logger.info(
             "KubernetesSandboxService initialized: namespace=%s, execd_image=%s",
             self.namespace,
             self.execd_image,
         )
-    
+
     def _wait_for_sandbox_ready(
         self,
         sandbox_id: str,
@@ -143,26 +144,26 @@ class KubernetesSandboxService(SandboxService):
     ) -> Dict[str, Any]:
         """
         Wait for Pod to be Running and have an IP address.
-        
+
         Args:
             sandbox_id: Sandbox ID
             timeout_seconds: Maximum time to wait in seconds
             poll_interval_seconds: Time between polling attempts
-            
+
         Returns:
             Workload dict when Pod is Running with IP
-            
+
         Raises:
             HTTPException: If timeout or Pod fails
         """
         logger.info(
             f"Waiting for sandbox {sandbox_id} to be Running with IP (timeout: {timeout_seconds}s)"
         )
-        
+
         start_time = time.time()
         last_state = None
         last_message = None
-        
+
         while time.time() - start_time < timeout_seconds:
             try:
                 # Get current workload status
@@ -170,17 +171,17 @@ class KubernetesSandboxService(SandboxService):
                     sandbox_id=sandbox_id,
                     namespace=self.namespace,
                 )
-                
+
                 if not workload:
                     logger.debug(f"Workload not found yet for sandbox {sandbox_id}")
                     time.sleep(poll_interval_seconds)
                     continue
-                
+
                 # Get status
                 status_info = self.workload_provider.get_status(workload)
                 current_state = status_info["state"]
                 current_message = status_info["message"]
-                
+
                 # Log state changes
                 if current_state != last_state or current_message != last_message:
                     logger.info(
@@ -188,22 +189,21 @@ class KubernetesSandboxService(SandboxService):
                     )
                     last_state = current_state
                     last_message = current_message
-                
+
                 # Check if Running or Allocated (IP assigned)
                 if current_state in ("Running", "Allocated"):
                     return workload
-                
+
             except HTTPException:
                 raise
             except Exception as e:
                 logger.warning(
-                    f"Error checking sandbox {sandbox_id} status: {e}",
-                    exc_info=True
+                    f"Error checking sandbox {sandbox_id} status: {e}", exc_info=True
                 )
-            
+
             # Wait before next poll
             time.sleep(poll_interval_seconds)
-        
+
         # Timeout
         elapsed = time.time() - start_time
         raise HTTPException(
@@ -216,11 +216,11 @@ class KubernetesSandboxService(SandboxService):
                 ),
             },
         )
-    
+
     def _ensure_network_policy_support(self, request: CreateSandboxRequest) -> None:
         """
         Validate that network policy can be honored under the current runtime config.
-        
+
         This validates that egress.image is configured when network_policy is provided.
         """
         # Common validation: egress.image must be configured
@@ -250,15 +250,15 @@ class KubernetesSandboxService(SandboxService):
     def create_sandbox(self, request: CreateSandboxRequest) -> CreateSandboxResponse:
         """
         Create a new sandbox using Kubernetes Pod.
-        
+
         Wait for the Pod to be Running and have an IP address before returning.
-        
+
         Args:
             request: Sandbox creation request.
-            
+
         Returns:
             CreateSandboxResponse: Created sandbox information with Running state
-            
+
         Raises:
             HTTPException: If creation fails, timeout, or invalid parameters
         """
@@ -271,10 +271,10 @@ class KubernetesSandboxService(SandboxService):
         )
         self._ensure_network_policy_support(request)
         self._ensure_image_auth_support(request)
-        
+
         # Generate sandbox ID
         sandbox_id = self.generate_sandbox_id()
-        
+
         # Calculate expiration time (None = no TTL, manual cleanup only; same as Docker)
         created_at = datetime.now(timezone.utc)
         expires_at = None
@@ -287,28 +287,30 @@ class KubernetesSandboxService(SandboxService):
         }
         if expires_at is None:
             labels[SANDBOX_MANUAL_CLEANUP_LABEL] = "true"
-        
+
         # Add user metadata as labels
         if request.metadata:
             labels.update(request.metadata)
-        
+
         # Extract resource limits
         resource_limits = {}
         if request.resource_limits and request.resource_limits.root:
             resource_limits = request.resource_limits.root
-        
+
         try:
             # Get egress image if network policy is provided
             egress_image = None
             if request.network_policy:
-                egress_image = self.app_config.egress.image if self.app_config.egress else None
-            
+                egress_image = (
+                    self.app_config.egress.image if self.app_config.egress else None
+                )
+
             # Validate volumes before creating workload
             ensure_volumes_valid(
                 request.volumes,
                 self.app_config.storage.allowed_host_paths or None,
             )
-            
+
             # Create workload
             workload_info = self.workload_provider.create_workload(
                 sandbox_id=sandbox_id,
@@ -325,22 +327,22 @@ class KubernetesSandboxService(SandboxService):
                 egress_image=egress_image,
                 volumes=request.volumes,
             )
-            
+
             logger.info(
                 "Created sandbox (Async): id=%s, workload=%s",
                 sandbox_id,
                 workload_info.get("name"),
             )
-            
+
             # Fetch the initial workload state (likely Pending) to build the response
             workload = self.workload_provider.get_workload(
                 sandbox_id=sandbox_id,
                 namespace=self.namespace,
             )
-            
+
             # Get initial status
             status_info = self.workload_provider.get_status(workload)
-            
+
             # Build and return response immediately with initial state
             return CreateSandboxResponse(
                 id=sandbox_id,
@@ -356,7 +358,7 @@ class KubernetesSandboxService(SandboxService):
                 image=request.image,
                 entrypoint=request.entrypoint,
             )
-            
+
         except HTTPException:
             raise
         except ValueError as e:
@@ -378,17 +380,17 @@ class KubernetesSandboxService(SandboxService):
                     "message": f"Failed to create sandbox: {str(e)}",
                 },
             ) from e
-    
+
     def get_sandbox(self, sandbox_id: str) -> Sandbox:
         """
         Get sandbox by ID.
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
-            
+
         Returns:
             Sandbox: Sandbox information
-            
+
         Raises:
             HTTPException: If sandbox not found
         """
@@ -397,7 +399,7 @@ class KubernetesSandboxService(SandboxService):
                 sandbox_id=sandbox_id,
                 namespace=self.namespace,
             )
-            
+
             if not workload:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -406,9 +408,9 @@ class KubernetesSandboxService(SandboxService):
                         "message": f"Sandbox '{sandbox_id}' not found",
                     },
                 )
-            
+
             return self._build_sandbox_from_workload(workload)
-            
+
         except HTTPException:
             raise
         except Exception as e:
@@ -420,50 +422,48 @@ class KubernetesSandboxService(SandboxService):
                     "message": f"Failed to get sandbox: {str(e)}",
                 },
             ) from e
-    
+
     def list_sandboxes(self, request: ListSandboxesRequest) -> ListSandboxesResponse:
         """
         List sandboxes with filtering and pagination.
-        
+
         Args:
             request: List request with filters and pagination
-            
+
         Returns:
             ListSandboxesResponse: Paginated list of sandboxes
         """
         try:
             # Build label selector
             label_selector = SANDBOX_ID_LABEL
-            
+
             # List all workloads
             workloads = self.workload_provider.list_workloads(
                 namespace=self.namespace,
                 label_selector=label_selector,
             )
-            
+
             # Convert to Sandbox objects
-            sandboxes = [
-                self._build_sandbox_from_workload(w) for w in workloads
-            ]
-            
+            sandboxes = [self._build_sandbox_from_workload(w) for w in workloads]
+
             # Apply filters
             filtered = self._apply_filters(sandboxes, request.filter)
-            
+
             # Sort by creation time (newest first)
             filtered.sort(key=lambda s: s.created_at or datetime.min, reverse=True)
-            
+
             # Apply pagination
             total_items = len(filtered)
             page = request.pagination.page
             page_size = request.pagination.page_size
-            
+
             start_idx = (page - 1) * page_size
             end_idx = start_idx + page_size
             paginated_items = filtered[start_idx:end_idx]
-            
+
             total_pages = (total_items + page_size - 1) // page_size
             has_next = page < total_pages
-            
+
             return ListSandboxesResponse(
                 items=paginated_items,
                 pagination=PaginationInfo(
@@ -474,7 +474,7 @@ class KubernetesSandboxService(SandboxService):
                     has_next_page=has_next,
                 ),
             )
-            
+
         except Exception as e:
             logger.error(f"Error listing sandboxes: {e}")
             raise HTTPException(
@@ -484,14 +484,14 @@ class KubernetesSandboxService(SandboxService):
                     "message": f"Failed to list sandboxes: {str(e)}",
                 },
             ) from e
-    
+
     def delete_sandbox(self, sandbox_id: str) -> None:
         """
         Delete a sandbox.
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
-            
+
         Raises:
             HTTPException: If deletion fails
         """
@@ -500,9 +500,9 @@ class KubernetesSandboxService(SandboxService):
                 sandbox_id=sandbox_id,
                 namespace=self.namespace,
             )
-            
+
             logger.info(f"Deleted sandbox: {sandbox_id}")
-            
+
         except Exception as e:
             if "not found" in str(e).lower():
                 raise HTTPException(
@@ -512,7 +512,7 @@ class KubernetesSandboxService(SandboxService):
                         "message": f"Sandbox '{sandbox_id}' not found",
                     },
                 ) from e
-            
+
             logger.error(f"Error deleting sandbox {sandbox_id}: {e}")
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -521,14 +521,14 @@ class KubernetesSandboxService(SandboxService):
                     "message": f"Failed to delete sandbox: {str(e)}",
                 },
             ) from e
-    
+
     def pause_sandbox(self, sandbox_id: str) -> None:
         """
         Pause sandbox (not supported in Kubernetes).
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
-            
+
         Raises:
             HTTPException: Always raises 501 Not Implemented
         """
@@ -539,14 +539,14 @@ class KubernetesSandboxService(SandboxService):
                 "message": "Pause operation is not supported in Kubernetes runtime",
             },
         )
-    
+
     def resume_sandbox(self, sandbox_id: str) -> None:
         """
         Resume sandbox (not supported in Kubernetes).
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
-            
+
         Raises:
             HTTPException: Always raises 501 Not Implemented
         """
@@ -557,7 +557,7 @@ class KubernetesSandboxService(SandboxService):
                 "message": "Resume operation is not supported in Kubernetes runtime",
             },
         )
-    
+
     def renew_expiration(
         self,
         sandbox_id: str,
@@ -565,29 +565,29 @@ class KubernetesSandboxService(SandboxService):
     ) -> RenewSandboxExpirationResponse:
         """
         Renew sandbox expiration time.
-        
+
         Updates both the BatchSandbox spec.expireTime and label for consistency.
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
             request: Renewal request with new expiration time
-            
+
         Returns:
             RenewSandboxExpirationResponse: Updated expiration time
-            
+
         Raises:
             HTTPException: If renewal fails
         """
         # Validate future expiration
         new_expiration = ensure_future_expiration(request.expires_at)
-        
+
         try:
             # Verify sandbox exists
             workload = self.workload_provider.get_workload(
                 sandbox_id=sandbox_id,
                 namespace=self.namespace,
             )
-            
+
             if not workload:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -613,15 +613,11 @@ class KubernetesSandboxService(SandboxService):
                 namespace=self.namespace,
                 expires_at=new_expiration,
             )
-            
-            logger.info(
-                f"Renewed sandbox {sandbox_id} expiration to {new_expiration}"
-            )
-            
-            return RenewSandboxExpirationResponse(
-                expires_at=new_expiration
-            )
-            
+
+            logger.info(f"Renewed sandbox {sandbox_id} expiration to {new_expiration}")
+
+            return RenewSandboxExpirationResponse(expires_at=new_expiration)
+
         except HTTPException:
             raise
         except Exception as e:
@@ -633,7 +629,7 @@ class KubernetesSandboxService(SandboxService):
                     "message": f"Failed to renew expiration: {str(e)}",
                 },
             ) from e
-    
+
     def get_endpoint(
         self,
         sandbox_id: str,
@@ -642,26 +638,26 @@ class KubernetesSandboxService(SandboxService):
     ) -> Endpoint:
         """
         Get sandbox access endpoint.
-        
+
         Args:
             sandbox_id: Unique sandbox identifier
             port: Port number
             resolve_internal: Ignored for Kubernetes (always returns Pod IP)
-            
+
         Returns:
             Endpoint: Endpoint information
-            
+
         Raises:
             HTTPException: If endpoint not available
         """
         self.validate_port(port)
-        
+
         try:
             workload = self.workload_provider.get_workload(
                 sandbox_id=sandbox_id,
                 namespace=self.namespace,
             )
-            
+
             if not workload:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -670,8 +666,10 @@ class KubernetesSandboxService(SandboxService):
                         "message": f"Sandbox '{sandbox_id}' not found",
                     },
                 )
-            
-            endpoint = self.workload_provider.get_endpoint_info(workload, port, sandbox_id)
+
+            endpoint = self.workload_provider.get_endpoint_info(
+                workload, port, sandbox_id
+            )
             if not endpoint:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
@@ -681,7 +679,7 @@ class KubernetesSandboxService(SandboxService):
                     },
                 )
             return endpoint
-            
+
         except HTTPException:
             raise
         except Exception as e:
@@ -693,14 +691,14 @@ class KubernetesSandboxService(SandboxService):
                     "message": f"Failed to get endpoint: {str(e)}",
                 },
             ) from e
-    
+
     def _build_sandbox_from_workload(self, workload: Any) -> Sandbox:
         """
         Build Sandbox object from Kubernetes workload.
-        
+
         Args:
             workload: Kubernetes workload object (V1Pod or dict for CRD)
-            
+
         Returns:
             Sandbox: Sandbox object
         """
@@ -715,25 +713,24 @@ class KubernetesSandboxService(SandboxService):
             spec = workload.spec
             labels = metadata.labels or {}
             creation_timestamp = metadata.creation_timestamp
-        
+
         sandbox_id = labels.get(SANDBOX_ID_LABEL, "")
-        
+
         # Get expiration from provider
         expires_at = self.workload_provider.get_expiration(workload)
-        
+
         # Get status
         status_info = self.workload_provider.get_status(workload)
-        
+
         # Extract metadata (filter out system labels)
         user_metadata = {
-            k: v for k, v in labels.items()
-            if not k.startswith("opensandbox.io/")
+            k: v for k, v in labels.items() if not k.startswith("opensandbox.io/")
         }
-        
+
         # Get image and entrypoint from spec
         image_uri = ""
         entrypoint = []
-        
+
         if isinstance(workload, dict):
             # For CRD, extract from template
             template = spec.get("template") or spec.get("podTemplate") or {}
@@ -745,13 +742,13 @@ class KubernetesSandboxService(SandboxService):
                 entrypoint = container.get("command", [])
         else:
             # For Pod object
-            if hasattr(spec, 'containers') and spec.containers:
+            if hasattr(spec, "containers") and spec.containers:
                 container = spec.containers[0]
                 image_uri = container.image or ""
                 entrypoint = container.command or []
-        
+
         image_spec = ImageSpec(uri=image_uri) if image_uri else ImageSpec(uri="unknown")
-        
+
         return Sandbox(
             id=sandbox_id,
             status=SandboxStatus(
@@ -766,24 +763,26 @@ class KubernetesSandboxService(SandboxService):
             image=image_spec,
             entrypoint=entrypoint,
         )
-    
-    def _apply_filters(self, sandboxes: list[Sandbox], filter_spec: Any) -> list[Sandbox]:
+
+    def _apply_filters(
+        self, sandboxes: list[Sandbox], filter_spec: Any
+    ) -> list[Sandbox]:
         """
         Apply filters to sandbox list.
-        
+
         Args:
             sandboxes: List of sandboxes
             filter_spec: Filter specification
-            
+
         Returns:
             Filtered list of sandboxes
         """
         if not filter_spec:
             return sandboxes
-        
+
         filtered = []
         for sandbox in sandboxes:
             if matches_filter(sandbox, filter_spec):
                 filtered.append(sandbox)
-        
+
         return filtered

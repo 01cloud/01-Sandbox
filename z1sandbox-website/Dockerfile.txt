@@ -62,5 +62,3 @@
 
 # # -s flag enables SPA mode (rewrites all routes to index.html)
 # CMD ["serve", "-s", "dist", "-l", "8080"]
-
-

@@ -1,5 +1,6 @@
-import os
 import base64
+import os
+
 
 def backend_mappings() -> dict[str, str]:
     """
@@ -7,28 +8,35 @@ def backend_mappings() -> dict[str, str]:
     Can be extended via a JSON environment variable.
     """
     default_mappings = {
-        "z1sandbox": os.environ.get("BACKEND_URL_Z1SANDBOX", "http://opensandbox-server:80"),
-        "opensandbox": os.environ.get("BACKEND_URL_OPENSANDBOX", "http://opensandbox-server:80"),
+        "z1sandbox": os.environ.get(
+            "BACKEND_URL_Z1SANDBOX", "http://opensandbox-server:80"
+        ),
+        "opensandbox": os.environ.get(
+            "BACKEND_URL_OPENSANDBOX", "http://opensandbox-server:80"
+        ),
     }
-    
+
     # Allow override/extension via JSON string Test
     custom_json = os.environ.get("BACKEND_MAPPINGS_JSON")
     if custom_json:
         try:
-            import json    
+            import json
+
             custom_mappings = json.loads(custom_json)
             default_mappings.update(custom_mappings)
         except Exception as e:
             print(f"[config] Failed to parse BACKEND_MAPPINGS_JSON: {e}")
-            
+
     return default_mappings
-    
+
+
 def opensandbox_route_prefix() -> str:
     """
     Returns the versioned prefix for the internal Opensandbox backend.
     Example: /api/v1/01sbx
     """
     return os.environ.get("OPENSANDBOX_ROUTE_PREFIX", "/api/v1/01sbx").rstrip("/")
+
 
 def opensandbox_base_url(backend_id: str = "opensandbox") -> str:
     """
@@ -62,12 +70,13 @@ def jwt_config():
     Returns configuration for JWT signing (Issuer role) with self-healing PEM repair.
     """
     raw_private_key = os.environ.get("JWT_PRIVATE_KEY", "")
-    
+
     def repair_pem(key_str, is_private=True):
-        if not key_str: return None
+        if not key_str:
+            return None
         # 1. Handle literal \n and clean whitespace
         k = key_str.replace("\\n", "\n").replace("\\r", "").strip()
-        
+
         # 2. Base64 fallback (if the entire thing is b64 encoded)
         if "-----BEGIN" not in k:
             try:
@@ -83,7 +92,7 @@ def jwt_config():
                 k = f"-----BEGIN PRIVATE KEY-----\n{k}\n-----END PRIVATE KEY-----"
             else:
                 k = f"-----BEGIN PUBLIC KEY-----\n{k}\n-----END PUBLIC KEY-----"
-        
+
         # 4. Final validation check
         if is_private and "PUBLIC" in k:
             print("[config] WARNING: Expected Private Key but found PUBLIC key header!")
@@ -97,7 +106,9 @@ def jwt_config():
         if os.path.exists(private_pem_path):
             with open(private_pem_path, "r") as f:
                 processed_key = repair_pem(f.read(), is_private=True)
-            print(f"[config] JWT Private Key loaded from local file: {private_pem_path}")
+            print(
+                f"[config] JWT Private Key loaded from local file: {private_pem_path}"
+            )
 
     public_jwks = os.environ.get("JWT_PUBLIC_JWKS", "").strip()
     private_key_obj = None
@@ -105,14 +116,15 @@ def jwt_config():
 
     if processed_key:
         try:
-            from cryptography.hazmat.primitives import serialization
             from cryptography.hazmat.backends import default_backend
+            from cryptography.hazmat.primitives import serialization
+
             private_key_obj = serialization.load_pem_private_key(
-                processed_key.encode("utf-8"),
-                password=None,
-                backend=default_backend()
+                processed_key.encode("utf-8"), password=None, backend=default_backend()
             )
-            print(f"[config] Private Key Object loaded successfully (Type: {type(private_key_obj).__name__})")
+            print(
+                f"[config] Private Key Object loaded successfully (Type: {type(private_key_obj).__name__})"
+            )
         except Exception as e:
             print(f"[config] CRITICAL: Failed to load Private Key Object: {e}")
 
@@ -122,21 +134,25 @@ def jwt_config():
             import json
 
             def b64_url_encode(data):
-                return base64.urlsafe_b64encode(data).decode('utf-8').replace('=', '')
+                return base64.urlsafe_b64encode(data).decode("utf-8").replace("=", "")
 
             if private_key_obj:
                 public_key_obj = private_key_obj.public_key()
                 numbers = public_key_obj.public_numbers()
-                n_bytes = numbers.n.to_bytes((numbers.n.bit_length() + 7) // 8, byteorder='big')
-                e_bytes = numbers.e.to_bytes((numbers.e.bit_length() + 7) // 8, byteorder='big')
-                
+                n_bytes = numbers.n.to_bytes(
+                    (numbers.n.bit_length() + 7) // 8, byteorder="big"
+                )
+                e_bytes = numbers.e.to_bytes(
+                    (numbers.e.bit_length() + 7) // 8, byteorder="big"
+                )
+
                 jwks_key = {
                     "kty": "RSA",
                     "use": "sig",
                     "kid": "code-inspector-key-01",
                     "alg": "RS256",
                     "n": b64_url_encode(n_bytes),
-                    "e": b64_url_encode(e_bytes)
+                    "e": b64_url_encode(e_bytes),
                 }
                 public_jwks = json.dumps({"keys": [jwks_key]})
                 print(f"[config] Public JWKS derived from Private Key")

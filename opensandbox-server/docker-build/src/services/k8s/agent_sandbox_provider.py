@@ -20,7 +20,7 @@ import hashlib
 import logging
 import re
 from datetime import datetime
-from typing import Dict, List, Any, Optional
+from typing import Any, Dict, List, Optional
 
 from kubernetes.client import (
     V1Container,
@@ -28,10 +28,9 @@ from kubernetes.client import (
     V1ResourceRequirements,
     V1VolumeMount,
 )
-
+from src.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
 from src.config import AppConfig
 from src.services.helpers import format_ingress_endpoint
-from src.api.schema import Endpoint, ImageSpec, NetworkPolicy, Volume
 from src.services.k8s.agent_sandbox_template import AgentSandboxTemplateManager
 from src.services.k8s.client import K8sClient
 from src.services.k8s.egress_helper import (
@@ -91,13 +90,17 @@ class AgentSandboxProvider(WorkloadProvider):
         k8s_config = app_config.kubernetes if app_config else None
         agent_config = app_config.agent_sandbox if app_config else None
 
-        self.shutdown_policy = agent_config.shutdown_policy if agent_config else "Delete"
+        self.shutdown_policy = (
+            agent_config.shutdown_policy if agent_config else "Delete"
+        )
         self.service_account = k8s_config.service_account if k8s_config else None
         self.template_manager = AgentSandboxTemplateManager(
             agent_config.template_file if agent_config else None
         )
         self.ingress_config = app_config.ingress if app_config else None
-        self.execd_init_resources = k8s_config.execd_init_resources if k8s_config else None
+        self.execd_init_resources = (
+            k8s_config.execd_init_resources if k8s_config else None
+        )
 
         # Initialize secure runtime resolver
         self.resolver = SecureRuntimeResolver(app_config) if app_config else None
@@ -222,9 +225,9 @@ class AgentSandboxProvider(WorkloadProvider):
             include_execd_volume=True,
             has_network_policy=network_policy is not None,
         )
-        
+
         containers = [self._container_to_dict(main_container)]
-        
+
         # Build base pod spec
         pod_spec: Dict[str, Any] = {
             "initContainers": [self._container_to_dict(init_container)],
@@ -248,7 +251,7 @@ class AgentSandboxProvider(WorkloadProvider):
             network_policy=network_policy,
             egress_image=egress_image,
         )
-        
+
         return pod_spec
 
     def _build_execd_init_container(self, execd_image: str) -> V1Container:
@@ -352,7 +355,9 @@ class AgentSandboxProvider(WorkloadProvider):
                 for vm in container.volume_mounts
             ]
         if container.security_context:
-            security_context_dict = serialize_security_context_to_dict(container.security_context)
+            security_context_dict = serialize_security_context_to_dict(
+                container.security_context
+            )
             if security_context_dict:
                 result["securityContext"] = security_context_dict
 
@@ -390,7 +395,9 @@ class AgentSandboxProvider(WorkloadProvider):
             grace_period_seconds=0,
         )
 
-    def list_workloads(self, namespace: str, label_selector: str) -> List[Dict[str, Any]]:
+    def list_workloads(
+        self, namespace: str, label_selector: str
+    ) -> List[Dict[str, Any]]:
         """List Sandbox CRDs matching the given label selector."""
         return self.k8s_client.list_custom_objects(
             group=self.group,
@@ -400,7 +407,9 @@ class AgentSandboxProvider(WorkloadProvider):
             label_selector=label_selector,
         )
 
-    def update_expiration(self, sandbox_id: str, namespace: str, expires_at: datetime) -> None:
+    def update_expiration(
+        self, sandbox_id: str, namespace: str, expires_at: datetime
+    ) -> None:
         """Patch the Sandbox CRD shutdownTime field."""
         sandbox = self.get_workload(sandbox_id, namespace)
         if not sandbox:
@@ -432,7 +441,9 @@ class AgentSandboxProvider(WorkloadProvider):
         try:
             return datetime.fromisoformat(shutdown_time_str.replace("Z", "+00:00"))
         except (ValueError, TypeError) as e:
-            logger.warning("Invalid shutdownTime format: %s, error: %s", shutdown_time_str, e)
+            logger.warning(
+                "Invalid shutdownTime format: %s, error: %s", shutdown_time_str, e
+            )
             return None
 
     def get_status(self, workload: Dict[str, Any]) -> Dict[str, Any]:
@@ -468,7 +479,9 @@ class AgentSandboxProvider(WorkloadProvider):
         cond_status = ready_condition.get("status")
         reason = ready_condition.get("reason")
         message = ready_condition.get("message")
-        last_transition_at = ready_condition.get("lastTransitionTime") or creation_timestamp
+        last_transition_at = (
+            ready_condition.get("lastTransitionTime") or creation_timestamp
+        )
 
         if cond_status == "True":
             state = "Running"
@@ -486,7 +499,9 @@ class AgentSandboxProvider(WorkloadProvider):
             "last_transition_at": last_transition_at,
         }
 
-    def _pod_state_from_selector(self, workload: Dict[str, Any]) -> Optional[tuple[str, str, str]]:
+    def _pod_state_from_selector(
+        self, workload: Dict[str, Any]
+    ) -> Optional[tuple[str, str, str]]:
         """Resolve state from Pod list via label selector.
 
         Returns three-state tuple (state, reason, message):
@@ -534,9 +549,13 @@ class AgentSandboxProvider(WorkloadProvider):
 
         return None
 
-    def get_endpoint_info(self, workload: Dict[str, Any], port: int, sandbox_id: str) -> Optional[Endpoint]:
+    def get_endpoint_info(
+        self, workload: Dict[str, Any], port: int, sandbox_id: str
+    ) -> Optional[Endpoint]:
         # ingress-based endpoint if configured (gateway)
-        ingress_endpoint = format_ingress_endpoint(self.ingress_config, sandbox_id, port)
+        ingress_endpoint = format_ingress_endpoint(
+            self.ingress_config, sandbox_id, port
+        )
         if ingress_endpoint:
             return ingress_endpoint
 
@@ -550,7 +569,11 @@ class AgentSandboxProvider(WorkloadProvider):
                     label_selector=selector,
                 )
                 for pod in pods:
-                    if pod.status and pod.status.pod_ip and pod.status.phase == "Running":
+                    if (
+                        pod.status
+                        and pod.status.pod_ip
+                        and pod.status.phase == "Running"
+                    ):
                         return Endpoint(endpoint=f"{pod.status.pod_ip}:{port}")
             except Exception as e:
                 logger.warning("Failed to resolve pod endpoint: %s", e)
@@ -560,4 +583,3 @@ class AgentSandboxProvider(WorkloadProvider):
             return Endpoint(endpoint=f"{service_fqdn}:{port}")
 
         return None
-

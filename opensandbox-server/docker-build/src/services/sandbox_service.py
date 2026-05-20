@@ -19,8 +19,8 @@ This module contains the business logic for sandbox lifecycle management.
 This module defines the abstract interface for sandbox services.
 """
 
-from abc import ABC, abstractmethod
 import socket
+from abc import ABC, abstractmethod
 from uuid import uuid4
 
 from src.api.schema import (
@@ -63,7 +63,11 @@ class SandboxService(ABC):
             str: Detected local IP address, or 127.0.0.1 as a safe fallback.
         """
         try:
-            target = ("2001:4860:4860::8888", 80, 0, 0) if family == socket.AF_INET6 else ("8.8.8.8", 80)
+            target = (
+                ("2001:4860:4860::8888", 80, 0, 0)
+                if family == socket.AF_INET6
+                else ("8.8.8.8", 80)
+            )
             with socket.socket(family, socket.SOCK_DGRAM) as sock:
                 sock.connect(target)
                 ip = sock.getsockname()[0]
@@ -75,7 +79,9 @@ class SandboxService(ABC):
                 return SandboxService._resolve_bind_ip(socket.AF_INET)
 
         try:
-            family_name = socket.AF_INET6 if family == socket.AF_INET6 else socket.AF_INET
+            family_name = (
+                socket.AF_INET6 if family == socket.AF_INET6 else socket.AF_INET
+            )
             hostname = socket.gethostname()
             infos = socket.getaddrinfo(hostname, None, family_name, socket.SOCK_DGRAM)
             if infos:
@@ -206,7 +212,9 @@ class SandboxService(ABC):
         pass
 
     @abstractmethod
-    def get_endpoint(self, sandbox_id: str, port: int, resolve_internal: bool = False) -> Endpoint:
+    def get_endpoint(
+        self, sandbox_id: str, port: int, resolve_internal: bool = False
+    ) -> Endpoint:
         """
         Get sandbox access endpoint.
 

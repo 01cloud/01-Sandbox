@@ -19,25 +19,25 @@ CodeInspector is built on a **Facade Architecture**, offering a unified, high-pe
 ## 🏗️ 2. Architecture & Data Flow
 
 ### Traffic Flow & Component Architecture
-CodeInspector acts as a "Brain" (FastAPI Orchestrator) that manages "Workers" (Sandboxes). 
+CodeInspector acts as a "Brain" (FastAPI Orchestrator) that manages "Workers" (Sandboxes).
 
 ```mermaid
 graph TD
     User([External Client]) -->|HTTP POST| MB[MetalLB Load Balancer]
     MB -->|IP Traffic| AG[Agent Gateway - Envoy Proxy]
-    
+
     subgraph "Ingress Layer"
         AG -->|Auth Check| AGP[AgentgatewayPolicy - API Key]
         AGP -->|Route| HR[HTTPRoute - /]
     end
-    
+
     HR -->|Forward| SAS[Sandbox API Service]
-    
+
     subgraph "Orchestration Layer"
         SAS -->|FastAPI| AS[API Server]
         AS -->|Proxy| OSB_PROXY[/api/z1sandbox/*]
     end
-    
+
     subgraph "Execution Layer"
         OSB_PROXY -->|REST| OSS[OpenSandbox Server]
         OSS -->|Lifecycle| OSC[OpenSandbox Controller]
@@ -122,7 +122,7 @@ def run_security_scan():
         status_res = requests.get(f"{BASE_URL}/v1/scan-status/{job_id}", headers=HEADERS)
         logs = status_res.text
         print(logs)
-        
+
         if "Security scans complete." in logs or "FAILED" in logs:
             break
         time.sleep(3)

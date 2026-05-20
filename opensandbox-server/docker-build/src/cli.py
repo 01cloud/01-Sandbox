@@ -20,11 +20,10 @@ import shutil
 from pathlib import Path
 
 import uvicorn
-
 from src.config import (
-    AgentSandboxRuntimeConfig,
     CONFIG_ENV_VAR,
     DEFAULT_CONFIG_PATH,
+    AgentSandboxRuntimeConfig,
     DockerConfig,
     EgressConfig,
     IngressConfig,
@@ -109,13 +108,17 @@ def copy_example_config(
     dest_path = Path(destination or DEFAULT_CONFIG_PATH).expanduser()
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     if dest_path.exists() and not force:
-        raise FileExistsError(f"Config file already exists at {dest_path}. Use --force to overwrite.")
+        raise FileExistsError(
+            f"Config file already exists at {dest_path}. Use --force to overwrite."
+        )
 
     shutil.copyfile(src_path, dest_path)
     return dest_path
 
 
-def render_full_config(destination: str | Path | None = None, *, force: bool = False) -> Path:
+def render_full_config(
+    destination: str | Path | None = None, *, force: bool = False
+) -> Path:
     """
     Render the most complete config skeleton from config models with comments.
 
@@ -162,7 +165,9 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
     dest_path = Path(destination or DEFAULT_CONFIG_PATH).expanduser()
     dest_path.parent.mkdir(parents=True, exist_ok=True)
     if dest_path.exists() and not force:
-        raise FileExistsError(f"Config file already exists at {dest_path}. Use --force to overwrite.")
+        raise FileExistsError(
+            f"Config file already exists at {dest_path}. Use --force to overwrite."
+        )
 
     sections = [
         "# Generated from OpenSandbox config schema. Remove sections you do not use.",
@@ -172,17 +177,19 @@ def render_full_config(destination: str | Path | None = None, *, force: bool = F
         _render_section(
             "egress",
             EgressConfig,
-            extra_comments=["Used when networkPolicy is provided. Requires docker.network_mode = \"bridge\"."],
+            extra_comments=[
+                'Used when networkPolicy is provided. Requires docker.network_mode = "bridge".'
+            ],
         ),
         _render_section(
             "kubernetes",
             KubernetesRuntimeConfig,
-            extra_comments=["Only used when runtime.type = \"kubernetes\""],
+            extra_comments=['Only used when runtime.type = "kubernetes"'],
         ),
         _render_section(
             "agent_sandbox",
             AgentSandboxRuntimeConfig,
-            extra_comments=["Requires kubernetes.workload_provider = \"agent-sandbox\""],
+            extra_comments=['Requires kubernetes.workload_provider = "agent-sandbox"'],
         ),
         _render_section("ingress", IngressConfig),
         _render_section("storage", StorageConfig),
@@ -200,7 +207,9 @@ def main() -> None:
     if args.command == "init-config":
         try:
             if args.example:
-                dest = copy_example_config(args.path, force=args.force, kind=args.example)
+                dest = copy_example_config(
+                    args.path, force=args.force, kind=args.example
+                )
                 print(f"Wrote example config ({args.example}) to {dest}\n")
             else:
                 dest = render_full_config(args.path, force=args.force)
