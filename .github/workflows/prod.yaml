@@ -36,10 +36,21 @@ jobs:
       controller: ${{ steps.filter.outputs.controller }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get previous release tag
+        id: prev-tag
+        run: |
+          git fetch --tags
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+          echo "Previous tag: $PREV_TAG"
+          echo "prev_tag=$PREV_TAG" >> $GITHUB_OUTPUT
+
       - uses: dorny/paths-filter@v3
         id: filter
         with:
-          base: ${{ github.event.before }}
+          base: ${{ steps.prev-tag.outputs.prev_tag }}
           filters: |
             api:
               - 'apiServer/**'
