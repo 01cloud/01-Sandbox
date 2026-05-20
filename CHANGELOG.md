@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/01cloud/01-Sandbox/compare/v0.1.1...v0.1.2) (2026-05-20)
+
+
+### Bug Fixes
+
+* helm-deploy release ([17f0ed4](https://github.com/01cloud/01-Sandbox/commit/17f0ed4c1b46f6a478f221696633a511bde5c0da))
+* missing release workflow ([f2341cf](https://github.com/01cloud/01-Sandbox/commit/f2341cfcbde78fc88f6bfa5d62bb37e66411c265))
+
 ## [0.1.1](https://github.com/01cloud/01-Sandbox/compare/v0.1.0...v0.1.1) (2026-05-20)
 
 
