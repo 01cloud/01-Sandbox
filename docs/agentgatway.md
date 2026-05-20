@@ -40,7 +40,7 @@ To protect internal microservices and prevent Denial of Service (DoS) conditions
 
 ### The Current Configuration
 
-The rate limit is fully templated and dynamically configured from the main [values.yaml](file:///home/berrybytes/Desktop/01-Sandbox/codeInspector/values.yaml#L38-L41) file. 
+The rate limit is fully templated and dynamically configured from the main [values.yaml](file:///home/berrybytes/Desktop/01-Sandbox/codeInspector/values.yaml#L38-L41) file.
 
 **Main Parent Configuration ([codeInspector/values.yaml](file:///home/berrybytes/Desktop/01-Sandbox/codeInspector/values.yaml#L38-L41)):**
 ```yaml

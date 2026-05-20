@@ -19,36 +19,38 @@ This module defines FastAPI routes that map to the OpenAPI specification endpoin
 All business logic is delegated to the service layer that backs each operation.
 """
 
-from typing import List, Optional, Any
+import asyncio
+import base64
+import json
 import os
 import re
-import json
-import base64
-import asyncio
+from typing import Any, List, Optional
 from uuid import uuid4
-import httpx
-from fastapi import APIRouter, Header, Query, Request, status, Body
-from fastapi.exceptions import HTTPException
-from fastapi.responses import Response, StreamingResponse, JSONResponse, FileResponse
 
+import httpx
+from fastapi import APIRouter, Body, Header, Query, Request, status
+from fastapi.exceptions import HTTPException
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from src.api.schema import (
+    PVC,
     CreateSandboxRequest,
     CreateSandboxResponse,
     Endpoint,
     ErrorResponse,
+    ImageSpec,
     ListSandboxesRequest,
     ListSandboxesResponse,
     PaginationRequest,
     RenewSandboxExpirationRequest,
     RenewSandboxExpirationResponse,
+)
+from src.api.schema import ResourceLimits as SchemaResourceLimits
+from src.api.schema import (
     Sandbox,
     SandboxFilter,
     ScanJobRequest,
     ScanJobResponse,
-    ImageSpec,
     Volume,
-    PVC,
-    ResourceLimits as SchemaResourceLimits,
 )
 from src.services.factory import create_sandbox_service
 
@@ -64,36 +66,48 @@ HOP_BY_HOP_HEADERS = {
     "upgrade",
 }
 
+
 def detect_extension(content: str) -> str:
     """Detects the best file extension for a code snippet using heuristics."""
     if not content:
         return "py"
-    
+
     # Check for JSON first (strict structure)
     stripped = content.strip()
-    if (stripped.startswith("{") and stripped.endswith("}")) or (stripped.startswith("[") and stripped.endswith("]")):
+    if (stripped.startswith("{") and stripped.endswith("}")) or (
+        stripped.startswith("[") and stripped.endswith("]")
+    ):
         return "json"
 
     # Check for YAML & K8s
-    if content.startswith("---") or re.search(r"^(apiVersion|metadata|version|services|spec|kind):", content, re.MULTILINE):
+    if content.startswith("---") or re.search(
+        r"^(apiVersion|metadata|version|services|spec|kind):", content, re.MULTILINE
+    ):
         # We return 'yaml' even for K8s manifests to ensure scanner tools (kube-score, etc.)
         # correctly identify the file type by extension. The orchestrator will still
         # classify it as 'k8s' based on content.
         return "yaml"
-    
+
     # Check for Go
     if content.startswith("package ") or "func main()" in content:
         return "go"
 
     # PRIORITIZE PYTHON: Check for Python-specific markers
-    if re.search(r"^\s*(#|def |from .* import |if __name__ ==)", content, re.MULTILINE) or "print(" in content:
+    if (
+        re.search(r"^\s*(#|def |from .* import |if __name__ ==)", content, re.MULTILINE)
+        or "print(" in content
+    ):
         return "py"
-    
+
     # Check for Javascript
-    if re.search(r"\b(const|let|var|function|console\.log)\s", content) or "require(" in content:
+    if (
+        re.search(r"\b(const|let|var|function|console\.log)\s", content)
+        or "require(" in content
+    ):
         return "js"
-        
-    return "py" # Default to Python
+
+    return "py"  # Default to Python
+
 
 # Headers that shouldn't be forwarded to untrusted/internal backends
 SENSITIVE_HEADERS = {
@@ -110,9 +124,11 @@ sandbox_service = create_sandbox_service()
 # Track the most recently initiated scan job ID for instant retrieval
 _latest_job_id = None
 
+
 def log_job_event(job_id: str, message: str):
     """Appends a timestamped message to the job's unified process log."""
     from datetime import datetime
+
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
     log_path = os.path.join(data_root, job_id, "reports", "process.log")
     try:
@@ -121,12 +137,13 @@ def log_job_event(job_id: str, message: str):
         with open(log_path, "a") as f:
             f.write(f"[{timestamp}] {message}\n")
     except Exception:
-        pass # Best effort logging
+        pass  # Best effort logging
 
 
 # ============================================================================
 # Sandbox CRUD Operations
 # ============================================================================
+
 
 @router.post(
     "/sandboxes",
@@ -134,15 +151,29 @@ def log_job_event(job_id: str, message: str):
     status_code=status.HTTP_202_ACCEPTED,
     responses={
         202: {"description": "Sandbox creation accepted for asynchronous provisioning"},
-        400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
-        409: {"model": ErrorResponse, "description": "The operation conflicts with the current state"},
-        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+        400: {
+            "model": ErrorResponse,
+            "description": "The request was invalid or malformed",
+        },
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
+        409: {
+            "model": ErrorResponse,
+            "description": "The operation conflicts with the current state",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "An unexpected server error occurred",
+        },
     },
 )
 async def create_sandbox(
     request: CreateSandboxRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
+    x_request_id: Optional[str] = Header(
+        None, alias="X-Request-ID", description="Unique request identifier for tracing"
+    ),
 ) -> CreateSandboxResponse:
     """
     Create a sandbox from a container image.
@@ -171,8 +202,14 @@ async def create_sandbox(
     status_code=status.HTTP_201_CREATED,
     responses={
         201: {"description": "Scan job successfully completed and report retrieved"},
-        400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
-        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+        400: {
+            "model": ErrorResponse,
+            "description": "The request was invalid or malformed",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "An unexpected server error occurred",
+        },
     },
     openapi_extra={
         "requestBody": {
@@ -181,12 +218,12 @@ async def create_sandbox(
                     "schema": {
                         "type": "string",
                         "description": "A JSON ScanJobRequest or a raw Python code snippet.",
-                        "example": "print('Hello, World!')"
+                        "example": "print('Hello, World!')",
                     }
                 }
             }
         }
-    }
+    },
 )
 async def create_scan_job(
     request: Request,
@@ -194,22 +231,22 @@ async def create_scan_job(
 ) -> ScanJobResponse:
     """
     High-level API to submit a set of files for security scanning.
-    
+
     This endpoint:
     1. Writes files to a shared PVC.
     2. Provisions a code-interpreter sandbox.
     3. Blocks synchronously until the scan finishes and returns the full JSON report.
     """
-    import os
+    import asyncio
     import base64
     import json
-    import asyncio
+    import os
     from uuid import uuid4
 
     # Robust parsing: Try JSON first, fallback to raw text as main.py
     body_bytes = await request.body()
     body_str = body_bytes.decode("utf-8")
-    
+
     scan_request = None
     try:
         # Check if it's a valid JSON object matching our schema
@@ -224,7 +261,7 @@ async def create_scan_job(
     metadata = {}
     if scan_request and scan_request.metadata:
         metadata = scan_request.metadata
-        
+
     job_id = metadata.get("job_id", str(uuid4()))
     metadata["job_id"] = job_id
 
@@ -250,27 +287,32 @@ async def create_scan_job(
             for filename, content in scan_request.files.items():
                 base_name = os.path.basename(filename)
                 # If the filename has no extension or is generic, attempt to fix it
-                if "." not in base_name or base_name.lower().startswith(("main", "code")):
+                if "." not in base_name or base_name.lower().startswith(
+                    ("main", "code")
+                ):
                     ext = detect_extension(content)
                     name_without_ext = base_name.split(".")[0]
                     files_to_save[f"{name_without_ext}.{ext}"] = content
                 else:
                     files_to_save[filename] = content
-    
+
     # If no files have been identified yet, treat the entire body text
     if not files_to_save:
         ext = detect_extension(body_str)
         files_to_save[f"main.{ext}"] = body_str
 
     try:
-        log_job_event(job_id, f"[SERVER] Writing {len(files_to_save)} source file(s) to PVC workspace...")
+        log_job_event(
+            job_id,
+            f"[SERVER] Writing {len(files_to_save)} source file(s) to PVC workspace...",
+        )
         os.makedirs(job_dir, exist_ok=True)
         os.makedirs(reports_dir, exist_ok=True)
-        
+
         for filename, content in files_to_save.items():
             safe_filename = os.path.basename(filename)
             file_path = os.path.join(job_dir, safe_filename)
-            
+
             try:
                 decoded_content = base64.b64decode(content, validate=True)
                 with open(file_path, "wb") as f:
@@ -278,18 +320,24 @@ async def create_scan_job(
             except Exception:
                 with open(file_path, "w") as f:
                     f.write(content)
-                    
+
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "FILE_SYSTEM_ERROR", "message": f"Failed to write scan files: {str(e)}"}
+            detail={
+                "code": "FILE_SYSTEM_ERROR",
+                "message": f"Failed to write scan files: {str(e)}",
+            },
         )
 
     sandbox_image = os.environ.get("SANDBOX_IMAGE")
     if not sandbox_image:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "MISSING_CONFIGURATION", "message": "SANDBOX_IMAGE environment variable is not set."}
+            detail={
+                "code": "MISSING_CONFIGURATION",
+                "message": "SANDBOX_IMAGE environment variable is not set.",
+            },
         )
 
     sandbox_req = CreateSandboxRequest(
@@ -298,32 +346,37 @@ async def create_scan_job(
         entrypoint=["/opt/opensandbox/code-interpreter.sh"],
         timeout=scan_request.timeout if scan_request and scan_request.timeout else 300,
         env={
-            "SCAN_DIR": "/workspace", 
+            "SCAN_DIR": "/workspace",
             "SCAN_REPORT": "/reports/security_scan_report.json",
-            "SCAN_TOOLS": ",".join(scan_request.tools) if scan_request and scan_request.tools else ""
+            "SCAN_TOOLS": ",".join(scan_request.tools)
+            if scan_request and scan_request.tools
+            else "",
         },
         volumes=[
             Volume(
                 name="workspace",
                 pvc=PVC(claimName="scan-pvc"),
-                mountPath="/workspace", 
-                subPath=f"{job_id}/workspace"
+                mountPath="/workspace",
+                subPath=f"{job_id}/workspace",
             ),
             Volume(
                 name="reports",
                 pvc=PVC(claimName="scan-pvc"),
-                mountPath="/reports", 
-                subPath=f"{job_id}/reports"
-            )
+                mountPath="/reports",
+                subPath=f"{job_id}/reports",
+            ),
         ],
-        metadata=metadata
+        metadata=metadata,
     )
 
     log_job_event(job_id, "[SERVER] Provisioning code-interpreter sandbox...")
     created_sandbox = sandbox_service.create_sandbox(sandbox_req)
     sandbox_id = created_sandbox.id
-    
-    log_job_event(job_id, f"[SERVER] Sandbox created (ID: {sandbox_id}). Waiting for scan results...")
+
+    log_job_event(
+        job_id,
+        f"[SERVER] Sandbox created (ID: {sandbox_id}). Waiting for scan results...",
+    )
     report_path = os.path.join(reports_dir, "security_scan_report.json")
     timeout_seconds = sandbox_req.timeout if sandbox_req.timeout else 300
     deadline = asyncio.get_event_loop().time() + timeout_seconds
@@ -338,10 +391,10 @@ async def create_scan_job(
                     job_id=job_id,
                     sandbox_id=sandbox_id,
                     status="COMPLETED",
-                    report=report_data
+                    report=report_data,
                 )
             except (json.JSONDecodeError, OSError):
-                pass # File may still be mid-write; retry next cycle
+                pass  # File may still be mid-write; retry next cycle
 
         # 2. Yield control to the async event loop (non-blocking wait)
         await asyncio.sleep(1)
@@ -350,14 +403,18 @@ async def create_scan_job(
         #    Run in executor so the blocking K8s API call doesn't freeze the event loop
         try:
             loop = asyncio.get_event_loop()
-            sb = await loop.run_in_executor(None, sandbox_service.get_sandbox, sandbox_id)
+            sb = await loop.run_in_executor(
+                None, sandbox_service.get_sandbox, sandbox_id
+            )
             state = sb.status.state if sb.status else "Unknown"
-            if state in ("Failed", "Terminated", "Stopped") and not os.path.exists(report_path):
+            if state in ("Failed", "Terminated", "Stopped") and not os.path.exists(
+                report_path
+            ):
                 return ScanJobResponse(
                     job_id=job_id,
                     sandbox_id=sandbox_id,
                     status="FAILED",
-                    error=f"Sandbox reached terminal state '{state}' before scan report was written."
+                    error=f"Sandbox reached terminal state '{state}' before scan report was written.",
                 )
         except Exception:
             pass  # Ignore transient look-up errors; keep waiting
@@ -367,7 +424,7 @@ async def create_scan_job(
         job_id=job_id,
         sandbox_id=sandbox_id,
         status="FAILED",
-        error="Scan timed out waiting for the report to be written to the PVC."
+        error="Scan timed out waiting for the report to be written to the PVC.",
     )
 
 
@@ -377,17 +434,23 @@ async def get_scan_report(job_id: str):
     Retrieves the persistent security scan report for a specific job ID.
     This report is stored on the PVC and lives beyond the sandbox lifecycle.
     """
-    import os
     import json
+    import os
+
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
-    report_path = os.path.join(data_root, job_id, "reports", "security_scan_report.json")
-    
+    report_path = os.path.join(
+        data_root, job_id, "reports", "security_scan_report.json"
+    )
+
     if not os.path.exists(report_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "REPORT_NOT_FOUND", "message": f"No report found for job {job_id}. The scan may still be in progress."}
+            detail={
+                "code": "REPORT_NOT_FOUND",
+                "message": f"No report found for job {job_id}. The scan may still be in progress.",
+            },
         )
-        
+
     try:
         with open(report_path, "r") as f:
             content = json.load(f)
@@ -395,26 +458,32 @@ async def get_scan_report(job_id: str):
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail={"code": "FILE_READ_ERROR", "message": str(e)}
+            detail={"code": "FILE_READ_ERROR", "message": str(e)},
         )
 
 
-@router.get("/scan-jobs/{job_id}/workspace/{file_path:path}", tags=["Security Scan Pipeline"])
+@router.get(
+    "/scan-jobs/{job_id}/workspace/{file_path:path}", tags=["Security Scan Pipeline"]
+)
 async def get_scan_source(job_id: str, file_path: str):
     """
     Retrieves a specific source file uploaded during a scan job.
     """
     import os
+
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
-    safe_file = os.path.basename(file_path) # Basic safety
+    safe_file = os.path.basename(file_path)  # Basic safety
     full_path = os.path.join(data_root, job_id, "workspace", safe_file)
-    
+
     if not os.path.exists(full_path):
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "FILE_NOT_FOUND", "message": f"Source file {file_path} not found for job {job_id}."}
+            detail={
+                "code": "FILE_NOT_FOUND",
+                "message": f"Source file {file_path} not found for job {job_id}.",
+            },
         )
-        
+
     return FileResponse(full_path)
 
 
@@ -429,21 +498,28 @@ async def get_scan_status(job_id: Optional[str] = None):
         if not _latest_job_id:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail={"code": "NO_JOBS_FOUND", "message": "No scan jobs have been initiated yet in this session."}
+                detail={
+                    "code": "NO_JOBS_FOUND",
+                    "message": "No scan jobs have been initiated yet in this session.",
+                },
             )
         job_id = _latest_job_id
 
     request = ListSandboxesRequest(
         filter=SandboxFilter(metadata={"job_id": job_id}),
-        pagination=PaginationRequest(page=1, pageSize=1)
+        pagination=PaginationRequest(page=1, pageSize=1),
     )
     res = sandbox_service.list_sandboxes(request)
-    
+
     if not res.items:
-        return {"job_id": job_id, "status": "NOT_FOUND", "message": "No active sandbox found for this job ID. It may have been garbage collected, or never existed."}
-        
+        return {
+            "job_id": job_id,
+            "status": "NOT_FOUND",
+            "message": "No active sandbox found for this job ID. It may have been garbage collected, or never existed.",
+        }
+
     sandbox = res.items[0]
-    
+
     # Try to fetch process logs if available
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
     log_path = os.path.join(data_root, job_id, "reports", "process.log")
@@ -461,7 +537,7 @@ async def get_scan_status(job_id: Optional[str] = None):
     return {
         "job_id": job_id,
         "sandbox_id": sandbox.id,
-        "status": sandbox.status.state if sandbox.status else "Unknown"
+        "status": sandbox.status.state if sandbox.status else "Unknown",
     }
 
 
@@ -474,7 +550,10 @@ async def get_latest_job_id():
     if not _latest_job_id:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail={"code": "NO_JOBS_FOUND", "message": "No scan jobs have been initiated yet in this session."}
+            detail={
+                "code": "NO_JOBS_FOUND",
+                "message": "No scan jobs have been initiated yet in this session.",
+            },
         )
     return {"job_id": _latest_job_id}
 
@@ -493,17 +572,35 @@ async def get_latest_job_status_alias():
     response_model=ListSandboxesResponse,
     responses={
         200: {"description": "Paginated collection of sandboxes"},
-        400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
-        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+        400: {
+            "model": ErrorResponse,
+            "description": "The request was invalid or malformed",
+        },
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "An unexpected server error occurred",
+        },
     },
 )
 async def list_sandboxes(
-    state: Optional[List[str]] = Query(None, description="Filter by lifecycle state. Pass multiple times for OR logic."),
-    metadata: Optional[str] = Query(None, description="Arbitrary metadata key-value pairs for filtering (URL encoded)."),
+    state: Optional[List[str]] = Query(
+        None, description="Filter by lifecycle state. Pass multiple times for OR logic."
+    ),
+    metadata: Optional[str] = Query(
+        None,
+        description="Arbitrary metadata key-value pairs for filtering (URL encoded).",
+    ),
     page: int = Query(1, ge=1, description="Page number for pagination"),
-    page_size: int = Query(20, ge=1, le=200, alias="pageSize", description="Number of items per page"),
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
+    page_size: int = Query(
+        20, ge=1, le=200, alias="pageSize", description="Number of items per page"
+    ),
+    x_request_id: Optional[str] = Header(
+        None, alias="X-Request-ID", description="Unique request identifier for tracing"
+    ),
 ) -> ListSandboxesResponse:
     """
     List sandboxes with optional filtering and pagination.
@@ -525,6 +622,7 @@ async def list_sandboxes(
     metadata_dict = {}
     if metadata:
         from urllib.parse import parse_qsl
+
         try:
             # Parse query string format: key=value&key2=value2
             # strict_parsing=True rejects malformed segments like "a=1&broken"
@@ -532,18 +630,25 @@ async def list_sandboxes(
             metadata_dict = dict(parsed)
         except Exception as e:
             from fastapi import HTTPException
+
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail={"code": "INVALID_METADATA_FORMAT", "message": f"Invalid metadata format: {str(e)}"}
+                detail={
+                    "code": "INVALID_METADATA_FORMAT",
+                    "message": f"Invalid metadata format: {str(e)}",
+                },
             )
 
     # Construct request object
     request = ListSandboxesRequest(
-        filter=SandboxFilter(state=state, metadata=metadata_dict if metadata_dict else None),
-        pagination=PaginationRequest(page=page, pageSize=page_size)
+        filter=SandboxFilter(
+            state=state, metadata=metadata_dict if metadata_dict else None
+        ),
+        pagination=PaginationRequest(page=page, pageSize=page_size),
     )
 
     import logging
+
     logger = logging.getLogger(__name__)
     logger.info("ListSandboxes: %s", request.filter)
 
@@ -556,15 +661,29 @@ async def list_sandboxes(
     response_model=Sandbox,
     responses={
         200: {"description": "Sandbox current state and metadata"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
-        403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
-        404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
-        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
+        403: {
+            "model": ErrorResponse,
+            "description": "The authenticated user lacks permission for this operation",
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "The requested resource does not exist",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "An unexpected server error occurred",
+        },
     },
 )
 async def get_sandbox(
     sandbox_id: str,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
+    x_request_id: Optional[str] = Header(
+        None, alias="X-Request-ID", description="Unique request identifier for tracing"
+    ),
 ) -> Sandbox:
     """
     Fetch a sandbox by id.
@@ -591,16 +710,33 @@ async def get_sandbox(
     status_code=status.HTTP_204_NO_CONTENT,
     responses={
         204: {"description": "Sandbox successfully deleted"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
-        403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
-        404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
-        409: {"model": ErrorResponse, "description": "The operation conflicts with the current state"},
-        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
+        403: {
+            "model": ErrorResponse,
+            "description": "The authenticated user lacks permission for this operation",
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "The requested resource does not exist",
+        },
+        409: {
+            "model": ErrorResponse,
+            "description": "The operation conflicts with the current state",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "An unexpected server error occurred",
+        },
     },
 )
 async def delete_sandbox(
     sandbox_id: str,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
+    x_request_id: Optional[str] = Header(
+        None, alias="X-Request-ID", description="Unique request identifier for tracing"
+    ),
 ) -> Response:
     """
     Delete a sandbox.
@@ -626,21 +762,39 @@ async def delete_sandbox(
 # Sandbox Lifecycle Operations
 # ============================================================================
 
+
 @router.post(
     "/sandboxes/{sandbox_id}/pause",
     status_code=status.HTTP_202_ACCEPTED,
     responses={
         202: {"description": "Pause operation accepted"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
-        403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
-        404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
-        409: {"model": ErrorResponse, "description": "The operation conflicts with the current state"},
-        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
+        403: {
+            "model": ErrorResponse,
+            "description": "The authenticated user lacks permission for this operation",
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "The requested resource does not exist",
+        },
+        409: {
+            "model": ErrorResponse,
+            "description": "The operation conflicts with the current state",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "An unexpected server error occurred",
+        },
     },
 )
 async def pause_sandbox(
     sandbox_id: str,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
+    x_request_id: Optional[str] = Header(
+        None, alias="X-Request-ID", description="Unique request identifier for tracing"
+    ),
 ) -> Response:
     """
     Pause execution while retaining state.
@@ -668,16 +822,33 @@ async def pause_sandbox(
     status_code=status.HTTP_202_ACCEPTED,
     responses={
         202: {"description": "Resume operation accepted"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
-        403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
-        404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
-        409: {"model": ErrorResponse, "description": "The operation conflicts with the current state"},
-        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
+        403: {
+            "model": ErrorResponse,
+            "description": "The authenticated user lacks permission for this operation",
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "The requested resource does not exist",
+        },
+        409: {
+            "model": ErrorResponse,
+            "description": "The operation conflicts with the current state",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "An unexpected server error occurred",
+        },
     },
 )
 async def resume_sandbox(
     sandbox_id: str,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
+    x_request_id: Optional[str] = Header(
+        None, alias="X-Request-ID", description="Unique request identifier for tracing"
+    ),
 ) -> Response:
     """
     Resume a paused sandbox.
@@ -706,18 +877,38 @@ async def resume_sandbox(
     response_model_exclude_none=True,
     responses={
         200: {"description": "Sandbox expiration updated successfully"},
-        400: {"model": ErrorResponse, "description": "The request was invalid or malformed"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
-        403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
-        404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
-        409: {"model": ErrorResponse, "description": "The operation conflicts with the current state"},
-        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+        400: {
+            "model": ErrorResponse,
+            "description": "The request was invalid or malformed",
+        },
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
+        403: {
+            "model": ErrorResponse,
+            "description": "The authenticated user lacks permission for this operation",
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "The requested resource does not exist",
+        },
+        409: {
+            "model": ErrorResponse,
+            "description": "The operation conflicts with the current state",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "An unexpected server error occurred",
+        },
     },
 )
 async def renew_sandbox_expiration(
     sandbox_id: str,
     request: RenewSandboxExpirationRequest,
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
+    x_request_id: Optional[str] = Header(
+        None, alias="X-Request-ID", description="Unique request identifier for tracing"
+    ),
 ) -> RenewSandboxExpirationResponse:
     """
     Renew sandbox expiration.
@@ -744,24 +935,41 @@ async def renew_sandbox_expiration(
 # Sandbox Endpoints
 # ============================================================================
 
+
 @router.get(
     "/sandboxes/{sandbox_id}/endpoints/{port}",
     response_model=Endpoint,
     response_model_exclude_none=True,
     responses={
         200: {"description": "Endpoint retrieved successfully"},
-        401: {"model": ErrorResponse, "description": "Authentication credentials are missing or invalid"},
-        403: {"model": ErrorResponse, "description": "The authenticated user lacks permission for this operation"},
-        404: {"model": ErrorResponse, "description": "The requested resource does not exist"},
-        500: {"model": ErrorResponse, "description": "An unexpected server error occurred"},
+        401: {
+            "model": ErrorResponse,
+            "description": "Authentication credentials are missing or invalid",
+        },
+        403: {
+            "model": ErrorResponse,
+            "description": "The authenticated user lacks permission for this operation",
+        },
+        404: {
+            "model": ErrorResponse,
+            "description": "The requested resource does not exist",
+        },
+        500: {
+            "model": ErrorResponse,
+            "description": "An unexpected server error occurred",
+        },
     },
 )
 async def get_sandbox_endpoint(
     request: Request,
     sandbox_id: str,
     port: int,
-    use_server_proxy: bool = Query(False, description="Whether to return a server-proxied URL"),
-    x_request_id: Optional[str] = Header(None, alias="X-Request-ID", description="Unique request identifier for tracing"),
+    use_server_proxy: bool = Query(
+        False, description="Whether to return a server-proxied URL"
+    ),
+    x_request_id: Optional[str] = Header(
+        None, alias="X-Request-ID", description="Unique request identifier for tracing"
+    ),
 ) -> Endpoint:
     """
     Get sandbox access endpoint.
@@ -799,7 +1007,9 @@ async def get_sandbox_endpoint(
     "/sandboxes/{sandbox_id}/proxy/{port}/{full_path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
 )
-async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port: int, full_path: str):
+async def proxy_sandbox_endpoint_request(
+    request: Request, sandbox_id: str, port: int, full_path: str
+):
     """
     Receives all incoming requests, determines the target sandbox from path parameter,
     and asynchronously proxies the request to it.
@@ -815,7 +1025,9 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
     try:
         upgrade_header = request.headers.get("Upgrade", "")
         if upgrade_header.lower() == "websocket":
-            raise HTTPException(status_code=400, detail="Websocket upgrade is not supported yet")
+            raise HTTPException(
+                status_code=400, detail="Websocket upgrade is not supported yet"
+            )
 
         # Filter headers
         hop_by_hop = set(HOP_BY_HOP_HEADERS)
@@ -841,7 +1053,9 @@ async def proxy_sandbox_endpoint_request(request: Request, sandbox_id: str, port
             url=f"http://{target_host}/{full_path}",
             params=query_string if query_string else None,
             headers=headers,
-            content=request.stream() if request.method in ("POST", "PUT", "PATCH", "DELETE") else None,
+            content=request.stream()
+            if request.method in ("POST", "PUT", "PATCH", "DELETE")
+            else None,
         )
 
         resp = await client.send(req, stream=True)

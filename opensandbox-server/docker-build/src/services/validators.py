@@ -22,16 +22,15 @@ enforce the same preconditions before performing runtime-specific work.
 from __future__ import annotations
 
 import os
+import re
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
 from fastapi import HTTPException, status
-import re
-
 from src.services.constants import RESERVED_LABEL_PREFIX, SandboxErrorCodes
 
 if TYPE_CHECKING:
-    from src.api.schema import NetworkPolicy, OSSFS, Volume
+    from src.api.schema import OSSFS, NetworkPolicy, Volume
     from src.config import EgressConfig
 
 
@@ -178,7 +177,9 @@ def ensure_valid_port(port: int) -> None:
         )
 
 
-def ensure_timeout_within_limit(timeout_seconds: Optional[int], max_timeout_seconds: Optional[int]) -> None:
+def ensure_timeout_within_limit(
+    timeout_seconds: Optional[int], max_timeout_seconds: Optional[int]
+) -> None:
     """
     Validate that a requested sandbox TTL does not exceed the configured limit.
 
@@ -210,7 +211,9 @@ def ensure_timeout_within_limit(timeout_seconds: Optional[int], max_timeout_seco
         )
 
 
-def calculate_expiration_or_raise(created_at: datetime, timeout_seconds: int) -> datetime:
+def calculate_expiration_or_raise(
+    created_at: datetime, timeout_seconds: int
+) -> datetime:
     """
     Compute an expiration timestamp and convert datetime overflow into a 400 error.
 
@@ -524,19 +527,19 @@ def ensure_egress_configured(
 ) -> None:
     """
     Validate that egress.image is configured when network policy is provided.
-    
+
     This is a common validation shared by Docker and Kubernetes runtimes.
-    
+
     Args:
         network_policy: Optional network policy from the request.
         egress_config: Optional egress configuration from app config.
-    
+
     Raises:
         HTTPException: When network_policy is provided but egress.image is not configured.
     """
     if not network_policy:
         return
-    
+
     egress_image = egress_config.image if egress_config else None
     if not egress_image:
         raise HTTPException(
@@ -595,11 +598,13 @@ def ensure_volumes_valid(
         ensure_valid_sub_path(volume.sub_path)
 
         # Count specified backends
-        backends_specified = sum([
-            volume.host is not None,
-            volume.pvc is not None,
-            volume.ossfs is not None,
-        ])
+        backends_specified = sum(
+            [
+                volume.host is not None,
+                volume.pvc is not None,
+                volume.ossfs is not None,
+            ]
+        )
 
         if backends_specified == 0:
             raise HTTPException(

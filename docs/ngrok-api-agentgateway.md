@@ -4,8 +4,8 @@ This document details the configuration steps, bug fixes, and operational instru
 
 ## 1. Architectural Overview
 
-The CodeInspector project utilizes an **API Gateway Pattern**. 
-Instead of exposing internal microservices explicitly, all traffic is securely funneled through the **AgentGateway** (`agentgateway-proxy`, an Envoy-based Kubernetes Gateway API implementation). 
+The CodeInspector project utilizes an **API Gateway Pattern**.
+Instead of exposing internal microservices explicitly, all traffic is securely funneled through the **AgentGateway** (`agentgateway-proxy`, an Envoy-based Kubernetes Gateway API implementation).
 
 The AgentGateway is responsible for:
 1. Receiving external traffic.
@@ -48,7 +48,7 @@ To successfully bind this domain to the Gateway, we updated the Helm chart `valu
 
 ## 4. Mapping the API target to AgentGateway (Bug Fixes)
 
-During configuration, we identified that the `agentgateway-route` was silently dropping traffic with a `BackendNotFound` error because it was attempting to resolve the `sandbox-api-service` locally within the `agentgateway-system` namespace, while the service actually resides in `opensandbox-system`. 
+During configuration, we identified that the `agentgateway-route` was silently dropping traffic with a `BackendNotFound` error because it was attempting to resolve the `sandbox-api-service` locally within the `agentgateway-system` namespace, while the service actually resides in `opensandbox-system`.
 
 ### The Fix
 Kubernetes Gateway APIs strictly prohibit cross-namespace routing by default for security reasons. To map the API backend correctly, we applied two structural changes to the Helm charts:
@@ -92,15 +92,15 @@ Through testing, we finalized the exact mechanisms required to interface correct
 
 1. **Authentication Headers**:
    The standard `api-key:` header is not expected by default. The `Strict` policy maps to the base-64 encoded `secret.yaml` via standard HTTP authorization schemas.
-   
+
    The required header format is:
    ```text
    Authorization: Bearer <YOUR_DECODED_API_KEY>
    ```
 
 2. **HTTP Verbs Constraints**:
-   The backend Uvicorn/FastAPI instance inherently rejects HTTP `HEAD` HTTP method requests on endpoints designated exclusively for `GET`. When attempting to ping the `/health` endpoint using `curl -I` (which defaults to a HEAD request method), it will result in an unhandled `405 Method Not Allowed`. 
-   
+   The backend Uvicorn/FastAPI instance inherently rejects HTTP `HEAD` HTTP method requests on endpoints designated exclusively for `GET`. When attempting to ping the `/health` endpoint using `curl -I` (which defaults to a HEAD request method), it will result in an unhandled `405 Method Not Allowed`.
+
    **Use `-X GET` explicitly across API tests.**
 
 ## 6. Processes for Authenticating and Accessing the API

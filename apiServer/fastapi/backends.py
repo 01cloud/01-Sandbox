@@ -1,17 +1,18 @@
 from __future__ import annotations
+
 import abc
 import time
 import uuid
-import httpx
 from typing import Optional
 
-from models import RunResponse, SessionResponse, CreateSandboxRequest, SandboxResponse
+import httpx
 from config import opensandbox_headers, opensandbox_route_prefix
+from models import CreateSandboxRequest, RunResponse, SandboxResponse, SessionResponse
 
 
 class SandboxBackend(abc.ABC):
     """Abstract interface exposing generic operation mapping routines natively.kjaksldjfaklsdj"""
-    
+
     @abc.abstractmethod
     def run(self, code: str, language: str, timeout: int) -> RunResponse:
         pass
@@ -59,6 +60,7 @@ class GenericHTTPBackend(SandboxBackend):
     Implements standard HTTP interfacing specifically hard-wired explicitly targeting
     REST API backend resources routing dynamically.
     """
+
     def __init__(self, name: str, url: str):
         self._name = name
         self._url = url
@@ -72,13 +74,17 @@ class GenericHTTPBackend(SandboxBackend):
         payload = {"code": code, "language": language, "timeout": timeout}
         t0 = time.perf_counter()
         prefix = opensandbox_route_prefix()
-        
+
         try:
             with httpx.Client(timeout=timeout + 5) as client:
-                r = client.post(f"{self._url}{prefix}/run", json=payload, headers=opensandbox_headers())
+                r = client.post(
+                    f"{self._url}{prefix}/run",
+                    json=payload,
+                    headers=opensandbox_headers(),
+                )
                 r.raise_for_status()
                 data = r.json()
-                
+
                 return RunResponse(
                     stdout=data.get("stdout", ""),
                     stderr=data.get("stderr", ""),
@@ -120,7 +126,7 @@ class GenericHTTPBackend(SandboxBackend):
             r = client.post(
                 f"{self._url}{prefix}/sandboxes",
                 json=req.dict(exclude_none=True),
-                headers=opensandbox_headers()
+                headers=opensandbox_headers(),
             )
             r.raise_for_status()
             data = r.json()
@@ -133,7 +139,7 @@ class GenericHTTPBackend(SandboxBackend):
             r = await client.post(
                 f"{self._url}{prefix}/scan-jobs",
                 json=req_body,
-                headers=opensandbox_headers()
+                headers=opensandbox_headers(),
             )
             r.raise_for_status()
             return r.json()
@@ -144,7 +150,7 @@ class GenericHTTPBackend(SandboxBackend):
         with httpx.Client(timeout=10) as client:
             r = client.get(
                 f"{self._url}{prefix}/scan-jobs/{job_id}/report",
-                headers=opensandbox_headers()
+                headers=opensandbox_headers(),
             )
             r.raise_for_status()
             return r.json()
@@ -155,7 +161,7 @@ class GenericHTTPBackend(SandboxBackend):
         with httpx.Client(timeout=5) as client:
             r = client.get(
                 f"{self._url}{prefix}/scan-status/{job_id}",
-                headers=opensandbox_headers()
+                headers=opensandbox_headers(),
             )
             r.raise_for_status()
             return r.json()
@@ -164,7 +170,9 @@ class GenericHTTPBackend(SandboxBackend):
         """Retrieves active sandboxes from the remote OpenSandbox server."""
         prefix = opensandbox_route_prefix()
         with httpx.Client(timeout=10) as client:
-            r = client.get(f"{self._url}{prefix}/sandboxes", headers=opensandbox_headers())
+            r = client.get(
+                f"{self._url}{prefix}/sandboxes", headers=opensandbox_headers()
+            )
             r.raise_for_status()
             data = r.json()
             items = data if isinstance(data, list) else data.get("items", [])

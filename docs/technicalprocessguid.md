@@ -19,13 +19,13 @@ sequenceDiagram
 
     User->>Auth0: Login (Obtain Passport)
     Auth0-->>User: JWT
-    
+
     Note over User, API: Phase 1: Ingress & Provisioning
-    User->>GW:  
+    User->>GW:
     Note right of User: Request + Cookie
-    GW->>API:  
+    GW->>API:
     Note right of GW: Promote & Create API Key
-    API->>User:  
+    API->>User:
     Note left of API: Platform JWT
 
     Note over User, Cache: Phase 2: Verification, Lockdown & Rate Limiting
@@ -112,7 +112,7 @@ state.redis_client.sadd("active_api_keys", jti)
 The API Server performs **Identity Lockdown** to ensure the presented credentials (**Auth0 Cookie** / `inspector_auth` vs. **API Key**) belong to the same user.
 
 ### 1. The Security Problem: Key Impersonation
-In a typical dashboard, a user might have a browser session (Cookie) while also using an API Key (Header). Without Identity Lockdown, an attacker who steals a victim's API Key could potentially use it within their *own* dashboard session. 
+In a typical dashboard, a user might have a browser session (Cookie) while also using an API Key (Header). Without Identity Lockdown, an attacker who steals a victim's API Key could potentially use it within their *own* dashboard session.
 
 ### 2. The Enforcement Logic
 When the API Server receives a request, it performs a cross-check:
@@ -159,10 +159,10 @@ async def check_rate_limit(state, jti: str):
     rl_conf = rate_limit_config()
     requests_limit = rl_conf["requests"]
     window_secs = rl_conf["window_secs"]
-    
+
     # 1. Pipeline atomic fetch & cleanup
     current_count = await get_sliding_window_count(state, jti, window_secs)
-    
+
     # 2. Quota validation before commit (Prevents Tarpitting)
     if current_count >= requests_limit:
         oldest_ts = await get_oldest_timestamp(state, jti)
@@ -172,7 +172,7 @@ async def check_rate_limit(state, jti: str):
             detail={"error": "Rate limit exceeded", "jti": jti, "retry_after": retry_after},
             headers={"Retry-After": str(retry_after)}
         )
-    
+
     # 3. Safe commit on success
     await record_timestamp(state, jti)
 ```
@@ -184,7 +184,7 @@ async def check_rate_limit(state, jti: str):
 This phase is triggered the moment a user clicks **"Execute Audit"** in the Security Scanner dashboard. The process is divided into two distinct technical layers:
 
 #### Part A: Storage Foundation (Static)
-*   **The Shared PVC**: The system relies on a pre-provisioned `ReadWriteMany` (RWX) PersistentVolumeClaim (`scan-pvc`). 
+*   **The Shared PVC**: The system relies on a pre-provisioned `ReadWriteMany` (RWX) PersistentVolumeClaim (`scan-pvc`).
 *   **Persistent Mounts**: This volume is permanently mounted to the Management Server. This architecture avoids the "Cloud Cold Start" problem (waiting for disk attachment), enabling sub-second response times.
 
 #### Part B: Dynamic Ingestion (On-the-Fly)
@@ -214,7 +214,7 @@ with open(os.path.join(job_dir, filename), "w") as f:
 The core security phase. The UI displays **"Auditing Security Probe..."** as the code is isolated within a **gVisor** "Glass Cage."
 
 ### 1. gVisor Isolation (The Glass Cage)
-Scanner pods do not run as standard Linux containers. They use the **runsc (gVisor)** runtime, which provides a dedicated application-kernel for the pod. 
+Scanner pods do not run as standard Linux containers. They use the **runsc (gVisor)** runtime, which provides a dedicated application-kernel for the pod.
 *   **Syscall Interception**: If a malicious script attempts to exploit a kernel vulnerability, gVisor intercepts the system call, preventing a breakout to the host node.
 *   **Runtime Class Enforcement**: Defined in the cluster configuration to ensure no scanner pod ever runs "naked" on the host.
 

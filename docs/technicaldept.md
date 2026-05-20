@@ -12,25 +12,25 @@ The following diagram illustrates how external traffic flows through the system 
 graph TD
     User([External Client]) -->|HTTP POST /run| MB[MetalLB Load Balancer]
     MB -->|IP Traffic| AG[Agent Gateway - Envoy Proxy]
-    
+
     subgraph "Ingress Layer (agentgateway)"
         AG -->|Auth Check| AGP[AgentgatewayPolicy - Strict API Key]
         AGP -->|Route| HR[HTTPRoute - /]
     end
-    
+
     HR -->|Forward| SAS[Sandbox API Service]
-    
+
     subgraph "Orchestration Layer (apiServer)"
         SAS -->|ClusterIP| AS[API Server - FastAPI]
         AS -->|Backend Strategy| OSB_PROXY[/api/z1sandbox/*]
     end
-    
+
     subgraph "Execution Management (opensandbox-server)"
         OSB_PROXY -->|HTTP/REST| OSS[OpenSandbox Server]
         OSS -->|Lifecycle| OSC[OpenSandbox Controller]
         OSC -->|Provision| CI_POD[Code Interpreter Pod]
     end
-    
+
     subgraph "Isolation Layer (code-interpreter)"
         CI_POD -->|Runsc/gVisor| KERNEL[Isolated Kernel]
         CI_POD -->|Logic| CIS[code-interpreter.sh]
@@ -86,7 +86,7 @@ The OpenSandbox Server is the "Management Tier". It abstracts the complexity of 
     -   Acts as the system's "Brain", orchestrating the translation of high-level API calls into Kubernetes actions.
     -   **Intelligent Language Detection**: Automatically parses input code to determine the correct runtime environment (Python, Node, Go, etc.) and saves it with appropriate extensions to the PVC.
     -   **Dynamic Provisioning**: Manages the instantiation of `BatchSandbox` resources, ensuring volumes are correctly mounted and environment variables are injected.
--   **Data Integrity (`api/schema.py`)**: 
+-   **Data Integrity (`api/schema.py`)**:
     -   Implements strict Pydantic models for all API interactions.
     -   Ensures type safety across the bridge between the FastAPI management layer and the Kubernetes custom resources.
 -   **Security Middleware (`middleware/auth.py`)**:

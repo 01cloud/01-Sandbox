@@ -10,21 +10,21 @@ The system is designed with a **Facade Pattern**, where a stable FastAPI server 
 graph TD
     User([User/Client]) -->|HTTP Request| Gateway[Agent Gateway / Ingress]
     Gateway -->|Forward| APIServer[Sandbox API Server - FastAPI]
-    
+
     subgraph "Internal Backends (Local to API Pod)"
         APIServer -->|Subprocess| Subprocess[Local OS Subprocess]
         APIServer -->|Docker API| Docker[Docker Containers]
         APIServer -->|Logic| Mock[Mock Response]
     end
-    
+
     subgraph "Remote Backends (Distributed)"
         APIServer -->|HTTP Proxy/REST| OpenSandboxServer[OpenSandbox Server]
         OpenSandboxServer -->|K8s CRDs| OpenSandboxController[OpenSandbox Controller]
         OpenSandboxController -->|Orchestrate| K8sNodes[K8s Pods / Sandboxes]
-        
+
         APIServer -->|SDK / API| E2B[E2B Cloud Sandboxes]
     end
-    
+
     subgraph "K8s Orchestration"
         K8sConfig[ConfigMap / Secret] -.-> APIServer
         HPA[Horizontal Pod Autoscaler] -.-> APIServer
@@ -36,7 +36,7 @@ graph TD
 ## Core Components
 
 ### 1. Sandbox API Server (FastAPI)
-The central orchestrator that exposes the stable HTTP contract. 
+The central orchestrator that exposes the stable HTTP contract.
 - **Endpoint Transformation**: It translates high-level requests (e.g., "run this Python code") into backend-specific commands.
 - **Dynamic Registry**: Maintains a registry of available backends (`Mock`, `Subprocess`, `Docker`, `E2B`, `OpenSandbox`).
 - **Transparent Proxy**: Provides a proxy mechanism (`/api/{name}/{path}`) to allow direct interaction with specialized backend APIs without exposing them to the external network.

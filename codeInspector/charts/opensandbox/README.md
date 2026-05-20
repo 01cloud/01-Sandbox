@@ -13,8 +13,8 @@ This Helm chart bundles both the **OpenSandbox Controller** and **OpenSandbox Se
 # Add repo (if published)
 wget https://github.com/alibaba/OpenSandbox/releases/download/helm/opensandbox/0.1.0/opensandbox-0.1.0.tgz
 
-# unzip 
- tar -xvf opensandbox-0.1.0.tgz 
+# unzip
+ tar -xvf opensandbox-0.1.0.tgz
 
 # Install all components in one command
 helm install opensandbox-controller-server ./opensandbox \
@@ -94,4 +94,3 @@ Note: CRDs are kept by default. To remove them:
 kubectl delete crd batchsandboxes.sandbox.opensandbox.io
 kubectl delete crd pools.sandbox.opensandbox.io
 ```
-

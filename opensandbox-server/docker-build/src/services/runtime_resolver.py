@@ -73,10 +73,7 @@ class SecureRuntimeResolver:
 
     def is_enabled(self) -> bool:
         """Check if secure runtime is configured and enabled."""
-        return (
-            self.secure_runtime is not None
-            and self.secure_runtime.type != ""
-        )
+        return self.secure_runtime is not None and self.secure_runtime.type != ""
 
     def get_docker_runtime(self) -> Optional[str]:
         """
@@ -235,7 +232,9 @@ async def _validate_k8s_runtime_class(
 
     try:
         loop = asyncio.get_event_loop()
-        await loop.run_in_executor(None, k8s_client.read_runtime_class, runtime_class_name)
+        await loop.run_in_executor(
+            None, k8s_client.read_runtime_class, runtime_class_name
+        )
         logger.info("Kubernetes RuntimeClass '%s' is available.", runtime_class_name)
     except ApiException as exc:
         if exc.status == 404:

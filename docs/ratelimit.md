@@ -25,19 +25,19 @@ sequenceDiagram
 
     Developer->>GW: Click "Quick Scan" / "Docs" (with Bearer Token or Session Cookie)
     GW->>API: Proxy Request (transfers Token / Cookies)
-    
+
     note right of API: validate_token Middleware
     API->>API: Decode Token & Identify auth0/user_id (sub)
-    
+
     API->>DB: Query: Get all active keys for user (case-insensitively via LOWER)
     DB-->>API: Returns Key Pool: [Key_A, Key_B, ...]
-    
+
     loop For each Candidate Key in Pool
         API->>Cache: Check active requests in sliding window for Candidate Key
         Cache-->>API: Returns current request count
         note right of API: Is count < 7 ?
     end
-    
+
     alt Found Non-Limited Key (e.g. Key_B)
         API->>API: Map request dynamically to Key_B (jti)
     else All Keys Rate-Limited
@@ -68,7 +68,7 @@ By decoupling rate-limiting from the gateway proxy and executing it inside the F
 
 ## 2. Ingress Layer Configurations (Agent Gateway)
 
-To satisfy the `AgentgatewayPolicy` custom resource validator, the `traffic` block must always be present under `spec` (the schema requires at least one of `traffic`, `frontend`, or `backend` to be defined). 
+To satisfy the `AgentgatewayPolicy` custom resource validator, the `traffic` block must always be present under `spec` (the schema requires at least one of `traffic`, `frontend`, or `backend` to be defined).
 
 To cleanly bypass the gateway-level throttling, we configure the Envoy policy template to automatically substitute a massive fallback threshold of **10,000 requests per minute** when the rate limit is disabled. This passes schema validation perfectly while guaranteeing zero routing blocks at the proxy layer.
 
@@ -127,7 +127,7 @@ To allow developers to scale their limits by creating multiple API keys, the sys
 1. **Subject Extraction**: The backend decodes the incoming token and extracts the creator's `sub` claim (their Auth0 user ID).
 2. **Key Pool Retrieval**: It executes a case-insensitive query against the central database:
    ```sql
-   SELECT id, expires_at FROM api_keys 
+   SELECT id, expires_at FROM api_keys
    WHERE LOWER(user_id) = LOWER(:user_id) AND is_revoked = 0
    ```
 3. **Python-Side Date Safety**: It filters the retrieved keys in memory using timezone-aware UTC datetime parsing. This eliminates any potential SQLite/Postgres timezone comparison bugs.
@@ -148,7 +148,7 @@ Unlike a **Fixed Window** algorithm (which resets at the beginning of each clock
 * This ensures that a client spamming blocked requests does not keep resetting or indefinitely extending their lockout window. The window continues to clear naturally as time passes.
 
 ### E. Single-Slot button Enforcements (Prevention of Double-Depletion)
-* Clicking **"View Documentation"** in the browser triggers a page load (`GET /docs`), which in turn triggers a request for the Swagger specification (`GET /openapi.json`). 
+* Clicking **"View Documentation"** in the browser triggers a page load (`GET /docs`), which in turn triggers a request for the Swagger specification (`GET /openapi.json`).
 * Previously, both paths were rate-limited. This caused a single click to instantly consume **2 slots** (reducing the effective click allowance to 3-4 per minute).
 * We updated the path routing to **exclude `/openapi.json` from rate limiting**. Only `/docs` and `POST /v1/scan-jobs` (Quick Scan) consume rate-limit slots. Each click now consumes exactly **1 slot**, delivering a flawless 7 actions per minute per key.
 
@@ -218,4 +218,3 @@ Enforcing dynamic, key-specific sliding-window rate limiting at the ingress gate
 ### Architectural Division of Labor
 * **Agent Gateway (Proxy Ingress)**: Best for **structural perimeter protection** (e.g. flat rate limits of 10,000 requests/min to protect the cluster from raw DDoS/network flooding attacks).
 * **API Server (Application Brain)**: Best for **business-logic-aware rate limiting** (e.g. dynamic developer key pools, active user rotation, sliding window verification, and dynamic Retry-After computation).
-

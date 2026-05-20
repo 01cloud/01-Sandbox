@@ -29,7 +29,6 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-
 from src.config import load_config
 from uvicorn.config import LOGGING_CONFIG as UVICORN_LOGGING_CONFIG
 
@@ -78,6 +77,7 @@ from src.services.runtime_resolver import (  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     app.state.http_client = httpx.AsyncClient(timeout=180.0)
@@ -115,6 +115,7 @@ async def lifespan(app: FastAPI):
 
 
 import os
+
 API_PREFIX = os.getenv("API_ROUTE_PREFIX", "/api/v1/01sbx")
 
 # Initialize FastAPI application
@@ -122,7 +123,7 @@ app = FastAPI(
     title="z1Sandbox Lifecycle API",
     version="0.1.0",
     description="The Sandbox Lifecycle API coordinates how untrusted workloads are created, "
-                "executed, paused, resumed, and finally disposed.",
+    "executed, paused, resumed, and finally disposed.",
     docs_url=f"{API_PREFIX}/docs",
     redoc_url=f"{API_PREFIX}/redoc",
     openapi_url=f"{API_PREFIX}/openapi.json",

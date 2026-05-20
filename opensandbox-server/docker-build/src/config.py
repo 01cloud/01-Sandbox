@@ -40,9 +40,15 @@ logger = logging.getLogger(__name__)
 CONFIG_ENV_VAR = "SANDBOX_CONFIG_PATH"
 DEFAULT_CONFIG_PATH = Path.home() / ".sandbox.toml"
 
-_DOMAIN_RE = re.compile(r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$")
-_WILDCARD_DOMAIN_RE = re.compile(r"^\*\.(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$")
-_IPV4_WITH_PORT_RE = re.compile(r"^(?P<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d{1,5}))?$")
+_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$"
+)
+_WILDCARD_DOMAIN_RE = re.compile(
+    r"^\*\.(?!-)[A-Za-z0-9-]{1,63}(?:\.[A-Za-z0-9-]{1,63})+$"
+)
+_IPV4_WITH_PORT_RE = re.compile(
+    r"^(?P<ip>(?:\d{1,3}\.){3}\d{1,3})(?::(?P<port>\d{1,5}))?$"
+)
 
 INGRESS_MODE_DIRECT = "direct"
 INGRESS_MODE_GATEWAY = "gateway"
@@ -129,16 +135,22 @@ class IngressConfig(BaseModel):
     @model_validator(mode="after")
     def validate_ingress_mode(self) -> "IngressConfig":
         if self.mode == INGRESS_MODE_GATEWAY and self.gateway is None:
-            raise ValueError("gateway block must be provided when ingress.mode = 'gateway'.")
+            raise ValueError(
+                "gateway block must be provided when ingress.mode = 'gateway'."
+            )
         if self.mode == INGRESS_MODE_DIRECT and self.gateway is not None:
-            raise ValueError("gateway block must be omitted unless ingress.mode = 'gateway'.")
+            raise ValueError(
+                "gateway block must be omitted unless ingress.mode = 'gateway'."
+            )
 
         if self.mode == INGRESS_MODE_GATEWAY and self.gateway:
             route_mode = self.gateway.route.mode
             address_raw = self.gateway.address
             hostport = address_raw
             if "://" in address_raw:
-                raise ValueError("ingress.gateway.address must not include a scheme; clients choose http/https.")
+                raise ValueError(
+                    "ingress.gateway.address must not include a scheme; clients choose http/https."
+                )
 
             if route_mode == GATEWAY_ROUTE_MODE_WILDCARD:
                 if not _is_wildcard_domain(hostport):
@@ -151,7 +163,9 @@ class IngressConfig(BaseModel):
                     raise ValueError(
                         "ingress.gateway.address must not contain wildcard when gateway.route.mode is not wildcard."
                     )
-                if not (_is_valid_domain(hostport) or _is_valid_ip_or_ip_port(hostport)):
+                if not (
+                    _is_valid_domain(hostport) or _is_valid_ip_or_ip_port(hostport)
+                ):
                     raise ValueError(
                         "ingress.gateway.address must be a valid domain, IP, or IP:port when gateway.route.mode is not wildcard."
                     )
@@ -500,13 +514,24 @@ class AppConfig(BaseModel):
     def validate_runtime_blocks(self) -> "AppConfig":
         if self.runtime.type == "docker":
             if self.kubernetes is not None:
-                raise ValueError("Kubernetes block must be omitted when runtime.type = 'docker'.")
+                raise ValueError(
+                    "Kubernetes block must be omitted when runtime.type = 'docker'."
+                )
             if self.agent_sandbox is not None:
-                raise ValueError("agent_sandbox block must be omitted when runtime.type = 'docker'.")
+                raise ValueError(
+                    "agent_sandbox block must be omitted when runtime.type = 'docker'."
+                )
             if self.ingress is not None and self.ingress.mode != INGRESS_MODE_DIRECT:
-                raise ValueError("ingress.mode must be 'direct' when runtime.type = 'docker'.")
-            if self.secure_runtime is not None and self.secure_runtime.type == "firecracker":
-                raise ValueError( "secure_runtime.type 'firecracker' is only compatible with runtime.type='kubernetes'.")
+                raise ValueError(
+                    "ingress.mode must be 'direct' when runtime.type = 'docker'."
+                )
+            if (
+                self.secure_runtime is not None
+                and self.secure_runtime.type == "firecracker"
+            ):
+                raise ValueError(
+                    "secure_runtime.type 'firecracker' is only compatible with runtime.type='kubernetes'."
+                )
         elif self.runtime.type == "kubernetes":
             if self.kubernetes is None:
                 self.kubernetes = KubernetesRuntimeConfig()

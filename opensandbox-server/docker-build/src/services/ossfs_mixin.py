@@ -26,7 +26,6 @@ from typing import Any, Optional
 from uuid import uuid4
 
 from fastapi import HTTPException, status
-
 from src.services.constants import SandboxErrorCodes
 from src.services.helpers import normalize_external_endpoint_url
 
@@ -38,7 +37,7 @@ class OSSFSMixin:
     def _validate_bucket_name(bucket: str) -> None:
         """
         Validate OSS bucket name to prevent command injection.
-        
+
         Bucket names must follow OSS naming rules: lowercase letters, numbers, hyphens.
         Length: 3-63 characters. Cannot start/end with hyphen.
         """
@@ -50,10 +49,10 @@ class OSSFSMixin:
                     "message": "OSSFS bucket name cannot be empty.",
                 },
             )
-        
+
         # OSS bucket naming: 3-63 chars, lowercase alphanumeric and hyphens only
         # Must start and end with lowercase letter or digit
-        if not re.match(r'^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?$', bucket):
+        if not re.match(r"^[a-z0-9]([a-z0-9-]{1,61}[a-z0-9])?$", bucket):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
@@ -70,11 +69,11 @@ class OSSFSMixin:
     def _validate_ossfs_option(option: str) -> None:
         """
         Validate OSSFS option to prevent command injection.
-        
+
         Options should not contain shell metacharacters or command separators.
         """
         # Check for dangerous characters that could be used for command injection
-        dangerous_chars = [';', '&', '|', '`', '$', '(', ')', '<', '>', '\n', '\r']
+        dangerous_chars = [";", "&", "|", "`", "$", "(", ")", "<", ">", "\n", "\r"]
         for char in dangerous_chars:
             if char in option:
                 raise HTTPException(
@@ -92,7 +91,7 @@ class OSSFSMixin:
     def _validate_mount_path(path: str) -> None:
         """
         Validate mount path to prevent command injection in unmount operations.
-        
+
         Path must be absolute and not contain dangerous characters.
         """
         if not path or not isinstance(path, str):
@@ -103,9 +102,9 @@ class OSSFSMixin:
                     "message": "Mount path cannot be empty.",
                 },
             )
-        
+
         # Path must be absolute
-        if not path.startswith('/'):
+        if not path.startswith("/"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail={
@@ -113,9 +112,9 @@ class OSSFSMixin:
                     "message": f"Mount path must be absolute: '{path}'",
                 },
             )
-        
+
         # Check for dangerous characters that could be used for command injection
-        dangerous_chars = [';', '&', '|', '`', '$', '(', ')', '<', '>', '\n', '\r']
+        dangerous_chars = [";", "&", "|", "`", "$", "(", ")", "<", ">", "\n", "\r"]
         for char in dangerous_chars:
             if char in path:
                 raise HTTPException(
@@ -133,7 +132,7 @@ class OSSFSMixin:
     def _validate_endpoint_url(endpoint_url: str) -> None:
         """
         Validate endpoint URL to prevent command injection.
-        
+
         URL should not contain dangerous shell metacharacters.
         """
         if not endpoint_url or not isinstance(endpoint_url, str):
@@ -144,9 +143,9 @@ class OSSFSMixin:
                     "message": "Endpoint URL cannot be empty.",
                 },
             )
-        
+
         # Check for dangerous characters
-        dangerous_chars = [';', '&', '|', '`', '$', '(', ')', '<', '>', '\n', '\r', ' ']
+        dangerous_chars = [";", "&", "|", "`", "$", "(", ")", "<", ">", "\n", "\r", " "]
         for char in dangerous_chars:
             if char in endpoint_url:
                 raise HTTPException(
@@ -188,7 +187,9 @@ class OSSFSMixin:
             )
 
         mount_root = posixpath.normpath(mount_root)
-        bucket_root = posixpath.normpath(posixpath.join(mount_root, volume.ossfs.bucket))
+        bucket_root = posixpath.normpath(
+            posixpath.join(mount_root, volume.ossfs.bucket)
+        )
         prefix = (volume.sub_path or "").lstrip("/")
         backend_path = posixpath.normpath(posixpath.join(bucket_root, prefix))
 
@@ -218,7 +219,7 @@ class OSSFSMixin:
         self._validate_bucket_name(volume.ossfs.bucket)
         self._validate_endpoint_url(endpoint_url)
         self._validate_mount_path(backend_path)
-        
+
         cmd: list[str] = [
             "ossfs",
             source,
@@ -246,7 +247,7 @@ class OSSFSMixin:
         # Validate inputs for security
         self._validate_bucket_name(volume.ossfs.bucket)
         self._validate_endpoint_url(endpoint_url)
-        
+
         conf_lines: list[str] = [
             f"--oss_endpoint={endpoint_url}",
             f"--oss_bucket={volume.ossfs.bucket}",
@@ -265,7 +266,9 @@ class OSSFSMixin:
                     conf_lines.append(f"--{opt}")
         return conf_lines
 
-    def _build_ossfs_v2_mount_command(self, backend_path: str, conf_file: str) -> list[str]:
+    def _build_ossfs_v2_mount_command(
+        self, backend_path: str, conf_file: str
+    ) -> list[str]:
         # Validate backend path for security
         self._validate_mount_path(backend_path)
         return ["ossfs2", "mount", backend_path, "-c", conf_file]
@@ -419,7 +422,7 @@ class OSSFSMixin:
         """Release one reference and unmount when ref count reaches zero."""
         # Validate mount path before using in unmount commands
         self._validate_mount_path(mount_key)
-        
+
         with self._ossfs_mount_lock:
             current = self._ossfs_mount_ref_counts.get(mount_key, 0)
             if current <= 0:

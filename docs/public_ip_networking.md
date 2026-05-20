@@ -1,6 +1,6 @@
 # Public IP & Networking Configuration
 
-This document explains how the backend API (running inside a Proxmox VM Kubernetes cluster) is exposed to the internet and how it connects to the external frontend website (`sandbox.01security.com`). 
+This document explains how the backend API (running inside a Proxmox VM Kubernetes cluster) is exposed to the internet and how it connects to the external frontend website (`sandbox.01security.com`).
 
 With the assignment of a dedicated public IP (`148.113.4.247`) to the Proxmox VM, the cluster uses a native Kubernetes approach via **MetalLB** and an **Ingress Controller**, replacing the previous requirement for Cloudflare Tunnels (though tunnels remain a viable alternative).
 
@@ -27,7 +27,7 @@ metallb:
 With `l2Advertisement` enabled, MetalLB responds to ARP requests on your local network, declaring that the MAC address of the Kubernetes node owns the IP `148.113.4.247`.
 
 ### 2. Ingress Controller
-When your Nginx Ingress Controller (or API Gateway) creates a `Service` of `type: LoadBalancer`, MetalLB automatically provisions the public IP for it. 
+When your Nginx Ingress Controller (or API Gateway) creates a `Service` of `type: LoadBalancer`, MetalLB automatically provisions the public IP for it.
 
 Any internet traffic hitting `148.113.4.247` on ports 80/443 is now natively routed to the Nginx Ingress Controller, which then forwards the traffic to your backend API services based on the Ingress rules.
 

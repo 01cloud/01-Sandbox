@@ -6,7 +6,7 @@ This document outlines the multi-layered security architecture used by the **01 
 
 ## 1. Identity Path Alignment (Cross-User Isolation)
 
-To prevent "Key Hijacking" (where User B attempts to use User A's leaked API key), the system enforces a mandatory **Identity Path Alignment** check. 
+To prevent "Key Hijacking" (where User B attempts to use User A's leaked API key), the system enforces a mandatory **Identity Path Alignment** check.
 
 ### How it works:
 When a request is made through the dashboard, the backend performs a dual-identity verification:
@@ -38,7 +38,7 @@ The system uses a layered "Sentry" approach to distribute security overhead and 
 
 ### Layer 1: AgentGateway (The Edge Sentry)
 The gateway sits at the network perimeter and handles high-speed gatekeeping.
-- **Responsibilities**: 
+- **Responsibilities**:
     - Cookie-to-Token transformation for "Zero-Touch" redirections.
     - Standard cryptographic verification (Signature and `exp` time).
 - **Goal**: Stop invalid or expired requests before they reach internal microservices or consume sandbox resources.

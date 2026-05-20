@@ -29,10 +29,10 @@ The **AgentGateway** (Envoy) is configured with an `HTTPRoute` filter that execu
 
 **The Transformation Script:**
 ```javascript
-'authorization' in request.headers ? 
-    request.headers['authorization'] : 
-    ('cookie' in request.headers && request.headers['cookie'].contains("inspector_auth=") ? 
-        "Bearer " + request.headers['cookie'].split("inspector_auth=")[1].split(";")[0] : 
+'authorization' in request.headers ?
+    request.headers['authorization'] :
+    ('cookie' in request.headers && request.headers['cookie'].contains("inspector_auth=") ?
+        "Bearer " + request.headers['cookie'].split("inspector_auth=")[1].split(";")[0] :
         "")
 ```
 
@@ -95,7 +95,7 @@ Unlike symmetric algorithms (HS256) which share a secret key, Z1 Agent Sandbox u
 This is the most critical part of the system. It allows a browser-based user to talk to a header-based API without manual token pasting.
 *   **The Component**: **Agent Gateway** (Envoy) sitting at the edge.
 *   **The Code**: A **Common Expression Language (CEL)** script located in the Helm template: [`agentgateway/templates/policy.yaml`](file:///home/berrybytes/Desktop/codeInspector/codeInspector/charts/agentgateway/templates/policy.yaml).
-*   **The Logic**: 
+*   **The Logic**:
     1.  Gateway checks if an `Authorization` header already exists.
     2.  If not, it scans the incoming `Cookie` header for `inspector_auth=`.
     3.  It extracts the JWT string and **injects** a new `Authorization: Bearer <JWT>` header into the request context.

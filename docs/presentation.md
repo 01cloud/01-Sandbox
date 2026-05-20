@@ -14,7 +14,7 @@ Our "Facade Architecture" provides a stable, unified API while allowing for seam
 graph TD
     Client([Client/App]) -->|REST/Scan Request| Gateway[Agent Gateway]
     Gateway -->|Forward| APIServer[FastAPI Orchestrator]
-    
+
     subgraph "Production Layer (OpenSandbox)"
         APIServer -->|Async REST| OpenServer[OpenSandbox Server]
         OpenServer -->|CRDs| Controller[K8s Operator]

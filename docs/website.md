@@ -28,7 +28,7 @@ Z1 Agent Sandbox acts as a "Brain" (FastAPI Orchestrator) that manages "Workers"
 graph TD
     Client([Client/App]) -->|REST/Scan Request| Gateway[Agent Gateway]
     Gateway -->|Forward| APIServer[FastAPI Orchestrator]
-    
+
     subgraph "Execution Layer (OpenSandbox)"
         APIServer -->|Async| OpenServer[OpenSandbox Server]
         OpenServer -->|Schedule| K8sNodes[Hardened gVisor Pods]
@@ -79,25 +79,25 @@ sequenceDiagram
 
     User->>Gateway: 2. POST /v1/scan-jobs (Code & Auth)
     Note over Gateway: 3. Validate Token & API Key
-    
+
     Gateway->>API: 4. Forward Validated Request
     Note over API: 5. Select Backend (Z1Sandbox)
-    
+
     API->>Z1: 6. Trigger Scan Job (Internal POST)
-    
+
     Note over Z1: 7. Process Files & Write to PVC
     Z1->>K8s: 8. Schedule Scanner Pod (gVisor)
-    
+
     K8s->>Pod: 9. Initialize & Mount Volumes
-    
+
     Note over Pod: 10. Execute code-interpreter.sh
     Note over Pod: 11. Run Security Tools (Semgrep, Bandit, etc.)
     Pod->>Z1: 12. Write Report to Shared PVC
-    
+
     loop Polling
         Z1->>Z1: 13. Check for Result File
     end
-    
+
     Z1-->>API: 14. Return Aggregated JSON Report
     API-->>Gateway: 15. Forward Final Response
     Gateway-->>User: 16. Delivery Structured Security Audit

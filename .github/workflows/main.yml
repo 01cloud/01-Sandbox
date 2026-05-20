@@ -1,45 +1,37 @@
-name: CI/CD Pipeline
+name: Promote to Live
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
     paths:
       - 'apiServer/**'
       - 'code-interpreter/**'
-      - 'codeInspector/**'
       - 'opensandbox-server/**'
       - 'opensandbox-controller/**'
       - 'codeInspector/**'
+      - '!codeInspector/values.yaml'
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
-  versioning:
-    runs-on: ubuntu-latest
-    outputs:
-      version: ${{ steps.semver.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-      - name: Get Next Version
-        id: semver
-        uses: paulhatch/semantic-version@v5.4.0
-        with:
-          tag_prefix: "v"
-          major_pattern: "(MAJOR)"
-          minor_pattern: "(MINOR)"
-          version_format: "${major}.${minor}.${patch}"
+  release-please:
+    name: Release
+    uses: 01cloud/actions/.github/workflows/release.yaml@main
+    permissions:
+      contents: write
+      pull-requests: write
 
   filter:
-    needs: versioning
+    name: Filter Changes
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     outputs:
-      api: ${{ steps.filter.outputs.api }}
-      scanner: ${{ steps.filter.outputs.scanner }}
-      infra: ${{ steps.filter.outputs.infra }}
-      server: ${{ steps.filter.outputs.server }}
+      api:        ${{ steps.filter.outputs.api }}
+      scanner:    ${{ steps.filter.outputs.scanner }}
+      server:     ${{ steps.filter.outputs.server }}
       controller: ${{ steps.filter.outputs.controller }}
     steps:
       - uses: actions/checkout@v4
@@ -51,215 +43,59 @@ jobs:
               - 'apiServer/**'
             scanner:
               - 'code-interpreter/**'
-            infra:
-              - 'codeInspector/**'
             server:
               - 'opensandbox-server/**'
             controller:
               - 'opensandbox-controller/**'
-            codeInspector:
-              - 'codeInspector/**'
 
-  build-api:
-    needs: [filter, versioning]
-    if: needs.filter.outputs.api == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push API Server
-        uses: docker/build-push-action@v5
-        with:
-          context: ./apiServer/fastapi/
-          push: true
-          tags: |
-            01community/01sandbox-api:latest
-            01community/01sandbox-api:${{ needs.versioning.outputs.version }}
-
-  build-scanner:
-    needs: [filter, versioning]
-    if: needs.filter.outputs.scanner == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push Scanner
-        uses: docker/build-push-action@v5
-        with:
-          context: ./code-interpreter
-          push: true
-          tags: |
-            01community/01sandbox-codeinterpreter:latest
-            01community/01sandbox-codeinterpreter:${{ needs.versioning.outputs.version }}
-  
-  build-server:
-    needs: [filter, versioning]
-    if: needs.filter.outputs.server == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push Server
-        uses: docker/build-push-action@v5
-        with:
-          context: ./opensandbox-server/docker-build/
-          push: true
-          tags: |
-            01community/01sandbox-opensandbox-server:latest
-            01community/01sandbox-opensandbox-server:${{ needs.versioning.outputs.version }}
-
-  build-controller:
-    needs: [filter, versioning]
-    if: needs.filter.outputs.controller == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Login to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-      - name: Build and push Controller
-        uses: docker/build-push-action@v5
-        with:
-          context: ./opensandbox-controller/docker-build/
-          push: true
-          tags: |
-            01community/01sandbox-opensandbox-controller:latest
-            01community/01sandbox-opensandbox-controller:${{ needs.versioning.outputs.version }}
+  build:
+    name: Build
+    needs: [release-please, filter]
+    if: needs.release-please.outputs.release_created == 'true'
+    uses: 01cloud/actions/.github/workflows/docker-build-multi.yaml@main
+    with:
+      version: ${{ needs.release-please.outputs.version }}
+      components: |
+        [
+          {"name": "api",        "changed": "${{ needs.filter.outputs.api }}",        "context": "./apiServer/fastapi",                   "image": "01community/01sandbox-api"},
+          {"name": "scanner",    "changed": "${{ needs.filter.outputs.scanner }}",    "context": "./code-interpreter",                    "image": "01community/01sandbox-codeinterpreter"},
+          {"name": "server",     "changed": "${{ needs.filter.outputs.server }}",     "context": "./opensandbox-server/docker-build",     "image": "01community/01sandbox-opensandbox-server"},
+          {"name": "controller", "changed": "${{ needs.filter.outputs.controller }}", "context": "./opensandbox-controller/docker-build",  "image": "01community/01sandbox-opensandbox-controller"}
+        ]
+    secrets:
+      REGISTRY_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.DOCKERHUB_TOKEN }}
 
   deploy:
-    needs: [filter, versioning, build-api, build-scanner, build-server, build-controller]
+    name: Deploy
+    needs: [release-please, filter, build]
     if: |
       always() &&
-      (needs.filter.outputs.infra == 'true' || 
-       needs.build-api.result == 'success' || 
-       needs.build-scanner.result == 'success' ||
-       needs.build-server.result == 'success' ||
-       needs.build-controller.result == 'success')
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Set up Kubeconfig
-        run: |
-          mkdir -p ~/.kube
-          echo "${{ secrets.KUBECONFIG }}" > ~/.kube/config
-          # Patch Kubeconfig to use public IP instead of localhost
-          sed -i 's/127.0.0.1/148.113.4.247/g' ~/.kube/config
-          chmod 600 ~/.kube/config
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-      - name: Helm Lint
-        run: helm lint ./codeInspector
-      - name: Cleanup Stuck Helm Release
-        run: |
-          echo "Checking for stuck Helm releases..."
-          # Delete any Helm secrets that are stuck in 'pending' state
-          kubectl delete secret -n default -l "owner=helm,name=codeinspector,status=pending-upgrade" || true
-          kubectl delete secret -n default -l "owner=helm,name=codeinspector,status=pending-install" || true
+      needs.release-please.outputs.release_created == 'true' &&
+      needs.build.result != 'failure'
+    secrets: inherit
+    uses: 01cloud/actions/.github/workflows/deploy-helm.yaml@main
+    with:
+      release-name: ${{ vars.HELM_RELEASE_NAME }}
+      namespace: ${{ vars.K8S_NAMESPACE }}
+      chart-path: ${{ vars.HELM_CHART_PATH }}
+      values-files: ${{ vars.HELM_VALUES_FILES }}
+      atomic: true
+      timeout: 5m0s
 
-      - name: Deploy to RKE2
-        run: |
-          set -x
-          VERSION=${{ needs.versioning.outputs.version }}
-          echo "Starting deployment..."
-          
-          # Build the Helm command dynamically
-          HELM_CMD="helm upgrade --install codeinspector ./codeInspector -n default --rollback-on-failure --debug --timeout 5m0s --values ./codeInspector/values.yaml"
-          
-          if [ "${{ needs.filter.outputs.api }}" == "true" ]; then
-            HELM_CMD="$HELM_CMD --set apiServer.deployment.image.tag=${VERSION}"
-          fi
-          if [ "${{ needs.filter.outputs.controller }}" == "true" ]; then
-            HELM_CMD="$HELM_CMD --set opensandbox.controller.image.tag=${VERSION}"
-          fi
-          if [ "${{ needs.filter.outputs.server }}" == "true" ]; then
-            HELM_CMD="$HELM_CMD --set opensandbox.server.image.tag=${VERSION}"
-          fi
-          if [ "${{ needs.filter.outputs.scanner }}" == "true" ]; then
-            HELM_CMD="$HELM_CMD --set opensandbox.server.sandboxImage=01community/01sandbox-codeinterpreter:${VERSION}"
-          fi
-          
-          eval $HELM_CMD
-            
-      - name: Update values.yaml and Tag Repository
-        run: |
-          set -x
-          VERSION=${{ needs.versioning.outputs.version }}
-          UPDATED=false
-          
-          echo "Checking for changes to apply version ${VERSION}..."
-          
-          # Update API Tag
-          if [ "${{ needs.filter.outputs.api }}" == "true" ]; then
-            echo "Updating API Server tag..."
-            sed -i "/apiServer:/,/tag:/ s/tag: [\"']\?[0-9.]*[\"']\?/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
-            UPDATED=true
-          fi
-          
-          # Update Controller Tag
-          if [ "${{ needs.filter.outputs.controller }}" == "true" ]; then
-            echo "Updating Controller tag..."
-            sed -i "/controller:/,/tag:/ s/tag: [\"']\?[0-9.]*[\"']\?/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
-            UPDATED=true
-          fi
-          
-          # Update Server Tag
-          if [ "${{ needs.filter.outputs.server }}" == "true" ]; then
-            echo "Updating Server tag..."
-            sed -i "/server:/,/tag:/ s/tag: [\"']\?[0-9.]*[\"']\?/tag: \"${VERSION}\"/" ./codeInspector/values.yaml
-            UPDATED=true
-          fi
-
-          # Update Sandbox Image (Scanner)
-          if [ "${{ needs.filter.outputs.scanner }}" == "true" ]; then
-            echo "Updating Sandbox Scanner image..."
-            # Update the specialized sandboxImage field (handles quotes)
-            sed -i "s|sandboxImage: [\"']\?01community/01sandbox-codeinterpreter:[0-9.]*[\"']\?|sandboxImage: \"01community/01sandbox-codeinterpreter:${VERSION}\"|g" ./codeInspector/values.yaml
-            # Update the Resource Pool image if it exists
-            sed -i "s|image: [\"']\?01community/01sandbox-codeinterpreter:[0-9.]*[\"']\?|image: \"01community/01sandbox-codeinterpreter:${VERSION}\"|g" ./codeInspector/values.yaml
-            UPDATED=true
-          fi
-          
-          if [ "$UPDATED" == "true" ]; then
-            echo "Changes applied. Checking if commit is needed..."
-            git config --global user.name "github-actions[bot]"
-            git config --global user.email "github-actions[bot]@users.noreply.github.com"
-            git add ./codeInspector/values.yaml
-            
-            # Only commit if there are actual changes
-            if ! git diff --cached --quiet; then
-              git commit -m "chore: bump versions to ${VERSION} [skip ci]"
-            else
-              echo "No changes to values.yaml, skipping commit."
-            fi
-            
-            # Always try to push tags for versioning persistence
-            git tag -f "v${VERSION}"
-            git push origin main --tags --force
-          else
-            echo "No component changes detected, skipping repository update."
-          fi
-
-      - name: Sync Remote Server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.REMOTE_HOST }}
-          username: ${{ secrets.REMOTE_USER }}
-          password: ${{ secrets.REMOTE_PASSWORD }}
-          script: |
-            cd /home/ktamang/01-Sandbox
-            git fetch origin main
-            git reset --hard origin/main
+  update-values:
+    name: Update Values
+    needs: [release-please, filter, deploy]
+    if: needs.deploy.result == 'success'
+    secrets: inherit
+    uses: 01cloud/actions/.github/workflows/update-values.yaml@main
+    with:
+      version: ${{ needs.release-please.outputs.version }}
+      values-file: ${{ vars.HELM_VALUES_FILES }}
+      components: |
+        [
+          {"name": "api",        "changed": "${{ needs.filter.outputs.api }}",        "values-key": "apiServer.deployment.image.tag",   "value": "__VERSION__"},
+          {"name": "scanner",    "changed": "${{ needs.filter.outputs.scanner }}",    "values-key": "opensandbox.server.sandboxImage",   "value": "01community/01sandbox-codeinterpreter:__VERSION__"},
+          {"name": "server",     "changed": "${{ needs.filter.outputs.server }}",     "values-key": "opensandbox.server.image.tag",      "value": "__VERSION__"},
+          {"name": "controller", "changed": "${{ needs.filter.outputs.controller }}", "values-key": "opensandbox.controller.image.tag",  "value": "__VERSION__"}
+        ]

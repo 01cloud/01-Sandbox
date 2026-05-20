@@ -11,7 +11,7 @@ This document provides a highly technical summary of the architectural and imple
 
 ## 2. Concurrency Resilience & Rate Limiting
 **Problem**: Rapid bursts of API requests could overwhelm the Kubernetes API server (etcd pressure).
-- **Change**: Integrated a `TokenBucketRateLimiter` within the `K8sClient`. 
+- **Change**: Integrated a `TokenBucketRateLimiter` within the `K8sClient`.
 - **Change**: Fine-tuned the `apiServer` HPA (Horizontal Pod Autoscaler) and resource limits (CPU: 500m / Mem: 256Mi).
 - **Result**: The system can now handle 50+ simultaneous requests by safely queuing them at the K8s scheduler level (`Pending` state) without crashing the application layer.
 

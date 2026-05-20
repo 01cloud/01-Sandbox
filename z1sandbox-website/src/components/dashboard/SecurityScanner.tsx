@@ -1,9 +1,9 @@
 import { useState } from "react";
-import { 
-  X, 
-  ShieldAlert, 
-  Terminal, 
-  AlertCircle, 
+import {
+  X,
+  ShieldAlert,
+  Terminal,
+  AlertCircle,
   RefreshCw,
   ShieldCheck,
   Zap,
@@ -71,17 +71,17 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
 
     // YAML & K8s Indicators
     if (text.startsWith("---")) scores.yaml += 15;
-    
+
     const hasApiVersion = /apiVersion:/m.test(text);
     const hasKind = /kind:/m.test(text);
     const isK8s = hasApiVersion && hasKind;
-    
+
     if (isK8s) {
       scores.k8s = (scores.k8s || 0) + 30;
     } else if (hasApiVersion || hasKind || /^(metadata|spec|services|version):/m.test(text)) {
       scores.yaml += 10;
     }
-    
+
     const kvPairs = (text.match(/^\s*[\w.-]+\s*:\s*.+/gm) || []).length;
     scores.yaml += Math.min(kvPairs * 2, 20); // Cap KV pairs contribution
 
@@ -104,13 +104,13 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
     if (/\b(if\s+\[|then|fi|done|do)\b/.test(text)) scores.sh += 10;
 
     // --- Conflicts & Contextual Adjustments ---
-    
+
     // If it has strong Python keywords, it's very unlikely to be YAML or K8S
     if (scores.py > 5) {
       scores.yaml -= 15;
       scores.k8s -= 15;
     }
-    
+
     // If it has strong JS keywords, it's very unlikely to be YAML or K8S
     if (scores.js > 5) {
       scores.yaml -= 15;
@@ -207,7 +207,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                 {detectLanguage(code).toUpperCase()}
               </Badge>
             </div>
-            
+
             <div className="flex-1 relative group rounded-2xl bg-background border border-border overflow-hidden focus-within:ring-2 focus-within:ring-primary/10 transition-all">
               <textarea
                 value={code}
@@ -218,8 +218,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
               />
             </div>
 
-            <Button 
-              onClick={runScan} 
+            <Button
+              onClick={runScan}
               disabled={isScanning}
               className="mt-6 h-11 rounded-lg bg-primary text-primary-foreground hover:opacity-90 font-bold text-xs uppercase tracking-widest transition-all shadow-lg flex items-center justify-center gap-2 active:scale-[0.98]"
             >
@@ -265,8 +265,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                         {/* Compact Header */}
                         <div className={cn(
                             "px-6 py-3 rounded-lg flex items-center justify-between border shadow-sm",
-                            result.summary?.overall_status === "CLEAN" 
-                                ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-600 dark:text-emerald-400" 
+                            result.summary?.overall_status === "CLEAN"
+                                ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-600 dark:text-emerald-400"
                                 : "bg-destructive/5 border-destructive/20 text-destructive"
                         )}>
                             <div className="flex flex-col">
@@ -319,7 +319,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                                                               severity === "HIGH" ? "bg-orange-500/10 text-orange-500 border-orange-500/20" :
                                                               severity === "MEDIUM" ? "bg-amber-500/10 text-amber-500 border-amber-500/20" :
                                                               "bg-blue-500/10 text-blue-500 border-blue-500/20";
-                                             
+
                                              return (
                                                 <div key={i} className="p-5 rounded-xl border bg-muted/10 hover:bg-muted/20 transition-all group relative overflow-hidden">
                                                    <div className="flex items-center justify-between mb-3">
@@ -331,9 +331,9 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                                                       </div>
                                                       {f.line && <span className="text-[9px] font-mono opacity-40">L:{f.line}</span>}
                                                    </div>
-                                                   
+
                                                    <h4 className="text-sm font-black tracking-tight mb-2 lowercase">{f.issue || "security violation"}</h4>
-                                                   
+
                                                    <div className="flex flex-col gap-2 mt-4">
                                                       <span className="text-[9px] font-black tracking-[0.1em] text-muted-foreground/60 lowercase">remediation insight</span>
                                                       <div className="p-4 rounded-lg bg-background/50 text-[11px] font-medium text-foreground/80 border border-border/40 leading-relaxed italic lowercase">
@@ -366,7 +366,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                                              <Badge className={cn(
                                                 "text-[8px] font-black uppercase",
                                                 scan.status === "SKIPPED" ? "bg-amber-500/10 text-amber-500 hover:bg-amber-500/20" :
-                                                scan.exit_code === 0 ? "bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20" : 
+                                                scan.exit_code === 0 ? "bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20" :
                                                 "bg-destructive/10 text-destructive hover:bg-destructive/20"
                                              )}>
                                                 {scan.status === "SKIPPED" ? "SKIPPED" : (scan.exit_code === 0 ? "PASSED" : "FAILED")}
@@ -390,9 +390,9 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                         <p className="text-sm text-destructive font-bold leading-relaxed bg-black/10 p-10 rounded-[2.5rem] font-mono border border-destructive/10">
                             {result?.error || "Fatal exception encountered during the security ingestion phase."}
                         </p>
-                        <Button 
+                        <Button
                             onClick={() => setStatus("READY")}
-                            variant="outline" 
+                            variant="outline"
                             className="mt-8 rounded-full border-destructive/20 text-destructive hover:bg-destructive/10 px-8"
                         >
                             RESTART PIPELINE

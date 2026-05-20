@@ -223,7 +223,7 @@ run_security_scans() {
     # First, ensure we source the Python environment so the orchestrator runs correctly.
     # We use the system-managed python with breaking system packages enabled for the tools.
     if [ -f /opt/opensandbox/code-interpreter-env.sh ]; then
-        source /opt/opensandbox/code-interpreter-env.sh python 3.12 
+        source /opt/opensandbox/code-interpreter-env.sh python 3.12
     fi
 
     if [ -f /opt/opensandbox/src/scanner_orchestrator.py ]; then

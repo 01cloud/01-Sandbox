@@ -9,5 +9,3 @@ window._env_ = {
   VITE_API_BASE_URL: "",
   VITE_DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"/api/v1/01sbx","documentationUrl":"/api/v1/01sbx/docs"}]'
 };
-
-
