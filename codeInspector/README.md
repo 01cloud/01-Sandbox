@@ -1,5 +1,5 @@
 # CodeInspector Helm Chart
-
+#
 This Helm chart deploys all CodeInspector components in one go.
 
 ## Components

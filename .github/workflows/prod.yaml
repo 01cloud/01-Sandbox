@@ -10,18 +10,14 @@ on:
       - 'opensandbox-controller/**'
       - 'codeInspector/**'
       - '!codeInspector/values.yaml'
+      - 'CHANGELOG.md'
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  release-please:
-    name: Release
-    uses: 01cloud/actions/.github/workflows/release-please.yaml@main
-    permissions:
-      contents: write
-      pull-requests: write
+
 
   filter:
     name: Filter Changes
