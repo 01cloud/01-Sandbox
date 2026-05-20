@@ -15,12 +15,12 @@ repos:
   # ==========================================
   # Golang hooks
   # ==========================================
-  - repo: https://github.com/TekWizely/pre-commit-golang
-    rev: v1.0.0-rc.1
-    hooks:
-      - id: go-fmt
-        args: [-w]
-      - id: go-mod-tidy
+  # - repo: https://github.com/TekWizely/pre-commit-golang
+  #   rev: v1.0.0-rc.1
+  #   hooks:
+  #     - id: go-fmt
+  #       args: [-w]
+  #     - id: go-mod-tidy
 
   # ==========================================
   # Python formatting & linting
