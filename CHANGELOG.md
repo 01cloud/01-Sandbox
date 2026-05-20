@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.6](https://github.com/01cloud/01-Sandbox/compare/v0.1.5...v0.1.6) (2026-05-20)
+
+
+### Bug Fixes
+
+* filter issues fixes to build the docker images ([9873092](https://github.com/01cloud/01-Sandbox/commit/98730920730dc1ff65503aa11e944e8bc626a237))
+* filter issues fixes to build the docker images ([0502f42](https://github.com/01cloud/01-Sandbox/commit/0502f42a29066ee01776fd727205afdebe6132c7))
+* filter issues fixes to build the docker images ([883017f](https://github.com/01cloud/01-Sandbox/commit/883017ff9f0e553b4529d5fc5b5ffe694cf27d4d))
+* filter issues fixes to build the docker images ([24116f0](https://github.com/01cloud/01-Sandbox/commit/24116f02f2e508b8761a376038f3cdcf0db6dcce))
+
 ## [0.1.5](https://github.com/01cloud/01-Sandbox/compare/v0.1.4...v0.1.5) (2026-05-20)
 
 
