@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.0](https://github.com/01cloud/01-Sandbox/compare/v0.1.8...v0.2.0) (2026-05-20)
+
+
+### Features
+
+* trigger all component builds for pipeline testing ([6d4cd61](https://github.com/01cloud/01-Sandbox/commit/6d4cd616216e038878c117356c95a07aa376e594))
+* trigger all component builds for pipeline testing ([fcb84a5](https://github.com/01cloud/01-Sandbox/commit/fcb84a53e06fdbf400718c2d2b4368274452c9d8))
+
 ## [0.1.8](https://github.com/01cloud/01-Sandbox/compare/v0.1.7...v0.1.8) (2026-05-20)
 
 
