@@ -1,5 +1,5 @@
 # OpenSandbox Controller Helm Chart
-
+#
 A Helm chart for deploying the OpenSandbox Kubernetes Controller, which manages sandbox environments with resource pooling and batch delivery capabilities.
 
 ## Introduction
