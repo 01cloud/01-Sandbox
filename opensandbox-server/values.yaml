@@ -1,6 +1,6 @@
 # Copyright 2026 Alibaba Group Holding Ltd.
 # Default values for opensandbox-server.
-
+#
 # -- Override the name of the chart
 nameOverride: ""
 # -- Resource names and app.kubernetes.io/name are fixed to this value, independent of release name
