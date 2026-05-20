@@ -5,7 +5,6 @@
 global:
   apiRoutePrefix: "/api/v1/01sbx"
   JWT_PUBLIC_JWKS: ""
-
 ################################################################
 # Agent Gateway  values
 ################################################################
@@ -39,8 +38,6 @@ agentgateway:
       enabled: false
       requests: 7
       unit: "Minutes"
-
-
 ################################################################
 # API Server component values
 ################################################################
@@ -66,7 +63,6 @@ apiServer:
     OPENSANDBOX_ROUTE_PREFIX: "{{ .Values.global.apiRoutePrefix }}"
     DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}","documentationUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}/docs"}]'
     JWT_PUBLIC_JWKS: ""
-
   secret:
     E2B_API_KEY: ""
     JWT_PRIVATE_KEY: ""
@@ -74,7 +70,7 @@ apiServer:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-api
-      tag: "0.0.40"
+      tag: "0.1.6"
       pullPolicy: Always
     resources:
       requests:
@@ -106,7 +102,6 @@ apiServer:
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
   postgresql:
-
     enabled: true
     host: "postgresql-service"
     port: 5432
@@ -120,7 +115,6 @@ apiServer:
     host: "redis-service"
     port: 6379
     password: ""
-
 ################################################################
 # MetalLB component values
 ################################################################
@@ -133,7 +127,6 @@ metallb:
       - 148.113.4.247/32
   l2Advertisement:
     enabled: true
-
 ################################################################
 # Kind Cluster component values
 ################################################################
@@ -143,7 +136,6 @@ kindCluster:
   runtimeClass:
     name: gvisor
     handler: runsc
-
 ################################################################
 # OpenSandbox component values
 ################################################################
@@ -184,7 +176,6 @@ opensandbox:
       accessMode: "ReadWriteMany"
       mountPath: "/data"
       storageClassName: "longhorn"
-
 ################################################################
 # OpenSandbox Resource Pool component values
 ################################################################
