@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.1.7](https://github.com/01cloud/01-Sandbox/compare/v0.1.6...v0.1.7) (2026-05-20)
+
+
+### Bug Fixes
+
+* filter issues in updating in the values.yml file ([ce5a272](https://github.com/01cloud/01-Sandbox/commit/ce5a272de42f3a23e7d2e54b0db2b7ecf329bbae))
+* filter issues in updating in the values.yml file ([b78f4e1](https://github.com/01cloud/01-Sandbox/commit/b78f4e15f7f32dacf4abedc48cf5e9969e8a34c5))
+* filter issues in updating in the values.yml file ([7faf90f](https://github.com/01cloud/01-Sandbox/commit/7faf90ff2f3957d86889e056f5f4281a55c55785))
+* filter issues in updating in the values.yml file ([718f9ed](https://github.com/01cloud/01-Sandbox/commit/718f9edf776cf838e7be794624bdda332000f9c5))
+
 ## [0.1.6](https://github.com/01cloud/01-Sandbox/compare/v0.1.5...v0.1.6) (2026-05-20)
 
 
