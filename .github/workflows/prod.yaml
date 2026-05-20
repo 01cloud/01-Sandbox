@@ -18,7 +18,7 @@ permissions:
 jobs:
   release-please:
     name: Release
-    uses: 01cloud/actions/.github/workflows/release.yaml@main
+    uses: 01cloud/actions/.github/workflows/release-please.yaml@main
     permissions:
       contents: write
       pull-requests: write
