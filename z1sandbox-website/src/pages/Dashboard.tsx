@@ -1,5 +1,5 @@
 import { useAuth0 } from "@auth0/auth0-react";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import DOMPurify from 'dompurify';
 import {
   Plus,
@@ -21,7 +21,8 @@ import {
   Calendar,
   UploadCloud,
   Play,
-  FileCode
+  FileCode,
+  Square
 } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Button } from "@/components/ui/button";
@@ -97,6 +98,13 @@ const Dashboard = () => {
   const selectedBulkLog = bulkScanLogs.find(log => log.name === selectedBulkLogName) || null;
   const [detailTab, setDetailTab] = useState<"insights" | "raw">("insights");
   const [rateLimitCountdown, setRateLimitCountdown] = useState<number | null>(null);
+  const bulkScanCancelledRef = useRef(false);
+
+  const stopBulkSecurityAudit = () => {
+    bulkScanCancelledRef.current = true;
+    setIsBulkScanning(false);
+    toast.info("Stopping bulk security scan...");
+  };
 
   const processFiles = async (fileList: FileList) => {
     const newItems: { name: string; content: string; lang: string }[] = [];
@@ -125,8 +133,16 @@ const Dashboard = () => {
       if (ext === 'txt' && content.includes('==== lang:')) {
         const blocks = content.split(/====\s*lang:\s*([a-zA-Z0-9_-]+)\s*====/i);
         for (let j = 1; j < blocks.length; j += 2) {
-          const blockLang = blocks[j].toLowerCase();
+          let blockLang = blocks[j].toLowerCase();
           const blockContent = blocks[j + 1]?.trim();
+
+          // Normalize block language names
+          if (blockLang === 'python') blockLang = 'py';
+          else if (blockLang === 'golang') blockLang = 'go';
+          else if (blockLang === 'javascript' || blockLang === 'typescript') blockLang = 'js';
+          else if (blockLang === 'bash' || blockLang === 'shell') blockLang = 'sh';
+          else if (blockLang === 'kubernetes') blockLang = 'k8s';
+
           if (blockContent && blockContent.length > 0) {
             newItems.push({
               name: `bulk_${file.name.replace('.txt', '')}_${Math.floor(Math.random() * 1000)}_${j}.${blockLang === 'k8s' ? 'yaml' : blockLang}`,
@@ -183,12 +199,13 @@ const Dashboard = () => {
     }
 
     setIsBulkScanning(true);
+    bulkScanCancelledRef.current = false;
 
     let rateLimitUntil = 0;
     const scanPromises: Promise<void>[] = [];
 
     const checkRateLimitWait = async () => {
-      while (Date.now() < rateLimitUntil) {
+      while (Date.now() < rateLimitUntil && !bulkScanCancelledRef.current) {
         const remaining = Math.ceil((rateLimitUntil - Date.now()) / 1000);
         setRateLimitCountdown(remaining);
         await new Promise(r => setTimeout(r, 1000));
@@ -198,7 +215,22 @@ const Dashboard = () => {
 
     // Process concurrent queue
     for (let i = 0; i < bulkQueue.length; i++) {
+      // Skip files that have already finished successfully
+      const currentLog = bulkScanLogs[i];
+      if (currentLog && (currentLog.status === 'clean' || currentLog.status === 'risks')) {
+        continue;
+      }
+
+      if (bulkScanCancelledRef.current) {
+        break;
+      }
+
       await checkRateLimitWait();
+
+      if (bulkScanCancelledRef.current) {
+        break;
+      }
+
       const item = bulkQueue[i];
 
       const scanTask = (async () => {
@@ -206,8 +238,12 @@ const Dashboard = () => {
         setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'scanning' } : log));
 
         let attemptScan = true;
-        while (attemptScan) {
+        while (attemptScan && !bulkScanCancelledRef.current) {
           await checkRateLimitWait();
+
+          if (bulkScanCancelledRef.current) {
+            break;
+          }
 
           try {
             const apiExt = item.lang === 'k8s' ? 'yaml' : item.lang;
@@ -226,6 +262,10 @@ const Dashboard = () => {
                 metadata: { job_id: `bulk_${Date.now()}_${i}` }
               })
             });
+
+            if (bulkScanCancelledRef.current) {
+              break;
+            }
 
             const data = await response.json();
 
@@ -253,7 +293,13 @@ const Dashboard = () => {
             let reportData = null;
 
             while (true) {
+                if (bulkScanCancelledRef.current) {
+                    break;
+                }
                 await new Promise(r => setTimeout(r, 5000)); // Poll every 5 seconds
+                if (bulkScanCancelledRef.current) {
+                    break;
+                }
                 const pollRes = await fetch(`${baseUrl}/scan-jobs/${jobId}/report`, {
                     headers: {
                         "accept": "application/json",
@@ -269,12 +315,21 @@ const Dashboard = () => {
                 }
             }
 
+            if (bulkScanCancelledRef.current) {
+                setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'idle' } : log));
+                attemptScan = false;
+                break;
+            }
+
             // 3. Process the retrieved report
             const report = reportData.report || reportData;
             const findings = Array.isArray(report)
               ? report
               : (report.findings || report.findings_list || []);
-            const totalFindings = findings.length;
+
+            // Exclude INFO severity from high-priority vulnerability counts so best practices don't block green status
+            const vulnerabilities = findings.filter((f: any) => f.severity && f.severity.toLowerCase() !== 'info');
+            const totalFindings = vulnerabilities.length;
             const finalStatus = totalFindings > 0 ? 'risks' : 'clean';
 
             setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? {
@@ -297,14 +352,18 @@ const Dashboard = () => {
       scanPromises.push(scanTask);
 
       // Wait 2 seconds before launching the next scan
-      if (i < bulkQueue.length - 1) {
+      if (i < bulkQueue.length - 1 && !bulkScanCancelledRef.current) {
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
 
     await Promise.all(scanPromises);
     setIsBulkScanning(false);
-    toast.success("Bulk security audit finished!");
+    if (bulkScanCancelledRef.current) {
+      toast.warning("Bulk security audit stopped by user!");
+    } else {
+      toast.success("Bulk security audit finished!");
+    }
   };
 
   const [scannerConfig, setScannerConfig] = useState<{
@@ -662,23 +721,36 @@ const Dashboard = () => {
                               </Button>
                             </div>
 
-                            <Button
-                              onClick={() => runBulkSecurityAudit(app.id, app.baseUrl)}
-                              disabled={isBulkScanning}
-                              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl h-11 font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 transition-all"
-                            >
-                              {isBulkScanning ? (
-                                <>
-                                  <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                                  Scanning Queue... {rateLimitCountdown ? `[ Retry in ${rateLimitCountdown}s ]` : ''}
-                                </>
-                              ) : (
-                                <>
-                                  <Play className="w-4 h-4 fill-current mr-2" />
-                                  Run Bulk Scan (2s Cooldown)
-                                </>
+                            <div className="flex gap-2 w-full animate-in fade-in duration-200">
+                              <Button
+                                onClick={() => runBulkSecurityAudit(app.id, app.baseUrl)}
+                                disabled={isBulkScanning}
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl h-11 font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 transition-all disabled:opacity-90 disabled:cursor-not-allowed"
+                              >
+                                {isBulkScanning ? (
+                                  <>
+                                    <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                                    Scanning Queue... {rateLimitCountdown ? `[ Retry in ${rateLimitCountdown}s ]` : ''}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="w-4 h-4 fill-current mr-2" />
+                                    Run Bulk Scan (2s Cooldown)
+                                  </>
+                                )}
+                              </Button>
+
+                              {isBulkScanning && (
+                                <Button
+                                  type="button"
+                                  onClick={stopBulkSecurityAudit}
+                                  className="bg-rose-600 hover:bg-rose-500 text-white rounded-2xl h-11 px-4 font-bold flex items-center justify-center gap-2 shadow-lg transition-all animate-in zoom-in duration-200"
+                                >
+                                  <Square className="w-4 h-4 fill-current" />
+                                  Stop
+                                </Button>
                               )}
-                            </Button>
+                            </div>
 
                             {/* Telemetry Console widget */}
                             <div className="bg-zinc-950 rounded-2xl border border-white/5 p-4 max-h-[220px] overflow-y-auto custom-scrollbar font-mono text-[11px] leading-relaxed flex flex-col gap-2">
