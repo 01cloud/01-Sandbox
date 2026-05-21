@@ -1,0 +1,20 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-09-insecure-image
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: untrusted-images
+  template:
+    metadata:
+      labels:
+        app: untrusted-images
+    spec:
+      containers:
+        - name: container-latest
+          image: untrusted-reg.co/pwned:latest  # VULN: 'latest' tag can change unexpectedly
+          imagePullPolicy: IfNotPresent         # VULN: won't pull updated image if cached
+        - name: container-http
+          image: http://insecure-mirror.io/alpine:3.18 # VULN: plaintext mirror (vulnerable to MitM)

@@ -1,0 +1,7 @@
+{
+  "filename": "sample_07_dangerous_capabilities.yaml",
+  "expected_findings": [
+    "capabilities",
+    "SYS_ADMIN"
+  ]
+}

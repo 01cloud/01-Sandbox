@@ -1,0 +1,8 @@
+{
+  "filename": "sample_06_auto_mount_sa.yaml",
+  "expected_findings": [
+    "serviceaccount",
+    "token",
+    "automountServiceAccountToken"
+  ]
+}

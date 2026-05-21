@@ -1,0 +1,11 @@
+{
+  "filename": "sample_01_privileged_pod.yaml",
+  "expected_findings": [
+    "privileged",
+    "hostNetwork",
+    "hostPID",
+    "hostIPC",
+    "runAsUser",
+    "hostPath"
+  ]
+}

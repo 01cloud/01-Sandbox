@@ -1,0 +1,7 @@
+{
+  "filename": "sample_04_no_resource_limits.yaml",
+  "expected_findings": [
+    "limit",
+    "resource"
+  ]
+}

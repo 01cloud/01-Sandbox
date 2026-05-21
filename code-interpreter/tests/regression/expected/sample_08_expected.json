@@ -1,0 +1,9 @@
+{
+  "filename": "sample_08_sensitive_hostpath.yaml",
+  "expected_findings": [
+    "hostPath",
+    "etc",
+    "log",
+    "home"
+  ]
+}

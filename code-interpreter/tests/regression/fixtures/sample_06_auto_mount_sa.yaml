@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: sample-06-auto-mount-sa
+automountServiceAccountToken: true        # VULN: mounts API token into every pod
+
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sample-06-token-mounted
+spec:
+  serviceAccountName: sample-06-auto-mount-sa
+  automountServiceAccountToken: true      # VULN: token accessible at /var/run/secrets/
+  containers:
+    - name: app
+      image: myapp:latest
+      command: ["/bin/sh", "-c",
+        "curl -H 'Authorization: Bearer $(cat /var/run/secrets/kubernetes.io/serviceaccount/token)' https://kubernetes.default.svc/api/v1/secrets"]

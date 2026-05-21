@@ -1,0 +1,8 @@
+{
+  "filename": "sample_03_hardcoded_secrets.yaml",
+  "expected_findings": [
+    "password",
+    "key",
+    "secret"
+  ]
+}
