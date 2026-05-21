@@ -21,3 +21,4 @@ apiServer/fastapi/typing_extensions.py
 apiServer/fastapi/venv/
 apiServer/fastapi/bleach/
 apiServer/fastapi/webencodings/
+test.sh
