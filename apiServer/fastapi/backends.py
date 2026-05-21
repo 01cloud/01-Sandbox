@@ -153,6 +153,10 @@ class GenericHTTPBackend(SandboxBackend):
                 f"{self._url}{prefix}/scan-jobs/{job_id}/report",
                 headers=opensandbox_headers(),
             )
+            if r.status_code == 404:
+                from fastapi import HTTPException
+
+                raise HTTPException(status_code=404, detail="Report not ready yet")
             r.raise_for_status()
             return r.json()
 

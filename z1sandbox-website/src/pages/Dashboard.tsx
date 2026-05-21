@@ -208,7 +208,8 @@ const Dashboard = () => {
             const apiExt = item.lang === 'k8s' ? 'yaml' : item.lang;
             const filename = item.name.includes('.') ? item.name : `${item.name}.${apiExt}`;
 
-            const response = await fetch(`${baseUrl}/scan-jobs`, {
+            // 1. Submit the job asynchronously
+            const response = await fetch(`${baseUrl}/scan-jobs?async=true`, {
               method: "POST",
               headers: {
                 "accept": "application/json",
@@ -216,7 +217,8 @@ const Dashboard = () => {
                 "Authorization": `Bearer ${foundKey}`
               },
               body: JSON.stringify({
-                files: { [filename]: item.content }
+                files: { [filename]: item.content },
+                metadata: { job_id: `bulk_${Date.now()}_${i}` }
               })
             });
 
@@ -241,7 +243,29 @@ const Dashboard = () => {
               break;
             }
 
-            const report = data.report || data;
+            // 2. Job submitted successfully, start polling loop
+            const jobId = data.job_id;
+            let reportData = null;
+
+            while (true) {
+                await new Promise(r => setTimeout(r, 5000)); // Poll every 5 seconds
+                const pollRes = await fetch(`${baseUrl}/scan-jobs/${jobId}/report`, {
+                    headers: {
+                        "accept": "application/json",
+                        "Authorization": `Bearer ${foundKey}`
+                    }
+                });
+
+                if (pollRes.status === 200) {
+                    reportData = await pollRes.json();
+                    break;
+                } else if (pollRes.status !== 404) {
+                    throw new Error("Polling failed with status " + pollRes.status);
+                }
+            }
+
+            // 3. Process the retrieved report
+            const report = reportData.report || reportData;
             const totalFindings = report.findings?.length || report.summary?.findings_count || 0;
             const finalStatus = totalFindings > 0 ? 'risks' : 'clean';
 
