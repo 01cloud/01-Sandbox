@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.1](https://github.com/01cloud/01-Sandbox/compare/v0.3.0...v0.3.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* testing the ci pipeline ([b54072c](https://github.com/01cloud/01-Sandbox/commit/b54072c60c6b282406c5c34d7e0ddbea0b26450e))
+* testing the ci pipeline ([83dd17f](https://github.com/01cloud/01-Sandbox/commit/83dd17fbd8856cb6e9a75fe973e05984289e691e))
+
 ## [0.3.0](https://github.com/01cloud/01-Sandbox/compare/v0.2.0...v0.3.0) (2026-05-20)
 
 
