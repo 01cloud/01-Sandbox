@@ -93,7 +93,8 @@ const Dashboard = () => {
     errorMsg?: string;
     report?: any;
   }[]>([]);
-  const [selectedBulkLog, setSelectedBulkLog] = useState<typeof bulkScanLogs[0] | null>(null);
+  const [selectedBulkLogName, setSelectedBulkLogName] = useState<string | null>(null);
+  const selectedBulkLog = bulkScanLogs.find(log => log.name === selectedBulkLogName) || null;
   const [detailTab, setDetailTab] = useState<"insights" | "raw">("insights");
   const [rateLimitCountdown, setRateLimitCountdown] = useState<number | null>(null);
 
@@ -715,7 +716,7 @@ const Dashboard = () => {
                                     key={idx}
                                     onClick={() => {
                                       if (isInteractive) {
-                                        setSelectedBulkLog(log);
+                                        setSelectedBulkLogName(log.name);
                                       }
                                     }}
                                     className={cn(
@@ -745,9 +746,9 @@ const Dashboard = () => {
             </div>
 
             {/* Sticky Right-Side Telemetry log reader panel */}
-            <div className="lg:sticky lg:top-8 w-full h-full flex flex-col">
+            <div className="w-full h-full min-h-[400px] relative">
               {selectedBulkLog ? (
-                <Card className="rounded-[2.5rem] border-border/50 bg-background/30 backdrop-blur-xl p-8 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-500 h-full min-h-[600px] overflow-hidden">
+                <Card className="absolute inset-0 rounded-[2.5rem] border-border/50 bg-background/30 backdrop-blur-xl p-8 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-500 overflow-hidden">
                   <div className="flex flex-col gap-1.5 border-b border-border/50 pb-6 shrink-0">
                     <div className="flex items-center justify-between">
                       <h3 className="text-xl font-black truncate max-w-[70%] tracking-tight text-zinc-100 flex items-center gap-2">
@@ -761,7 +762,7 @@ const Dashboard = () => {
                         size="sm"
                         variant="ghost"
                         className="h-8 text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-white/5 rounded-xl px-3 shrink-0"
-                        onClick={() => setSelectedBulkLog(null)}
+                        onClick={() => setSelectedBulkLogName(null)}
                       >
                         Close
                       </Button>
@@ -841,7 +842,7 @@ const Dashboard = () => {
                     <TabsContent value="raw" className="flex-1 overflow-hidden flex flex-col mt-4 min-h-0">
                       <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group flex flex-col min-h-0">
                         <ScrollArea className="flex-1 w-full" orientation="both">
-                          <div className="p-6 w-full h-full">
+                          <div className="p-6">
                             <pre className="text-[11px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre overflow-x-auto w-max font-medium block">
                               {JSON.stringify(selectedBulkLog.report || { error: selectedBulkLog.errorMsg || "No report available" }, null, 2)}
                             </pre>
@@ -852,7 +853,7 @@ const Dashboard = () => {
                   </Tabs>
                 </Card>
               ) : (
-                <Card className="rounded-[2.5rem] border-border/50 bg-secondary/5 border-dashed p-12 flex flex-col items-center justify-center text-center h-full min-h-[500px] animate-in fade-in duration-300">
+                <Card className="absolute inset-0 rounded-[2.5rem] border-border/50 bg-secondary/5 border-dashed p-12 flex flex-col items-center justify-center text-center animate-in fade-in duration-300">
                   <Terminal className="w-12 h-12 text-muted-foreground/30 mb-4 animate-pulse" />
                   <h3 className="text-sm font-black uppercase tracking-wider text-muted-foreground/50">Telemetry Log Reader</h3>
                   <p className="text-xs text-muted-foreground/30 mt-2 max-w-xs">Select any completed scan item from the Ingestion Stream console on the left to read its detailed security analysis.</p>
