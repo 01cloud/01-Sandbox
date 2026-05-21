@@ -60,3 +60,4 @@ EXPOSE 8080
 
 ENTRYPOINT ["opensandbox-server"]
 CMD ["--config", "/etc/opensandbox/config.toml"]
+# security patch dummy comment
