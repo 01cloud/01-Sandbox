@@ -70,7 +70,7 @@ apiServer:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-api
-      tag: "0.3.1"
+      tag: "0.4.0"
       pullPolicy: Always
     resources:
       requests:
@@ -146,7 +146,7 @@ opensandbox:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-opensandbox-controller
-      tag: "0.3.0"
+      tag: "0.4.0"
       pullPolicy: Always
     resources:
       requests:
@@ -157,10 +157,10 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
-    sandboxImage: "01community/01sandbox-codeinterpreter:0.3.1"
+    sandboxImage: "01community/01sandbox-codeinterpreter:0.4.0"
     image:
       repository: 01community/01sandbox-opensandbox-server
-      tag: "0.3.1"
+      tag: "0.4.0"
       pullPolicy: Always
     resources:
       requests:
