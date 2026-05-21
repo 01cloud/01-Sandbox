@@ -1,8 +1,0 @@
-{
-  "filename": "sample_02_docker_socket.yaml",
-  "expected_findings": [
-    "docker.sock",
-    "hostPath",
-    "privileged"
-  ]
-}

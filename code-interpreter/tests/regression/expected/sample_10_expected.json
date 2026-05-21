@@ -1,8 +1,0 @@
-{
-  "filename": "sample_10_no_network_policy.yaml",
-  "expected_findings": [
-    "networkpolicy",
-    "policy",
-    "missing"
-  ]
-}

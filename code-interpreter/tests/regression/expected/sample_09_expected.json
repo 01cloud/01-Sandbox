@@ -1,8 +1,0 @@
-{
-  "filename": "sample_09_insecure_image.yaml",
-  "expected_findings": [
-    "latest",
-    "imagePullPolicy",
-    "insecure"
-  ]
-}

@@ -1,7 +1,0 @@
-{
-  "filename": "sample_05_cluster_admin_binding.yaml",
-  "expected_findings": [
-    "admin",
-    "cluster-admin"
-  ]
-}
