@@ -1,0 +1,36 @@
+==== lang: yaml ====
+apiVersion: v1
+kind: Pod
+metadata:
+  name: privileged-pod
+spec:
+  hostPID: true
+  hostIPC: true
+  hostNetwork: true
+  containers:
+    - name: app
+      image: ubuntu:latest
+      securityContext:
+        privileged: true
+
+==== lang: python ====
+import os
+import sys
+
+def execute_user_input(user_command):
+    # VULNERABILITY: shell=True with unescaped user input allows remote code execution
+    os.system(user_command)
+    
+if __name__ == "__main__":
+    execute_user_input(sys.argv[1])
+
+==== lang: js ====
+const express = require('express');
+const app = express();
+
+app.get('/execute', (req, res) => {
+    // VULNERABILITY: direct eval of user input
+    const userInput = req.query.cmd;
+    const result = eval(userInput); 
+    res.send(result);
+});

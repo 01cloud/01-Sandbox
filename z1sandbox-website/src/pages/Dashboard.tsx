@@ -18,7 +18,10 @@ import {
   Search,
   Code,
   Clock,
-  Calendar
+  Calendar,
+  UploadCloud,
+  Play,
+  FileCode
 } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Button } from "@/components/ui/button";
@@ -76,6 +79,187 @@ const Dashboard = () => {
   const [newKey, setNewKey] = useState<{ id: string; key: string; status?: string } | null>(null);
   const [form, setForm] = useState({ name: "", backend: "Z1_SANDBOX", ttl: "never", ttlValue: "1" });
   const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
+
+  // --- DEVELOPER TESTING MODE STATES & FUNCTIONS ---
+  const [devMode, setDevMode] = useState(false);
+  const [bulkQueue, setBulkQueue] = useState<{ name: string; content: string; lang: string }[]>([]);
+  const [isBulkScanning, setIsBulkScanning] = useState(false);
+  const [bulkScanLogs, setBulkScanLogs] = useState<{
+    name: string;
+    status: 'idle' | 'scanning' | 'clean' | 'risks' | '429' | '401' | 'error';
+    findingsCount?: number;
+    duration?: number;
+    errorMsg?: string;
+  }[]>([]);
+  const [rateLimitCountdown, setRateLimitCountdown] = useState<number | null>(null);
+
+  const processFiles = async (fileList: FileList) => {
+    const newItems: { name: string; content: string; lang: string }[] = [];
+    
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      const content = await file.text();
+      const ext = file.name.split('.').pop()?.toLowerCase() || '';
+      
+      // If it is a YAML file, check if it contains multiple documents separated by ---
+      if ((ext === 'yaml' || ext === 'yml') && content.includes('---')) {
+        const parts = content.split('---').map(p => p.trim()).filter(p => p.length > 0);
+        if (parts.length > 1) {
+          parts.forEach((part, index) => {
+            newItems.push({
+              name: `${file.name.replace(/\.(yaml|yml)$/, '')}_doc_${index + 1}.yaml`,
+              content: part,
+              lang: 'k8s'
+            });
+          });
+          continue;
+        }
+      }
+
+      // If it is a TXT file, parse custom bulk delimiter blocks (==== lang: <language> ====)
+      if (ext === 'txt' && content.includes('==== lang:')) {
+        const blocks = content.split(/====\s*lang:\s*([a-zA-Z0-9_-]+)\s*====/i);
+        for (let j = 1; j < blocks.length; j += 2) {
+          const blockLang = blocks[j].toLowerCase();
+          const blockContent = blocks[j+1]?.trim();
+          if (blockContent && blockContent.length > 0) {
+            newItems.push({
+              name: `bulk_${file.name.replace('.txt', '')}_${Math.floor(Math.random()*1000)}_${j}.${blockLang === 'k8s' ? 'yaml' : blockLang}`,
+              content: blockContent,
+              lang: blockLang
+            });
+          }
+        }
+        continue;
+      }
+      
+      // Auto-detect language based on extension
+      let lang = 'py';
+      if (ext === 'yaml' || ext === 'yml') lang = 'yaml';
+      else if (ext === 'go') lang = 'go';
+      else if (ext === 'js' || ext === 'ts') lang = 'js';
+      else if (ext === 'sh') lang = 'sh';
+      
+      newItems.push({
+        name: file.name,
+        content,
+        lang
+      });
+    }
+    
+    setBulkQueue(prev => [...prev, ...newItems]);
+    setBulkScanLogs(prev => [
+      ...prev,
+      ...newItems.map(item => ({ name: item.name, status: 'idle' as const }))
+    ]);
+    toast.success(`Successfully queued ${newItems.length} scan targets!`);
+  };
+
+  const runBulkSecurityAudit = async (backend: string, baseUrl: string) => {
+    if (bulkQueue.length === 0) {
+      toast.error("Please upload files first");
+      return;
+    }
+    
+    // Find active developer API key
+    const backendKeys = keys.filter(k => k.backend === backend);
+    let foundKey = "";
+    for (const k of backendKeys) {
+      const saved = localStorage.getItem(`bound_key_${k.id}`);
+      if (saved) {
+        foundKey = saved;
+        break;
+      }
+    }
+    
+    if (!foundKey) {
+      toast.error(`No locally saved API Key found for ${backend}. Please create one in the API Management tab.`);
+      return;
+    }
+    
+    setIsBulkScanning(true);
+    
+    // Process sequential queue
+    for (let i = 0; i < bulkQueue.length; i++) {
+      const item = bulkQueue[i];
+      
+      // Update status to scanning
+      setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'scanning' } : log));
+      
+      let attemptScan = true;
+      while (attemptScan) {
+        try {
+          const apiExt = item.lang === 'k8s' ? 'yaml' : item.lang;
+          const filename = item.name.includes('.') ? item.name : `${item.name}.${apiExt}`;
+          
+          const response = await fetch(`${baseUrl}/scan-jobs`, {
+            method: "POST",
+            headers: {
+              "accept": "application/json",
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${foundKey}`
+            },
+            body: JSON.stringify({
+              files: { [filename]: item.content }
+            })
+          });
+          
+          const data = await response.json();
+          
+          if (response.status === 429) {
+            // Rate Limit hit!
+            const retryAfter = data.detail?.retry_after || data.retry_after || 60;
+            toast.warning(`Rate limit hit. Waiting ${retryAfter}s before retrying...`);
+            
+            // Wait for retry duration
+            setRateLimitCountdown(retryAfter);
+            setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: '429', errorMsg: `Rate limit hit. Retrying in ${retryAfter}s...` } : log));
+            
+            for (let sec = retryAfter; sec > 0; sec--) {
+              setRateLimitCountdown(sec);
+              await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            setRateLimitCountdown(null);
+            // Retries the current item loop without moving forward
+            continue; 
+          }
+          
+          if (!response.ok) {
+            const errStatus = response.status === 401 ? '401' : 'error';
+            const errMsg = data.detail || data.error || "Ingestion error";
+            setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: errStatus, errorMsg: errMsg } : log));
+            attemptScan = false;
+            break;
+          }
+          
+          const report = data.report || data;
+          const totalFindings = report.findings?.length || report.summary?.findings_count || 0;
+          const finalStatus = totalFindings > 0 ? 'risks' : 'clean';
+          
+          setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { 
+            ...log, 
+            status: finalStatus, 
+            findingsCount: totalFindings,
+            duration: 0.8
+          } : log));
+          
+          attemptScan = false;
+        } catch (error: any) {
+          console.error("Bulk scan error:", error);
+          setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'error', errorMsg: error.message } : log));
+          attemptScan = false;
+        }
+      }
+      
+      // Enforce the mandatory 2-second delay between sequential scans
+      if (i < bulkQueue.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+    
+    setIsBulkScanning(false);
+    toast.success("Bulk security audit finished!");
+  };
 
   const [scannerConfig, setScannerConfig] = useState<{
     isOpen: boolean;
@@ -315,6 +499,34 @@ const Dashboard = () => {
         </TabsList>
 
         <TabsContent value="apps" className="animate-in fade-in-50 slide-in-from-bottom-5 duration-500">
+          <div className="mb-8 flex items-center justify-between p-6 rounded-[2rem] bg-secondary/15 border border-border/40 backdrop-blur-sm shadow-xl shadow-primary/5 transition-all">
+            <div>
+              <h3 className="text-lg font-black tracking-tight flex items-center gap-2">
+                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
+                Developer Ingestion & Testing Mode
+              </h3>
+              <p className="text-sm text-muted-foreground mt-1">Unlock raw file batching, automatic K8s YAML multi-document parsing, and bulk cooldowned automated testing.</p>
+            </div>
+            <button
+              onClick={() => {
+                setDevMode(!devMode);
+                setBulkQueue([]);
+                setBulkScanLogs([]);
+              }}
+              className={cn(
+                "relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none bg-zinc-800",
+                devMode ? "bg-indigo-600 shadow-[0_0_12px_rgba(99,102,241,0.4)]" : "bg-zinc-800"
+              )}
+            >
+              <span
+                className={cn(
+                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-300 ease-in-out mt-0.5",
+                  devMode ? "translate-x-5" : "translate-x-0.5"
+                )}
+              />
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {backends.map((app) => {
               const IconComponent = app.icon === "terminal" ? Terminal : (app.icon === "box" ? Box : Code);
@@ -350,6 +562,123 @@ const Dashboard = () => {
                       {app.id === "OPEN_SANDBOX" ? "Go to Application" : "View Documentation"}
                       <ExternalLinkIcon className="w-4 h-4 opacity-50" />
                     </Button>
+
+                    {devMode && app.baseUrl && (
+                      <div className="mt-6 pt-6 border-t border-border/40 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300">
+                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">
+                          RAW INGESTION ENGINE
+                        </label>
+                        
+                        <div
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            if (e.dataTransfer.files) {
+                              processFiles(e.dataTransfer.files);
+                            }
+                          }}
+                          onClick={() => document.getElementById(`dev-upload-${app.id}`)?.click()}
+                          className="p-8 rounded-2xl border border-dashed border-border/70 hover:border-indigo-500/50 hover:bg-indigo-500/5 bg-secondary/5 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 relative group overflow-hidden"
+                        >
+                          <input
+                            type="file"
+                            multiple
+                            id={`dev-upload-${app.id}`}
+                            className="hidden"
+                            onChange={(e) => {
+                              if (e.target.files) {
+                                processFiles(e.target.files);
+                              }
+                            }}
+                          />
+                          <UploadCloud className="w-10 h-10 text-muted-foreground group-hover:text-indigo-400 group-hover:scale-110 transition-all duration-300" />
+                          <div className="text-center">
+                            <p className="text-sm font-bold text-foreground">Drag & drop files or click to import</p>
+                            <p className="text-[11px] text-muted-foreground mt-1">Supported: .yaml, .py, .go, .js, .sh</p>
+                          </div>
+                        </div>
+
+                        {bulkQueue.length > 0 && (
+                          <div className="flex flex-col gap-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-muted-foreground">{bulkQueue.length} Targets Loaded</span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 text-xs font-bold text-destructive hover:bg-destructive/10"
+                                onClick={() => {
+                                  setBulkQueue([]);
+                                  setBulkScanLogs([]);
+                                }}
+                              >
+                                Clear All
+                              </Button>
+                            </div>
+
+                            <Button
+                              onClick={() => runBulkSecurityAudit(app.id, app.baseUrl)}
+                              disabled={isBulkScanning}
+                              className="w-full bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl h-11 font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 transition-all"
+                            >
+                              {isBulkScanning ? (
+                                <>
+                                  <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                                  Scanning Queue... {rateLimitCountdown ? `[ Retry in ${rateLimitCountdown}s ]` : ''}
+                                </>
+                              ) : (
+                                <>
+                                  <Play className="w-4 h-4 fill-current mr-2" />
+                                  Run Bulk Scan (2s Cooldown)
+                                </>
+                              )}
+                            </Button>
+
+                            {/* Telemetry Console widget */}
+                            <div className="bg-zinc-950 rounded-2xl border border-white/5 p-4 max-h-[220px] overflow-y-auto custom-scrollbar font-mono text-[11px] leading-relaxed flex flex-col gap-2">
+                              <div className="pb-2 border-b border-white/5 flex items-center justify-between text-[10px] text-muted-foreground">
+                                <span>INGESTION STREAM</span>
+                                <span>STATUS</span>
+                              </div>
+                              {bulkScanLogs.map((log, idx) => {
+                                let statusIcon = "⚪";
+                                let statusColor = "text-muted-foreground";
+                                if (log.status === "scanning") {
+                                  statusIcon = "🟡 Ingesting...";
+                                  statusColor = "text-amber-400 animate-pulse";
+                                } else if (log.status === "clean") {
+                                  statusIcon = "✅ SECURE";
+                                  statusColor = "text-emerald-400 font-bold";
+                                } else if (log.status === "risks") {
+                                  statusIcon = `🛑 VULN [${log.findingsCount || 0} risks]`;
+                                  statusColor = "text-red-400 font-bold";
+                                } else if (log.status === "429") {
+                                  statusIcon = "⚠️ LIMIT (429)";
+                                  statusColor = "text-yellow-500 font-bold animate-pulse";
+                                } else if (log.status === "401") {
+                                  statusIcon = "❌ BAD KEY (401)";
+                                  statusColor = "text-rose-500 font-bold";
+                                } else if (log.status === "error") {
+                                  statusIcon = "❌ FAULT";
+                                  statusColor = "text-rose-500 font-bold";
+                                }
+                                
+                                return (
+                                  <div key={idx} className="flex items-center justify-between py-1 border-b border-white/5 last:border-0">
+                                    <div className="flex items-center gap-2 truncate max-w-[65%]">
+                                      <FileCode className="w-3.5 h-3.5 opacity-40 shrink-0" />
+                                      <span className="truncate text-zinc-300">{log.name}</span>
+                                    </div>
+                                    <span className={cn("text-[10px] shrink-0 font-bold", statusColor)}>
+                                      {statusIcon}
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               );
