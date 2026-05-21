@@ -891,7 +891,7 @@ async def _do_proxy(backend_id: str, proxy_path: str, request: Request):
                 params=params,
                 content=body,
                 headers=headers,
-                timeout=300.0,
+                timeout=900.0,
             )
             return Response(
                 content=resp.content,
