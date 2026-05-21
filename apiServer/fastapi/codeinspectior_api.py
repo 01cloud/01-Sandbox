@@ -37,7 +37,16 @@ from config import (
     opensandbox_base_url,
     opensandbox_headers,
 )
-from fastapi import Depends, FastAPI, HTTPException, Request, Response, status
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import (
@@ -972,17 +981,29 @@ def list_sandboxes():
     return state.backend.list_sandboxes()
 
 
+async def run_scan_in_background(req_dict: dict):
+    """Background worker to trigger scan without blocking HTTP requests."""
+    try:
+        await state.backend.create_scan_job(req_dict)
+    except Exception as e:
+        print(f"[BACKGROUND TASK ERROR] Scan job failed: {e}")
+
+
 @app.post(
     "/v1/scan-jobs",
     response_model=ScanJobResponse,
     tags=["Security Scan Pipeline"],
     dependencies=[Depends(validate_token)],
 )
-async def create_scan_job(req: ScanJobRequest):
+async def create_scan_job(
+    req: ScanJobRequest,
+    background_tasks: BackgroundTasks,
+    is_async: bool = Query(False, alias="async"),
+):
     """
     Submits files for unified security scanning.
     Every submission is isolated by a unique UUID in the PVC.
-    This endpoint blocks and waits for the entire scan process to complete.
+    Supports asynchronous execution via ?async=true query parameter to bypass edge proxy timeouts.
     """
     job_id = str(uuid.uuid4())
     state.latest_job_id = job_id
@@ -991,8 +1012,12 @@ async def create_scan_job(req: ScanJobRequest):
         req.metadata = {}
     req.metadata["job_id"] = job_id
 
-    data = await state.backend.create_scan_job(req.dict(exclude_none=True))
-    return ScanJobResponse(**data)
+    if is_async:
+        background_tasks.add_task(run_scan_in_background, req.dict(exclude_none=True))
+        return ScanJobResponse(job_id=job_id, status="PROCESSING")
+    else:
+        data = await state.backend.create_scan_job(req.dict(exclude_none=True))
+        return ScanJobResponse(**data)
 
 
 @app.get(
