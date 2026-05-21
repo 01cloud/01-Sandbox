@@ -94,6 +94,7 @@ const Dashboard = () => {
     report?: any;
   }[]>([]);
   const [selectedBulkLog, setSelectedBulkLog] = useState<typeof bulkScanLogs[0] | null>(null);
+  const [detailTab, setDetailTab] = useState<"insights" | "raw">("insights");
   const [rateLimitCountdown, setRateLimitCountdown] = useState<number | null>(null);
 
   const processFiles = async (fileList: FileList) => {
@@ -269,7 +270,10 @@ const Dashboard = () => {
 
             // 3. Process the retrieved report
             const report = reportData.report || reportData;
-            const totalFindings = report.findings?.length || report.summary?.findings_count || 0;
+            const findings = Array.isArray(report)
+              ? report
+              : (report.findings || report.findings_list || []);
+            const totalFindings = findings.length;
             const finalStatus = totalFindings > 0 ? 'risks' : 'clean';
 
             setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? {
@@ -568,8 +572,9 @@ const Dashboard = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {backends.map((app) => {
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-start">
+            <div className="space-y-6">
+              {backends.map((app) => {
               const IconComponent = app.icon === "terminal" ? Terminal : (app.icon === "box" ? Box : Code);
               const colorClass = app.color === "indigo" ? "bg-indigo-500/10 text-indigo-500 border-indigo-500/20" : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
 
@@ -737,6 +742,123 @@ const Dashboard = () => {
                 </Card>
               );
             })}
+            </div>
+
+            {/* Sticky Right-Side Telemetry log reader panel */}
+            <div className="lg:sticky lg:top-8 w-full">
+              {selectedBulkLog ? (
+                <Card className="rounded-[2.5rem] border-border/50 bg-background/30 backdrop-blur-xl p-8 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-500 max-h-[calc(100vh-280px)] overflow-hidden">
+                  <div className="flex flex-col gap-1.5 border-b border-border/50 pb-6 shrink-0">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xl font-black truncate max-w-[70%] tracking-tight text-zinc-100 flex items-center gap-2">
+                        <span className={cn(
+                          "w-2.5 h-2.5 rounded-full animate-pulse shadow-md shrink-0",
+                          selectedBulkLog.status === "clean" ? "bg-emerald-500 shadow-emerald-500/50" : "bg-destructive shadow-destructive/50"
+                        )} />
+                        <span className="truncate">{selectedBulkLog.name}</span>
+                      </h3>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="h-8 text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-white/5 rounded-xl px-3 shrink-0"
+                        onClick={() => setSelectedBulkLog(null)}
+                      >
+                        Close
+                      </Button>
+                    </div>
+                    <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mt-1">
+                      Security Ingestion Archive Node
+                    </span>
+                  </div>
+
+                  <Tabs value={detailTab} onValueChange={(val: any) => setDetailTab(val)} className="w-full flex-1 flex flex-col overflow-hidden">
+                    <TabsList className="grid grid-cols-2 rounded-xl bg-zinc-950/50 border border-white/5 p-1 shrink-0">
+                      <TabsTrigger value="insights" className="rounded-lg py-2 text-xs font-bold data-[state=active]:bg-background">Vulnerabilities</TabsTrigger>
+                      <TabsTrigger value="raw" className="rounded-lg py-2 text-xs font-bold data-[state=active]:bg-background">Raw Telemetry</TabsTrigger>
+                    </TabsList>
+
+                    <TabsContent value="insights" className="flex-1 overflow-hidden flex flex-col mt-4">
+                      <ScrollArea className="flex-1">
+                        {(() => {
+                          const report = selectedBulkLog.report?.report || selectedBulkLog.report || {};
+                          const findings = Array.isArray(report)
+                            ? report
+                            : (report.findings || report.findings_list || []);
+
+                          if (findings.length === 0) {
+                            return (
+                              <div className="h-[300px] flex flex-col items-center justify-center text-center opacity-30">
+                                <ShieldCheck className="w-12 h-12 text-emerald-500 mb-3 animate-pulse" />
+                                <span className="text-[10px] font-black uppercase tracking-widest">No Risks Found - Clean Code</span>
+                              </div>
+                            );
+                          }
+
+                          return (
+                            <div className="space-y-4 pr-4 pb-4">
+                              {findings.map((f: any, i: number) => {
+                                const severity = (f.Severity || f.severity || "MEDIUM").toUpperCase();
+                                const sevColor = severity === "CRITICAL" ? "bg-red-500/10 text-red-500 border-red-500/20" :
+                                                 severity === "HIGH" ? "bg-orange-500/10 text-orange-500 border-orange-500/20" :
+                                                 severity === "MEDIUM" ? "bg-amber-500/10 text-amber-500 border-amber-500/20" :
+                                                 "bg-blue-500/10 text-blue-500 border-blue-500/20";
+
+                                const tool = f.Type || f.tool || "security check";
+                                const issue = f.Title || f.Message || f.issue || "security violation";
+                                const remediation = f.Resolution || f.Remediation || f.remediation || "";
+                                const startLine = f.CauseMetadata?.StartLine || f.line || "";
+
+                                return (
+                                  <div key={i} className="p-5 rounded-xl border bg-muted/10 hover:bg-muted/20 transition-all relative overflow-hidden group">
+                                    <div className="flex items-center justify-between mb-3">
+                                      <div className="flex items-center gap-2">
+                                        <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0", sevColor)}>
+                                          {severity}
+                                        </Badge>
+                                        <span className="text-[10px] font-black text-muted-foreground tracking-widest lowercase">{tool}</span>
+                                      </div>
+                                      {startLine && <span className="text-[9px] font-mono opacity-40">L:{startLine}</span>}
+                                    </div>
+                                    <h4 className="text-sm font-black tracking-tight mb-2 lowercase">{issue}</h4>
+
+                                    {remediation && (
+                                      <div className="flex flex-col gap-2 mt-4">
+                                        <span className="text-[9px] font-black tracking-[0.1em] text-muted-foreground/60 lowercase">remediation insight</span>
+                                        <div className="p-4 rounded-lg bg-background/50 text-[11px] font-medium text-foreground/80 border border-border/40 leading-relaxed italic lowercase">
+                                          {remediation}
+                                        </div>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })()}
+                      </ScrollArea>
+                    </TabsContent>
+
+                    <TabsContent value="raw" className="flex-1 overflow-hidden flex flex-col mt-4">
+                      <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group">
+                        <ScrollArea className="h-full w-full">
+                          <div className="p-6">
+                            <pre className="text-[11px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre font-medium block">
+                              {JSON.stringify(selectedBulkLog.report || { error: selectedBulkLog.errorMsg || "No report available" }, null, 2)}
+                            </pre>
+                          </div>
+                        </ScrollArea>
+                      </div>
+                    </TabsContent>
+                  </Tabs>
+                </Card>
+              ) : (
+                <Card className="rounded-[2.5rem] border-border/50 bg-secondary/5 border-dashed p-12 flex flex-col items-center justify-center text-center h-[500px] animate-in fade-in duration-300">
+                  <Terminal className="w-12 h-12 text-muted-foreground/30 mb-4 animate-pulse" />
+                  <h3 className="text-sm font-black uppercase tracking-wider text-muted-foreground/50">Telemetry Log Reader</h3>
+                  <p className="text-xs text-muted-foreground/30 mt-2 max-w-xs">Select any completed scan item from the Ingestion Stream console on the left to read its detailed security analysis.</p>
+                </Card>
+              )}
+            </div>
           </div>
         </TabsContent>
 
@@ -994,95 +1116,6 @@ const Dashboard = () => {
         baseUrl={scannerConfig.baseUrl}
         apiKey={scannerConfig.apiKey}
       />
-
-      {/* Immersive Bulk Scan Telemetry Modal */}
-      <Dialog open={!!selectedBulkLog} onOpenChange={(open) => !open && setSelectedBulkLog(null)}>
-        <DialogContent className="max-w-[90vw] w-[1200px] h-[85vh] m-0 p-0 overflow-hidden border-border/50 bg-background/95 backdrop-blur-xl flex flex-col rounded-3xl">
-          {selectedBulkLog && (
-            <>
-              <DialogHeader className="px-10 py-8 border-b bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
-                <div className="flex flex-col">
-                  <DialogTitle className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
-                    <span className={cn(
-                      "w-2.5 h-2.5 rounded-full animate-pulse shadow-md",
-                      selectedBulkLog.status === "clean" ? "bg-emerald-500 shadow-emerald-500/50" : "bg-destructive shadow-destructive/50"
-                    )} />
-                    Telemetry: {selectedBulkLog.name}
-                  </DialogTitle>
-                  <DialogDescription className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-1.5">
-                    Security Ingestion Archive Node
-                  </DialogDescription>
-                </div>
-              </DialogHeader>
-
-              <div className="flex-1 flex overflow-hidden">
-                {/* Findings List (Left column) */}
-                <div className="flex-1 flex flex-col p-8 overflow-hidden">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-4 shrink-0">
-                    Vulnerability Insights ({selectedBulkLog.findingsCount || 0} findings)
-                  </h3>
-                  <ScrollArea className="flex-1 border-t pt-4">
-                    {selectedBulkLog.report?.findings && selectedBulkLog.report.findings.length > 0 ? (
-                      <div className="space-y-4 pr-4 pb-4">
-                        {selectedBulkLog.report.findings.map((f: any, i: number) => {
-                          const severity = (f.severity || "MEDIUM").toUpperCase();
-                          const sevColor = severity === "CRITICAL" ? "bg-red-500/10 text-red-500 border-red-500/20" :
-                                           severity === "HIGH" ? "bg-orange-500/10 text-orange-500 border-orange-500/20" :
-                                           severity === "MEDIUM" ? "bg-amber-500/10 text-amber-500 border-amber-500/20" :
-                                           "bg-blue-500/10 text-blue-500 border-blue-500/20";
-
-                          return (
-                            <div key={i} className="p-5 rounded-xl border bg-muted/10 hover:bg-muted/20 transition-all relative overflow-hidden group">
-                              <div className="flex items-center justify-between mb-3">
-                                <div className="flex items-center gap-2">
-                                  <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0", sevColor)}>
-                                    {severity}
-                                  </Badge>
-                                  <span className="text-[10px] font-black text-muted-foreground tracking-widest lowercase">{f.tool}</span>
-                                </div>
-                                {f.line && <span className="text-[9px] font-mono opacity-40">L:{f.line}</span>}
-                              </div>
-                              <h4 className="text-sm font-black tracking-tight mb-2 lowercase">{f.issue || "security violation"}</h4>
-
-                              <div className="flex flex-col gap-2 mt-4">
-                                <span className="text-[9px] font-black tracking-[0.1em] text-muted-foreground/60 lowercase">remediation insight</span>
-                                <div className="p-4 rounded-lg bg-background/50 text-[11px] font-medium text-foreground/80 border border-border/40 leading-relaxed italic lowercase">
-                                  {f.remediation || "analyze the specific code structure and apply industry security standards to mitigate this risk."}
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
-                        <ShieldCheck className="w-12 h-12 text-emerald-500 mb-3 animate-pulse" />
-                        <span className="text-[10px] font-black uppercase tracking-widest">No Risks Found - Clean Code</span>
-                      </div>
-                    )}
-                  </ScrollArea>
-                </div>
-
-                {/* Raw Telemetry Terminal (Right column) */}
-                <div className="w-[500px] border-l border-border/50 bg-muted/10 p-8 flex flex-col overflow-hidden shrink-0">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-4 shrink-0">
-                    Raw Telemetry Report
-                  </h3>
-                  <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group">
-                    <ScrollArea className="h-full w-full">
-                      <div className="p-6">
-                        <pre className="text-[11px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre font-medium block">
-                          {JSON.stringify(selectedBulkLog.report || { error: selectedBulkLog.errorMsg || "No report available" }, null, 2)}
-                        </pre>
-                      </div>
-                    </ScrollArea>
-                  </div>
-                </div>
-              </div>
-            </>
-          )}
-        </DialogContent>
-      </Dialog>
 
       <AlertDialog open={!!keyToDelete} onOpenChange={(open) => !open && setKeyToDelete(null)}>
         <AlertDialogContent className="rounded-[2.5rem] border-border/50 p-8 bg-background/95 backdrop-blur-xl">
