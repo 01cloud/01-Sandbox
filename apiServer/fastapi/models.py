@@ -54,6 +54,7 @@ class DependencyStatus(BaseModel):
 
 
 class HealthResponse(BaseModel):
+    status_code: int
     status: str
     backend: str
     healthy: bool

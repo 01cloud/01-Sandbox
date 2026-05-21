@@ -92,6 +92,7 @@ def get_health_router(state, validate_token) -> APIRouter:
                 queue_details = redis_details
 
         return HealthResponse(
+            status_code=status_code,
             status="healthy" if overall_healthy else "unhealthy",
             backend=state.backend.name,
             healthy=overall_healthy,
@@ -135,10 +136,12 @@ def get_health_router(state, validate_token) -> APIRouter:
         Lightweight and production-safe health check for the PostgreSQL database.
         """
         healthy, details = check_postgresql_health(state)
-        response.status_code = (
+        status_code = (
             status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+        response.status_code = status_code
         return {
+            "status_code": status_code,
             "status": "healthy" if healthy else "unhealthy",
             "dependency": "postgresql" if state.use_postgres else "sqlite",
             "healthy": healthy,
@@ -155,10 +158,12 @@ def get_health_router(state, validate_token) -> APIRouter:
         Lightweight and production-safe health check for the Redis cache/queue dependency.
         """
         healthy, details = check_redis_health(state)
-        response.status_code = (
+        status_code = (
             status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+        response.status_code = status_code
         return {
+            "status_code": status_code,
             "status": "healthy" if healthy else "unhealthy",
             "dependency": "redis",
             "healthy": healthy,
@@ -175,10 +180,12 @@ def get_health_router(state, validate_token) -> APIRouter:
         Lightweight and production-safe health check for the upstream OpenSandbox backend service.
         """
         healthy, details = check_opensandbox_server_health(state)
-        response.status_code = (
+        status_code = (
             status.HTTP_200_OK if healthy else status.HTTP_500_INTERNAL_SERVER_ERROR
         )
+        response.status_code = status_code
         return {
+            "status_code": status_code,
             "status": "healthy" if healthy else "unhealthy",
             "dependency": "01sandbox",
             "healthy": healthy,
