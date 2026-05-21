@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.2](https://github.com/01cloud/01-Sandbox/compare/v0.5.1...v0.5.2) (2026-05-21)
+
+
+### Bug Fixes
+
+* concurrent 2 second placing of api scan ([d57b9f2](https://github.com/01cloud/01-Sandbox/commit/d57b9f2a47f90eafa7c2ff066e95297ea41b0d79))
+* concurrent 2 second placing of api scan ([d11b0c0](https://github.com/01cloud/01-Sandbox/commit/d11b0c076a42467be00da2ad6f98e88d5d6fe0af))
+* timeout from 300 to 900 seconds ([9bbd337](https://github.com/01cloud/01-Sandbox/commit/9bbd337ee01abc1b912882638c0e4e281e638844))
+* timeout from 300 to 900 seconds ([10c4078](https://github.com/01cloud/01-Sandbox/commit/10c40789493eee1d860b67a4967fe34a80dea415))
+
 ## [0.5.1](https://github.com/01cloud/01-Sandbox/compare/v0.5.0...v0.5.1) (2026-05-21)
 
 
