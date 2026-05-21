@@ -747,7 +747,7 @@ const Dashboard = () => {
             {/* Sticky Right-Side Telemetry log reader panel */}
             <div className="lg:sticky lg:top-8 w-full">
               {selectedBulkLog ? (
-                <Card className="rounded-[2.5rem] border-border/50 bg-background/30 backdrop-blur-xl p-8 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-500 max-h-[calc(100vh-280px)] overflow-hidden">
+                <Card className="rounded-[2.5rem] border-border/50 bg-background/30 backdrop-blur-xl p-8 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-500 min-h-[600px] lg:h-[calc(100vh-200px)] overflow-hidden">
                   <div className="flex flex-col gap-1.5 border-b border-border/50 pb-6 shrink-0">
                     <div className="flex items-center justify-between">
                       <h3 className="text-xl font-black truncate max-w-[70%] tracking-tight text-zinc-100 flex items-center gap-2">
@@ -771,14 +771,14 @@ const Dashboard = () => {
                     </span>
                   </div>
 
-                  <Tabs value={detailTab} onValueChange={(val: any) => setDetailTab(val)} className="w-full flex-1 flex flex-col overflow-hidden">
+                  <Tabs value={detailTab} onValueChange={(val: any) => setDetailTab(val)} className="w-full flex-1 flex flex-col overflow-hidden min-h-0">
                     <TabsList className="grid grid-cols-2 rounded-xl bg-zinc-950/50 border border-white/5 p-1 shrink-0">
                       <TabsTrigger value="insights" className="rounded-lg py-2 text-xs font-bold data-[state=active]:bg-background">Vulnerabilities</TabsTrigger>
                       <TabsTrigger value="raw" className="rounded-lg py-2 text-xs font-bold data-[state=active]:bg-background">Raw Telemetry</TabsTrigger>
                     </TabsList>
 
-                    <TabsContent value="insights" className="flex-1 overflow-hidden flex flex-col mt-4">
-                      <ScrollArea className="flex-1">
+                    <TabsContent value="insights" className="flex-1 overflow-hidden flex flex-col mt-4 min-h-0">
+                      <ScrollArea className="flex-1 pr-2">
                         {(() => {
                           const report = selectedBulkLog.report?.report || selectedBulkLog.report || {};
                           const findings = Array.isArray(report)
@@ -838,9 +838,9 @@ const Dashboard = () => {
                       </ScrollArea>
                     </TabsContent>
 
-                    <TabsContent value="raw" className="flex-1 overflow-hidden flex flex-col mt-4">
-                      <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group">
-                        <ScrollArea className="h-full w-full">
+                    <TabsContent value="raw" className="flex-1 overflow-hidden flex flex-col mt-4 min-h-0">
+                      <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group flex flex-col min-h-0">
+                        <ScrollArea className="flex-1 w-full">
                           <div className="p-6">
                             <pre className="text-[11px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre font-medium block">
                               {JSON.stringify(selectedBulkLog.report || { error: selectedBulkLog.errorMsg || "No report available" }, null, 2)}
