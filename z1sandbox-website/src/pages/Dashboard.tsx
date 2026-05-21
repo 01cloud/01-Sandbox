@@ -95,12 +95,12 @@ const Dashboard = () => {
 
   const processFiles = async (fileList: FileList) => {
     const newItems: { name: string; content: string; lang: string }[] = [];
-    
+
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
       const content = await file.text();
       const ext = file.name.split('.').pop()?.toLowerCase() || '';
-      
+
       // If it is a YAML file, check if it contains multiple documents separated by ---
       if ((ext === 'yaml' || ext === 'yml') && content.includes('---')) {
         const parts = content.split('---').map(p => p.trim()).filter(p => p.length > 0);
@@ -121,10 +121,10 @@ const Dashboard = () => {
         const blocks = content.split(/====\s*lang:\s*([a-zA-Z0-9_-]+)\s*====/i);
         for (let j = 1; j < blocks.length; j += 2) {
           const blockLang = blocks[j].toLowerCase();
-          const blockContent = blocks[j+1]?.trim();
+          const blockContent = blocks[j + 1]?.trim();
           if (blockContent && blockContent.length > 0) {
             newItems.push({
-              name: `bulk_${file.name.replace('.txt', '')}_${Math.floor(Math.random()*1000)}_${j}.${blockLang === 'k8s' ? 'yaml' : blockLang}`,
+              name: `bulk_${file.name.replace('.txt', '')}_${Math.floor(Math.random() * 1000)}_${j}.${blockLang === 'k8s' ? 'yaml' : blockLang}`,
               content: blockContent,
               lang: blockLang
             });
@@ -132,21 +132,21 @@ const Dashboard = () => {
         }
         continue;
       }
-      
+
       // Auto-detect language based on extension
       let lang = 'py';
       if (ext === 'yaml' || ext === 'yml') lang = 'yaml';
       else if (ext === 'go') lang = 'go';
       else if (ext === 'js' || ext === 'ts') lang = 'js';
       else if (ext === 'sh') lang = 'sh';
-      
+
       newItems.push({
         name: file.name,
         content,
         lang
       });
     }
-    
+
     setBulkQueue(prev => [...prev, ...newItems]);
     setBulkScanLogs(prev => [
       ...prev,
@@ -160,7 +160,7 @@ const Dashboard = () => {
       toast.error("Please upload files first");
       return;
     }
-    
+
     // Find active developer API key
     const backendKeys = keys.filter(k => k.backend === backend);
     let foundKey = "";
@@ -171,27 +171,27 @@ const Dashboard = () => {
         break;
       }
     }
-    
+
     if (!foundKey) {
       toast.error(`No locally saved API Key found for ${backend}. Please create one in the API Management tab.`);
       return;
     }
-    
+
     setIsBulkScanning(true);
-    
+
     // Process sequential queue
     for (let i = 0; i < bulkQueue.length; i++) {
       const item = bulkQueue[i];
-      
+
       // Update status to scanning
       setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'scanning' } : log));
-      
+
       let attemptScan = true;
       while (attemptScan) {
         try {
           const apiExt = item.lang === 'k8s' ? 'yaml' : item.lang;
           const filename = item.name.includes('.') ? item.name : `${item.name}.${apiExt}`;
-          
+
           const response = await fetch(`${baseUrl}/scan-jobs`, {
             method: "POST",
             headers: {
@@ -203,27 +203,27 @@ const Dashboard = () => {
               files: { [filename]: item.content }
             })
           });
-          
+
           const data = await response.json();
-          
+
           if (response.status === 429) {
             // Rate Limit hit!
             const retryAfter = data.detail?.retry_after || data.retry_after || 60;
             toast.warning(`Rate limit hit. Waiting ${retryAfter}s before retrying...`);
-            
+
             // Wait for retry duration
             setRateLimitCountdown(retryAfter);
             setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: '429', errorMsg: `Rate limit hit. Retrying in ${retryAfter}s...` } : log));
-            
+
             for (let sec = retryAfter; sec > 0; sec--) {
               setRateLimitCountdown(sec);
               await new Promise(resolve => setTimeout(resolve, 1000));
             }
             setRateLimitCountdown(null);
             // Retries the current item loop without moving forward
-            continue; 
+            continue;
           }
-          
+
           if (!response.ok) {
             const errStatus = response.status === 401 ? '401' : 'error';
             const errMsg = data.detail || data.error || "Ingestion error";
@@ -231,18 +231,18 @@ const Dashboard = () => {
             attemptScan = false;
             break;
           }
-          
+
           const report = data.report || data;
           const totalFindings = report.findings?.length || report.summary?.findings_count || 0;
           const finalStatus = totalFindings > 0 ? 'risks' : 'clean';
-          
-          setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { 
-            ...log, 
-            status: finalStatus, 
+
+          setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? {
+            ...log,
+            status: finalStatus,
             findingsCount: totalFindings,
             duration: 0.8
           } : log));
-          
+
           attemptScan = false;
         } catch (error: any) {
           console.error("Bulk scan error:", error);
@@ -250,13 +250,13 @@ const Dashboard = () => {
           attemptScan = false;
         }
       }
-      
+
       // Enforce the mandatory 2-second delay between sequential scans
       if (i < bulkQueue.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
-    
+
     setIsBulkScanning(false);
     toast.success("Bulk security audit finished!");
   };
@@ -568,7 +568,7 @@ const Dashboard = () => {
                         <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">
                           RAW INGESTION ENGINE
                         </label>
-                        
+
                         <div
                           onDragOver={(e) => e.preventDefault()}
                           onDrop={(e) => {
@@ -661,7 +661,7 @@ const Dashboard = () => {
                                   statusIcon = "❌ FAULT";
                                   statusColor = "text-rose-500 font-bold";
                                 }
-                                
+
                                 return (
                                   <div key={idx} className="flex items-center justify-between py-1 border-b border-white/5 last:border-0">
                                     <div className="flex items-center gap-2 truncate max-w-[65%]">
