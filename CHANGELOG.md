@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.4.0](https://github.com/01cloud/01-Sandbox/compare/v0.3.1...v0.4.0) (2026-05-21)
+
+
+### Features
+
+* add cluster resource quota limits ([d3415c0](https://github.com/01cloud/01-Sandbox/commit/d3415c00f02b54c8c72676afa2028e922320f5bf))
+* add cluster resource quota limits ([810b23b](https://github.com/01cloud/01-Sandbox/commit/810b23b5176c4ba0e8a383d1ee707dc519952524))
+* add cluster resource quota limits ([6f7b83b](https://github.com/01cloud/01-Sandbox/commit/6f7b83bbeeb52ad28b17c2a903571313aa6ff024))
+
+
+### Bug Fixes
+
+* resolve memory leak in sandbox worker container ([20d5b12](https://github.com/01cloud/01-Sandbox/commit/20d5b128bbd685231338e7b4ee395ca887a865d1))
+* resolve memory leak in sandbox worker container ([f1cc65b](https://github.com/01cloud/01-Sandbox/commit/f1cc65b7e5bd90df4ecceef7635fbc9eb532f576))
+
+
+### Performance Improvements
+
+* optimize log streaming throughput by 40% ([5d7274b](https://github.com/01cloud/01-Sandbox/commit/5d7274b24e4b61f10e797c62bb305c715442dee2))
+
 ## [0.3.1](https://github.com/01cloud/01-Sandbox/compare/v0.3.0...v0.3.1) (2026-05-21)
 
 
