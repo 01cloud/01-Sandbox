@@ -918,6 +918,25 @@ async def _do_proxy(backend_id: str, proxy_path: str, request: Request):
             )
 
 
+@app.post(
+    "/api/{version}/{backend_id}/scan-jobs",
+    response_model=ScanJobResponse,
+    tags=["Security Scan Pipeline"],
+    dependencies=[Depends(validate_token)],
+)
+async def create_scan_job_alias(
+    version: str,
+    backend_id: str,
+    req: ScanJobRequest,
+    background_tasks: BackgroundTasks,
+    is_async: bool = Query(False, alias="async"),
+):
+    """
+    Intercepts proxy requests to scan-jobs to enforce background async execution.
+    """
+    return await create_scan_job(req, background_tasks, is_async)
+
+
 @app.api_route(
     "/api/{version}/{backend_id}/{proxy_path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
