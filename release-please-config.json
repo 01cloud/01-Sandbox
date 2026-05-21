@@ -5,13 +5,16 @@
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true,
       "changelog-sections": [
-        { "type": "feat", "section": "New Features" },
-        { "type": "fix", "section": "Bug Fixes" },
-        { "type": "docs", "section": "Documentation" },
-        { "type": "refactor", "section": "Refactoring" },
-        { "type": "perf", "section": "Performance" },
-        { "type": "ci", "section": "CI/CD", "hidden": true },
-        { "type": "chore", "section": "Miscellaneous", "hidden": true }
+        { "type": "feat", "section": "🚀 New Features", "hidden": false },
+        { "type": "fix", "section": "🐛 Bug Fixes", "hidden": false },
+        { "type": "sec", "section": "🔐 Security Updates", "hidden": false },
+        { "type": "perf", "section": "⚡️ Performance Improvements", "hidden": false },
+        { "type": "revert", "section": "⏪ Reverts", "hidden": false },
+        { "type": "docs", "section": "📖 Documentation", "hidden": false },
+        { "type": "refactor", "section": "♻️ Code Refactoring", "hidden": true },
+        { "type": "ci", "section": "🤖 CI/CD", "hidden": true },
+        { "type": "test", "section": "✅ Testing", "hidden": true },
+        { "type": "chore", "section": "🧹 Miscellaneous", "hidden": true }
       ]
     }
   }
