@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.3](https://github.com/01cloud/01-Sandbox/compare/v0.5.2...v0.5.3) (2026-05-21)
+
+
+### Bug Fixes
+
+* status code in for health endpoints and increase timeout in the UI ([94750d5](https://github.com/01cloud/01-Sandbox/commit/94750d538c85c61c5a1e6bb7c612dbbe39f39a1c))
+* status code in for health endpoints and increase timeout in the UI ([3c5f7aa](https://github.com/01cloud/01-Sandbox/commit/3c5f7aa3a9f43b4fe3d1979265ce99c35cf0df70))
+
 ## [0.5.2](https://github.com/01cloud/01-Sandbox/compare/v0.5.1...v0.5.2) (2026-05-21)
 
 
