@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.5.4](https://github.com/01cloud/01-Sandbox/compare/v0.5.3...v0.5.4) (2026-05-21)
+
+
+### Bug Fixes
+
+* nginx ingress annotations from 120 to 900 ([4049329](https://github.com/01cloud/01-Sandbox/commit/40493295e37fe72c6be5355ae1f5b396197973da))
+* nginx ingress annotations from 120 to 900 ([573dc78](https://github.com/01cloud/01-Sandbox/commit/573dc78a20e0ff10767f6b57320f13ce85a893bf))
+
 ## [0.5.3](https://github.com/01cloud/01-Sandbox/compare/v0.5.2...v0.5.3) (2026-05-21)
 
 
