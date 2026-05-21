@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.5.1](https://github.com/01cloud/01-Sandbox/compare/v0.5.0...v0.5.1) (2026-05-21)
+
+
+### Bug Fixes
+
+* add missing docs to commint with fixed code structure ([dd6f157](https://github.com/01cloud/01-Sandbox/commit/dd6f1578536c246a39258cf1d7ba28136428935d))
+* code structure detected by pre-commit ([01f70de](https://github.com/01cloud/01-Sandbox/commit/01f70de55dfb9de2f33a10cadb1f00111f20ea8f))
+* remove the regressions test files ([430f0fb](https://github.com/01cloud/01-Sandbox/commit/430f0fb2e0a1d6e77be56c23cb3a5a858708d654))
+* unlimited single-file bulk ingestion ([cd7b54d](https://github.com/01cloud/01-Sandbox/commit/cd7b54dbfdb5ca9a9d3abdab14bc23a882574ecd))
+
 ## [0.5.0](https://github.com/01cloud/01-Sandbox/compare/v0.4.0...v0.5.0) (2026-05-21)
 
 
