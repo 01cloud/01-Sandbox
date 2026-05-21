@@ -179,84 +179,97 @@ const Dashboard = () => {
 
     setIsBulkScanning(true);
 
-    // Process sequential queue
+    let rateLimitUntil = 0;
+    const scanPromises: Promise<void>[] = [];
+
+    const checkRateLimitWait = async () => {
+      while (Date.now() < rateLimitUntil) {
+        const remaining = Math.ceil((rateLimitUntil - Date.now()) / 1000);
+        setRateLimitCountdown(remaining);
+        await new Promise(r => setTimeout(r, 1000));
+      }
+      setRateLimitCountdown(null);
+    };
+
+    // Process concurrent queue
     for (let i = 0; i < bulkQueue.length; i++) {
+      await checkRateLimitWait();
       const item = bulkQueue[i];
 
-      // Update status to scanning
-      setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'scanning' } : log));
+      const scanTask = (async () => {
+        // Update status to scanning
+        setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'scanning' } : log));
 
-      let attemptScan = true;
-      while (attemptScan) {
-        try {
-          const apiExt = item.lang === 'k8s' ? 'yaml' : item.lang;
-          const filename = item.name.includes('.') ? item.name : `${item.name}.${apiExt}`;
+        let attemptScan = true;
+        while (attemptScan) {
+          await checkRateLimitWait();
 
-          const response = await fetch(`${baseUrl}/scan-jobs`, {
-            method: "POST",
-            headers: {
-              "accept": "application/json",
-              "Content-Type": "application/json",
-              "Authorization": `Bearer ${foundKey}`
-            },
-            body: JSON.stringify({
-              files: { [filename]: item.content }
-            })
-          });
+          try {
+            const apiExt = item.lang === 'k8s' ? 'yaml' : item.lang;
+            const filename = item.name.includes('.') ? item.name : `${item.name}.${apiExt}`;
 
-          const data = await response.json();
+            const response = await fetch(`${baseUrl}/scan-jobs`, {
+              method: "POST",
+              headers: {
+                "accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${foundKey}`
+              },
+              body: JSON.stringify({
+                files: { [filename]: item.content }
+              })
+            });
 
-          if (response.status === 429) {
-            // Rate Limit hit!
-            const retryAfter = data.detail?.retry_after || data.retry_after || 60;
-            toast.warning(`Rate limit hit. Waiting ${retryAfter}s before retrying...`);
+            const data = await response.json();
 
-            // Wait for retry duration
-            setRateLimitCountdown(retryAfter);
-            setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: '429', errorMsg: `Rate limit hit. Retrying in ${retryAfter}s...` } : log));
-
-            for (let sec = retryAfter; sec > 0; sec--) {
-              setRateLimitCountdown(sec);
-              await new Promise(resolve => setTimeout(resolve, 1000));
+            if (response.status === 429) {
+              const retryAfter = data.detail?.retry_after || data.retry_after || 60;
+              const newLimit = Date.now() + retryAfter * 1000;
+              if (newLimit > rateLimitUntil) {
+                rateLimitUntil = newLimit;
+                toast.warning(`Rate limit hit. Waiting ${retryAfter}s before retrying...`);
+              }
+              setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: '429', errorMsg: `Rate limit hit. Retrying in ${retryAfter}s...` } : log));
+              continue;
             }
-            setRateLimitCountdown(null);
-            // Retries the current item loop without moving forward
-            continue;
-          }
 
-          if (!response.ok) {
-            const errStatus = response.status === 401 ? '401' : 'error';
-            const errMsg = data.detail || data.error || "Ingestion error";
-            setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: errStatus, errorMsg: errMsg } : log));
+            if (!response.ok) {
+              const errStatus = response.status === 401 ? '401' : 'error';
+              const errMsg = data.detail || data.error || "Ingestion error";
+              setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: errStatus, errorMsg: errMsg } : log));
+              attemptScan = false;
+              break;
+            }
+
+            const report = data.report || data;
+            const totalFindings = report.findings?.length || report.summary?.findings_count || 0;
+            const finalStatus = totalFindings > 0 ? 'risks' : 'clean';
+
+            setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? {
+              ...log,
+              status: finalStatus,
+              findingsCount: totalFindings,
+              duration: 0.8
+            } : log));
+
             attemptScan = false;
-            break;
+          } catch (error: any) {
+            console.error("Bulk scan error:", error);
+            setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'error', errorMsg: error.message } : log));
+            attemptScan = false;
           }
-
-          const report = data.report || data;
-          const totalFindings = report.findings?.length || report.summary?.findings_count || 0;
-          const finalStatus = totalFindings > 0 ? 'risks' : 'clean';
-
-          setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? {
-            ...log,
-            status: finalStatus,
-            findingsCount: totalFindings,
-            duration: 0.8
-          } : log));
-
-          attemptScan = false;
-        } catch (error: any) {
-          console.error("Bulk scan error:", error);
-          setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'error', errorMsg: error.message } : log));
-          attemptScan = false;
         }
-      }
+      })();
 
-      // Enforce the mandatory 2-second delay between sequential scans
+      scanPromises.push(scanTask);
+
+      // Wait 2 seconds before launching the next scan
       if (i < bulkQueue.length - 1) {
         await new Promise(resolve => setTimeout(resolve, 2000));
       }
     }
 
+    await Promise.all(scanPromises);
     setIsBulkScanning(false);
     toast.success("Bulk security audit finished!");
   };
