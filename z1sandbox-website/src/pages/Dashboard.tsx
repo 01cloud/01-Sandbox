@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -90,7 +91,9 @@ const Dashboard = () => {
     findingsCount?: number;
     duration?: number;
     errorMsg?: string;
+    report?: any;
   }[]>([]);
+  const [selectedBulkLog, setSelectedBulkLog] = useState<typeof bulkScanLogs[0] | null>(null);
   const [rateLimitCountdown, setRateLimitCountdown] = useState<number | null>(null);
 
   const processFiles = async (fileList: FileList) => {
@@ -273,7 +276,8 @@ const Dashboard = () => {
               ...log,
               status: finalStatus,
               findingsCount: totalFindings,
-              duration: 0.8
+              duration: 0.8,
+              report: report
             } : log));
 
             attemptScan = false;
@@ -542,7 +546,7 @@ const Dashboard = () => {
                 <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
                 Developer Ingestion & Testing Mode
               </h3>
-              <p className="text-sm text-muted-foreground mt-1">Unlock raw file batching, automatic K8s YAML multi-document parsing, and bulk cooldowned automated testing.</p>
+              {/* <p className="text-sm text-muted-foreground mt-1">Unlock raw file batching, automatic K8s YAML multi-document parsing, and bulk cooldowned automated testing.</p> */}
             </div>
             <button
               onClick={() => {
@@ -699,8 +703,21 @@ const Dashboard = () => {
                                   statusColor = "text-rose-500 font-bold";
                                 }
 
+                                const isInteractive = ["clean", "risks", "error"].includes(log.status);
+
                                 return (
-                                  <div key={idx} className="flex items-center justify-between py-1 border-b border-white/5 last:border-0">
+                                  <div
+                                    key={idx}
+                                    onClick={() => {
+                                      if (isInteractive) {
+                                        setSelectedBulkLog(log);
+                                      }
+                                    }}
+                                    className={cn(
+                                      "flex items-center justify-between py-1.5 border-b border-white/5 last:border-0 transition-all",
+                                      isInteractive ? "cursor-pointer hover:bg-white/5 px-2 rounded-lg" : ""
+                                    )}
+                                  >
                                     <div className="flex items-center gap-2 truncate max-w-[65%]">
                                       <FileCode className="w-3.5 h-3.5 opacity-40 shrink-0" />
                                       <span className="truncate text-zinc-300">{log.name}</span>
@@ -977,6 +994,95 @@ const Dashboard = () => {
         baseUrl={scannerConfig.baseUrl}
         apiKey={scannerConfig.apiKey}
       />
+
+      {/* Immersive Bulk Scan Telemetry Modal */}
+      <Dialog open={!!selectedBulkLog} onOpenChange={(open) => !open && setSelectedBulkLog(null)}>
+        <DialogContent className="max-w-[90vw] w-[1200px] h-[85vh] m-0 p-0 overflow-hidden border-border/50 bg-background/95 backdrop-blur-xl flex flex-col rounded-3xl">
+          {selectedBulkLog && (
+            <>
+              <DialogHeader className="px-10 py-8 border-b bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
+                <div className="flex flex-col">
+                  <DialogTitle className="text-xl font-black uppercase tracking-tight flex items-center gap-2">
+                    <span className={cn(
+                      "w-2.5 h-2.5 rounded-full animate-pulse shadow-md",
+                      selectedBulkLog.status === "clean" ? "bg-emerald-500 shadow-emerald-500/50" : "bg-destructive shadow-destructive/50"
+                    )} />
+                    Telemetry: {selectedBulkLog.name}
+                  </DialogTitle>
+                  <DialogDescription className="text-[10px] font-bold text-muted-foreground uppercase tracking-widest mt-1.5">
+                    Security Ingestion Archive Node
+                  </DialogDescription>
+                </div>
+              </DialogHeader>
+
+              <div className="flex-1 flex overflow-hidden">
+                {/* Findings List (Left column) */}
+                <div className="flex-1 flex flex-col p-8 overflow-hidden">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-4 shrink-0">
+                    Vulnerability Insights ({selectedBulkLog.findingsCount || 0} findings)
+                  </h3>
+                  <ScrollArea className="flex-1 border-t pt-4">
+                    {selectedBulkLog.report?.findings && selectedBulkLog.report.findings.length > 0 ? (
+                      <div className="space-y-4 pr-4 pb-4">
+                        {selectedBulkLog.report.findings.map((f: any, i: number) => {
+                          const severity = (f.severity || "MEDIUM").toUpperCase();
+                          const sevColor = severity === "CRITICAL" ? "bg-red-500/10 text-red-500 border-red-500/20" :
+                                           severity === "HIGH" ? "bg-orange-500/10 text-orange-500 border-orange-500/20" :
+                                           severity === "MEDIUM" ? "bg-amber-500/10 text-amber-500 border-amber-500/20" :
+                                           "bg-blue-500/10 text-blue-500 border-blue-500/20";
+
+                          return (
+                            <div key={i} className="p-5 rounded-xl border bg-muted/10 hover:bg-muted/20 transition-all relative overflow-hidden group">
+                              <div className="flex items-center justify-between mb-3">
+                                <div className="flex items-center gap-2">
+                                  <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0", sevColor)}>
+                                    {severity}
+                                  </Badge>
+                                  <span className="text-[10px] font-black text-muted-foreground tracking-widest lowercase">{f.tool}</span>
+                                </div>
+                                {f.line && <span className="text-[9px] font-mono opacity-40">L:{f.line}</span>}
+                              </div>
+                              <h4 className="text-sm font-black tracking-tight mb-2 lowercase">{f.issue || "security violation"}</h4>
+
+                              <div className="flex flex-col gap-2 mt-4">
+                                <span className="text-[9px] font-black tracking-[0.1em] text-muted-foreground/60 lowercase">remediation insight</span>
+                                <div className="p-4 rounded-lg bg-background/50 text-[11px] font-medium text-foreground/80 border border-border/40 leading-relaxed italic lowercase">
+                                  {f.remediation || "analyze the specific code structure and apply industry security standards to mitigate this risk."}
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="h-full flex flex-col items-center justify-center text-center opacity-30">
+                        <ShieldCheck className="w-12 h-12 text-emerald-500 mb-3 animate-pulse" />
+                        <span className="text-[10px] font-black uppercase tracking-widest">No Risks Found - Clean Code</span>
+                      </div>
+                    )}
+                  </ScrollArea>
+                </div>
+
+                {/* Raw Telemetry Terminal (Right column) */}
+                <div className="w-[500px] border-l border-border/50 bg-muted/10 p-8 flex flex-col overflow-hidden shrink-0">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-4 shrink-0">
+                    Raw Telemetry Report
+                  </h3>
+                  <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group">
+                    <ScrollArea className="h-full w-full">
+                      <div className="p-6">
+                        <pre className="text-[11px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre font-medium block">
+                          {JSON.stringify(selectedBulkLog.report || { error: selectedBulkLog.errorMsg || "No report available" }, null, 2)}
+                        </pre>
+                      </div>
+                    </ScrollArea>
+                  </div>
+                </div>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={!!keyToDelete} onOpenChange={(open) => !open && setKeyToDelete(null)}>
         <AlertDialogContent className="rounded-[2.5rem] border-border/50 p-8 bg-background/95 backdrop-blur-xl">
