@@ -841,7 +841,7 @@ const Dashboard = () => {
 
                     <TabsContent value="raw" className="flex-1 overflow-hidden flex flex-col mt-4 min-h-0">
                       <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group flex flex-col min-h-0">
-                        <ScrollArea className="flex-1 w-full" orientation="both">
+                        <ScrollArea className="flex-1 w-full">
                           <div className="p-6">
                             <pre className="text-[11px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre overflow-x-auto w-max font-medium block">
                               {JSON.stringify(selectedBulkLog.report || { error: selectedBulkLog.errorMsg || "No report available" }, null, 2)}
