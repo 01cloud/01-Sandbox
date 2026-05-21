@@ -4,7 +4,7 @@ OpenSandbox API-Driven Security Scan Regression Test Harness
 ============================================================
 Validates Checkov, Trivy, Kubesec, Semgrep, and other scanner detections against
 malicious K8s YAML fixtures by communicating directly with the API Server.
-Does NOT require a local Docker daemon.
+Now supports bulk ingestion of single `.txt` files containing multiple codebases!
 """
 
 import argparse
@@ -12,10 +12,10 @@ import json
 import os
 import sys
 import time
+import re
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 
-# Color palettes for premium console reporting
 GREEN = "\033[38;5;46m"
 RED = "\033[38;5;196m"
 YELLOW = "\033[38;5;220m"
@@ -35,7 +35,7 @@ BANNER = f"""{CYAN}{BOLD}
   ███        ██S    ███  ███▌    ▄ ███        ███    ███   ███    ███ ███    ███ ███   ███    
   ███         ▀██████▀   █████▄▄██ ██████████  ▀██████▀  ▄█████████▀   ▀██████▀   ▀██████▀     
                          ▀                                                                  
-              {YELLOW}--- REMOTE API SECURITY REGRESSION TESTING SUITE v1.0.0 ---{RESET}
+              {YELLOW}--- REMOTE API SECURITY REGRESSION TESTING SUITE v1.1.0 ---{RESET}
 """
 
 def print_divider(char="─", length=90, color=BLUE):
@@ -57,14 +57,10 @@ def load_expected_assertions(expected_dir):
                 print(f"{RED}Warning: Failed to load expectation file {name}: {e}{RESET}")
     return expected
 
-def test_api_scan(api_url, api_key, fixture_path, expected_findings):
-    """Sends the fixture to the remote API and validates the scanner findings."""
-    filename = os.path.basename(fixture_path)
+def test_api_scan_content(api_url, api_key, filename, content, expected_findings):
+    """Sends raw code content to the remote API and validates findings if provided."""
     print(f" {BLUE}Remote Scan via API:{RESET} {BOLD}{filename}{RESET}")
     
-    with open(fixture_path, 'r') as f:
-        content = f.read()
-        
     payload = json.dumps({"files": {filename: content}}).encode("utf-8")
     req = Request(
         f"{api_url.rstrip('/')}/v1/scan-jobs",
@@ -81,6 +77,7 @@ def test_api_scan(api_url, api_key, fixture_path, expected_findings):
     findings_matched = []
     findings_missing = []
     overall_status = "FAILED"
+    total_risks = 0
     
     try:
         response = urlopen(req)
@@ -88,14 +85,19 @@ def test_api_scan(api_url, api_key, fixture_path, expected_findings):
         res_data = json.loads(response.read().decode('utf-8'))
         
         report_str = json.dumps(res_data).lower()
-        for item in expected_findings:
-            if item.lower() in report_str:
-                findings_matched.append(item)
-            else:
-                findings_missing.append(item)
-                
-        overall_status = "PASS" if not findings_missing else "FAIL"
+        report = res_data.get("report", res_data)
+        total_risks = len(report.get("findings", [])) if "findings" in report else report.get("summary", {}).get("findings_count", 0)
         
+        if expected_findings:
+            for item in expected_findings:
+                if item.lower() in report_str:
+                    findings_matched.append(item)
+                else:
+                    findings_missing.append(item)
+            overall_status = "PASS" if not findings_missing else "FAIL"
+        else:
+            overall_status = "PASS" if total_risks == 0 else "RISKS_FOUND"
+            
     except HTTPError as e:
         duration = time.time() - start_time
         if e.code == 429:
@@ -113,7 +115,8 @@ def test_api_scan(api_url, api_key, fixture_path, expected_findings):
         "status": overall_status,
         "duration": duration,
         "matched": findings_matched,
-        "missing": findings_missing
+        "missing": findings_missing,
+        "risks": total_risks
     }
 
 def test_api_unauthorized(api_url):
@@ -181,12 +184,10 @@ def main():
     parser.add_argument("--api-url", required=True, help="FastAPI Base URL for gateway (e.g. http://server-ip:8000)")
     parser.add_argument("--api-key", required=True, help="Valid developer API key for live testing")
     parser.add_argument("--delay", type=float, default=2.0, help="Cool-down interval between successive scans (seconds)")
+    parser.add_argument("--file", help="Path to a single .txt file containing multiple codebases separated by '==== lang: <language> ===='")
     
     args = parser.parse_args()
-    
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    fixtures_dir = os.path.join(base_dir, "fixtures")
-    expected_dir = os.path.join(base_dir, "expected")
     
     print(BANNER)
     print_divider("━")
@@ -195,14 +196,6 @@ def main():
     print(f" {BOLD}SCAN COOLDOWN:{RESET}       {YELLOW}{args.delay} seconds{RESET}")
     print_divider("━")
     
-    expected_assertions = load_expected_assertions(expected_dir)
-    fixtures = [f for f in os.listdir(fixtures_dir) if f.endswith(".yaml")]
-    fixtures.sort()
-    
-    if not fixtures:
-        print(f"{RED}Error: No YAML fixtures found in {fixtures_dir}{RESET}")
-        sys.exit(1)
-        
     passed = 0
     failed = 0
     skipped = 0
@@ -210,17 +203,62 @@ def main():
     
     print(f"\n{BOLD}{PURPLE}=== PHASE A: REMOTE VULNERABILITY AUDIT (VIA API) ==={RESET}\n")
     
-    for idx, fixture_name in enumerate(fixtures, 1):
-        fixture_path = os.path.join(fixtures_dir, fixture_name)
-        assertions = expected_assertions.get(fixture_name, [])
+    # Mode 1: Single TXT File Bulk Import
+    if args.file:
+        if not os.path.exists(args.file):
+            print(f"{RED}Error: File {args.file} not found.{RESET}")
+            sys.exit(1)
+            
+        with open(args.file, 'r') as f:
+            content = f.read()
+            
+        blocks = re.split(r'====\s*lang:\s*([a-zA-Z0-9_-]+)\s*====', content, flags=re.IGNORECASE)
+        fixtures = []
+        for j in range(1, len(blocks), 2):
+            lang = blocks[j].lower()
+            code = blocks[j+1].strip()
+            if code:
+                ext = 'yaml' if lang == 'k8s' else lang
+                name = f"bulk_block_{j}.{ext}"
+                fixtures.append({"name": name, "content": code, "assertions": []})
+                
+        print(f" {GREEN}Successfully extracted {len(fixtures)} distinct codebases from {args.file}!{RESET}\n")
         
-        res = test_api_scan(args.api_url, args.api_key, fixture_path, assertions)
+    # Mode 2: Directory Fixture Import
+    else:
+        fixtures_dir = os.path.join(base_dir, "fixtures")
+        expected_dir = os.path.join(base_dir, "expected")
+        expected_assertions = load_expected_assertions(expected_dir)
+        
+        fixture_files = [f for f in os.listdir(fixtures_dir) if f.endswith(".yaml")]
+        fixture_files.sort()
+        
+        fixtures = []
+        for fname in fixture_files:
+            fpath = os.path.join(fixtures_dir, fname)
+            with open(fpath, 'r') as f:
+                fixtures.append({
+                    "name": fname,
+                    "content": f.read(),
+                    "assertions": expected_assertions.get(fname, [])
+                })
+                
+    if not fixtures:
+        print(f"{RED}Error: No codebases found to scan!{RESET}")
+        sys.exit(1)
+        
+    # Execute the Scans
+    for idx, item in enumerate(fixtures, 1):
+        res = test_api_scan_content(args.api_url, args.api_key, item["name"], item["content"], item["assertions"])
         total_duration += res["duration"]
         
         status_text = ""
         if res["status"] == "PASS":
             passed += 1
             status_text = f"{GREEN}{BOLD}[ PASS ]{RESET}"
+        elif res["status"] == "RISKS_FOUND":
+            passed += 1 # A pure scan that successfully returns risks passes the operational test
+            status_text = f"{YELLOW}{BOLD}[ SCANNED: {res['risks']} RISKS FOUND ]{RESET}"
         elif res["status"] == "FAIL":
             failed += 1
             status_text = f"{RED}{BOLD}[ FAIL ]{RESET}"
@@ -235,7 +273,6 @@ def main():
             print(f"  {RED}Missing Violations: {', '.join(res['missing'])}{RESET}")
         print()
         
-        # Cooldown prevents rate limit hits during scanning
         if idx < len(fixtures):
             time.sleep(args.delay)
             
@@ -247,7 +284,6 @@ def main():
     else: failed += 1
     print(f"  Status: {GREEN if auth_status == 'PASS' else RED}[ {auth_status} ]{RESET} | Details: {auth_details}\n")
     
-    # Wait for the cooldown window before testing rate limit so our previous scans don't pollute the window
     print(f" {YELLOW}Waiting 10s cooldown before rapid-fire rate limit test...{RESET}")
     time.sleep(10)
     

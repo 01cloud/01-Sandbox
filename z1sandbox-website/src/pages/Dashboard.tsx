@@ -115,6 +115,23 @@ const Dashboard = () => {
           continue;
         }
       }
+
+      // If it is a TXT file, parse custom bulk delimiter blocks (==== lang: <language> ====)
+      if (ext === 'txt' && content.includes('==== lang:')) {
+        const blocks = content.split(/====\s*lang:\s*([a-zA-Z0-9_-]+)\s*====/i);
+        for (let j = 1; j < blocks.length; j += 2) {
+          const blockLang = blocks[j].toLowerCase();
+          const blockContent = blocks[j+1]?.trim();
+          if (blockContent && blockContent.length > 0) {
+            newItems.push({
+              name: `bulk_${file.name.replace('.txt', '')}_${Math.floor(Math.random()*1000)}_${j}.${blockLang === 'k8s' ? 'yaml' : blockLang}`,
+              content: blockContent,
+              lang: blockLang
+            });
+          }
+        }
+        continue;
+      }
       
       // Auto-detect language based on extension
       let lang = 'py';
