@@ -136,7 +136,7 @@ class GenericHTTPBackend(SandboxBackend):
     async def create_scan_job(self, req_body: dict) -> dict:
         """Triggers the isolated scan pipeline and blocks asynchronously for the final result."""
         prefix = opensandbox_route_prefix()
-        async with httpx.AsyncClient(timeout=300) as client:
+        async with httpx.AsyncClient(timeout=900.0) as client:
             r = await client.post(
                 f"{self._url}{prefix}/scan-jobs",
                 json=req_body,
