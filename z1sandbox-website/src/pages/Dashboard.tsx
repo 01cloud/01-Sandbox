@@ -778,7 +778,7 @@ const Dashboard = () => {
                       <TabsTrigger value="raw" className="rounded-lg py-2 text-xs font-bold data-[state=active]:bg-background">Raw Telemetry</TabsTrigger>
                     </TabsList>
 
-                    <TabsContent value="insights" className="flex-1 overflow-hidden flex flex-col mt-4 min-h-0">
+                    <TabsContent value="insights" className="flex-1 mt-4 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
                       <ScrollArea className="flex-1 pr-2">
                         {(() => {
                           const report = selectedBulkLog.report?.report || selectedBulkLog.report || {};
@@ -839,7 +839,7 @@ const Dashboard = () => {
                       </ScrollArea>
                     </TabsContent>
 
-                    <TabsContent value="raw" className="flex-1 overflow-hidden flex flex-col mt-4 min-h-0">
+                    <TabsContent value="raw" className="flex-1 mt-4 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
                       <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group flex flex-col min-h-0">
                         <ScrollArea className="flex-1 w-full">
                           <div className="p-6">
