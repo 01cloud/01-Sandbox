@@ -23,17 +23,23 @@ export default defineConfig(({ mode }) => {
         '/v1': {
           target: backendUrl,
           changeOrigin: true,
-          headers: proxyHeaders
+          headers: proxyHeaders,
+          proxyTimeout: 900000,
+          timeout: 900000
         },
         '/config': {
           target: backendUrl,
           changeOrigin: true,
-          headers: proxyHeaders
+          headers: proxyHeaders,
+          proxyTimeout: 900000,
+          timeout: 900000
         },
         '/api': {
           target: backendUrl,
           changeOrigin: true,
-          headers: proxyHeaders
+          headers: proxyHeaders,
+          proxyTimeout: 900000,
+          timeout: 900000
         },
       }
     },
