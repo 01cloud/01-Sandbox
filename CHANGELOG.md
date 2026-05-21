@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.7](https://github.com/01cloud/01-Sandbox/compare/v0.5.6...v0.5.7) (2026-05-21)
+
+
+### Bug Fixes
+
+* adjust the telemetry ui ([60e1399](https://github.com/01cloud/01-Sandbox/commit/60e1399199ce7a9f78acbacf4e3c4992333dff7d))
+* adjust the telemetry ui ([e2284b2](https://github.com/01cloud/01-Sandbox/commit/e2284b2cfd42e7e64a63a472c81a7f704dcd1fcc))
+* adjust the telemetry ui ([82516aa](https://github.com/01cloud/01-Sandbox/commit/82516aae65506995b5a9d99a9c9cea7dbeff09ee))
+* adjust the telemetry ui ([585f601](https://github.com/01cloud/01-Sandbox/commit/585f60169d4d0857457fc1a19256a9f774268bd2))
+* adjust the telemetry ui ([afe67a4](https://github.com/01cloud/01-Sandbox/commit/afe67a46671a1991a90120e612ad841688a96e71))
+* adjust the telemetry ui ([0808be8](https://github.com/01cloud/01-Sandbox/commit/0808be8a0feafb288817615143de71d4690c74f6))
+* implement reporting fo the vulnerability ([95026fc](https://github.com/01cloud/01-Sandbox/commit/95026fc7da0fe4f836f5f48eed4fd4ab65082bfc))
+* implement reporting fo the vulnerability ([adc3463](https://github.com/01cloud/01-Sandbox/commit/adc3463625aad6233745db9a6c7ee38ca32fb072))
+* implement reporting fo the vulnerability ([c4259d1](https://github.com/01cloud/01-Sandbox/commit/c4259d19e1b22f93005e025c030af786f7d0c894))
+* implement reporting fo the vulnerability ([40fd32f](https://github.com/01cloud/01-Sandbox/commit/40fd32f26134b03309e12eb055aa1148b489ee91))
+* implement reporting fo the vulnerability ([60cd6af](https://github.com/01cloud/01-Sandbox/commit/60cd6af0f1babac74fd94a5c49996a1065384f03))
+* implement reporting fo the vulnerability ([26baf98](https://github.com/01cloud/01-Sandbox/commit/26baf98861dc1f9406cf887b30795f32296c57bf))
+* implement reporting fo the vulnerability ([67b8a12](https://github.com/01cloud/01-Sandbox/commit/67b8a12b36f4a9280e3bd9d1d6fb3d3008b7765c))
+* implement reporting fo the vulnerability ([634900a](https://github.com/01cloud/01-Sandbox/commit/634900a8d62c83bb1a56924b35c48f1b975290ef))
+* kube-score warnings and improvement in bulk scan ([2247f50](https://github.com/01cloud/01-Sandbox/commit/2247f5062e045840a09cac19363cd24430511ffb))
+* kube-score warnings and improvement in bulk scan ([ea2724b](https://github.com/01cloud/01-Sandbox/commit/ea2724bc18afde7599ac33c98a592a9cbb6b3c7a))
+
 ## [0.5.6](https://github.com/01cloud/01-Sandbox/compare/v0.5.5...v0.5.6) (2026-05-21)
 
 
