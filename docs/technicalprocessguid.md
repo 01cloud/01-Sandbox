@@ -152,6 +152,12 @@ To ensure the rate limit corresponds exactly to the number of clicks a user make
 *   **Exclusion List**: Path routing excludes background API queries such as `/openapi.json` or health checks from the rate limiter.
 *   **Action Specific**: Only the main document index page (`/docs`) and the scan trigger (`POST /v1/scan-jobs`) consume rate-limit slots. One click on "View Documentation" or "Quick Scan" consumes exactly **1 slot**, ensuring a flawless 7 actions per minute per key.
 
+#### D. High-Frequency Concurrent Scaling & UI Synchronization
+To support rapid bulk scanning operations (where requests are dispatched in rapid succession), the system integrates deep client-side rate synchronization:
+*   **Threshold Increase**: The default limit `RATE_LIMIT_REQUESTS` configured in `values.yaml` is raised from `7` requests/min to `100` requests/min in production deployments to accommodate sequential parallel scans.
+*   **Dynamic Cooldown Sync**: When the client receives a `429 Too Many Requests` error, the React UI decodes the `retry_after` parameter in the response. It updates a shared, global `rateLimitUntil` state.
+*   **Dispatch Freeze**: Active polling loops and subsequent scan dispatches instantly freeze, rendering a visual countdown: `Rate limit hit. Retrying in Xs...` until the cooldown expires, at which point the queue resumes execution automatically.
+
 **Reference Code: Dynamic Sliding Window Verification** (`apiServer/fastapi/ratelimit.py`)
 ```python
 # Sliding Window Check with Atomic Pre-Check and Dynamic Retry-After
@@ -274,13 +280,44 @@ cmd = ["kubeconform", "-strict", "-ignore-missing-schemas=false"]
 
 The final delivery of intelligence back to the user. Once the result is delivered, the UI transitions from "AUDITING" to **"SUCCESS"** and renders the **Audit Verdict**.
 
-### 1. The Polling Loop (Synchronous Handover)
-The Management Server (OpenSandbox) blocks the initial request and enters a polling loop. It watches the specific `{job_id}/reports` directory on the PVC.
-*   **The Trigger**: As soon as the scanner pod finishes and writes `security_scan_report.json`, the management server detects the file.
-*   **Cleanup**: Once the report is read into memory, the transient scanner pod is deleted to free up cluster resources.
+### 1. Synchronous vs. Asynchronous Core Handover
 
-### 2. Telemetry Persistence
-While the pod is gone, the report remains on the PVC for historical retrieval. This allows the UI to display the report even if the user refreshes their browser.
+The system supports two distinct methods for retrieving security scan results depending on request weight and length:
+
+#### A. Traditional Synchronous Handover
+The Management Server (`opensandbox-server`) blocks the initial HTTP connection and enters a loop watching the specific `{job_id}/reports` directory on the PVC.
+*   **The Trigger**: As soon as the scanner pod completes and writes `security_scan_report.json` to storage, the server detects it, aggregates results, and returns the response.
+*   **The Limit**: If a scan exceeds 60 seconds (due to large files or cold start), ingress proxies (Nginx/Cloudflare) forcefully terminate the connection, yielding a `504 Gateway Timeout`.
+
+#### B. Asynchronous Non-Blocking Polling Model
+To eliminate 504 Gateway Timeouts, the platform implements a decoupled background-task polling loop triggered by appending the query parameter `?async=true` on the ingestion request:
+
+1.  **Fast API Acknowledgment (`apiServer`)**:
+    *   The `create_scan_job_alias` endpoint intercepts the request and instantly provisions a FastAPI `BackgroundTasks` execution thread.
+    *   The API returns a `200 OK` JSON payload `{ "job_id": "<uuid>", "status": "PROCESSING" }` in less than 100 milliseconds, closing the HTTP connection immediately.
+2.  **Client-Side React Orchestrator (`z1sandbox-website`)**:
+    *   Upon receiving the `job_id`, the React UI enters a background `while(true)` polling loop pinging `/v1/scan-jobs/{job_id}/report` every 5 seconds.
+    *   **Graceful 404 Resolution**: If the PVC report is still missing, `get_scan_report` catches the filesystem `FileNotFoundError` and yields a standard `404 Not Found` response instead of crashing, indicating that execution is still active.
+    *   Once the secure gVisor sandbox aggregates results and writes `security_scan_report.json` to PVC storage, the next polling call returns a `200 OK` with the full payload, updating the UI.
+
+### 2. Advanced Dispatch Control & Optimization
+
+#### A. Parallel Pacing & Skip Optimization
+* **Sequential Queueing**: Frontend scans are dispatched sequentially spaced exactly **2 seconds apart**, pacing resource ingestion without blocking the UI.
+* **Stop/Abort Action**: Clicking "Stop" sets `bulkScanCancelledRef.current = true`, instantly breaking sleep routines, aborting active requests, and shutting down background polling.
+* **Resume Scan Skip Logic**: Before triggering a scan request, the queue scans previous items. If an item already has a status of `'clean'` or `'risks'`, it is skipped, starting exactly from the first pending entry.
+
+#### B. Colloquial Extension Standardization & Symlinks
+To ensure universal scanners (Semgrep, Bandit, ShellCheck, py_compile) execute flawlessly across both Quick and Bulk Scans:
+* Colloquial user extensions (`.python`, `.golang`, `.bash`, `.kubernetes`) are normalized to standard formats (`.py`, `.go`, `.sh`, `.yaml`) during frontend ingestion.
+* During initialization inside `scanner_orchestrator.py`, the backend checks for colloquial files and dynamically builds symlinks to standard file extensions before launching security tools.
+
+#### C. Informational Best-Practices
+* General layout and configuration best practices from tools like **Kube-Score** are classified under `severity: "info"` with `has_issues: False` inside `scanner_orchestrator.py`.
+* They do not trigger risk indicators or block green **`CLEAN`** badges in the dashboard, but are fully accessible as interactive remediation checklists upon clicking the file.
+
+### 3. Telemetry Persistence
+While the transient scanner gVisor pod is deleted immediately upon job completion to release cluster resources, the aggregated report is retained persistently on the PVC for historical lookup and browser session refresh integrity.
 
 **Reference Code: Result Polling** (`opensandbox-server/docker-build/src/api/lifecycle.py`)
 ```python
