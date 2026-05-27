@@ -273,13 +273,29 @@ Language detection runs a **priority chain** against the locally cloned repo dir
 
 | Priority | Tool | Method | Requires |
 |---|---|---|---|
-| 1 | **tokei** | Subprocess, JSON output (`tokei <repo> --output json`) | `tokei` binary |
-| 2 | **enry** | Subprocess, text output + extension fallback | `enry` binary |
-| 3 | **Extension walk** | Pure Python `os.walk()` — always succeeds | Nothing |
+| 1 | **Tokei** | Subprocess, JSON output (`tokei <repo> --output json`) | `tokei` binary on path |
+| 2 | **Enry** | Subprocess, text output + extension fallback | `enry` binary on path |
+| 3 | **Extension Walk** | Pure Python `os.walk()` — always succeeds | None (built-in fallback) |
 
-The extension walk fallback maps 20+ file extensions to canonical language names (`.py` → `Python`, `.ts`/`.tsx` → `TypeScript`, `.go` → `Go`, etc.) and prunes well-known non-source directories (`node_modules`, `.git`, `__pycache__`, `vendor`, `dist`, `build`, etc.) automatically.
+#### 1. Tokei (Priority 1)
+* **Description**: A fast, compile-optimized tool written in Rust designed to count code lines, comments, and files in a codebase.
+* **Orchestration**: Runs via a subprocess call: `tokei <repo_path> --output json`.
+* **Output Handling**: Since it outputs clean, structured JSON detailing exact file paths mapped to languages, it allows the pipeline to directly extract the file lists without any additional directory traversal.
 
-The chosen `DetectionTool` enum value is recorded in the final `RepoScanResult` for observability.
+#### 2. Enry (Priority 2)
+* **Description**: A lightweight Go implementation of GitHub's official Ruby-based `Linguist` library, providing the same language classification heuristics without requiring a heavy Ruby runtime.
+* **Orchestration**: Runs via a subprocess call: `enry <repo_path>`.
+* **Output Handling**: Since the default output format provides detected language names only, the pipeline uses Enry's stdout as a filter list, then runs a local extension walk to map the files belonging to those specific languages.
+
+#### 3. Extension Walk Fallback (Priority 3)
+* **Description**: A pure-Python file walker (`_local_walk()`) that acts as a failsafe when neither `tokei` nor `enry` is installed on the host container.
+* **Orchestration**: Automatically crawls the directory structure using standard library `os.walk()`.
+* **Output Handling**:
+  * Automatically ignores common non-code folders like `.git`, `node_modules`, `.venv`, `__pycache__`, `target`, `dist`, and `build`.
+  * Matches files against a predefined dictionary of over 20 extensions (`.py` → `Python`, `.js`/`.jsx` → `JavaScript`, `.ts`/`.tsx` → `TypeScript`, `.go` → `Go`, `.rs` → `Rust`, etc.).
+  * This guarantees that language detection succeeds and produces accurate lists under any environmental configuration.
+
+The chosen `DetectionTool` enum value (`tokei`, `enry`, or `unknown`) is saved in the `RepoScanResult` object for full pipeline observability.
 
 ---
 
