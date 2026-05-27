@@ -1,3 +1,44 @@
+## Release v0.5.15 — 01-Sandbox
+**Release Date:** May 27, 2026
+
+---
+
+### Summary
+v0.5.15 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* git clone issues ([c73cd87](https://github.com/01cloud/01-Sandbox/commit/c73cd87823ff3085c2be46d08abeb5a93a92963a))
+* git clone issues ([a3f294e](https://github.com/01cloud/01-Sandbox/commit/a3f294e57b727ad39744e5ea93c2568702feecbd))
+* generate RELEASE.md for v0.5.14 [skip ci] ([db7d575](https://github.com/01cloud/01-Sandbox/commit/db7d57574fba266a738b0fb18ad015a9d1358880))
+* bump versions to v0.5.14 [skip ci] ([db0e054](https://github.com/01cloud/01-Sandbox/commit/db0e054c350fa95d8664a4c2a88ffaecf975dd4c))
+
+### Changes
+## [0.5.15](https://github.com/01cloud/01-Sandbox/compare/v0.5.14...v0.5.15) (2026-05-27)
+
+
+### 🐛 Bug Fixes
+
+* git clone issues ([c73cd87](https://github.com/01cloud/01-Sandbox/commit/c73cd87823ff3085c2be46d08abeb5a93a92963a))
+* git clone issues ([a3f294e](https://github.com/01cloud/01-Sandbox/commit/a3f294e57b727ad39744e5ea93c2568702feecbd))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.14 [skip ci] ([db7d575](https://github.com/01cloud/01-Sandbox/commit/db7d57574fba266a738b0fb18ad015a9d1358880))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.14 [skip ci] ([db0e054](https://github.com/01cloud/01-Sandbox/commit/db0e054c350fa95d8664a4c2a88ffaecf975dd4c))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.15)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.14 — 01-Sandbox
 **Release Date:** May 27, 2026
 
