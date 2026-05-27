@@ -7,7 +7,7 @@ store cloned files in a local temp directory, and run tools via the
 existing POST /scan-jobs pipeline.
 
 The "sandbox_id" returned by provision_sandbox() is the path of the
-local temp directory (e.g. /tmp/repo_abc123).
+local temp directory (e.g. /tmp/reposcanner_abc123).
 """
 
 from __future__ import annotations
@@ -16,10 +16,13 @@ import asyncio
 import os
 import shutil
 import tempfile
+import time
 from typing import Optional, Tuple
 
 # Subdirectory inside the temp sandbox where the repo is cloned
 REPO_DIR = "repo"
+
+_TAG = "[RepoScanner][Sandbox]"
 
 
 async def provision_sandbox(backend) -> str:
@@ -27,9 +30,11 @@ async def provision_sandbox(backend) -> str:
     Create an isolated temp directory to act as the local 'sandbox'.
     Returns the absolute path of the temp directory as the sandbox_id.
     """
+    t0 = time.monotonic()
     loop = asyncio.get_event_loop()
     tmpdir = await loop.run_in_executor(None, tempfile.mkdtemp, None, "reposcanner_")
-    print(f"[RepoScanner] Provisioned local sandbox at: {tmpdir}")
+    elapsed = time.monotonic() - t0
+    print(f"{_TAG} Provisioned local sandbox in {elapsed:.3f}s: {tmpdir}")
     return tmpdir
 
 
@@ -46,6 +51,9 @@ async def exec_in_sandbox(
     Returns (stdout, stderr, exit_code).
     """
     effective_cwd = workdir or sandbox_id
+    cmd_str = " ".join(command)
+    print(f"{_TAG} exec: {cmd_str}  (cwd={effective_cwd}, timeout={timeout}s)")
+    t0 = time.monotonic()
 
     try:
         proc = await asyncio.wait_for(
@@ -61,16 +69,26 @@ async def exec_in_sandbox(
         stdout_bytes, stderr_bytes = await asyncio.wait_for(
             proc.communicate(), timeout=timeout
         )
+        elapsed = time.monotonic() - t0
+        rc = proc.returncode or 0
+        print(f"{_TAG} exec done: exit={rc}, elapsed={elapsed:.2f}s, cmd={command[0]}")
+        if rc != 0 and stderr_bytes:
+            # Log first 300 chars of stderr so failures are visible in pod logs
+            err_preview = stderr_bytes.decode("utf-8", errors="replace")[:300].strip()
+            print(f"{_TAG} exec stderr (exit={rc}): {err_preview}")
         return (
             stdout_bytes.decode("utf-8", errors="replace"),
             stderr_bytes.decode("utf-8", errors="replace"),
-            proc.returncode or 0,
+            rc,
         )
     except asyncio.TimeoutError:
+        print(f"{_TAG} exec TIMEOUT after {timeout}s: {cmd_str}")
         return ("", f"Command timed out after {timeout}s", 1)
     except FileNotFoundError as exc:
+        print(f"{_TAG} exec MISSING BINARY: {command[0]} — {exc}")
         return ("", f"Command not found: {command[0]}: {exc}", 127)
     except Exception as exc:
+        print(f"{_TAG} exec EXCEPTION: {exc}")
         return ("", f"exec failed: {exc}", 1)
 
 
@@ -81,14 +99,31 @@ async def clone_repo(sandbox_id: str, repo_url: str) -> Tuple[bool, str]:
     Returns (success, error_message).
     """
     target = os.path.join(sandbox_id, REPO_DIR)
+    print(f"{_TAG} git clone --depth=1 {repo_url}")
+    print(f"{_TAG} Clone target directory: {target}")
+    t0 = time.monotonic()
+
     stdout, stderr, exit_code = await exec_in_sandbox(
         sandbox_id=sandbox_id,
         command=["git", "clone", "--depth=1", repo_url, target],
         timeout=180.0,
     )
+    elapsed = time.monotonic() - t0
+
     if exit_code != 0:
+        print(f"{_TAG} git clone FAILED (exit={exit_code}, elapsed={elapsed:.1f}s)")
+        print(f"{_TAG} git stderr: {(stderr or stdout)[:500]}")
         return False, stderr or stdout
-    print(f"[RepoScanner] Cloned repo to: {target}")
+
+    # Log size of cloned repo
+    try:
+        file_count = sum(len(files) for _, _, files in os.walk(target))
+        print(
+            f"{_TAG} git clone SUCCESS in {elapsed:.1f}s — {file_count} file(s) in {target}"
+        )
+    except Exception:
+        print(f"{_TAG} git clone SUCCESS in {elapsed:.1f}s → {target}")
+
     return True, ""
 
 
@@ -97,8 +132,10 @@ async def destroy_sandbox(sandbox_id: str) -> None:
     Delete the local temp directory. Always called in a finally block.
     """
     try:
+        t0 = time.monotonic()
         loop = asyncio.get_event_loop()
         await loop.run_in_executor(None, shutil.rmtree, sandbox_id, True)
-        print(f"[RepoScanner] Cleaned up local sandbox: {sandbox_id}")
+        elapsed = time.monotonic() - t0
+        print(f"{_TAG} Sandbox destroyed in {elapsed:.3f}s: {sandbox_id}")
     except Exception as exc:
-        print(f"[RepoScanner] Warning: failed to destroy sandbox {sandbox_id}: {exc}")
+        print(f"{_TAG} WARNING: failed to destroy sandbox {sandbox_id}: {exc}")

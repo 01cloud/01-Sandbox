@@ -45,6 +45,11 @@ async def _run_scan_pipeline(
     sandbox_id: Optional[str] = None
     start_time = time.monotonic()
     backend = app_state.backend
+    jid = job_id[:8]  # short ID for log readability
+
+    def log(step: str, msg: str) -> None:
+        elapsed = time.monotonic() - start_time
+        print(f"[RepoScanner][{step}][{jid}] (+{elapsed:.1f}s) {msg}")
 
     async def push_event(
         step: ScanStep,
@@ -74,8 +79,13 @@ async def _run_scan_pipeline(
             except Exception as e:
                 print(f"[RepoScanner] Redis pipeline broadcast error: {e}")
 
+    log("INIT", f"Pipeline started for {owner}/{repo} (job={job_id})")
+    log("INIT", f"Repository URL: {repo_url}")
+    log("INIT", f"Redis enabled: {app_state.use_redis}")
+
     try:
         # ── Step 1: Provision sandbox ────────────────────────────────
+        log("PROVISIONING", "Creating isolated local sandbox directory...")
         await push_event(ScanStep.PROVISIONING, "Provisioning isolated sandbox...", 10)
         try:
             sandbox_id = await asyncio.wait_for(
@@ -83,38 +93,63 @@ async def _run_scan_pipeline(
             )
         except asyncio.TimeoutError:
             raise RuntimeError("Sandbox provisioning timed out after 60 seconds")
+        log("PROVISIONING", f"Sandbox ready at: {sandbox_id}")
 
         # ── Step 2: Clone repository ─────────────────────────────────
+        clone_url = repo_url if repo_url.endswith(".git") else f"{repo_url}.git"
+        log("CLONING", f"Running: git clone --depth=1 {clone_url}")
         await push_event(
             ScanStep.CLONING, f"Cloning {owner}/{repo} with --depth=1...", 25
         )
-        clone_url = repo_url if repo_url.endswith(".git") else f"{repo_url}.git"
         success, error = await asyncio.wait_for(
             clone_repo(sandbox_id, clone_url), timeout=180.0
         )
         if not success:
+            log("CLONING", f"git clone FAILED: {error}")
             raise RuntimeError(f"git clone failed: {error}")
+        log("CLONING", f"Repository cloned successfully to: {sandbox_id}/repo/")
 
         # ── Step 3: Detect languages ─────────────────────────────────
+        log(
+            "DETECTING",
+            "Starting language detection (tokei → enry → extension walk)...",
+        )
         await push_event(
-            ScanStep.DETECTING, "Detecting languages (linguist → tokei → enry)...", 45
+            ScanStep.DETECTING,
+            "Detecting languages (tokei → enry → extension walk)...",
+            45,
         )
         lang_map, detection_tool = await asyncio.wait_for(
             detect_languages(sandbox_id), timeout=60.0
         )
 
         if not lang_map:
+            log(
+                "DETECTING",
+                "No languages detected — repository may be empty or binary-only",
+            )
             raise RuntimeError(
                 "No languages detected. Repository may be empty or contain only binary files."
             )
 
-        # ── Step 4: Scan each language ───────────────────────────────
         total_langs = len(lang_map)
         total_files = sum(len(f) for f in lang_map.values())
+        log("DETECTING", f"Detection tool used: {detection_tool.value}")
+        log(
+            "DETECTING",
+            f"Languages found ({total_langs}): {', '.join(lang_map.keys())}",
+        )
+        for lang, files in lang_map.items():
+            log("DETECTING", f"  {lang}: {len(files)} file(s)")
 
+        # ── Step 4: Scan each language ───────────────────────────────
         def pct(files_count: int) -> float:
             return (files_count / max(total_files, 1)) * 100.0
 
+        log(
+            "SCANNING",
+            f"Beginning security scan: {total_langs} language(s), {total_files} total file(s)",
+        )
         await push_event(
             ScanStep.SCANNING,
             f"Scanning {total_langs} language(s) across {total_files} files...",
@@ -123,10 +158,15 @@ async def _run_scan_pipeline(
 
         language_results = {}
         for idx, (language, files) in enumerate(lang_map.items()):
+            file_count = min(len(files), 100)
             progress = 60 + int(((idx + 1) / total_langs) * 30)
+            log(
+                "SCANNING",
+                f"[{idx+1}/{total_langs}] Scanning {language} — {file_count} file(s) submitted to scan-jobs pipeline...",
+            )
             await push_event(
                 ScanStep.SCANNING,
-                f"Scanning {language} ({min(len(files), 100)} files)...",
+                f"Scanning {language} ({file_count} files)...",
                 progress,
             )
             result = await asyncio.wait_for(
@@ -139,6 +179,19 @@ async def _run_scan_pipeline(
                 timeout=180.0,
             )
             language_results[language] = result
+            lang_findings = len(result.findings)
+            log(
+                "SCANNING",
+                f"[{idx+1}/{total_langs}] {language} complete — {result.lines_of_code} LoC, {lang_findings} finding(s)",
+            )
+            if lang_findings > 0:
+                for f in result.findings[:5]:  # log first 5 findings
+                    log(
+                        "SCANNING",
+                        f"  [{f.severity}] {f.file}:{f.line or '?'} — {f.issue[:80]} (tool={f.tool})",
+                    )
+                if lang_findings > 5:
+                    log("SCANNING", f"  ... and {lang_findings - 5} more finding(s)")
 
         # ── Step 5: Build and emit final result ──────────────────────
         duration = time.monotonic() - start_time
@@ -172,6 +225,19 @@ async def _run_scan_pipeline(
             except Exception as e:
                 print(f"[RepoScanner] Redis final done save error: {e}")
 
+        log("DONE", "=" * 60)
+        log("DONE", f"Scan finished for {owner}/{repo}")
+        log("DONE", f"  Job ID         : {job_id}")
+        log("DONE", f"  Detection tool : {detection_tool.value}")
+        log(
+            "DONE",
+            f"  Languages      : {total_langs}  ({', '.join(language_results.keys())})",
+        )
+        log("DONE", f"  Total files    : {total_files}")
+        log("DONE", f"  Total findings : {total_findings}")
+        log("DONE", f"  Duration       : {duration:.2f}s")
+        log("DONE", "=" * 60)
+
         # 3. Emit final DONE status event
         await push_event(
             ScanStep.DONE,
@@ -182,6 +248,7 @@ async def _run_scan_pipeline(
 
     except asyncio.TimeoutError:
         msg = "Scan timed out (5-minute limit exceeded)"
+        log("ERROR", msg)
         _store_error(
             job_id, repo_url, owner, repo, msg, time.monotonic() - start_time, app_state
         )
@@ -189,7 +256,7 @@ async def _run_scan_pipeline(
 
     except Exception as exc:
         msg = str(exc)
-        print(f"[RepoScanner] Pipeline error for job {job_id}: {msg}")
+        log("ERROR", f"Unhandled exception: {msg}")
         _store_error(
             job_id, repo_url, owner, repo, msg, time.monotonic() - start_time, app_state
         )
@@ -197,8 +264,10 @@ async def _run_scan_pipeline(
 
     finally:
         if sandbox_id:
+            log("CLEANUP", f"Destroying sandbox: {sandbox_id}")
             await destroy_sandbox(sandbox_id)
         sse_manager.cleanup_expired()
+        log("CLEANUP", "Pipeline teardown complete")
 
 
 def _store_error(

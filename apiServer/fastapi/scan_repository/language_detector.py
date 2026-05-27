@@ -17,10 +17,13 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from typing import Dict, List, Tuple
 
 from .models import DetectionTool
 from .sandbox_provisioner import REPO_DIR, exec_in_sandbox
+
+_TAG = "[RepoScanner][LangDetect]"
 
 # Mapping of file extensions to canonical language names
 EXT_MAP = {
@@ -147,33 +150,58 @@ async def detect_languages(
         tool_used: which DetectionTool was successful
     """
     repo_path = _repo_path(sandbox_id)
+    print(f"{_TAG} Starting language detection on: {repo_path}")
 
     # ── 1. tokei ────────────────────────────────────────────────────────
+    print(f"{_TAG} Trying tokei (JSON mode)...")
+    t0 = time.monotonic()
     stdout, stderr, exit_code = await exec_in_sandbox(
         sandbox_id=sandbox_id,
         command=["tokei", repo_path, "--output", "json"],
         timeout=60.0,
     )
+    elapsed = time.monotonic() - t0
+
     if exit_code == 0 and stdout.strip():
         lang_map = _parse_tokei(stdout, repo_path)
         if lang_map:
-            print(f"[RepoScanner] Language detected by tokei: {list(lang_map.keys())}")
+            print(
+                f"{_TAG} tokei succeeded in {elapsed:.2f}s — {len(lang_map)} language(s) detected: {', '.join(lang_map.keys())}"
+            )
+            for lang, files in lang_map.items():
+                print(f"{_TAG}   {lang}: {len(files)} file(s)")
             return lang_map, DetectionTool.TOKEI
+        else:
+            print(
+                f"{_TAG} tokei returned output but parsed 0 languages (elapsed={elapsed:.2f}s)"
+            )
+    else:
+        print(
+            f"{_TAG} tokei unavailable or failed (exit={exit_code}, elapsed={elapsed:.2f}s) — trying enry..."
+        )
+        if stderr.strip():
+            print(f"{_TAG} tokei stderr: {stderr.strip()[:200]}")
 
     # ── 2. enry (if available) ──────────────────────────────────────────
+    print(f"{_TAG} Trying enry...")
+    t0 = time.monotonic()
     stdout, stderr, exit_code = await exec_in_sandbox(
         sandbox_id=sandbox_id,
         command=["enry", repo_path],
         timeout=60.0,
     )
+    elapsed = time.monotonic() - t0
+
     if exit_code == 0 and stdout.strip():
         lang_names = _parse_enry(stdout)
         if lang_names:
+            print(
+                f"{_TAG} enry succeeded in {elapsed:.2f}s — {len(lang_names)} language(s): {', '.join(lang_names.keys())}"
+            )
             # enry gives no file list — fill it via extension walk
             walk_map = _local_walk(repo_path)
             lang_map: Dict[str, List[str]] = {}
             for lang in lang_names:
-                # Try exact match first, then case-insensitive
                 files = walk_map.get(lang) or next(
                     (v for k, v in walk_map.items() if k.lower() == lang.lower()), []
                 )
@@ -181,19 +209,33 @@ async def detect_languages(
                     lang_map[lang] = files
             if lang_map:
                 print(
-                    f"[RepoScanner] Language detected by enry: {list(lang_map.keys())}"
+                    f"{_TAG} enry + extension walk resolved {len(lang_map)} language(s) with file lists"
                 )
                 return lang_map, DetectionTool.ENRY
+    else:
+        print(
+            f"{_TAG} enry unavailable or failed (exit={exit_code}, elapsed={elapsed:.2f}s)"
+        )
+        if stderr.strip():
+            print(f"{_TAG} enry stderr: {stderr.strip()[:200]}")
 
     # ── 3. Pure-Python extension walk (always works) ────────────────────
     print(
-        "[RepoScanner] External tools unavailable — using local extension-based detection"
+        f"{_TAG} Falling back to pure-Python extension walk (no external tools required)..."
     )
+    t0 = time.monotonic()
     lang_map = _local_walk(repo_path)
+    elapsed = time.monotonic() - t0
+
     if lang_map:
         print(
-            f"[RepoScanner] Language detected by extension walk: {list(lang_map.keys())}"
+            f"{_TAG} Extension walk completed in {elapsed:.3f}s — {len(lang_map)} language(s): {', '.join(lang_map.keys())}"
         )
+        for lang, files in lang_map.items():
+            print(f"{_TAG}   {lang}: {len(files)} file(s)")
         return lang_map, DetectionTool.UNKNOWN
 
+    print(
+        f"{_TAG} Extension walk found 0 files — repository may be empty or binary-only"
+    )
     return {}, DetectionTool.UNKNOWN
