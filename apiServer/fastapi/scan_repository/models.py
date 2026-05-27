@@ -3,6 +3,7 @@ models.py — Pydantic models for the GitHub Repository Scanner feature.
 
 All models are specific to repo scanning and do not conflict with
 the main models.py in the parent package.
+Test
 """
 
 from __future__ import annotations
