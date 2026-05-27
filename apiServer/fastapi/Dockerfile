@@ -20,7 +20,7 @@ RUN apt-get update && apt-get install -y libpq-dev gcc \
 FROM python:3.12-slim AS runtime
 
 # Create a non-root user for security
-RUN apt-get update && apt-get install -y libpq5 \
+RUN apt-get update && apt-get install -y libpq5 git ca-certificates \
  && useradd --create-home --shell /bin/bash appuser
 
 WORKDIR /app
