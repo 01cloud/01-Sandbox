@@ -4,22 +4,17 @@ scan_repository.py — FastAPI APIRouter factory for GitHub Repository Scanner.
 Pattern mirrors health.py → get_health_router(state, validate_token).
 Call get_repo_scan_router(state, validate_token) from codeinspectior_api.py.
 
-Endpoints (all gated by the same validate_token as Quick Scan / Bulk Scan):
-
-  POST   /v1/repo-scan                      Submit a new repo scan job
-  GET    /v1/repo-scan/{job_id}/status      SSE stream of live step events
-  GET    /v1/repo-scan/{job_id}/result      Final aggregated results
-
-The scan pipeline runs as an asyncio background task so POST returns
-immediately with a job_id (same pattern as ?async=true in /v1/scan-jobs).
+This implementation is fully cluster-aware (multi-pod safe) using the shared
+Redis instance for job statuses, Pub/Sub event broadcasting, and cached results.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 import uuid
-from typing import Callable, Optional
+from typing import AsyncIterator, Callable, Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -41,22 +36,47 @@ async def _run_scan_pipeline(
     repo_url: str,
     owner: str,
     repo: str,
-    backend,
+    app_state,
 ) -> None:
     """
     Full scan pipeline executed as a background task.
-    Pushes SSE events at each step and stores the final result.
-
-    Steps: PROVISIONING → CLONING → DETECTING → SCANNING → DONE | ERROR
+    Pushes SSE events locally and broadcasts them via Redis Pub/Sub.
     """
     sandbox_id: Optional[str] = None
     start_time = time.monotonic()
+    backend = app_state.backend
+
+    async def push_event(
+        step: ScanStep,
+        message: str,
+        progress: int,
+        detail: Optional[dict] = None,
+    ) -> None:
+        # 1. Update local sse_manager
+        await sse_manager.push(job_id, step, message, progress, detail)
+        # 2. Broadcast via Redis Pub/Sub & update status key
+        if app_state.use_redis and app_state.redis_client:
+            try:
+                from .models import ScanEvent
+
+                event = ScanEvent(
+                    job_id=job_id,
+                    step=step,
+                    message=message,
+                    progress=progress,
+                    detail=detail,
+                )
+                event_json = event.json()
+                app_state.redis_client.publish(f"repo_scan:chan:{job_id}", event_json)
+                app_state.redis_client.set(
+                    f"repo_scan:status:{job_id}", step.value, ex=3600
+                )
+            except Exception as e:
+                print(f"[RepoScanner] Redis pipeline broadcast error: {e}")
 
     try:
         # ── Step 1: Provision sandbox ────────────────────────────────
-        await sse_manager.push(
-            job_id, ScanStep.PROVISIONING, "Provisioning isolated sandbox...", 10
-        )
+        await push_event(ScanStep.PROVISIONING, "Provisioning isolated sandbox...", 10)
         try:
             sandbox_id = await asyncio.wait_for(
                 provision_sandbox(backend), timeout=60.0
@@ -65,8 +85,8 @@ async def _run_scan_pipeline(
             raise RuntimeError("Sandbox provisioning timed out after 60 seconds")
 
         # ── Step 2: Clone repository ─────────────────────────────────
-        await sse_manager.push(
-            job_id, ScanStep.CLONING, f"Cloning {owner}/{repo} with --depth=1...", 25
+        await push_event(
+            ScanStep.CLONING, f"Cloning {owner}/{repo} with --depth=1...", 25
         )
         clone_url = repo_url if repo_url.endswith(".git") else f"{repo_url}.git"
         success, error = await asyncio.wait_for(
@@ -76,11 +96,8 @@ async def _run_scan_pipeline(
             raise RuntimeError(f"git clone failed: {error}")
 
         # ── Step 3: Detect languages ─────────────────────────────────
-        await sse_manager.push(
-            job_id,
-            ScanStep.DETECTING,
-            "Detecting languages (linguist → tokei → enry)...",
-            45,
+        await push_event(
+            ScanStep.DETECTING, "Detecting languages (linguist → tokei → enry)...", 45
         )
         lang_map, detection_tool = await asyncio.wait_for(
             detect_languages(sandbox_id), timeout=60.0
@@ -98,8 +115,7 @@ async def _run_scan_pipeline(
         def pct(files_count: int) -> float:
             return (files_count / max(total_files, 1)) * 100.0
 
-        await sse_manager.push(
-            job_id,
+        await push_event(
             ScanStep.SCANNING,
             f"Scanning {total_langs} language(s) across {total_files} files...",
             60,
@@ -108,8 +124,7 @@ async def _run_scan_pipeline(
         language_results = {}
         for idx, (language, files) in enumerate(lang_map.items()):
             progress = 60 + int(((idx + 1) / total_langs) * 30)
-            await sse_manager.push(
-                job_id,
+            await push_event(
                 ScanStep.SCANNING,
                 f"Scanning {language} ({min(len(files), 100)} files)...",
                 progress,
@@ -141,10 +156,24 @@ async def _run_scan_pipeline(
             total_findings=total_findings,
             scan_duration_seconds=round(duration, 2),
         )
+
+        # 1. Update local job record
         sse_manager.set_result(job_id, final_result)
 
-        await sse_manager.push(
-            job_id,
+        # 2. Update Redis results for cluster access
+        if app_state.use_redis and app_state.redis_client:
+            try:
+                app_state.redis_client.set(
+                    f"repo_scan:status:{job_id}", ScanStep.DONE.value, ex=3600
+                )
+                app_state.redis_client.set(
+                    f"repo_scan:result:{job_id}", final_result.json(), ex=3600
+                )
+            except Exception as e:
+                print(f"[RepoScanner] Redis final done save error: {e}")
+
+        # 3. Emit final DONE status event
+        await push_event(
             ScanStep.DONE,
             f"Scan complete — {total_langs} language(s), {total_findings} finding(s) in {duration:.1f}s",
             100,
@@ -153,14 +182,18 @@ async def _run_scan_pipeline(
 
     except asyncio.TimeoutError:
         msg = "Scan timed out (5-minute limit exceeded)"
-        _store_error(job_id, repo_url, owner, repo, msg, time.monotonic() - start_time)
-        await sse_manager.push(job_id, ScanStep.ERROR, msg, 0)
+        _store_error(
+            job_id, repo_url, owner, repo, msg, time.monotonic() - start_time, app_state
+        )
+        await push_event(ScanStep.ERROR, msg, 0)
 
     except Exception as exc:
         msg = str(exc)
         print(f"[RepoScanner] Pipeline error for job {job_id}: {msg}")
-        _store_error(job_id, repo_url, owner, repo, msg, time.monotonic() - start_time)
-        await sse_manager.push(job_id, ScanStep.ERROR, f"Scan failed: {msg}", 0)
+        _store_error(
+            job_id, repo_url, owner, repo, msg, time.monotonic() - start_time, app_state
+        )
+        await push_event(ScanStep.ERROR, f"Scan failed: {msg}", 0)
 
     finally:
         if sandbox_id:
@@ -175,6 +208,7 @@ def _store_error(
     repo: str,
     error_msg: str,
     duration: float,
+    app_state,
 ) -> None:
     result = RepoScanResult(
         job_id=job_id,
@@ -186,10 +220,20 @@ def _store_error(
         scan_duration_seconds=round(duration, 2),
     )
     sse_manager.set_result(job_id, result)
+    if app_state.use_redis and app_state.redis_client:
+        try:
+            app_state.redis_client.set(
+                f"repo_scan:status:{job_id}", ScanStep.ERROR.value, ex=3600
+            )
+            app_state.redis_client.set(
+                f"repo_scan:result:{job_id}", result.json(), ex=3600
+            )
+        except Exception as e:
+            print(f"[RepoScanner] Redis error save error: {e}")
 
 
 # ─────────────────────────────────────────────
-# Router Factory  (mirrors get_health_router pattern)
+# Router Factory
 # ─────────────────────────────────────────────
 
 
@@ -197,10 +241,6 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
     """
     Build and return the repo-scan APIRouter, injecting shared state
     and the validate_token dependency — same pattern as get_health_router().
-
-    Usage in codeinspectior_api.py:
-        from scan_repository import get_repo_scan_router
-        app.include_router(get_repo_scan_router(state, validate_token))
     """
     router = APIRouter()
 
@@ -218,19 +258,34 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
     ) -> RepoScanSubmitResponse:
         """
         Validates a public GitHub repository URL and enqueues a full scan job.
-
-        Returns immediately with a `job_id`. Connect to the `/status` SSE endpoint
-        for live progress updates and poll `/result` for the final report.
-
-        **Auth**: Same API key (Bearer token) as Quick Scan and Bulk Scan.
         """
         owner, repo = await validate_github_repo(req.repo_url)
 
         job_id = str(uuid.uuid4())
         sse_manager.create_job(job_id, req.repo_url)
+
+        # 1. Local event push
         await sse_manager.push(
             job_id, ScanStep.QUEUED, "Job queued — awaiting sandbox...", 5
         )
+
+        # 2. Redis status and initial event sync (cluster-wide visibility)
+        if app_state.use_redis and app_state.redis_client:
+            try:
+                from .models import ScanEvent
+
+                event = ScanEvent(
+                    job_id=job_id,
+                    step=ScanStep.QUEUED,
+                    message="Job queued — awaiting sandbox...",
+                    progress=5,
+                )
+                app_state.redis_client.publish(f"repo_scan:chan:{job_id}", event.json())
+                app_state.redis_client.set(
+                    f"repo_scan:status:{job_id}", ScanStep.QUEUED.value, ex=3600
+                )
+            except Exception as e:
+                print(f"[RepoScanner] Redis queued save error: {e}")
 
         background_tasks.add_task(
             _run_scan_pipeline,
@@ -238,7 +293,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
             req.repo_url,
             owner,
             repo,
-            app_state.backend,
+            app_state,
         )
 
         base = "/v1/repo-scan"
@@ -259,32 +314,90 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
     async def stream_scan_status(job_id: str) -> StreamingResponse:
         """
         SSE endpoint streaming scan step events in real-time.
-
-        Each event is a JSON object:
-        ```json
-        {
-          "job_id": "...",
-          "step": "CLONING",
-          "message": "Cloning owner/repo...",
-          "progress": 25,
-          "detail": null
-        }
-        ```
-        The stream closes automatically when **DONE** or **ERROR** is emitted.
+        Works across clusters using Redis Pub/Sub as fallback.
         """
+        # Scenario A: Local pod created this job
         job = sse_manager.get_job(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        if job is not None:
+            return StreamingResponse(
+                sse_manager.stream(job_id),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                    "Connection": "keep-alive",
+                },
+            )
 
-        return StreamingResponse(
-            sse_manager.stream(job_id),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-                "Connection": "keep-alive",
-            },
-        )
+        # Scenario B: Another replica pod in cluster handles the job — use Redis Pub/Sub fallback
+        if app_state.use_redis and app_state.redis_client:
+
+            async def stream_redis_pubsub() -> AsyncIterator[str]:
+                # Send bootstrapping update if terminal state is already reached
+                status_bytes = app_state.redis_client.get(f"repo_scan:status:{job_id}")
+                if status_bytes:
+                    status_str = (
+                        status_bytes.decode("utf-8")
+                        if isinstance(status_bytes, bytes)
+                        else str(status_bytes)
+                    )
+                    if status_str in ("DONE", "ERROR"):
+                        res_bytes = app_state.redis_client.get(
+                            f"repo_scan:result:{job_id}"
+                        )
+                        if res_bytes:
+                            try:
+                                res_json = json.loads(res_bytes)
+                                from .models import ScanEvent
+
+                                bootstrap_event = ScanEvent(
+                                    job_id=job_id,
+                                    step=ScanStep(status_str),
+                                    message="Scan complete (loaded from cluster cache)",
+                                    progress=100 if status_str == "DONE" else 0,
+                                    detail=res_json,
+                                )
+                                yield f"data: {bootstrap_event.json()}\n\n"
+                                return
+                            except Exception:
+                                pass
+
+                # Subscribe to the job channel
+                pubsub = app_state.redis_client.pubsub()
+                pubsub.subscribe(f"repo_scan:chan:{job_id}")
+
+                try:
+                    while True:
+                        msg = pubsub.get_message(ignore_subscribe_messages=True)
+                        if msg:
+                            data_str = (
+                                msg["data"].decode("utf-8")
+                                if isinstance(msg["data"], bytes)
+                                else str(msg["data"])
+                            )
+                            yield f"data: {data_str}\n\n"
+                            try:
+                                ev_dict = json.loads(data_str)
+                                if ev_dict.get("step") in ("DONE", "ERROR"):
+                                    break
+                            except Exception:
+                                pass
+                        await asyncio.sleep(0.5)
+                finally:
+                    pubsub.unsubscribe(f"repo_scan:chan:{job_id}")
+                    pubsub.close()
+
+            return StreamingResponse(
+                stream_redis_pubsub(),
+                media_type="text/event-stream",
+                headers={
+                    "Cache-Control": "no-cache",
+                    "X-Accel-Buffering": "no",
+                    "Connection": "keep-alive",
+                },
+            )
+
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     # ── GET /v1/repo-scan/{job_id}/result ──────────────────────────────
     @router.get(
@@ -296,18 +409,37 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
     )
     async def get_scan_result(job_id: str) -> RepoScanResult:
         """
-        Returns the complete scan result once the job reaches **DONE** or **ERROR**.
-
-        Returns **404** while the scan is still in progress.
+        Returns the complete scan result once the job reaches DONE or ERROR.
+        Resolves via cluster Redis cache fallback if processed on another node.
         """
+        # 1. Local pod check
         job = sse_manager.get_job(job_id)
-        if job is None:
-            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
-        if job.result is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Result not ready yet. Job is still in progress.",
-            )
-        return job.result
+        if job and job.result:
+            return job.result
+
+        # 2. Redis cache fallback
+        if app_state.use_redis and app_state.redis_client:
+            res_bytes = app_state.redis_client.get(f"repo_scan:result:{job_id}")
+            if res_bytes:
+                try:
+                    return RepoScanResult.parse_raw(res_bytes)
+                except Exception as e:
+                    print(f"[RepoScanner] Error parsing result from Redis: {e}")
+
+            # If result not in Redis yet, check if the job is still active
+            status_bytes = app_state.redis_client.get(f"repo_scan:status:{job_id}")
+            if status_bytes:
+                status_str = (
+                    status_bytes.decode("utf-8")
+                    if isinstance(status_bytes, bytes)
+                    else str(status_bytes)
+                )
+                if status_str not in ("DONE", "ERROR"):
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Result not ready yet. Scan is currently in step: {status_str}",
+                    )
+
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
     return router
