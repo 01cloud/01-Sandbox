@@ -8,7 +8,7 @@ the main models.py in the parent package.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field, validator
 
@@ -67,7 +67,7 @@ class FindingItem(BaseModel):
 
     severity: str = "INFO"
     file: str = ""
-    line: Optional[int] = None
+    line: Optional[Union[int, str]] = None
     issue: str = ""
     tool: str = ""
     remediation: Optional[str] = None
