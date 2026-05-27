@@ -1,195 +1,136 @@
 """
 file_scanner.py — Per-language static analysis scanner dispatch.
 
-Runs the appropriate scanner for each detected language inside the
-provisioned sandbox. All tools are already installed in Dockerfile_base.
+Revised architecture: Instead of exec-ing tools in a remote sandbox
+(which has no /exec endpoint), we read files from the locally cloned
+repo and submit them to the existing POST /scan-jobs pipeline.
+
+The /scan-jobs endpoint provisions a code-interpreter sandbox with all
+tools (bandit, pylint, eslint, rubocop, pmd, go vet, etc.) pre-installed
+via Dockerfile_base and returns a full security scan report.
 
 File cap: max 100 files per language (spec constraint).
-
-Test
 """
 from __future__ import annotations
 
 import json
-import re
-from typing import List
+import os
+from typing import List, Optional
+
+import httpx
+from config import opensandbox_base_url, opensandbox_headers, opensandbox_route_prefix
 
 from .models import FindingItem, LanguageScanResult
-from .sandbox_provisioner import REPO_DIR, exec_in_sandbox
 
-# Maximum files scanned per language (spec constraint)
+# Maximum files submitted per language
 FILE_CAP = 100
 
-
-# ─────────────────────────────────────────────
-# Finding Parsers
-# ─────────────────────────────────────────────
-
-
-def _parse_bandit(stdout: str, language: str) -> List[FindingItem]:
-    """Parse bandit JSON output."""
-    findings: List[FindingItem] = []
-    try:
-        data = json.loads(stdout)
-        for issue in data.get("results", []):
-            findings.append(
-                FindingItem(
-                    severity=issue.get("issue_severity", "MEDIUM").upper(),
-                    file=issue.get("filename", "").replace(REPO_DIR + "/", ""),
-                    line=issue.get("line_number"),
-                    issue=issue.get("issue_text", ""),
-                    tool="bandit",
-                    remediation=issue.get("more_info", ""),
-                )
-            )
-    except Exception:
-        pass
-    return findings
+# Languages we skip security scanning for (only LoC counted)
+LOC_ONLY_LANGS = {
+    "yaml",
+    "json",
+    "markdown",
+    "text",
+    "toml",
+    "xml",
+    "ini",
+    "dockerfile",
+}
 
 
-def _parse_pylint(stdout: str) -> List[FindingItem]:
-    """Parse pylint JSON output."""
-    findings: List[FindingItem] = []
-    try:
-        data = json.loads(stdout)
-        for msg in data:
-            sev = msg.get("type", "convention").upper()
-            # Map pylint types to severity
-            sev_map = {
-                "ERROR": "HIGH",
-                "WARNING": "MEDIUM",
-                "REFACTOR": "LOW",
-                "CONVENTION": "INFO",
-                "INFORMATION": "INFO",
-                "FATAL": "CRITICAL",
-            }
-            findings.append(
-                FindingItem(
-                    severity=sev_map.get(sev, "INFO"),
-                    file=msg.get("path", "").replace(REPO_DIR + "/", ""),
-                    line=msg.get("line"),
-                    issue=f"[{msg.get('message-id', '')}] {msg.get('message', '')}",
-                    tool="pylint",
-                    remediation=msg.get("symbol", ""),
-                )
-            )
-    except Exception:
-        pass
-    return findings
+def _pmd_priority_to_severity(priority: int) -> str:
+    """Convert PMD numeric priority (1=highest) to severity string."""
+    return {1: "CRITICAL", 2: "HIGH", 3: "MEDIUM", 4: "LOW"}.get(priority, "INFO")
 
 
-def _parse_eslint(stdout: str) -> List[FindingItem]:
-    """Parse ESLint JSON output."""
-    findings: List[FindingItem] = []
-    try:
-        data = json.loads(stdout)
-        for file_result in data:
-            filepath = file_result.get("filePath", "").replace(REPO_DIR + "/", "")
-            for msg in file_result.get("messages", []):
-                sev = "HIGH" if msg.get("severity") == 2 else "MEDIUM"
-                findings.append(
-                    FindingItem(
-                        severity=sev,
-                        file=filepath,
-                        line=msg.get("line"),
-                        issue=msg.get("message", ""),
-                        tool="eslint",
-                        remediation=msg.get("ruleId", ""),
-                    )
-                )
-    except Exception:
-        pass
-    return findings
-
-
-def _parse_go_vet(stdout: str, stderr: str) -> List[FindingItem]:
-    """Parse go vet output (text format)."""
-    findings: List[FindingItem] = []
-    text = stderr or stdout
-    for line in text.splitlines():
-        # Pattern: ./path/file.go:line:col: message
-        m = re.match(r"^(.+\.go):(\d+)(?::\d+)?: (.+)$", line.strip())
-        if m:
-            findings.append(
-                FindingItem(
-                    severity="MEDIUM",
-                    file=m.group(1).replace(REPO_DIR + "/", ""),
-                    line=int(m.group(2)),
-                    issue=m.group(3),
-                    tool="go vet",
-                )
-            )
-    return findings
-
-
-def _parse_staticcheck(stdout: str) -> List[FindingItem]:
-    """Parse staticcheck JSON output (one JSON object per line)."""
-    findings: List[FindingItem] = []
-    for line in stdout.splitlines():
+def _count_loc(files: list[str]) -> int:
+    """Count lines of code across a list of local file paths."""
+    total = 0
+    for path in files:
         try:
-            obj = json.loads(line.strip())
-            pos = obj.get("position", {})
-            findings.append(
-                FindingItem(
-                    severity="MEDIUM",
-                    file=pos.get("file", "").replace(REPO_DIR + "/", ""),
-                    line=pos.get("line"),
-                    issue=obj.get("message", ""),
-                    tool="staticcheck",
-                    remediation=obj.get("code", ""),
-                )
-            )
+            with open(path, "r", errors="replace") as f:
+                total += sum(1 for line in f if line.strip())
+        except Exception:
+            pass
+    return total
+
+
+def _read_files_as_dict(files: list[str], repo_root: str) -> dict[str, str]:
+    """
+    Read file contents and return {relative_path: content} dict.
+    Skips binary files and files > 200 KB.
+    """
+    result: dict[str, str] = {}
+    for path in files[:FILE_CAP]:
+        try:
+            size = os.path.getsize(path)
+            if size > 200 * 1024:  # 200 KB cap per file
+                continue
+            with open(path, "r", errors="replace") as f:
+                content = f.read()
+            rel_path = os.path.relpath(path, repo_root)
+            result[rel_path] = content
         except Exception:
             continue
-    return findings
+    return result
 
 
-def _parse_rubocop(stdout: str) -> List[FindingItem]:
-    """Parse rubocop JSON output."""
+def _parse_scan_report(report: dict, lang_lower: str) -> List[FindingItem]:
+    """
+    Parse the security_scan_report.json returned by the scan-jobs endpoint.
+    The report structure is produced by code-interpreter/src/scanner_orchestrator.py.
+    """
     findings: List[FindingItem] = []
-    try:
-        data = json.loads(stdout)
-        for file_info in data.get("files", []):
-            filepath = file_info.get("path", "").replace(REPO_DIR + "/", "")
-            for offense in file_info.get("offenses", []):
-                sev = offense.get("severity", "convention").upper()
-                sev_map = {
-                    "ERROR": "HIGH",
-                    "WARNING": "MEDIUM",
-                    "CONVENTION": "INFO",
-                    "REFACTOR": "LOW",
-                    "INFO": "INFO",
-                }
-                loc = offense.get("location", {})
-                findings.append(
-                    FindingItem(
-                        severity=sev_map.get(sev, "INFO"),
-                        file=filepath,
-                        line=loc.get("start_line"),
-                        issue=offense.get("message", ""),
-                        tool="rubocop",
-                        remediation=offense.get("cop_name", ""),
-                    )
-                )
-    except Exception:
-        pass
+
+    # Findings are nested under tool names in the report
+    # Structure: {"findings": [...], "tool_outputs": {...}, ...}
+    raw_findings = report.get("findings", [])
+
+    for f in raw_findings:
+        severity = f.get("severity", "INFO").upper()
+        # Normalize severity levels
+        if severity not in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
+            severity = "INFO"
+
+        findings.append(
+            FindingItem(
+                severity=severity,
+                file=f.get("file", f.get("filename", "")),
+                line=f.get("line", f.get("line_number")),
+                issue=f.get("issue", f.get("message", f.get("description", ""))),
+                tool=f.get("tool", "scanner"),
+                remediation=f.get("remediation", f.get("more_info", f.get("rule"))),
+            )
+        )
+
     return findings
 
 
-def _parse_tokei_loc(stdout: str, language: str) -> int:
-    """Extract lines of code from tokei JSON for a specific language."""
+async def _submit_scan_job(
+    files_dict: dict[str, str], tools: Optional[list[str]] = None
+) -> dict:
+    """
+    Submit files to POST /scan-jobs and wait for the result.
+    Returns the parsed report dict, or {} on failure.
+    """
+    base_url = opensandbox_base_url()
+    prefix = opensandbox_route_prefix()
+    url = f"{base_url.rstrip('/')}{prefix}/scan-jobs"
+
+    payload: dict = {"files": files_dict}
+    if tools:
+        payload["tools"] = tools
+
     try:
-        data = json.loads(stdout)
-        lang_data = data.get(language, {})
-        if not lang_data:
-            # Try case-insensitive match
-            for k, v in data.items():
-                if k.lower() == language.lower():
-                    lang_data = v
-                    break
-        return lang_data.get("code", 0)
-    except Exception:
-        return 0
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            resp = await client.post(url, json=payload, headers=opensandbox_headers())
+            resp.raise_for_status()
+            data = resp.json()
+            # Scan-jobs returns ScanJobResponse with a "report" field
+            return data.get("report") or {}
+    except Exception as exc:
+        print(f"[RepoScanner] scan-jobs submission error: {exc}")
+        return {}
 
 
 # ─────────────────────────────────────────────
@@ -204,168 +145,80 @@ async def scan_language(
     percentage: float,
 ) -> LanguageScanResult:
     """
-    Run the appropriate static analysis scanner for a detected language.
+    Run security analysis for a detected language by submitting
+    its source files to the POST /scan-jobs endpoint.
 
     Args:
-        sandbox_id:  Active sandbox to exec commands in.
-        language:    Language name from the detector (e.g. "Python").
-        files:       List of file paths inside the sandbox.
-        percentage:  Language share of the total repo (0-100).
+        sandbox_id:  Path to the local temp directory (repo root's parent).
+        language:    Language name (e.g. "Python").
+        files:       List of absolute file paths inside sandbox_id.
+        percentage:  Language share of the total repo (0–100).
 
     Returns:
         LanguageScanResult with findings and LoC.
     """
-    # Cap files to avoid runaway costs
+    lang_lower = language.lower()
     files_capped = files[:FILE_CAP]
     file_count = len(files_capped)
     findings: List[FindingItem] = []
-    lines_of_code = 0
 
-    # ── Get LoC via tokei ──────────────────────────────────────────────
-    loc_stdout, _, _ = await exec_in_sandbox(
-        sandbox_id=sandbox_id,
-        command=["tokei", REPO_DIR, "--output", "json"],
-        timeout=30.0,
-    )
-    lines_of_code = _parse_tokei_loc(loc_stdout, language)
+    # Always count LoC from local files (fast, no network)
+    lines_of_code = _count_loc(files_capped)
 
-    lang_lower = language.lower()
+    # Skip security scanning for non-code languages
+    if lang_lower in LOC_ONLY_LANGS:
+        return LanguageScanResult(
+            language=language,
+            file_count=file_count,
+            lines_of_code=lines_of_code,
+            percentage=round(percentage, 2),
+            findings=[],
+        )
 
-    # ── Python ────────────────────────────────────────────────────────
+    # Build the file dict to submit to the scan-jobs pipeline
+    repo_root = os.path.join(sandbox_id, "repo")
+    files_dict = _read_files_as_dict(files_capped, repo_root)
+
+    if not files_dict:
+        print(f"[RepoScanner] No readable files for {language}, skipping scan")
+        return LanguageScanResult(
+            language=language,
+            file_count=file_count,
+            lines_of_code=lines_of_code,
+            percentage=round(percentage, 2),
+            findings=[],
+        )
+
+    # Select tool hints for the scan-jobs orchestrator
+    # (scanner_orchestrator.py uses these to pick the right tools)
+    tool_hints: Optional[list[str]] = None
     if lang_lower == "python":
-        # bandit security scan
-        stdout, _, _ = await exec_in_sandbox(
-            sandbox_id=sandbox_id,
-            command=["bandit", "-r", "-f", "json", REPO_DIR],
-            timeout=90.0,
-        )
-        findings.extend(_parse_bandit(stdout, language))
-
-        # pylint code quality
-        if files_capped:
-            stdout, _, _ = await exec_in_sandbox(
-                sandbox_id=sandbox_id,
-                command=["pylint", "--output-format=json", "--exit-zero"]
-                + files_capped,
-                timeout=90.0,
-            )
-            findings.extend(_parse_pylint(stdout))
-
-    # ── JavaScript / TypeScript ───────────────────────────────────────
+        tool_hints = ["bandit", "semgrep"]
     elif lang_lower in ("javascript", "typescript"):
-        stdout, _, _ = await exec_in_sandbox(
-            sandbox_id=sandbox_id,
-            command=[
-                "eslint",
-                "--format",
-                "json",
-                "--no-eslintrc",
-                "--env",
-                "browser,node,es2022",
-                REPO_DIR,
-            ],
-            timeout=90.0,
-        )
-        findings.extend(_parse_eslint(stdout))
-
-    # ── Go ────────────────────────────────────────────────────────────
+        tool_hints = ["semgrep"]
     elif lang_lower == "go":
-        # go vet for correctness
-        stdout, stderr, _ = await exec_in_sandbox(
-            sandbox_id=sandbox_id,
-            command=["go", "vet", "./..."],
-            workdir=REPO_DIR,
-            timeout=120.0,
-        )
-        findings.extend(_parse_go_vet(stdout, stderr))
-
-        # staticcheck for extra lint
-        stdout, _, _ = await exec_in_sandbox(
-            sandbox_id=sandbox_id,
-            command=["staticcheck", "-f", "json", "./..."],
-            workdir=REPO_DIR,
-            timeout=120.0,
-        )
-        findings.extend(_parse_staticcheck(stdout))
-
-    # ── Rust ─────────────────────────────────────────────────────────
-    elif lang_lower == "rust":
-        stdout, stderr, _ = await exec_in_sandbox(
-            sandbox_id=sandbox_id,
-            command=["cargo", "check", "--message-format", "json"],
-            workdir=REPO_DIR,
-            timeout=180.0,
-        )
-        for line in (stdout + "\n" + stderr).splitlines():
-            try:
-                obj = json.loads(line.strip())
-                if obj.get("reason") == "compiler-message":
-                    msg = obj.get("message", {})
-                    level = msg.get("level", "note")
-                    if level in ("error", "warning"):
-                        spans = msg.get("spans", [{}])
-                        span = spans[0] if spans else {}
-                        findings.append(
-                            FindingItem(
-                                severity="HIGH" if level == "error" else "MEDIUM",
-                                file=(span.get("file_name", "")).replace(
-                                    REPO_DIR + "/", ""
-                                ),
-                                line=span.get("line_start"),
-                                issue=msg.get("message", ""),
-                                tool="cargo check",
-                                remediation=msg.get("code", {}).get("code")
-                                if msg.get("code")
-                                else None,
-                            )
-                        )
-            except Exception:
-                continue
-
-    # ── Ruby ─────────────────────────────────────────────────────────
-    elif lang_lower == "ruby":
-        stdout, _, _ = await exec_in_sandbox(
-            sandbox_id=sandbox_id,
-            command=["rubocop", "--format", "json", "--no-color", REPO_DIR],
-            timeout=90.0,
-        )
-        findings.extend(_parse_rubocop(stdout))
-
-    # ── Java ─────────────────────────────────────────────────────────
+        tool_hints = ["gosec", "semgrep"]
     elif lang_lower == "java":
-        if files_capped:
-            stdout, _, _ = await exec_in_sandbox(
-                sandbox_id=sandbox_id,
-                command=[
-                    "pmd",
-                    "check",
-                    "-f",
-                    "json",
-                    "-R",
-                    "rulesets/java/quickstart.xml",
-                    "-d",
-                    REPO_DIR,
-                ],
-                timeout=120.0,
-            )
-            try:
-                data = json.loads(stdout)
-                for v in data.get("violations", []):
-                    findings.append(
-                        FindingItem(
-                            severity=_pmd_priority_to_severity(v.get("priority", 3)),
-                            file=v.get("filename", "").replace(REPO_DIR + "/", ""),
-                            line=v.get("beginline"),
-                            issue=v.get("description", ""),
-                            tool="pmd",
-                            remediation=v.get("rule", ""),
-                        )
-                    )
-            except Exception:
-                pass
+        tool_hints = ["semgrep"]
+    elif lang_lower == "ruby":
+        tool_hints = ["semgrep"]
+    elif lang_lower in ("shell", "bash"):
+        tool_hints = ["shellcheck", "semgrep"]
+    elif lang_lower in ("yaml", "yml"):
+        tool_hints = ["yamllint", "semgrep"]
 
-    # ── Generic / Shell / YAML / Markdown — just LoC (already done) ──
-    # tokei already captured LoC above; no findings for generic langs.
+    print(
+        f"[RepoScanner] Submitting {len(files_dict)} {language} files to scan-jobs pipeline..."
+    )
+    report = await _submit_scan_job(files_dict, tools=tool_hints)
+
+    if report:
+        findings = _parse_scan_report(report, lang_lower)
+        print(f"[RepoScanner] {language}: {len(findings)} finding(s) from scan-jobs")
+    else:
+        print(
+            f"[RepoScanner] {language}: scan-jobs returned no report, skipping findings"
+        )
 
     return LanguageScanResult(
         language=language,
@@ -374,17 +227,3 @@ async def scan_language(
         percentage=round(percentage, 2),
         findings=findings,
     )
-
-
-def _pmd_priority_to_severity(priority: int) -> str:
-    """Convert PMD numeric priority (1=highest) to severity string."""
-    if priority == 1:
-        return "CRITICAL"
-    elif priority == 2:
-        return "HIGH"
-    elif priority == 3:
-        return "MEDIUM"
-    elif priority == 4:
-        return "LOW"
-    else:
-        return "INFO"

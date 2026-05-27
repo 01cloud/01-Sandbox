@@ -1,54 +1,36 @@
 """
 sandbox_provisioner.py — Sandbox lifecycle management for repo scanning.
 
-Provisions sandboxes via the same state.backend (GenericHTTPBackend)
-that Quick Scan and Bulk Scan use. Commands are executed inside the
-sandbox via the OpenSandbox /exec endpoint.
+Revised architecture: Since the OpenSandbox server has no /exec endpoint,
+we clone the repository locally on the API pod using a subprocess git clone,
+store cloned files in a local temp directory, and run tools via the
+existing POST /scan-jobs pipeline.
+
+The "sandbox_id" returned by provision_sandbox() is the path of the
+local temp directory (e.g. /tmp/repo_abc123).
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import os
+import shutil
+import tempfile
 from typing import Optional, Tuple
 
-import httpx
-from config import opensandbox_base_url, opensandbox_headers, opensandbox_route_prefix
-
-# Image used for scanning — the code-interpreter base image that has
-# all detection tools (linguist, tokei, enry, bandit, eslint, etc.)
-# pre-installed in Dockerfile_base.
-DEFAULT_SCANNER_IMAGE = os.getenv(
-    "SCANNER_IMAGE",
-    "01community/01sandbox-codeinterpreter-base-image:1.0.1",
-)
-
-# Sandbox stays alive for 5 minutes max (constraint from spec)
-SANDBOX_TIMEOUT_SECONDS = 300
-
-REPO_DIR = "/repo"
+# Subdirectory inside the temp sandbox where the repo is cloned
+REPO_DIR = "repo"
 
 
 async def provision_sandbox(backend) -> str:
     """
-    Provision an isolated sandbox using the scanner base image.
-    Returns the sandbox_id string.
-
-    Uses GenericHTTPBackend.create_sandbox() — the same call made by
-    POST /v1/sandboxes.
+    Create an isolated temp directory to act as the local 'sandbox'.
+    Returns the absolute path of the temp directory as the sandbox_id.
     """
-    from models import CreateSandboxRequest, ImageSpec, ResourceLimits  # parent package
-
-    req = CreateSandboxRequest(
-        image=ImageSpec(uri=DEFAULT_SCANNER_IMAGE),
-        entrypoint=["sleep", str(SANDBOX_TIMEOUT_SECONDS)],
-        timeout=SANDBOX_TIMEOUT_SECONDS,
-        env={},
-        resourceLimits=ResourceLimits(cpu="500m", memory="1Gi"),
-        metadata={"purpose": "repo-scan"},
-    )
-    result = backend.create_sandbox(req)
-    return result.id
+    loop = asyncio.get_event_loop()
+    tmpdir = await loop.run_in_executor(None, tempfile.mkdtemp, None, "reposcanner_")
+    print(f"[RepoScanner] Provisioned local sandbox at: {tmpdir}")
+    return tmpdir
 
 
 async def exec_in_sandbox(
@@ -58,35 +40,36 @@ async def exec_in_sandbox(
     timeout: float = 120.0,
 ) -> Tuple[str, str, int]:
     """
-    Execute a command inside the sandbox via the OpenSandbox exec endpoint.
+    Execute a command inside the local sandbox directory using asyncio subprocess.
+    sandbox_id is the absolute path of the temp directory.
+
     Returns (stdout, stderr, exit_code).
-
-    Mirrors how scan jobs call the backend directly via httpx.
     """
-    base_url = opensandbox_base_url()
-    prefix = opensandbox_route_prefix()
-    url = f"{base_url.rstrip('/')}{prefix}/sandboxes/{sandbox_id}/exec"
-
-    payload: dict = {"command": command}
-    if workdir:
-        payload["workdir"] = workdir
+    effective_cwd = workdir or sandbox_id
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(
-                url,
-                json=payload,
-                headers=opensandbox_headers(),
-            )
-            resp.raise_for_status()
-            data = resp.json()
-            return (
-                data.get("stdout", ""),
-                data.get("stderr", ""),
-                int(data.get("exit_code", 0)),
-            )
-    except httpx.HTTPStatusError as exc:
-        return ("", f"HTTP error {exc.response.status_code}: {exc.response.text}", 1)
+        proc = await asyncio.wait_for(
+            asyncio.create_subprocess_exec(
+                *command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=effective_cwd,
+                env={**os.environ},
+            ),
+            timeout=timeout,
+        )
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout
+        )
+        return (
+            stdout_bytes.decode("utf-8", errors="replace"),
+            stderr_bytes.decode("utf-8", errors="replace"),
+            proc.returncode or 0,
+        )
+    except asyncio.TimeoutError:
+        return ("", f"Command timed out after {timeout}s", 1)
+    except FileNotFoundError as exc:
+        return ("", f"Command not found: {command[0]}: {exc}", 127)
     except Exception as exc:
         return ("", f"exec failed: {exc}", 1)
 
@@ -94,30 +77,28 @@ async def exec_in_sandbox(
 async def clone_repo(sandbox_id: str, repo_url: str) -> Tuple[bool, str]:
     """
     Clone the repository into REPO_DIR inside the sandbox using --depth=1.
+    sandbox_id is the temp directory path.
     Returns (success, error_message).
     """
+    target = os.path.join(sandbox_id, REPO_DIR)
     stdout, stderr, exit_code = await exec_in_sandbox(
         sandbox_id=sandbox_id,
-        command=["git", "clone", "--depth=1", repo_url, REPO_DIR],
+        command=["git", "clone", "--depth=1", repo_url, target],
         timeout=180.0,
     )
     if exit_code != 0:
         return False, stderr or stdout
+    print(f"[RepoScanner] Cloned repo to: {target}")
     return True, ""
 
 
 async def destroy_sandbox(sandbox_id: str) -> None:
     """
-    Delete the sandbox via DELETE /v1/sandboxes/{id}.
-    Always called in a finally block so it runs even on error.
+    Delete the local temp directory. Always called in a finally block.
     """
-    base_url = opensandbox_base_url()
-    prefix = opensandbox_route_prefix()
-    url = f"{base_url.rstrip('/')}{prefix}/sandboxes/{sandbox_id}"
-
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            await client.delete(url, headers=opensandbox_headers())
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, shutil.rmtree, sandbox_id, True)
+        print(f"[RepoScanner] Cleaned up local sandbox: {sandbox_id}")
     except Exception as exc:
-        # Non-fatal — log and continue
         print(f"[RepoScanner] Warning: failed to destroy sandbox {sandbox_id}: {exc}")

@@ -1,81 +1,78 @@
 """
-language_detector.py — Language detection using a priority chain.
+language_detector.py — Language detection using local file system tools.
 
-Priority order (same tools as GitHub uses internally):
-  1. github-linguist  — most accurate; handles vendored/generated/docs
-  2. tokei            — fast LoC counter with JSON output
-  3. enry             — lightweight Go port of linguist
+Since the repo is now cloned to a local temp directory, we run language
+detection tools directly on the API pod via subprocess (exec_in_sandbox).
 
-All tools are pre-installed in code-interpreter/Dockerfile_base so
-zero runtime installation occurs.
+Priority order:
+  1. tokei  — fast, JSON output with file-level breakdown
+  2. enry   — lightweight Go port of linguist (if installed)
+  3. Fallback — extension-based file walking (always available)
+
+Tools are run against the local cloned repo directory.
 """
 
 from __future__ import annotations
 
 import json
+import os
 import re
 from typing import Dict, List, Tuple
 
 from .models import DetectionTool
 from .sandbox_provisioner import REPO_DIR, exec_in_sandbox
 
-# ─────────────────────────────────────────────
-# Output Parsers
-# ─────────────────────────────────────────────
+# Mapping of file extensions to canonical language names
+EXT_MAP = {
+    ".py": "Python",
+    ".js": "JavaScript",
+    ".jsx": "JavaScript",
+    ".ts": "TypeScript",
+    ".tsx": "TypeScript",
+    ".go": "Go",
+    ".rs": "Rust",
+    ".java": "Java",
+    ".rb": "Ruby",
+    ".sh": "Shell",
+    ".bash": "Shell",
+    ".yaml": "YAML",
+    ".yml": "YAML",
+    ".json": "JSON",
+    ".md": "Markdown",
+    ".c": "C",
+    ".cpp": "C++",
+    ".h": "C",
+    ".cs": "C#",
+    ".php": "PHP",
+    ".swift": "Swift",
+    ".kt": "Kotlin",
+    ".scala": "Scala",
+}
+
+# Directories to skip during file walk
+SKIP_DIRS = {
+    ".git",
+    "node_modules",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "vendor",
+    "target",
+    ".idea",
+    ".vscode",
+    "dist",
+    "build",
+}
 
 
-def _parse_linguist(output: str) -> Dict[str, List[str]]:
+def _repo_path(sandbox_id: str) -> str:
+    """Return the absolute path of the cloned repo directory."""
+    return os.path.join(sandbox_id, REPO_DIR)
+
+
+def _parse_tokei(output: str, base_path: str) -> Dict[str, List[str]]:
     """
-    Parse `linguist --breakdown` output.
-
-    Example output:
-        Python (87.3%)
-        ---------------
-        src/main.py
-        src/utils.py
-
-        JavaScript (12.7%)
-        -------------------
-        static/app.js
-    """
-    result: Dict[str, List[str]] = {}
-    current_lang: str | None = None
-
-    for line in output.splitlines():
-        line = line.strip()
-        if not line:
-            current_lang = None
-            continue
-
-        # Language header: "Python (87.3%)"
-        lang_match = re.match(r"^([A-Za-z+#\s/.-]+?)\s+\(\d+\.\d+%\)$", line)
-        if lang_match:
-            current_lang = lang_match.group(1).strip()
-            result[current_lang] = []
-            continue
-
-        # Separator line
-        if re.match(r"^-+$", line):
-            continue
-
-        # File path
-        if current_lang is not None:
-            result[current_lang].append(line)
-
-    return result
-
-
-def _parse_tokei(output: str) -> Dict[str, List[str]]:
-    """
-    Parse `tokei --output json` output.
-
-    Tokei JSON structure:
-    {
-      "Python": {"blanks": 10, "code": 200, "comments": 30, "reports": [
-          {"name": "src/main.py", "stats": {...}}, ...
-      ]},
-      ...
-    }
+    Parse `tokei --output json` to build {language: [absolute_file_paths]}.
     """
     result: Dict[str, List[str]] = {}
     try:
@@ -87,7 +84,7 @@ def _parse_tokei(output: str) -> Dict[str, List[str]]:
         if lang == "Total":
             continue
         files = [r.get("name", "") for r in info.get("reports", [])]
-        files = [f for f in files if f]
+        files = [f for f in files if f and os.path.isfile(f)]
         if files:
             result[lang] = files
 
@@ -96,13 +93,8 @@ def _parse_tokei(output: str) -> Dict[str, List[str]]:
 
 def _parse_enry(output: str) -> Dict[str, List[str]]:
     """
-    Parse `enry` output.
-
-    Example output:
-        Python          87.30%  2 files
-        JavaScript      12.70%  1 file
-    (enry does not list individual files in its default output;
-     we return language → [] and the caller will glob for files)
+    Parse `enry` output — language names only (no per-file detail).
+    Returns {language: []} — file list populated by fallback walk.
     """
     result: Dict[str, List[str]] = {}
     for line in output.splitlines():
@@ -110,9 +102,31 @@ def _parse_enry(output: str) -> Dict[str, List[str]]:
         if not line:
             continue
         parts = line.split()
-        if len(parts) >= 1:
+        if parts:
             lang = parts[0]
-            result[lang] = []  # file list will be filled by file_scanner
+            if lang not in ("Total", "Other"):
+                result[lang] = []
+    return result
+
+
+def _local_walk(repo_path: str) -> Dict[str, List[str]]:
+    """
+    Pure-Python fallback: walk the repo directory and classify files
+    by extension. Always succeeds — never requires external tools.
+    """
+    result: Dict[str, List[str]] = {}
+
+    for root, dirs, files in os.walk(repo_path):
+        # Prune skipped directories in-place
+        dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
+
+        for filename in files:
+            _, ext = os.path.splitext(filename)
+            lang = EXT_MAP.get(ext.lower())
+            if lang:
+                full_path = os.path.join(root, filename)
+                result.setdefault(lang, []).append(full_path)
+
     return result
 
 
@@ -125,95 +139,61 @@ async def detect_languages(
     sandbox_id: str,
 ) -> Tuple[Dict[str, List[str]], DetectionTool]:
     """
-    Detect languages in REPO_DIR using the priority chain.
+    Detect languages in the locally cloned repository.
 
     Returns:
         (language_map, tool_used)
-        language_map: {"Python": ["src/main.py", ...], "Go": [...]}
+        language_map: {"Python": ["/tmp/reposcanner_abc/repo/src/main.py", ...]}
         tool_used: which DetectionTool was successful
     """
+    repo_path = _repo_path(sandbox_id)
 
-    # ── 1. github-linguist ──────────────────────────────────────────────
+    # ── 1. tokei ────────────────────────────────────────────────────────
     stdout, stderr, exit_code = await exec_in_sandbox(
         sandbox_id=sandbox_id,
-        command=["linguist", "--breakdown", REPO_DIR],
+        command=["tokei", repo_path, "--output", "json"],
         timeout=60.0,
     )
     if exit_code == 0 and stdout.strip():
-        lang_map = _parse_linguist(stdout)
-        if lang_map:
-            print(
-                f"[RepoScanner] Language detected by linguist: {list(lang_map.keys())}"
-            )
-            return lang_map, DetectionTool.LINGUIST
-
-    # ── 2. tokei ────────────────────────────────────────────────────────
-    stdout, stderr, exit_code = await exec_in_sandbox(
-        sandbox_id=sandbox_id,
-        command=["tokei", REPO_DIR, "--output", "json"],
-        timeout=60.0,
-    )
-    if exit_code == 0 and stdout.strip():
-        lang_map = _parse_tokei(stdout)
+        lang_map = _parse_tokei(stdout, repo_path)
         if lang_map:
             print(f"[RepoScanner] Language detected by tokei: {list(lang_map.keys())}")
             return lang_map, DetectionTool.TOKEI
 
-    # ── 3. enry ─────────────────────────────────────────────────────────
+    # ── 2. enry (if available) ──────────────────────────────────────────
     stdout, stderr, exit_code = await exec_in_sandbox(
         sandbox_id=sandbox_id,
-        command=["enry", REPO_DIR],
+        command=["enry", repo_path],
         timeout=60.0,
     )
-    lang_map = _parse_enry(stdout)
-    if lang_map:
-        print(f"[RepoScanner] Language detected by enry: {list(lang_map.keys())}")
-        return lang_map, DetectionTool.ENRY
+    if exit_code == 0 and stdout.strip():
+        lang_names = _parse_enry(stdout)
+        if lang_names:
+            # enry gives no file list — fill it via extension walk
+            walk_map = _local_walk(repo_path)
+            lang_map: Dict[str, List[str]] = {}
+            for lang in lang_names:
+                # Try exact match first, then case-insensitive
+                files = walk_map.get(lang) or next(
+                    (v for k, v in walk_map.items() if k.lower() == lang.lower()), []
+                )
+                if files:
+                    lang_map[lang] = files
+            if lang_map:
+                print(
+                    f"[RepoScanner] Language detected by enry: {list(lang_map.keys())}"
+                )
+                return lang_map, DetectionTool.ENRY
 
-    # ── Fallback: count files by common extension ────────────────────────
+    # ── 3. Pure-Python extension walk (always works) ────────────────────
     print(
-        "[RepoScanner] All detection tools failed — falling back to find-based detection"
+        "[RepoScanner] External tools unavailable — using local extension-based detection"
     )
-    return await _fallback_detect(sandbox_id), DetectionTool.UNKNOWN
+    lang_map = _local_walk(repo_path)
+    if lang_map:
+        print(
+            f"[RepoScanner] Language detected by extension walk: {list(lang_map.keys())}"
+        )
+        return lang_map, DetectionTool.UNKNOWN
 
-
-async def _fallback_detect(sandbox_id: str) -> Dict[str, List[str]]:
-    """
-    Last-resort fallback: use `find` to collect files by extension.
-    This mirrors what linguist avoids (extension guessing) but is better
-    than returning nothing.
-    """
-    EXT_MAP = {
-        ".py": "Python",
-        ".js": "JavaScript",
-        ".ts": "TypeScript",
-        ".go": "Go",
-        ".rs": "Rust",
-        ".java": "Java",
-        ".rb": "Ruby",
-        ".sh": "Shell",
-        ".yaml": "YAML",
-        ".yml": "YAML",
-        ".json": "JSON",
-        ".md": "Markdown",
-    }
-    result: Dict[str, List[str]] = {}
-
-    stdout, _, exit_code = await exec_in_sandbox(
-        sandbox_id=sandbox_id,
-        command=["find", REPO_DIR, "-type", "f", "-not", "-path", "*/.git/*"],
-        timeout=30.0,
-    )
-    if exit_code != 0:
-        return result
-
-    for path in stdout.splitlines():
-        path = path.strip()
-        if not path:
-            continue
-        ext = "." + path.rsplit(".", 1)[-1] if "." in path else ""
-        lang = EXT_MAP.get(ext.lower())
-        if lang:
-            result.setdefault(lang, []).append(path)
-
-    return result
+    return {}, DetectionTool.UNKNOWN
