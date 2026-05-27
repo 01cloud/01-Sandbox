@@ -6,8 +6,8 @@ Revised architecture: Instead of exec-ing tools in a remote sandbox
 repo and submit them to the existing POST /scan-jobs pipeline.
 
 The /scan-jobs endpoint provisions a code-interpreter sandbox with all
-tools (bandit, pylint, eslint, rubocop, pmd, go vet, etc.) pre-installed
-via Dockerfile_base and returns a full security scan report.
+tools (bandit, semgrep, gosec, shellcheck, etc.) pre-installed via
+Dockerfile_base and returns a full security scan report.
 
 File cap: max 100 files per language (spec constraint).
 """
@@ -15,12 +15,15 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from typing import List, Optional
 
 import httpx
 from config import opensandbox_base_url, opensandbox_headers, opensandbox_route_prefix
 
 from .models import FindingItem, LanguageScanResult
+
+_TAG = "[RepoScanner][FileScanner]"
 
 # Maximum files submitted per language
 FILE_CAP = 100
@@ -44,7 +47,7 @@ def _pmd_priority_to_severity(priority: int) -> str:
 
 
 def _count_loc(files: list[str]) -> int:
-    """Count lines of code across a list of local file paths."""
+    """Count non-blank lines of code across a list of local file paths."""
     total = 0
     for path in files:
         try:
@@ -59,20 +62,24 @@ def _read_files_as_dict(files: list[str], repo_root: str) -> dict[str, str]:
     """
     Read file contents and return {relative_path: content} dict.
     Skips binary files and files > 200 KB.
+    Returns tuple (files_dict, skipped_count).
     """
     result: dict[str, str] = {}
+    skipped = 0
     for path in files[:FILE_CAP]:
         try:
             size = os.path.getsize(path)
             if size > 200 * 1024:  # 200 KB cap per file
+                skipped += 1
                 continue
             with open(path, "r", errors="replace") as f:
                 content = f.read()
             rel_path = os.path.relpath(path, repo_root)
             result[rel_path] = content
         except Exception:
+            skipped += 1
             continue
-    return result
+    return result, skipped
 
 
 def _parse_scan_report(report: dict, lang_lower: str) -> List[FindingItem]:
@@ -129,15 +136,31 @@ async def _submit_scan_job(
     if tools:
         payload["tools"] = tools
 
+    print(f"{_TAG}   → POST {url}  (files={len(files_dict)}, tools={tools})")
+    t0 = time.monotonic()
+
     try:
         async with httpx.AsyncClient(timeout=300.0) as client:
             resp = await client.post(url, json=payload, headers=opensandbox_headers())
+            elapsed = time.monotonic() - t0
+            print(
+                f"{_TAG}   ← scan-jobs response: HTTP {resp.status_code} in {elapsed:.2f}s"
+            )
             resp.raise_for_status()
             data = resp.json()
-            # Scan-jobs returns ScanJobResponse with a "report" field
-            return data.get("report") or {}
+            report = data.get("report") or {}
+            raw_count = len(report.get("findings", []))
+            print(f"{_TAG}   ← report received: {raw_count} raw finding(s)")
+            return report
+    except httpx.HTTPStatusError as exc:
+        elapsed = time.monotonic() - t0
+        print(
+            f"{_TAG}   ✗ scan-jobs HTTP error after {elapsed:.2f}s: {exc.response.status_code} — {exc.response.text[:200]}"
+        )
+        return {}
     except Exception as exc:
-        print(f"[RepoScanner] scan-jobs submission error: {exc}")
+        elapsed = time.monotonic() - t0
+        print(f"{_TAG}   ✗ scan-jobs submission error after {elapsed:.2f}s: {exc}")
         return {}
 
 
@@ -169,12 +192,19 @@ async def scan_language(
     files_capped = files[:FILE_CAP]
     file_count = len(files_capped)
     findings: List[FindingItem] = []
+    t0 = time.monotonic()
+
+    print(
+        f"{_TAG} [{language}] Starting — {file_count} file(s), {percentage:.1f}% of repo"
+    )
 
     # Always count LoC from local files (fast, no network)
     lines_of_code = _count_loc(files_capped)
+    print(f"{_TAG} [{language}] Lines of code (non-blank): {lines_of_code:,}")
 
     # Skip security scanning for non-code languages
     if lang_lower in LOC_ONLY_LANGS:
+        print(f"{_TAG} [{language}] Skipping security scan — LoC-only language")
         return LanguageScanResult(
             language=language,
             file_count=file_count,
@@ -185,10 +215,15 @@ async def scan_language(
 
     # Build the file dict to submit to the scan-jobs pipeline
     repo_root = os.path.join(sandbox_id, "repo")
-    files_dict = _read_files_as_dict(files_capped, repo_root)
+    files_dict, skipped = _read_files_as_dict(files_capped, repo_root)
+
+    if skipped > 0:
+        print(
+            f"{_TAG} [{language}] Skipped {skipped} file(s) — binary, unreadable, or >200KB"
+        )
 
     if not files_dict:
-        print(f"[RepoScanner] No readable files for {language}, skipping scan")
+        print(f"{_TAG} [{language}] No readable files after filtering — skipping scan")
         return LanguageScanResult(
             language=language,
             file_count=file_count,
@@ -198,7 +233,6 @@ async def scan_language(
         )
 
     # Select tool hints for the scan-jobs orchestrator
-    # (scanner_orchestrator.py uses these to pick the right tools)
     tool_hints: Optional[list[str]] = None
     if lang_lower == "python":
         tool_hints = ["bandit", "semgrep"]
@@ -216,16 +250,25 @@ async def scan_language(
         tool_hints = ["yamllint", "semgrep"]
 
     print(
-        f"[RepoScanner] Submitting {len(files_dict)} {language} files to scan-jobs pipeline..."
+        f"{_TAG} [{language}] Submitting {len(files_dict)} file(s) to scan-jobs (tools: {tool_hints or 'auto'})"
     )
     report = await _submit_scan_job(files_dict, tools=tool_hints)
 
+    elapsed = time.monotonic() - t0
+
     if report:
         findings = _parse_scan_report(report, lang_lower)
-        print(f"[RepoScanner] {language}: {len(findings)} finding(s) from scan-jobs")
+        # Severity breakdown
+        sev_counts: dict[str, int] = {}
+        for fi in findings:
+            sev_counts[fi.severity] = sev_counts.get(fi.severity, 0) + 1
+        sev_str = ", ".join(f"{s}={n}" for s, n in sorted(sev_counts.items()))
+        print(
+            f"{_TAG} [{language}] Complete in {elapsed:.2f}s — {len(findings)} finding(s) [{sev_str or 'none'}]"
+        )
     else:
         print(
-            f"[RepoScanner] {language}: scan-jobs returned no report, skipping findings"
+            f"{_TAG} [{language}] scan-jobs returned no report in {elapsed:.2f}s — 0 findings recorded"
         )
 
     return LanguageScanResult(
