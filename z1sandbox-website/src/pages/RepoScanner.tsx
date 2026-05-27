@@ -172,10 +172,10 @@ export default function RepoScanner() {
     }
   };
 
-  const langEntries = result ? Object.entries(result.languages) : [];
+  const langEntries = result && result.languages ? Object.entries(result.languages) : [];
   const chartData   = langEntries.map(([lang, r]) => ({
     name: lang,
-    "%": parseFloat(r.percentage.toFixed(1)),
+    "%": r && typeof r.percentage === "number" ? parseFloat(r.percentage.toFixed(1)) : 0,
   }));
   const stepIdx = STEPS.indexOf(currentStep);
 

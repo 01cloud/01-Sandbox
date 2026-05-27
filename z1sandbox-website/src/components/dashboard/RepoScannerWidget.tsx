@@ -146,11 +146,18 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
 
       es.onerror = () => {
         es.close();
-        setIsScanning(false);
-        // Fallback: fetch result directly
+        // Fallback: fetch result directly if job is already done
         fetch(`${apiBaseUrl}/v1/repo-scan/${job_id}/result`, {
           headers: { Authorization: `Bearer ${apiKey}` },
-        }).then(r => r.json()).then(d => setResult(d)).catch(() => {});
+        })
+          .then(r => r.ok ? r.json() : null)
+          .then(d => {
+            if (d && d.languages) {
+              setResult(d);
+              setIsScanning(false);
+            }
+          })
+          .catch(() => {});
       };
     } catch (err: any) {
       toast.error(err.message);
@@ -160,9 +167,9 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
 
   useEffect(() => () => { esRef.current?.close(); }, []);
 
-  const langEntries = result ? Object.entries(result.languages) : [];
+  const langEntries = result && result.languages ? Object.entries(result.languages) : [];
   const chartData = langEntries.map(([lang, r]) => ({
-    name: lang, value: parseFloat(r.percentage.toFixed(1)),
+    name: lang, value: r && typeof r.percentage === "number" ? parseFloat(r.percentage.toFixed(1)) : 0,
   }));
 
   const stepIndex = STEPS.indexOf(currentStep);
