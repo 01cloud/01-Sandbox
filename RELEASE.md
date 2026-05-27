@@ -1,3 +1,44 @@
+## Release v0.5.14 — 01-Sandbox
+**Release Date:** May 27, 2026
+
+---
+
+### Summary
+v0.5.14 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* unauthorized error ([f1eed98](https://github.com/01cloud/01-Sandbox/commit/f1eed982c868a07d20287687074997b02c31524e))
+* unauthorized error ([a0548f0](https://github.com/01cloud/01-Sandbox/commit/a0548f0ccc5fa0c437829d0d07089fb33a1fe653))
+* generate RELEASE.md for v0.5.13 [skip ci] ([fac1da9](https://github.com/01cloud/01-Sandbox/commit/fac1da902fa0b4127ebd1c8334a6b717e402b83e))
+* bump versions to v0.5.13 [skip ci] ([f8ba128](https://github.com/01cloud/01-Sandbox/commit/f8ba12867a9d0acccbc99afb48f9cd54c5e6a5ad))
+
+### Changes
+## [0.5.14](https://github.com/01cloud/01-Sandbox/compare/v0.5.13...v0.5.14) (2026-05-27)
+
+
+### 🐛 Bug Fixes
+
+* unauthorized error ([f1eed98](https://github.com/01cloud/01-Sandbox/commit/f1eed982c868a07d20287687074997b02c31524e))
+* unauthorized error ([a0548f0](https://github.com/01cloud/01-Sandbox/commit/a0548f0ccc5fa0c437829d0d07089fb33a1fe653))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.13 [skip ci] ([fac1da9](https://github.com/01cloud/01-Sandbox/commit/fac1da902fa0b4127ebd1c8334a6b717e402b83e))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.13 [skip ci] ([f8ba128](https://github.com/01cloud/01-Sandbox/commit/f8ba12867a9d0acccbc99afb48f9cd54c5e6a5ad))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.14)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.13 — 01-Sandbox
 **Release Date:** May 27, 2026
 
