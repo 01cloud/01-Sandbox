@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.10](https://github.com/01cloud/01-Sandbox/compare/v0.5.9...v0.5.10) (2026-05-27)
+
+
+### 🚀 New Features
+
+* repo-scanner implementation in the apiServer ([ee1c5bf](https://github.com/01cloud/01-Sandbox/commit/ee1c5bff49e19cf604c2d7731f523802622e947f))
+* repo-scanner implementation in the apiServer ([16db3aa](https://github.com/01cloud/01-Sandbox/commit/16db3aa93c1943e9bbf989f1b53750dd551ff0e6))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.9 [skip ci] ([7fd2784](https://github.com/01cloud/01-Sandbox/commit/7fd278436237d8a25d68ed192cfaca23777f2497))
+
 ## [0.5.9](https://github.com/01cloud/01-Sandbox/compare/v0.5.8...v0.5.9) (2026-05-27)
 
 
