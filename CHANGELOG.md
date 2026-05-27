@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.13](https://github.com/01cloud/01-Sandbox/compare/v0.5.12...v0.5.13) (2026-05-27)
+
+
+### 🐛 Bug Fixes
+
+* pydantic validation error ([c8ed48d](https://github.com/01cloud/01-Sandbox/commit/c8ed48d3121f97b272100ccc6fb568f73c989f22))
+* pydantic validation error ([3f8313d](https://github.com/01cloud/01-Sandbox/commit/3f8313d73961cb79a6be0f769e960f064f588dc8))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.12 [skip ci] ([644f6ac](https://github.com/01cloud/01-Sandbox/commit/644f6acdc5bf22309afaa21ce6e0bc303b730728))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.12 [skip ci] ([fdf4c86](https://github.com/01cloud/01-Sandbox/commit/fdf4c8663f1137a04309960e66526a3c0a513399))
+
 ## [0.5.12](https://github.com/01cloud/01-Sandbox/compare/v0.5.11...v0.5.12) (2026-05-27)
 
 
