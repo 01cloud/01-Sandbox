@@ -1,3 +1,44 @@
+## Release v0.5.11 — 01-Sandbox
+**Release Date:** May 27, 2026
+
+---
+
+### Summary
+v0.5.11 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* fixed the dockerfile ([0784854](https://github.com/01cloud/01-Sandbox/commit/07848544998eff53804f9509031ebff3b0186f0a))
+* fixed the dockerfile ([173f6cc](https://github.com/01cloud/01-Sandbox/commit/173f6cc103355316f40a8c960a44cad50aa3d20a))
+* generate RELEASE.md for v0.5.10 [skip ci] ([d9b92cf](https://github.com/01cloud/01-Sandbox/commit/d9b92cf7d87cc2af0ad8595d7bd0e551074f3972))
+* bump versions to v0.5.10 [skip ci] ([ea937d3](https://github.com/01cloud/01-Sandbox/commit/ea937d3c8d2c12af4002309811562b152704713d))
+
+### Changes
+## [0.5.11](https://github.com/01cloud/01-Sandbox/compare/v0.5.10...v0.5.11) (2026-05-27)
+
+
+### 🐛 Bug Fixes
+
+* fixed the dockerfile ([0784854](https://github.com/01cloud/01-Sandbox/commit/07848544998eff53804f9509031ebff3b0186f0a))
+* fixed the dockerfile ([173f6cc](https://github.com/01cloud/01-Sandbox/commit/173f6cc103355316f40a8c960a44cad50aa3d20a))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.10 [skip ci] ([d9b92cf](https://github.com/01cloud/01-Sandbox/commit/d9b92cf7d87cc2af0ad8595d7bd0e551074f3972))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.10 [skip ci] ([ea937d3](https://github.com/01cloud/01-Sandbox/commit/ea937d3c8d2c12af4002309811562b152704713d))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.11)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.10 — 01-Sandbox
 **Release Date:** May 27, 2026
 
