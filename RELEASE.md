@@ -1,3 +1,40 @@
+## Release v0.5.18 — 01-Sandbox
+**Release Date:** May 27, 2026
+
+---
+
+### Summary
+v0.5.18 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* generate RELEASE.md for v0.5.17 [skip ci] ([3a4f75b](https://github.com/01cloud/01-Sandbox/commit/3a4f75b87fdcdeb31134e5d5912b5ae7bb971567))
+* **readme:** update the tools used ([f6788e9](https://github.com/01cloud/01-Sandbox/commit/f6788e9848eb060a685b4c1d731d7b1cb1a88da8))
+* **readme:** update the tools used ([37689b5](https://github.com/01cloud/01-Sandbox/commit/37689b5ed4fd8706501a2918554290d3a6dbfb52))
+* bump versions to v0.5.17 [skip ci] ([04f259a](https://github.com/01cloud/01-Sandbox/commit/04f259a14c5e5766d70eee2f8a6d12cf18f2a80a))
+
+### Changes
+## [0.5.18](https://github.com/01cloud/01-Sandbox/compare/v0.5.17...v0.5.18) (2026-05-27)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.17 [skip ci] ([3a4f75b](https://github.com/01cloud/01-Sandbox/commit/3a4f75b87fdcdeb31134e5d5912b5ae7bb971567))
+* **readme:** update the tools used ([f6788e9](https://github.com/01cloud/01-Sandbox/commit/f6788e9848eb060a685b4c1d731d7b1cb1a88da8))
+* **readme:** update the tools used ([37689b5](https://github.com/01cloud/01-Sandbox/commit/37689b5ed4fd8706501a2918554290d3a6dbfb52))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.17 [skip ci] ([04f259a](https://github.com/01cloud/01-Sandbox/commit/04f259a14c5e5766d70eee2f8a6d12cf18f2a80a))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.18)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.17 — 01-Sandbox
 **Release Date:** May 27, 2026
 
