@@ -26,8 +26,6 @@ jobs:
 
   filter:
     name: Filter Changes
-    needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
     runs-on: ubuntu-latest
     outputs:
       api:        ${{ steps.filter.outputs.api }}
@@ -115,3 +113,10 @@ jobs:
       values-files: ${{ vars.HELM_VALUES_FILES }}
       atomic: true
       timeout: 5m0s
+
+  notify:
+    name: Notify
+    needs: deploy
+    if: ${{ needs.release-please.outputs.release_created == 'true' }}
+    uses: 01cloud/actions/.github/workflows/notify.yaml@main
+    secrets: inherit

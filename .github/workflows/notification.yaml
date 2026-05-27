@@ -1,0 +1,16 @@
+name: Notifications
+
+on:
+  pull_request:
+    types: [opened, closed, reopened, ready_for_review, review_requested]
+  pull_request_review:
+    types: [submitted, edited, dismissed]
+  issues:
+    types: [opened, closed, reopened]
+  issue_comment:
+    types: [created]
+
+jobs:
+  notify:
+    uses: 01cloud/actions/.github/workflows/notifications.yaml@main
+    secrets: inherit
