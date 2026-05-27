@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.9](https://github.com/01cloud/01-Sandbox/compare/v0.5.8...v0.5.9) (2026-05-27)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.8 [skip ci] ([7d53130](https://github.com/01cloud/01-Sandbox/commit/7d5313082c6354ffcd769f4ac16a744168b5500b))
+
 ## [0.5.8](https://github.com/01cloud/01-Sandbox/compare/v0.5.7...v0.5.8) (2026-05-27)
 
 
