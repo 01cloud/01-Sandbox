@@ -1,3 +1,44 @@
+## Release v0.5.13 — 01-Sandbox
+**Release Date:** May 27, 2026
+
+---
+
+### Summary
+v0.5.13 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* pydantic validation error ([c8ed48d](https://github.com/01cloud/01-Sandbox/commit/c8ed48d3121f97b272100ccc6fb568f73c989f22))
+* pydantic validation error ([3f8313d](https://github.com/01cloud/01-Sandbox/commit/3f8313d73961cb79a6be0f769e960f064f588dc8))
+* generate RELEASE.md for v0.5.12 [skip ci] ([644f6ac](https://github.com/01cloud/01-Sandbox/commit/644f6acdc5bf22309afaa21ce6e0bc303b730728))
+* bump versions to v0.5.12 [skip ci] ([fdf4c86](https://github.com/01cloud/01-Sandbox/commit/fdf4c8663f1137a04309960e66526a3c0a513399))
+
+### Changes
+## [0.5.13](https://github.com/01cloud/01-Sandbox/compare/v0.5.12...v0.5.13) (2026-05-27)
+
+
+### 🐛 Bug Fixes
+
+* pydantic validation error ([c8ed48d](https://github.com/01cloud/01-Sandbox/commit/c8ed48d3121f97b272100ccc6fb568f73c989f22))
+* pydantic validation error ([3f8313d](https://github.com/01cloud/01-Sandbox/commit/3f8313d73961cb79a6be0f769e960f064f588dc8))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.12 [skip ci] ([644f6ac](https://github.com/01cloud/01-Sandbox/commit/644f6acdc5bf22309afaa21ce6e0bc303b730728))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.12 [skip ci] ([fdf4c86](https://github.com/01cloud/01-Sandbox/commit/fdf4c8663f1137a04309960e66526a3c0a513399))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.13)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.12 — 01-Sandbox
 **Release Date:** May 27, 2026
 
