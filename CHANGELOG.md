@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.12](https://github.com/01cloud/01-Sandbox/compare/v0.5.11...v0.5.12) (2026-05-27)
+
+
+### 🐛 Bug Fixes
+
+* 404 not found ([fa3b0ba](https://github.com/01cloud/01-Sandbox/commit/fa3b0ba6a518a6daf563f69c9f34df20a3e17043))
+* 404 not found ([82f9b02](https://github.com/01cloud/01-Sandbox/commit/82f9b02036a934620226ccedb6b389953da39e39))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.11 [skip ci] ([34e9c7d](https://github.com/01cloud/01-Sandbox/commit/34e9c7d2d20dfcbe44eeab323f061120359970a0))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.11 [skip ci] ([20c0583](https://github.com/01cloud/01-Sandbox/commit/20c0583aa290863dbb6e3d91a89d957b8c6157c6))
+
 ## [0.5.11](https://github.com/01cloud/01-Sandbox/compare/v0.5.10...v0.5.11) (2026-05-27)
 
 
