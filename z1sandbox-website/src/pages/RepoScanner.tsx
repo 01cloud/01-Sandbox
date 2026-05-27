@@ -137,7 +137,7 @@ export default function RepoScanner() {
 
       const { job_id } = data;
 
-      const es = new EventSource(`${API_BASE}/v1/repo-scan/${job_id}/status`);
+      const es = new EventSource(`${API_BASE}/v1/repo-scan/${job_id}/status?token=${encodeURIComponent(apiKey)}`);
       esRef.current = es;
 
       es.onmessage = (e) => {

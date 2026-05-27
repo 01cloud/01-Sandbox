@@ -122,7 +122,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
       const { job_id } = data;
 
       // Connect to SSE stream
-      const es = new EventSource(`${apiBaseUrl}/v1/repo-scan/${job_id}/status`);
+      const es = new EventSource(`${apiBaseUrl}/v1/repo-scan/${job_id}/status?token=${encodeURIComponent(apiKey)}`);
       esRef.current = es;
 
       es.onmessage = (e) => {

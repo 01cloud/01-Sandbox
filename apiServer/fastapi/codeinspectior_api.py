@@ -301,6 +301,7 @@ async def validate_token(request: Request):
     auth_header = request.headers.get("authorization") or request.headers.get(
         "Authorization"
     )
+    query_token = request.query_params.get("token")
     raw_token = None
     source = "header"
 
@@ -311,6 +312,9 @@ async def validate_token(request: Request):
             if auth_header.startswith("Bearer ")
             else auth_header
         )
+    elif query_token:
+        raw_token = query_token
+        source = "query_parameter"
     elif not is_execution_route:
         # ALLOW Cookie Fallback ONLY for Management/Docs/UI routes
         exec_cookie = request.cookies.get("execution_token")
