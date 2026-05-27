@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.17](https://github.com/01cloud/01-Sandbox/compare/v0.5.16...v0.5.17) (2026-05-27)
+
+
+### 🐛 Bug Fixes
+
+* include logs ([13f900c](https://github.com/01cloud/01-Sandbox/commit/13f900c064c5733cdb4be6062c84115490590ac2))
+* include logs ([73d3a77](https://github.com/01cloud/01-Sandbox/commit/73d3a7759162683dff60cbcb95813dd9f37c69f6))
+* ui issues on reporting ([e0e54b9](https://github.com/01cloud/01-Sandbox/commit/e0e54b9af7894077af661aa9f0e5f8d7a75bb5ab))
+* ui issues on reporting ([c9677bc](https://github.com/01cloud/01-Sandbox/commit/c9677bcab493c4ee12adb6ba86276b17737f86cf))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.16 [skip ci] ([b2a65a3](https://github.com/01cloud/01-Sandbox/commit/b2a65a37eb6894f687fa9b92c24329670899d47d))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.16 [skip ci] ([7191fd2](https://github.com/01cloud/01-Sandbox/commit/7191fd2b3831b925f118a942409cc73c41c8497f))
+
 ## [0.5.16](https://github.com/01cloud/01-Sandbox/compare/v0.5.15...v0.5.16) (2026-05-27)
 
 
