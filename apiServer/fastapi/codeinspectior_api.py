@@ -804,6 +804,11 @@ from health import get_health_router
 
 app.include_router(get_health_router(state, validate_token))
 
+# GitHub Repository Scanner routes
+from scan_repository import get_repo_scan_router
+
+app.include_router(get_repo_scan_router(state, validate_token))
+
 
 @app.post(
     "/run",

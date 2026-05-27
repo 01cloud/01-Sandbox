@@ -118,7 +118,6 @@ RUN set -eux; \
         semgrep \
         yamllint \
         bandit; \
-    # Ensure they are in /usr/local/bin (uv --system should do this, but we'll be certain)
     ln -sf $(uv python which 3.12 | sed 's/python3/semgrep/') /usr/local/bin/semgrep || true; \
     ln -sf $(uv python which 3.12 | sed 's/python3/yamllint/') /usr/local/bin/yamllint || true; \
     ln -sf $(uv python which 3.12 | sed 's/python3/bandit/') /usr/local/bin/bandit || true
@@ -255,6 +254,72 @@ RUN STATICCHECK_VERSION="2023.1.7" && \
     rm -rf staticcheck.tar.gz /tmp/staticcheck
 
 RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v1.57.2
+
+# ── Language Detection Tools (GitHub Repository Scanner) ──────────────────────
+# These tools are pre-installed so sandbox provisioning has zero runtime cost.
+
+# github-linguist — primary detector (same tool GitHub uses)
+# Requires Ruby with native extension build deps
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ruby ruby-dev ruby-full cmake pkg-config \
+    libssl-dev libicu-dev libcurl4-openssl-dev \
+    zlib1g-dev libonig-dev \
+    && rm -rf /var/lib/apt/lists/* \
+    && gem install github-linguist \
+    && ln -sf $(which github-linguist) /usr/local/bin/linguist
+
+# tokei — secondary detector & LoC counter (static binary, fast)
+RUN set -eux; \
+    TOKEI_VERSION="12.1.2"; \
+    case "$(uname -m)" in \
+      x86_64)  ARCH="x86_64-unknown-linux-gnu" ;; \
+      aarch64) ARCH="aarch64-unknown-linux-gnu" ;; \
+      *) ARCH="x86_64-unknown-linux-gnu" ;; \
+    esac; \
+    curl -fsSL \
+      "https://github.com/XAMPPRocky/tokei/releases/download/v${TOKEI_VERSION}/tokei-${ARCH}.tar.gz" \
+      | tar -xz -C /usr/local/bin tokei; \
+    chmod 755 /usr/local/bin/tokei
+
+# enry — fallback detector (Go port of linguist, lightweight)
+RUN /opt/go/1.25.5/bin/go install github.com/go-enry/go-enry/v2/cmd/enry@latest \
+    && cp /root/go/bin/enry /usr/local/bin/enry \
+    && chmod 755 /usr/local/bin/enry
+
+# pylint — Python code quality (bandit already present)
+RUN UV_BREAK_SYSTEM_PACKAGES=1 uv pip install --system --python 3.12 --no-cache pylint
+
+# ESLint + TypeScript support — JavaScript / TypeScript scanner
+RUN /opt/node/v${NODE_V22}/bin/npm install -g \
+    eslint \
+    @typescript-eslint/parser \
+    @typescript-eslint/eslint-plugin \
+    typescript
+
+# rubocop — Ruby style / lint scanner
+RUN gem install rubocop rubocop-rake rubocop-performance
+
+# PMD — Java static analysis (static binary distribution)
+RUN set -eux; \
+    PMD_VERSION="7.3.0"; \
+    curl -fsSL \
+      "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" \
+      -o /tmp/pmd.zip \
+    && unzip -q /tmp/pmd.zip -d /opt \
+    && ln -s /opt/pmd-bin-${PMD_VERSION}/bin/pmd /usr/local/bin/pmd \
+    && rm /tmp/pmd.zip
+
+# Verify all new tools are on PATH
+RUN set -eux; \
+    github-linguist --version; \
+    linguist --version; \
+    tokei --version; \
+    enry --version; \
+    pylint --version; \
+    /opt/node/v${NODE_V22}/bin/eslint --version; \
+    rubocop --version; \
+    pmd --version
+# ─────────────────────────────────────────────────────────────────────────────
 
 RUN mkdir -p /opt/opensandbox
 COPY scripts/code-interpreter-env.sh /opt/opensandbox/code-interpreter-env.sh

@@ -13,7 +13,7 @@
 # limitations under the License.
 
 
-FROM 01community/01sandbox-codeinterpreter-base-image:1.0.1
+FROM 01community/01sandbox-codeinterpreter-base-image:1.1.1
 
 # ── Base Image Verification ──────────────────────────────────────────────────
 # Verify that all required security tools are present in the base image.
