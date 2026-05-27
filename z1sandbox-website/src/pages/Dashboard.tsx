@@ -61,6 +61,7 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import SecurityScanner from "@/components/dashboard/SecurityScanner";
+import RepoScannerWidget from "@/components/dashboard/RepoScannerWidget";
 
 interface APIKey {
   id: string;
@@ -815,6 +816,9 @@ const Dashboard = () => {
                 </Card>
               );
             })}
+
+            {/* GitHub Repository Scanner Widget */}
+            <RepoScannerWidget apiBaseUrl={API_BASE_URL} keys={keys} />
             </div>
 
             {/* Sticky Right-Side Telemetry log reader panel */}
