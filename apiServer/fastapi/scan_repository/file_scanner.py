@@ -92,11 +92,19 @@ def _parse_scan_report(report: dict, lang_lower: str) -> List[FindingItem]:
         if severity not in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
             severity = "INFO"
 
+        line_val = f.get("line") or f.get("line_number")
+        sanitized_line = None
+        if line_val is not None:
+            try:
+                sanitized_line = int(line_val)
+            except (ValueError, TypeError):
+                sanitized_line = None
+
         findings.append(
             FindingItem(
                 severity=severity,
                 file=f.get("file", f.get("filename", "")),
-                line=f.get("line", f.get("line_number")),
+                line=sanitized_line,
                 issue=f.get("issue", f.get("message", f.get("description", ""))),
                 tool=f.get("tool", "scanner"),
                 remediation=f.get("remediation", f.get("more_info", f.get("rule"))),
