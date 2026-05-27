@@ -1,3 +1,51 @@
+## Release v0.5.16 — 01-Sandbox
+**Release Date:** May 27, 2026
+
+---
+
+### Summary
+v0.5.16 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* add the notification workflow ([067def6](https://github.com/01cloud/01-Sandbox/commit/067def664b37729ebd84a5e9ba8b5ab0d3a12423))
+* linter issue ([24bc92f](https://github.com/01cloud/01-Sandbox/commit/24bc92fa166cf1117874281c77ca94bbb035350f))
+* notify update ([0ff1f80](https://github.com/01cloud/01-Sandbox/commit/0ff1f800d248133701c54f1193adea35dd3cf88b))
+* pydantic validation issues ([645974d](https://github.com/01cloud/01-Sandbox/commit/645974d397b743499dfc9da8eacffdce4e0e25a9))
+
+### Changes
+## [0.5.16](https://github.com/01cloud/01-Sandbox/compare/v0.5.15...v0.5.16) (2026-05-27)
+
+
+### 🚀 New Features
+
+* add the notification workflow ([067def6](https://github.com/01cloud/01-Sandbox/commit/067def664b37729ebd84a5e9ba8b5ab0d3a12423))
+
+
+### 🐛 Bug Fixes
+
+* linter issue ([24bc92f](https://github.com/01cloud/01-Sandbox/commit/24bc92fa166cf1117874281c77ca94bbb035350f))
+* notify update ([0ff1f80](https://github.com/01cloud/01-Sandbox/commit/0ff1f800d248133701c54f1193adea35dd3cf88b))
+* pydantic validation issues ([645974d](https://github.com/01cloud/01-Sandbox/commit/645974d397b743499dfc9da8eacffdce4e0e25a9))
+* pydantic validation issues ([3bbad56](https://github.com/01cloud/01-Sandbox/commit/3bbad56fb65e355872d72a4673b81ba975aa5173))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.15 [skip ci] ([1c38dd3](https://github.com/01cloud/01-Sandbox/commit/1c38dd387a94b425d4163a201b9a78bbc274af3d))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.15 [skip ci] ([d097681](https://github.com/01cloud/01-Sandbox/commit/d097681ff17a007229b90c3ef3dc4a5258853913))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.16)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.15 — 01-Sandbox
 **Release Date:** May 27, 2026
 
