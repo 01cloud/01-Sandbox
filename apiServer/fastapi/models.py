@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -94,8 +94,8 @@ class SandboxResponse(BaseModel):
     """Standardized metadata representing a provisioned sandbox instance."""
 
     id: str
-    status: str
-    image: ImageSpec
+    status: Optional[Union[dict, str]] = None
+    image: Optional[ImageSpec] = None
     metadata: dict[str, str] = {}
 
 
