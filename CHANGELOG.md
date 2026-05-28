@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.24](https://github.com/01cloud/01-Sandbox/compare/v0.5.23...v0.5.24) (2026-05-28)
+
+
+### 🐛 Bug Fixes
+
+* stricter rules ([2a3f017](https://github.com/01cloud/01-Sandbox/commit/2a3f017aaf4f1efca1d42f7879b87721da3f4a08))
+* stricter rules ([6355722](https://github.com/01cloud/01-Sandbox/commit/635572238b2f086d62a3875c4454e8bba4597808))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.23 [skip ci] ([e6ac619](https://github.com/01cloud/01-Sandbox/commit/e6ac619cf2b79834aaac0ad329d3c57f7e8c2bfa))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.23 [skip ci] ([b95a4be](https://github.com/01cloud/01-Sandbox/commit/b95a4bea0741183c9d8e021a3dd3746effc9026b))
+
 ## [0.5.23](https://github.com/01cloud/01-Sandbox/compare/v0.5.22...v0.5.23) (2026-05-28)
 
 
