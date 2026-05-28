@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.22](https://github.com/01cloud/01-Sandbox/compare/v0.5.21...v0.5.22) (2026-05-28)
+
+
+### 🐛 Bug Fixes
+
+* language specific sections ([4e87420](https://github.com/01cloud/01-Sandbox/commit/4e87420470fbb281207ab485b84bf89dda462629))
+* language specific sections ([b503c3b](https://github.com/01cloud/01-Sandbox/commit/b503c3b22ab2b63da56c000809069c1a0a0a7926))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.21 [skip ci] ([ad911f8](https://github.com/01cloud/01-Sandbox/commit/ad911f84ce6578b6e4663cf58013c279e569a144))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.21 [skip ci] ([efae710](https://github.com/01cloud/01-Sandbox/commit/efae710e3d78414762afb0c7e65c700fb16266a3))
+
 ## [0.5.21](https://github.com/01cloud/01-Sandbox/compare/v0.5.20...v0.5.21) (2026-05-28)
 
 
