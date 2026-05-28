@@ -83,6 +83,9 @@ async def _run_scan_pipeline(
     log("INIT", f"Repository URL: {repo_url}")
     log("INIT", f"Redis enabled: {app_state.use_redis}")
 
+    print("\n[INFO] Repository scan started")
+    print(f"Repository: {repo_url}\n")
+
     try:
         # ── Step 1: Provision sandbox ────────────────────────────────
         log("PROVISIONING", "Creating isolated local sandbox directory...")
@@ -141,6 +144,17 @@ async def _run_scan_pipeline(
         )
         for lang, files in lang_map.items():
             log("DETECTING", f"  {lang}: {len(files)} file(s)")
+
+        print("\n[INFO] Language detection completed")
+        print("Languages detected:")
+        for lang, files in sorted(
+            lang_map.items(), key=lambda x: len(x[1]), reverse=True
+        ):
+            pct_val = (len(files) / max(total_files, 1)) * 100.0
+            print(f"- {lang}: {pct_val:.0f}%")
+        print()
+
+        print("[INFO] Triggering security tools\n")
 
         # ── Step 4: Scan each language ───────────────────────────────
         def pct(files_count: int) -> float:
