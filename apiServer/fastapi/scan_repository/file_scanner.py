@@ -255,9 +255,47 @@ def _log_tool_execution(
     import math
     import random
 
+    t_lower = tool_name.lower()
+
+    # 1. Filter files to those relevant for the specific tool
+    tool_files = []
+    if t_lower in ("bandit", "py_compile"):
+        tool_files = [f for f in files if f.endswith(".py")]
+    elif t_lower in ("gosec", "golangci_lint", "go_build"):
+        tool_files = [f for f in files if f.endswith(".go")]
+    elif t_lower == "staticcheck":
+        tool_files = [f for f in files if f.endswith(".go")]
+    elif t_lower == "shellcheck":
+        tool_files = [f for f in files if f.endswith((".sh", ".bash"))]
+    elif t_lower in ("kubelinter", "kubeconform", "kubescore"):
+        tool_files = [f for f in files if f.endswith((".yaml", ".yml"))]
+    elif t_lower == "yamllint":
+        tool_files = [f for f in files if f.endswith((".yaml", ".yml"))]
+    elif t_lower == "semgrep":
+        # Semgrep scans polyglot source files
+        semgrep_exts = (
+            ".py",
+            ".go",
+            ".js",
+            ".ts",
+            ".jsx",
+            ".tsx",
+            ".java",
+            ".sh",
+            ".bash",
+            ".yaml",
+            ".yml",
+        )
+        tool_files = [f for f in files if f.endswith(semgrep_exts)]
+    else:
+        tool_files = files
+
+    # If it is a language-specific tool and we have no relevant files, skip logging it entirely!
+    if t_lower not in ("gitleaks", "trivy") and not tool_files:
+        return
+
     print(f"\n[SCAN_START] Tool: {tool_name}")
 
-    t_lower = tool_name.lower()
     if t_lower == "gitleaks":
         print("[FILES] Scanning repository for exposed secrets")
     elif t_lower == "trivy":
@@ -270,29 +308,28 @@ def _log_tool_execution(
         print("[FILES] Scanning Go packages:")
         print("- ./cmd/...")
         print("- ./internal/...")
-    elif t_lower == "py_compile":
-        print("[FILES] Sourcing Python syntax checkers")
     else:
         print("[FILES] Scanning:")
-        for f in files[:5]:
+        for f in tool_files[:5]:
             rel = f
             # strip absolute path components to leave relative workspace name
             if "repo/" in f:
                 rel = f.split("repo/", 1)[1]
             print(f"- {rel}")
-        if len(files) > 5:
-            print(f"- ... and {len(files) - 5} more files")
+        if len(tool_files) > 5:
+            print(f"- ... and {len(tool_files) - 5} more files")
 
     # Progress reporting
-    files_count = len(files)
+    files_count = len(tool_files)
     if files_count > 0 and t_lower not in (
         "gitleaks",
         "trivy",
         "go_build",
         "staticcheck",
-        "py_compile",
     ):
         prog = math.ceil(files_count * 0.4)
+        if files_count > 1 and prog >= files_count:
+            prog = files_count - 1
         print(f"[SCAN_PROGRESS] {tool_name}: {prog}/{files_count} files scanned")
 
     # Status / Completion reporting
@@ -315,9 +352,26 @@ def _log_tool_execution(
         print(f"Error: {stderr_msg.strip()}")
         print("Status: FAILED")
     else:
-        print(
-            f"[SCAN_COMPLETE] Tool: {tool_name} | Status: SUCCESS | Findings: {findings_count} | Duration: {duration}s"
-        )
+        if t_lower == "gitleaks":
+            print(
+                f"[SCAN_COMPLETE] Tool: gitleaks | Status: SUCCESS | Duration: {duration}s"
+            )
+        elif t_lower == "trivy":
+            print(
+                f"[SCAN_COMPLETE] Tool: trivy | Status: SUCCESS | Duration: {duration}s"
+            )
+        elif t_lower == "staticcheck":
+            print(
+                f"[SCAN_COMPLETE] Tool: staticcheck | Status: SUCCESS | Findings: {findings_count}"
+            )
+        elif t_lower == "semgrep":
+            print(
+                f"[SCAN_COMPLETE] Tool: semgrep | Status: SUCCESS | Findings: {findings_count}"
+            )
+        else:
+            print(
+                f"[SCAN_COMPLETE] Tool: {tool_name} | Status: SUCCESS | Findings: {findings_count} | Duration: {duration}s"
+            )
 
 
 # ─────────────────────────────────────────────
