@@ -169,7 +169,7 @@ async def _run_scan_pipeline(
                 f"Scanning {language} ({file_count} files)...",
                 progress,
             )
-            result = await asyncio.wait_for(
+            scan_output = await asyncio.wait_for(
                 scan_language(
                     sandbox_id=sandbox_id,
                     language=language,
@@ -178,14 +178,38 @@ async def _run_scan_pipeline(
                 ),
                 timeout=180.0,
             )
-            language_results[language] = result
-            lang_findings = len(result.findings)
-            log(
-                "SCANNING",
-                f"[{idx+1}/{total_langs}] {language} complete — {result.lines_of_code} LoC, {lang_findings} finding(s)",
-            )
-            if lang_findings > 0:
-                for f in result.findings[:5]:  # log first 5 findings
+
+            # YAML returns a tuple (plain_result, optional k8s_result)
+            # All other languages return a single LanguageScanResult
+            if isinstance(scan_output, tuple):
+                yaml_result, k8s_result = scan_output
+                language_results["YAML"] = yaml_result
+                log(
+                    "SCANNING",
+                    f"[{idx+1}/{total_langs}] YAML (plain) complete — {yaml_result.file_count} file(s), "
+                    f"{yaml_result.lines_of_code} LoC, {len(yaml_result.findings)} finding(s)",
+                )
+                if k8s_result is not None:
+                    language_results["Kubernetes YAML"] = k8s_result
+                    log(
+                        "SCANNING",
+                        f"[{idx+1}/{total_langs}] Kubernetes YAML complete — {k8s_result.file_count} manifest(s), "
+                        f"{k8s_result.lines_of_code} LoC, {len(k8s_result.findings)} finding(s)",
+                    )
+                else:
+                    log(
+                        "SCANNING",
+                        f"[{idx+1}/{total_langs}] No K8s manifests found — Kubernetes YAML section skipped",
+                    )
+            else:
+                result = scan_output
+                language_results[language] = result
+                lang_findings = len(result.findings)
+                log(
+                    "SCANNING",
+                    f"[{idx+1}/{total_langs}] {language} complete — {result.lines_of_code} LoC, {lang_findings} finding(s)",
+                )
+                for f in result.findings[:5]:
                     log(
                         "SCANNING",
                         f"  [{f.severity}] {f.file}:{f.line or '?'} — {f.issue[:80]} (tool={f.tool})",
