@@ -67,8 +67,8 @@ const STEP_LABELS: Record<string, string> = {
 };
 
 const LANG_COLORS = [
-  "#6366f1","#8b5cf6","#06b6d4","#10b981","#f59e0b",
-  "#ef4444","#ec4899","#14b8a6","#84cc16","#f97316",
+  "#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b",
+  "#ef4444", "#ec4899", "#14b8a6", "#84cc16", "#f97316",
 ];
 
 function getApiKey(): string | null {
@@ -90,13 +90,13 @@ export default function RepoScanner() {
   const navigate = useNavigate();
   const API_BASE = getApiBaseUrl();
 
-  const [repoUrl, setRepoUrl]   = useState("");
+  const [repoUrl, setRepoUrl] = useState("");
   const [urlError, setUrlError] = useState("");
   const [isScanning, setIsScanning] = useState(false);
   const [currentStep, setCurrentStep] = useState("");
   const [stepMessage, setStepMessage] = useState("");
-  const [progress, setProgress]     = useState(0);
-  const [result, setResult]         = useState<ScanResult | null>(null);
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState<ScanResult | null>(null);
   const [expandedLang, setExpandedLang] = useState<string | null>(null);
 
   const esRef = useRef<EventSource | null>(null);
@@ -173,7 +173,7 @@ export default function RepoScanner() {
   };
 
   const langEntries = result && result.languages ? Object.entries(result.languages) : [];
-  const chartData   = langEntries.map(([lang, r]) => ({
+  const chartData = langEntries.map(([lang, r]) => ({
     name: lang,
     "%": r && typeof r.percentage === "number" ? parseFloat(r.percentage.toFixed(1)) : 0,
   }));
@@ -253,9 +253,9 @@ export default function RepoScanner() {
                     <div key={step} className={cn("flex items-center gap-3 py-2.5 px-3 rounded-xl transition-all", isActive ? "bg-violet-500/8" : "")}>
                       <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 border-2 transition-all",
                         isError && sI >= stepIdx ? "border-destructive/30 text-destructive/30" :
-                        isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
-                        isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
-                        "border-border text-muted-foreground/30")}>
+                          isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
+                            isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
+                              "border-border text-muted-foreground/30")}>
                         {isDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : isActive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>{i + 1}</span>}
                       </div>
                       <span className={cn("text-xs font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/40")}>
@@ -389,16 +389,16 @@ export default function RepoScanner() {
                               const sev = f.severity?.toUpperCase() ?? "INFO";
                               const sevColor =
                                 sev === "CRITICAL" ? "border-red-500/60 bg-red-500/5" :
-                                sev === "HIGH"     ? "border-orange-500/60 bg-orange-500/5" :
-                                sev === "MEDIUM"   ? "border-yellow-500/60 bg-yellow-500/5" :
-                                sev === "LOW"      ? "border-blue-500/60 bg-blue-500/5" :
-                                                     "border-border/50 bg-muted/10";
+                                  sev === "HIGH" ? "border-orange-500/60 bg-orange-500/5" :
+                                    sev === "MEDIUM" ? "border-yellow-500/60 bg-yellow-500/5" :
+                                      sev === "LOW" ? "border-blue-500/60 bg-blue-500/5" :
+                                        "border-border/50 bg-muted/10";
                               const badgeColor =
                                 sev === "CRITICAL" ? "bg-red-500/15 text-red-500 border-red-500/30" :
-                                sev === "HIGH"     ? "bg-orange-500/15 text-orange-500 border-orange-500/30" :
-                                sev === "MEDIUM"   ? "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" :
-                                sev === "LOW"      ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
-                                                     "bg-muted text-muted-foreground border-border";
+                                  sev === "HIGH" ? "bg-orange-500/15 text-orange-500 border-orange-500/30" :
+                                    sev === "MEDIUM" ? "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" :
+                                      sev === "LOW" ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
+                                        "bg-muted text-muted-foreground border-border";
                               return (
                                 <div key={fi} className={cn("p-4 rounded-xl border", sevColor)}>
                                   <div className="flex items-center gap-2 mb-1.5 flex-wrap">
