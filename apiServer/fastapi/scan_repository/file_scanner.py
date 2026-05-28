@@ -178,7 +178,16 @@ def _filter_findings_to_submitted_files(
                 normalized = normalized[len(prefix) :]
                 break
 
-        if normalized in submitted_rel_paths:
+        is_generic = normalized.lower() in (
+            "",
+            "workspace",
+            "manifest",
+            "go package",
+            "pipeline error",
+            "unknown",
+        )
+
+        if is_generic or normalized in submitted_rel_paths:
             kept.append(finding)
         else:
             dropped += 1

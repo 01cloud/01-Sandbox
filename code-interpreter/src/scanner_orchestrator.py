@@ -727,12 +727,19 @@ class ScannerOrchestrator:
                         else str(check_val)
                     )
                     remediation = report.get("Remediation") or report.get("remediation")
+                    obj = report.get("Object") or report.get("object") or {}
+                    metadata_val = obj.get("Metadata") or obj.get("metadata") or {}
+                    file_path = (
+                        metadata_val.get("FilePath")
+                        or metadata_val.get("filePath")
+                        or "manifest"
+                    )
 
                     with self.results_lock:
                         self.results["findings"].append(
                             {
                                 "tool": "kubelinter",
-                                "file": "manifest",
+                                "file": file_path,
                                 "line": None,
                                 "issue": f"linting violation: {check_name}".lower(),
                                 "severity": "HIGH",
