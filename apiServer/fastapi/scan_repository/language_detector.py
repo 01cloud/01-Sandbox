@@ -94,6 +94,37 @@ def _parse_tokei(output: str, base_path: str) -> Dict[str, List[str]]:
     return result
 
 
+def _parse_linguist(output: str, base_path: str) -> Dict[str, List[str]]:
+    """
+    Parse `github-linguist --json` to build {language: [absolute_file_paths]}.
+    """
+    result: Dict[str, List[str]] = {}
+    try:
+        data = json.loads(output)
+    except json.JSONDecodeError:
+        return result
+
+    for lang, info in data.items():
+        if not isinstance(info, dict):
+            continue
+        files = info.get("files", [])
+        if not isinstance(files, list):
+            continue
+
+        abs_files = []
+        for f in files:
+            if not f:
+                continue
+            path = f if os.path.isabs(f) else os.path.join(base_path, f)
+            if os.path.isfile(path):
+                abs_files.append(path)
+
+        if abs_files:
+            result[lang] = abs_files
+
+    return result
+
+
 def _parse_enry(output: str) -> Dict[str, List[str]]:
     """
     Parse `enry` output — language names only (no per-file detail).
@@ -152,7 +183,37 @@ async def detect_languages(
     repo_path = _repo_path(sandbox_id)
     print(f"{_TAG} Starting language detection on: {repo_path}")
 
-    # ── 1. tokei ────────────────────────────────────────────────────────
+    # ── 1. github-linguist ──────────────────────────────────────────────
+    print(f"{_TAG} Trying github-linguist (JSON mode)...")
+    t0 = time.monotonic()
+    stdout, stderr, exit_code = await exec_in_sandbox(
+        sandbox_id=sandbox_id,
+        command=["linguist", repo_path, "--json"],
+        timeout=60.0,
+    )
+    elapsed = time.monotonic() - t0
+
+    if exit_code == 0 and stdout.strip():
+        lang_map = _parse_linguist(stdout, repo_path)
+        if lang_map:
+            print(
+                f"{_TAG} linguist succeeded in {elapsed:.2f}s — {len(lang_map)} language(s) detected: {', '.join(lang_map.keys())}"
+            )
+            for lang, files in lang_map.items():
+                print(f"{_TAG}   {lang}: {len(files)} file(s)")
+            return lang_map, DetectionTool.LINGUIST
+        else:
+            print(
+                f"{_TAG} linguist returned output but parsed 0 languages (elapsed={elapsed:.2f}s)"
+            )
+    else:
+        print(
+            f"{_TAG} linguist unavailable or failed (exit={exit_code}, elapsed={elapsed:.2f}s) — trying tokei..."
+        )
+        if stderr.strip():
+            print(f"{_TAG} linguist stderr: {stderr.strip()[:200]}")
+
+    # ── 2. tokei ────────────────────────────────────────────────────────
     print(f"{_TAG} Trying tokei (JSON mode)...")
     t0 = time.monotonic()
     stdout, stderr, exit_code = await exec_in_sandbox(
@@ -182,7 +243,7 @@ async def detect_languages(
         if stderr.strip():
             print(f"{_TAG} tokei stderr: {stderr.strip()[:200]}")
 
-    # ── 2. enry (if available) ──────────────────────────────────────────
+    # ── 3. enry (if available) ──────────────────────────────────────────
     print(f"{_TAG} Trying enry...")
     t0 = time.monotonic()
     stdout, stderr, exit_code = await exec_in_sandbox(
@@ -219,7 +280,7 @@ async def detect_languages(
         if stderr.strip():
             print(f"{_TAG} enry stderr: {stderr.strip()[:200]}")
 
-    # ── 3. Pure-Python extension walk (always works) ────────────────────
+    # ── 4. Pure-Python extension walk (always works) ────────────────────
     print(
         f"{_TAG} Falling back to pure-Python extension walk (no external tools required)..."
     )
