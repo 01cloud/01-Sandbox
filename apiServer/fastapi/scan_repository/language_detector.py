@@ -188,7 +188,7 @@ async def detect_languages(
     t0 = time.monotonic()
     stdout, stderr, exit_code = await exec_in_sandbox(
         sandbox_id=sandbox_id,
-        command=["linguist", repo_path, "--json"],
+        command=["linguist", repo_path, "--breakdown", "--json"],
         timeout=60.0,
     )
     elapsed = time.monotonic() - t0
