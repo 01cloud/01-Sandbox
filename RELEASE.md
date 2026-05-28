@@ -1,3 +1,44 @@
+## Release v0.5.20 — 01-Sandbox
+**Release Date:** May 28, 2026
+
+---
+
+### Summary
+v0.5.20 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement Linguist tool ([4e70443](https://github.com/01cloud/01-Sandbox/commit/4e704439851d358325abb108d3ad1339b1682f48))
+* implement Linguist tool ([f55ca8f](https://github.com/01cloud/01-Sandbox/commit/f55ca8f201856f81f6086f8f42346ab4fbbd45de))
+* generate RELEASE.md for v0.5.19 [skip ci] ([8177521](https://github.com/01cloud/01-Sandbox/commit/81775212cea8e1315468685c811aea26fca32e15))
+* bump versions to v0.5.19 [skip ci] ([a2593f0](https://github.com/01cloud/01-Sandbox/commit/a2593f0105f74f074a1312ae091d67f3723b1831))
+
+### Changes
+## [0.5.20](https://github.com/01cloud/01-Sandbox/compare/v0.5.19...v0.5.20) (2026-05-28)
+
+
+### 🐛 Bug Fixes
+
+* implement Linguist tool ([4e70443](https://github.com/01cloud/01-Sandbox/commit/4e704439851d358325abb108d3ad1339b1682f48))
+* implement Linguist tool ([f55ca8f](https://github.com/01cloud/01-Sandbox/commit/f55ca8f201856f81f6086f8f42346ab4fbbd45de))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.19 [skip ci] ([8177521](https://github.com/01cloud/01-Sandbox/commit/81775212cea8e1315468685c811aea26fca32e15))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.19 [skip ci] ([a2593f0](https://github.com/01cloud/01-Sandbox/commit/a2593f0105f74f074a1312ae091d67f3723b1831))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.20)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.19 — 01-Sandbox
 **Release Date:** May 28, 2026
 
