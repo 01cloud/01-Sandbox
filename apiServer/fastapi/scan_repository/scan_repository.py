@@ -231,6 +231,117 @@ async def _run_scan_pipeline(
                 if lang_findings > 5:
                     log("SCANNING", f"  ... and {lang_findings - 5} more finding(s)")
 
+        # ── Step 4.5: Redistribute and Deduplicate Findings ──────────
+        # Gather all raw (unfiltered) findings from all language scans
+        all_raw_findings = []
+        for r in language_results.values():
+            if hasattr(r, "raw_findings") and r.raw_findings:
+                all_raw_findings.extend(r.raw_findings)
+
+        # Deduplicate all raw findings to ensure each finding is recorded exactly once
+        seen = set()
+        deduped_findings = []
+        for f in all_raw_findings:
+            # Normalise file path for keying
+            file_normalized = (f.file or "").strip()
+            # Construct a unique key
+            key = (f.severity, file_normalized, f.line, f.issue, f.tool)
+            if key not in seen:
+                seen.add(key)
+                deduped_findings.append(f)
+
+        # Clear existing language findings so we can populate them cleanly
+        for r in language_results.values():
+            r.findings = []
+
+        # Helper to map a file path to its matching language section
+        def get_target_language(file_path: str, tool_name: str) -> str:
+            import os
+
+            normalized = (file_path or "").strip()
+            for prefix in ("/workspace/", "workspace/", "./"):
+                if normalized.startswith(prefix):
+                    normalized = normalized[len(prefix) :]
+                    break
+
+            ext = os.path.splitext(normalized)[1].lower()
+            base = os.path.basename(normalized).lower()
+
+            if ext == ".py":
+                return "Python"
+            elif ext == ".go" or base in ("go.mod", "go.sum", "go.work"):
+                return "Go"
+            elif ext in (".js", ".jsx") or base in (
+                "package.json",
+                "package-lock.json",
+                "yarn.lock",
+            ):
+                if "JavaScript" in language_results:
+                    return "JavaScript"
+                if "TypeScript" in language_results:
+                    return "TypeScript"
+                return "JavaScript"
+            elif ext in (".ts", ".tsx") or base in (
+                "tsconfig.json",
+                "tsconfig.node.json",
+            ):
+                if "TypeScript" in language_results:
+                    return "TypeScript"
+                if "JavaScript" in language_results:
+                    return "JavaScript"
+                return "TypeScript"
+            elif ext in (".sh", ".bash"):
+                for possible in ("Shell", "Bash", "ShellScript"):
+                    if possible in language_results:
+                        return possible
+                return "Shell"
+            elif ext in (".yaml", ".yml"):
+                is_k8s_finding = any(
+                    t in str(tool_name).lower()
+                    for t in ("kubelinter", "kubeconform", "kubescore")
+                )
+                if is_k8s_finding or (
+                    "Kubernetes YAML" in language_results
+                    and "YAML" not in language_results
+                ):
+                    if "Kubernetes YAML" in language_results:
+                        return "Kubernetes YAML"
+                return "YAML"
+            elif ext == ".rb" or base in ("gemfile", "gemfile.lock"):
+                return "Ruby"
+            elif ext == ".java" or base in ("pom.xml", "build.gradle"):
+                return "Java"
+
+            # Fallback based on extension matching other detected languages
+            for lang in language_results.keys():
+                if lang.lower() in normalized.lower():
+                    return lang
+
+            # If it's a global secret, manifest, or not specific to a code language
+            return "Secrets & Infrastructure"
+
+        # Distribute each finding to the correct language section
+        for f in deduped_findings:
+            target_lang = get_target_language(f.file, f.tool)
+            if target_lang not in language_results:
+                from .models import LanguageScanResult
+
+                language_results[target_lang] = LanguageScanResult(
+                    language=target_lang,
+                    file_count=0,
+                    lines_of_code=0,
+                    percentage=0.0,
+                    findings=[],
+                )
+            language_results[target_lang].findings.append(f)
+
+        # Log clean-up summary of redistribution
+        for lang, r in language_results.items():
+            log(
+                "SCANNING",
+                f"Redistributed findings for {lang}: {len(r.findings)} finding(s)",
+            )
+
         # ── Step 5: Build and emit final result ──────────────────────
         duration = time.monotonic() - start_time
         total_findings = sum(len(r.findings) for r in language_results.values())
