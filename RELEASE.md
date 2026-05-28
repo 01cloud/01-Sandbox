@@ -1,3 +1,44 @@
+## Release v0.5.26 — 01-Sandbox
+**Release Date:** May 28, 2026
+
+---
+
+### Summary
+v0.5.26 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* scan tools specifications ([bbedf7f](https://github.com/01cloud/01-Sandbox/commit/bbedf7f4d1bfab4a509e3666492a34d26b8f7868))
+* scan tools specifications ([cf18bc2](https://github.com/01cloud/01-Sandbox/commit/cf18bc2c53a7e5624d26c40e361cae880aa2b79a))
+* generate RELEASE.md for v0.5.25 [skip ci] ([80c8dce](https://github.com/01cloud/01-Sandbox/commit/80c8dce0300a51980ecf3b464b185d0d64fb66b1))
+* bump versions to v0.5.25 [skip ci] ([f78dfda](https://github.com/01cloud/01-Sandbox/commit/f78dfdaa936100be3a79f78c736ff91f3005f592))
+
+### Changes
+## [0.5.26](https://github.com/01cloud/01-Sandbox/compare/v0.5.25...v0.5.26) (2026-05-28)
+
+
+### 🐛 Bug Fixes
+
+* scan tools specifications ([bbedf7f](https://github.com/01cloud/01-Sandbox/commit/bbedf7f4d1bfab4a509e3666492a34d26b8f7868))
+* scan tools specifications ([cf18bc2](https://github.com/01cloud/01-Sandbox/commit/cf18bc2c53a7e5624d26c40e361cae880aa2b79a))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.25 [skip ci] ([80c8dce](https://github.com/01cloud/01-Sandbox/commit/80c8dce0300a51980ecf3b464b185d0d64fb66b1))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.25 [skip ci] ([f78dfda](https://github.com/01cloud/01-Sandbox/commit/f78dfdaa936100be3a79f78c736ff91f3005f592))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.26)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.25 — 01-Sandbox
 **Release Date:** May 28, 2026
 
