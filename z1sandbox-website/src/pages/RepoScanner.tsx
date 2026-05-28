@@ -373,24 +373,58 @@ export default function RepoScanner() {
                       )}
                     </button>
 
-                    {expandedLang === lang && info.findings.length > 0 && (
-                      <div className="border-t border-border/50 p-5 space-y-3">
-                        {info.findings.map((f, fi) => (
-                          <div key={fi} className="p-4 rounded-xl border border-border/50 bg-muted/10">
-                            <div className="flex items-center gap-2 mb-2">
-                              <Badge variant="outline" className="text-[8px] font-black">{f.severity}</Badge>
-                              <span className="text-[10px] font-bold text-muted-foreground">{f.tool}</span>
-                              {f.line && <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">L:{f.line}</span>}
-                            </div>
-                            <p className="text-sm font-semibold">{f.issue}</p>
-                            {f.file && (
-                              <div className="flex items-center gap-1.5 mt-2">
-                                <FileCode className="w-3 h-3 text-muted-foreground/40" />
-                                <p className="text-[10px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
-                              </div>
-                            )}
+                    {expandedLang === lang && (
+                      <div className="border-t border-border/50">
+                        {info.findings.length === 0 ? (
+                          <div className="p-5 flex items-center gap-2 text-muted-foreground/60">
+                            <Shield className="w-4 h-4" />
+                            <span className="text-xs font-semibold">No security findings for this language</span>
                           </div>
-                        ))}
+                        ) : (
+                          <div
+                            className="overflow-y-auto p-5 space-y-3"
+                            style={{ maxHeight: "520px" }}
+                          >
+                            {info.findings.map((f, fi) => {
+                              const sev = f.severity?.toUpperCase() ?? "INFO";
+                              const sevColor =
+                                sev === "CRITICAL" ? "border-red-500/60 bg-red-500/5" :
+                                sev === "HIGH"     ? "border-orange-500/60 bg-orange-500/5" :
+                                sev === "MEDIUM"   ? "border-yellow-500/60 bg-yellow-500/5" :
+                                sev === "LOW"      ? "border-blue-500/60 bg-blue-500/5" :
+                                                     "border-border/50 bg-muted/10";
+                              const badgeColor =
+                                sev === "CRITICAL" ? "bg-red-500/15 text-red-500 border-red-500/30" :
+                                sev === "HIGH"     ? "bg-orange-500/15 text-orange-500 border-orange-500/30" :
+                                sev === "MEDIUM"   ? "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" :
+                                sev === "LOW"      ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
+                                                     "bg-muted text-muted-foreground border-border";
+                              return (
+                                <div key={fi} className={cn("p-4 rounded-xl border", sevColor)}>
+                                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                    <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide", badgeColor)}>
+                                      {sev}
+                                    </Badge>
+                                    <span className="text-[10px] font-bold text-muted-foreground">{f.tool}</span>
+                                    {f.line && (
+                                      <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">L:{f.line}</span>
+                                    )}
+                                  </div>
+                                  <p className="text-sm font-semibold leading-snug">{f.issue}</p>
+                                  {f.file && (
+                                    <div className="flex items-center gap-1.5 mt-2">
+                                      <FileCode className="w-3 h-3 text-muted-foreground/40 shrink-0" />
+                                      <p className="text-[10px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
+                                    </div>
+                                  )}
+                                  {f.remediation && (
+                                    <p className="text-[10px] text-muted-foreground/60 mt-1.5 leading-relaxed">{f.remediation}</p>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

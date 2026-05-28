@@ -10,13 +10,17 @@ tools (bandit, semgrep, gosec, shellcheck, etc.) pre-installed via
 Dockerfile_base and returns a full security scan report.
 
 File cap: max 100 files per language (spec constraint).
+
+YAML handling:
+  Plain YAML  → yamllint only              (section: "YAML")
+  K8s YAML    → kubelinter, kubescore, kubeconform  (section: "Kubernetes YAML")
 """
 from __future__ import annotations
 
 import json
 import os
 import time
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 import httpx
 from config import opensandbox_base_url, opensandbox_headers, opensandbox_route_prefix
@@ -29,8 +33,8 @@ _TAG = "[RepoScanner][FileScanner]"
 FILE_CAP = 100
 
 # Languages we skip security scanning for (only LoC counted)
+# NOTE: yaml/yml intentionally excluded — they are dispatched to scan_yaml_files()
 LOC_ONLY_LANGS = {
-    "yaml",
     "json",
     "markdown",
     "text",
@@ -39,6 +43,24 @@ LOC_ONLY_LANGS = {
     "ini",
     "dockerfile",
 }
+
+
+# K8s manifest signatures: a file must have BOTH apiVersion and kind at the top level
+def _is_k8s_yaml(filepath: str) -> bool:
+    """
+    Heuristic: read the first 4 KB of a YAML file and check whether it contains
+    both 'apiVersion:' and 'kind:' at the start of a line — the two required
+    top-level fields in every Kubernetes resource manifest.
+    """
+    try:
+        with open(filepath, "r", errors="replace") as fh:
+            head = fh.read(4096)
+        lines = head.splitlines()
+        has_api_version = any(ln.startswith("apiVersion:") for ln in lines)
+        has_kind = any(ln.startswith("kind:") for ln in lines)
+        return has_api_version and has_kind
+    except Exception:
+        return False
 
 
 def _pmd_priority_to_severity(priority: int) -> str:
@@ -232,6 +254,17 @@ async def scan_language(
             findings=[],
         )
 
+    # ── YAML: delegate to scan_yaml_files() for proper plain/k8s split ──
+    if lang_lower in ("yaml", "yml"):
+        print(
+            f"{_TAG} [{language}] Delegating to YAML splitter (plain → yamllint, K8s → k8s tools)"
+        )
+        return await scan_yaml_files(
+            sandbox_id=sandbox_id,
+            files=files_capped,
+            total_percentage=round(percentage, 2),
+        )
+
     # Select tool hints for the scan-jobs orchestrator
     tool_hints: Optional[list[str]] = None
     if lang_lower == "python":
@@ -246,8 +279,6 @@ async def scan_language(
         tool_hints = ["semgrep"]
     elif lang_lower in ("shell", "bash"):
         tool_hints = ["shellcheck", "semgrep"]
-    elif lang_lower in ("yaml", "yml"):
-        tool_hints = ["yamllint", "semgrep"]
 
     print(
         f"{_TAG} [{language}] Submitting {len(files_dict)} file(s) to scan-jobs (tools: {tool_hints or 'auto'})"
@@ -278,3 +309,108 @@ async def scan_language(
         percentage=round(percentage, 2),
         findings=findings,
     )
+
+
+# ─────────────────────────────────────────────
+# YAML Splitter: plain YAML vs Kubernetes YAML
+# ─────────────────────────────────────────────
+
+
+async def scan_yaml_files(
+    sandbox_id: str,
+    files: list[str],
+    total_percentage: float,
+) -> Tuple[LanguageScanResult, Optional[LanguageScanResult]]:
+    """
+    Split YAML files into:
+      - Plain YAML  → scanned with yamllint only → LanguageScanResult(language="YAML")
+      - K8s YAML    → scanned with kubelinter, kubescore, kubeconform
+                    → LanguageScanResult(language="Kubernetes YAML")
+
+    Returns a tuple (yaml_result, k8s_result).
+    k8s_result is None if no K8s manifests were found.
+    """
+    plain_files: list[str] = []
+    k8s_files: list[str] = []
+
+    print(f"{_TAG} [YAML] Classifying {len(files)} YAML file(s) into plain vs K8s...")
+    for f in files:
+        if _is_k8s_yaml(f):
+            k8s_files.append(f)
+        else:
+            plain_files.append(f)
+
+    print(
+        f"{_TAG} [YAML] Classification complete: {len(plain_files)} plain, {len(k8s_files)} K8s manifests"
+    )
+
+    repo_root = os.path.join(sandbox_id, "repo")
+    total_file_count = len(files)
+
+    # ── Plain YAML → yamllint only ───────────────────────────────────────
+    plain_loc = _count_loc(plain_files)
+    plain_findings: List[FindingItem] = []
+
+    if plain_files:
+        plain_dict, skipped = _read_files_as_dict(plain_files, repo_root)
+        if skipped > 0:
+            print(
+                f"{_TAG} [YAML] Skipped {skipped} plain YAML file(s) — binary or >200KB"
+            )
+        if plain_dict:
+            print(
+                f"{_TAG} [YAML] Submitting {len(plain_dict)} plain YAML file(s) to scan-jobs (tools: yamllint)"
+            )
+            report = await _submit_scan_job(plain_dict, tools=["yamllint"])
+            if report:
+                plain_findings = _parse_scan_report(report, "yaml")
+                print(
+                    f"{_TAG} [YAML] Plain YAML scan: {len(plain_findings)} finding(s)"
+                )
+
+    plain_pct = round(
+        (len(plain_files) / max(total_file_count, 1)) * total_percentage, 2
+    )
+    yaml_result = LanguageScanResult(
+        language="YAML",
+        file_count=len(plain_files),
+        lines_of_code=plain_loc,
+        percentage=plain_pct,
+        findings=plain_findings,
+    )
+
+    # ── Kubernetes YAML → k8s-specific tools ─────────────────────────────
+    k8s_result: Optional[LanguageScanResult] = None
+
+    if k8s_files:
+        k8s_loc = _count_loc(k8s_files)
+        k8s_findings: List[FindingItem] = []
+        k8s_tools = ["kubelinter", "kubescore", "kubeconform"]
+        k8s_dict, skipped = _read_files_as_dict(k8s_files, repo_root)
+        if skipped > 0:
+            print(
+                f"{_TAG} [K8sYAML] Skipped {skipped} K8s manifest file(s) — binary or >200KB"
+            )
+        if k8s_dict:
+            print(
+                f"{_TAG} [K8sYAML] Submitting {len(k8s_dict)} K8s manifest(s) to scan-jobs (tools: {k8s_tools})"
+            )
+            report = await _submit_scan_job(k8s_dict, tools=k8s_tools)
+            if report:
+                k8s_findings = _parse_scan_report(report, "yaml")
+                print(f"{_TAG} [K8sYAML] K8s YAML scan: {len(k8s_findings)} finding(s)")
+
+        k8s_pct = round(
+            (len(k8s_files) / max(total_file_count, 1)) * total_percentage, 2
+        )
+        k8s_result = LanguageScanResult(
+            language="Kubernetes YAML",
+            file_count=len(k8s_files),
+            lines_of_code=k8s_loc,
+            percentage=k8s_pct,
+            findings=k8s_findings,
+        )
+    else:
+        print(f"{_TAG} [YAML] No K8s manifests detected — skipping K8s-specific scan")
+
+    return yaml_result, k8s_result
