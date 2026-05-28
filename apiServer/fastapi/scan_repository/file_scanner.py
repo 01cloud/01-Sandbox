@@ -143,6 +143,54 @@ def _parse_scan_report(report: dict, lang_lower: str) -> List[FindingItem]:
     return findings
 
 
+def _filter_findings_to_submitted_files(
+    findings: List[FindingItem],
+    submitted_rel_paths: set,
+    label: str,
+) -> List[FindingItem]:
+    """
+    Keep only findings whose `file` field matches one of the files
+    we actually submitted to /scan-jobs.
+
+    scan-jobs may run multiple tools across the entire workspace;
+    this filter ensures that results for files we did NOT submit
+    (belonging to other languages) are never mixed into this section.
+
+    Path normalisation applied before comparison:
+      - strip leading /workspace/  (absolute sandbox path)
+      - strip leading ./
+    """
+    if not submitted_rel_paths:
+        return findings
+
+    kept: List[FindingItem] = []
+    dropped = 0
+    for finding in findings:
+        raw = (finding.file or "").strip()
+        if not raw:
+            # Finding has no file field — keep it, cannot determine ownership
+            kept.append(finding)
+            continue
+
+        normalized = raw
+        for prefix in ("/workspace/", "workspace/", "./"):
+            if normalized.startswith(prefix):
+                normalized = normalized[len(prefix) :]
+                break
+
+        if normalized in submitted_rel_paths:
+            kept.append(finding)
+        else:
+            dropped += 1
+
+    if dropped:
+        print(
+            f"{_TAG} [{label}] Filtered out {dropped} cross-language finding(s) "
+            f"(file not in submitted set)"
+        )
+    return kept
+
+
 async def _submit_scan_job(
     files_dict: dict[str, str], tools: Optional[list[str]] = None
 ) -> dict:
@@ -287,8 +335,13 @@ async def scan_language(
 
     elapsed = time.monotonic() - t0
 
+    submitted_paths: set = set(files_dict.keys())
+
     if report:
-        findings = _parse_scan_report(report, lang_lower)
+        raw_findings = _parse_scan_report(report, lang_lower)
+        findings = _filter_findings_to_submitted_files(
+            raw_findings, submitted_paths, language
+        )
         # Severity breakdown
         sev_counts: dict[str, int] = {}
         for fi in findings:
@@ -363,7 +416,11 @@ async def scan_yaml_files(
             )
             report = await _submit_scan_job(plain_dict, tools=["yamllint"])
             if report:
-                plain_findings = _parse_scan_report(report, "yaml")
+                raw_findings = _parse_scan_report(report, "yaml")
+                submitted_paths = set(plain_dict.keys())
+                plain_findings = _filter_findings_to_submitted_files(
+                    raw_findings, submitted_paths, "YAML"
+                )
                 print(
                     f"{_TAG} [YAML] Plain YAML scan: {len(plain_findings)} finding(s)"
                 )
@@ -397,7 +454,11 @@ async def scan_yaml_files(
             )
             report = await _submit_scan_job(k8s_dict, tools=k8s_tools)
             if report:
-                k8s_findings = _parse_scan_report(report, "yaml")
+                raw_findings = _parse_scan_report(report, "yaml")
+                submitted_paths = set(k8s_dict.keys())
+                k8s_findings = _filter_findings_to_submitted_files(
+                    raw_findings, submitted_paths, "Kubernetes YAML"
+                )
                 print(f"{_TAG} [K8sYAML] K8s YAML scan: {len(k8s_findings)} finding(s)")
 
         k8s_pct = round(
