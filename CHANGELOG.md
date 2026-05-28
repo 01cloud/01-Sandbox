@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.26](https://github.com/01cloud/01-Sandbox/compare/v0.5.25...v0.5.26) (2026-05-28)
+
+
+### 🐛 Bug Fixes
+
+* scan tools specifications ([bbedf7f](https://github.com/01cloud/01-Sandbox/commit/bbedf7f4d1bfab4a509e3666492a34d26b8f7868))
+* scan tools specifications ([cf18bc2](https://github.com/01cloud/01-Sandbox/commit/cf18bc2c53a7e5624d26c40e361cae880aa2b79a))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.25 [skip ci] ([80c8dce](https://github.com/01cloud/01-Sandbox/commit/80c8dce0300a51980ecf3b464b185d0d64fb66b1))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.25 [skip ci] ([f78dfda](https://github.com/01cloud/01-Sandbox/commit/f78dfdaa936100be3a79f78c736ff91f3005f592))
+
 ## [0.5.25](https://github.com/01cloud/01-Sandbox/compare/v0.5.24...v0.5.25) (2026-05-28)
 
 
