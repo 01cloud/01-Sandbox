@@ -1,3 +1,44 @@
+## Release v0.5.23 — 01-Sandbox
+**Release Date:** May 28, 2026
+
+---
+
+### Summary
+v0.5.23 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* language specific sections ([ddf91dc](https://github.com/01cloud/01-Sandbox/commit/ddf91dc9cfad4f518648416f0546a8a09dae80cb))
+* language specific sections ([f3b9cd8](https://github.com/01cloud/01-Sandbox/commit/f3b9cd8b6df952dc73396cd01467132db9eefa31))
+* generate RELEASE.md for v0.5.22 [skip ci] ([10ddad0](https://github.com/01cloud/01-Sandbox/commit/10ddad02ce88dc69e1f586d495af6625225a36a2))
+* bump versions to v0.5.22 [skip ci] ([9088d8d](https://github.com/01cloud/01-Sandbox/commit/9088d8d68d9dbfd4888a7c1359f5c301a9eac94a))
+
+### Changes
+## [0.5.23](https://github.com/01cloud/01-Sandbox/compare/v0.5.22...v0.5.23) (2026-05-28)
+
+
+### 🐛 Bug Fixes
+
+* language specific sections ([ddf91dc](https://github.com/01cloud/01-Sandbox/commit/ddf91dc9cfad4f518648416f0546a8a09dae80cb))
+* language specific sections ([f3b9cd8](https://github.com/01cloud/01-Sandbox/commit/f3b9cd8b6df952dc73396cd01467132db9eefa31))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.22 [skip ci] ([10ddad0](https://github.com/01cloud/01-Sandbox/commit/10ddad02ce88dc69e1f586d495af6625225a36a2))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.22 [skip ci] ([9088d8d](https://github.com/01cloud/01-Sandbox/commit/9088d8d68d9dbfd4888a7c1359f5c301a9eac94a))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.23)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.22 — 01-Sandbox
 **Release Date:** May 28, 2026
 
