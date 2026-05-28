@@ -82,6 +82,7 @@ class LanguageScanResult(BaseModel):
     lines_of_code: int = 0
     percentage: float = 0.0  # share of total repo bytes/LoC
     findings: List[FindingItem] = Field(default_factory=list)
+    raw_findings: List[FindingItem] = Field(default_factory=list, exclude=True)
 
 
 class RepoScanResult(BaseModel):

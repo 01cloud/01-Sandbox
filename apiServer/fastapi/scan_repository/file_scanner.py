@@ -478,6 +478,7 @@ async def scan_language(
     submitted_paths: set = set(files_dict.keys())
 
     findings = []
+    raw_findings = []
     if report:
         raw_findings = _parse_scan_report(report, lang_lower)
         findings = _filter_findings_to_submitted_files(
@@ -540,6 +541,7 @@ async def scan_language(
         lines_of_code=lines_of_code,
         percentage=round(percentage, 2),
         findings=findings,
+        raw_findings=raw_findings,
     )
 
 
@@ -582,7 +584,7 @@ async def scan_yaml_files(
     # ── Plain YAML → yamllint only ───────────────────────────────────────
     plain_loc = _count_loc(plain_files)
     plain_findings: List[FindingItem] = []
-
+    plain_raw_findings = []
     if plain_files:
         plain_dict, skipped = _read_files_as_dict(plain_files, repo_root)
         if skipped > 0:
@@ -597,10 +599,10 @@ async def scan_yaml_files(
             report = await _submit_scan_job(plain_dict, tools=["yamllint"])
             elapsed_yaml = time.monotonic() - t_yaml0
             if report:
-                raw_findings = _parse_scan_report(report, "yaml")
+                plain_raw_findings = _parse_scan_report(report, "yaml")
                 submitted_paths = set(plain_dict.keys())
                 plain_findings = _filter_findings_to_submitted_files(
-                    raw_findings, submitted_paths, "YAML"
+                    plain_raw_findings, submitted_paths, "YAML"
                 )
                 print(
                     f"{_TAG} [YAML] Plain YAML scan: {len(plain_findings)} finding(s)"
@@ -637,11 +639,13 @@ async def scan_yaml_files(
         lines_of_code=plain_loc,
         percentage=plain_pct,
         findings=plain_findings,
+        raw_findings=plain_raw_findings,
     )
 
     # ── Kubernetes YAML → k8s-specific tools ─────────────────────────────
     k8s_result: Optional[LanguageScanResult] = None
 
+    k8s_raw_findings = []
     if k8s_files:
         k8s_loc = _count_loc(k8s_files)
         k8s_findings: List[FindingItem] = []
@@ -659,10 +663,10 @@ async def scan_yaml_files(
             report = await _submit_scan_job(k8s_dict, tools=k8s_tools)
             elapsed_k8s = time.monotonic() - t_k8s0
             if report:
-                raw_findings = _parse_scan_report(report, "yaml")
+                k8s_raw_findings = _parse_scan_report(report, "yaml")
                 submitted_paths = set(k8s_dict.keys())
                 k8s_findings = _filter_findings_to_submitted_files(
-                    raw_findings, submitted_paths, "Kubernetes YAML"
+                    k8s_raw_findings, submitted_paths, "Kubernetes YAML"
                 )
                 print(f"{_TAG} [K8sYAML] K8s YAML scan: {len(k8s_findings)} finding(s)")
                 # Tool logs for kubelinter, kubescore, kubeconform and universal tools if ran here
@@ -703,6 +707,7 @@ async def scan_yaml_files(
             lines_of_code=k8s_loc,
             percentage=k8s_pct,
             findings=k8s_findings,
+            raw_findings=k8s_raw_findings,
         )
     else:
         print(f"{_TAG} [YAML] No K8s manifests detected — skipping K8s-specific scan")
