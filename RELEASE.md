@@ -1,3 +1,44 @@
+## Release v0.5.19 — 01-Sandbox
+**Release Date:** May 28, 2026
+
+---
+
+### Summary
+v0.5.19 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* tokie and entry tools ([faf8ae9](https://github.com/01cloud/01-Sandbox/commit/faf8ae993331f476ef8beacf39ceb836fddcc97c))
+* tokie and entry tools ([f529cf1](https://github.com/01cloud/01-Sandbox/commit/f529cf14e3ff5274dc5a9f67296a3ce9b4d9ab00))
+* generate RELEASE.md for v0.5.18 [skip ci] ([17501e7](https://github.com/01cloud/01-Sandbox/commit/17501e7a27844916ebfa543eeb2eebd65f84d2cb))
+* bump versions to v0.5.18 [skip ci] ([9e60f48](https://github.com/01cloud/01-Sandbox/commit/9e60f48ceb912b4c61fdc0511e70988a9c16b610))
+
+### Changes
+## [0.5.19](https://github.com/01cloud/01-Sandbox/compare/v0.5.18...v0.5.19) (2026-05-28)
+
+
+### 🐛 Bug Fixes
+
+* tokie and entry tools ([faf8ae9](https://github.com/01cloud/01-Sandbox/commit/faf8ae993331f476ef8beacf39ceb836fddcc97c))
+* tokie and entry tools ([f529cf1](https://github.com/01cloud/01-Sandbox/commit/f529cf14e3ff5274dc5a9f67296a3ce9b4d9ab00))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.18 [skip ci] ([17501e7](https://github.com/01cloud/01-Sandbox/commit/17501e7a27844916ebfa543eeb2eebd65f84d2cb))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.18 [skip ci] ([9e60f48](https://github.com/01cloud/01-Sandbox/commit/9e60f48ceb912b4c61fdc0511e70988a9c16b610))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.19)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.18 — 01-Sandbox
 **Release Date:** May 27, 2026
 
