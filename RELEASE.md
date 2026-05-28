@@ -1,3 +1,44 @@
+## Release v0.5.21 — 01-Sandbox
+**Release Date:** May 28, 2026
+
+---
+
+### Summary
+v0.5.21 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* lingusit language retrival ([fbf1dc7](https://github.com/01cloud/01-Sandbox/commit/fbf1dc7627d01d183d29b65ba8c20cb7ac7dc2f2))
+* lingusit language retrival ([f7a3ced](https://github.com/01cloud/01-Sandbox/commit/f7a3ced4a4a61d71e25c97a04c243573a7a780ab))
+* generate RELEASE.md for v0.5.20 [skip ci] ([d8b4f82](https://github.com/01cloud/01-Sandbox/commit/d8b4f820f319739dc54bbfa32a5db83e772bbea2))
+* bump versions to v0.5.20 [skip ci] ([4a79982](https://github.com/01cloud/01-Sandbox/commit/4a79982374c0f15f07dbd2fe281fb594f314db0e))
+
+### Changes
+## [0.5.21](https://github.com/01cloud/01-Sandbox/compare/v0.5.20...v0.5.21) (2026-05-28)
+
+
+### 🐛 Bug Fixes
+
+* lingusit language retrival ([fbf1dc7](https://github.com/01cloud/01-Sandbox/commit/fbf1dc7627d01d183d29b65ba8c20cb7ac7dc2f2))
+* lingusit language retrival ([f7a3ced](https://github.com/01cloud/01-Sandbox/commit/f7a3ced4a4a61d71e25c97a04c243573a7a780ab))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.20 [skip ci] ([d8b4f82](https://github.com/01cloud/01-Sandbox/commit/d8b4f820f319739dc54bbfa32a5db83e772bbea2))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.20 [skip ci] ([4a79982](https://github.com/01cloud/01-Sandbox/commit/4a79982374c0f15f07dbd2fe281fb594f314db0e))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.21)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.20 — 01-Sandbox
 **Release Date:** May 28, 2026
 
