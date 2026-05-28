@@ -12,9 +12,27 @@ WORKDIR /app
 
 # Install dependencies into a separate layer for caching
 COPY requirements.txt .
-RUN apt-get update && apt-get install -y libpq-dev gcc \
+RUN apt-get update && apt-get install -y libpq-dev gcc curl git golang \
  && pip install --no-cache-dir --upgrade pip \
  && pip install --no-cache-dir -r requirements.txt
+
+# tokei — secondary detector & LoC counter (static binary, fast)
+RUN set -eux; \
+    TOKEI_VERSION="12.1.2"; \
+    case "$(uname -m)" in \
+      x86_64)  ARCH="x86_64-unknown-linux-gnu" ;; \
+      aarch64) ARCH="aarch64-unknown-linux-gnu" ;; \
+      *) ARCH="x86_64-unknown-linux-gnu" ;; \
+    esac; \
+    curl -fsSL \
+      "https://github.com/XAMPPRocky/tokei/releases/download/v${TOKEI_VERSION}/tokei-${ARCH}.tar.gz" \
+      | tar -xz -C /usr/local/bin tokei; \
+    chmod 755 /usr/local/bin/tokei
+
+# enry — fallback detector (Go port of linguist, lightweight)
+RUN GOPATH=/go go install github.com/go-enry/go-enry/v2/cmd/enry@latest \
+ && cp /go/bin/enry /usr/local/bin/enry \
+ && chmod 755 /usr/local/bin/enry
 
 # ── Stage 2: runtime ─────────────────────────
 FROM python:3.12-slim AS runtime
@@ -28,6 +46,9 @@ WORKDIR /app
 # Copy installed packages from builder
 COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
+
+# Verify that tokei and enry are available and functional in the runtime image
+RUN tokei --version && enry --version
 
 # Copy application code
 
