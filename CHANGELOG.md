@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.20](https://github.com/01cloud/01-Sandbox/compare/v0.5.19...v0.5.20) (2026-05-28)
+
+
+### 🐛 Bug Fixes
+
+* implement Linguist tool ([4e70443](https://github.com/01cloud/01-Sandbox/commit/4e704439851d358325abb108d3ad1339b1682f48))
+* implement Linguist tool ([f55ca8f](https://github.com/01cloud/01-Sandbox/commit/f55ca8f201856f81f6086f8f42346ab4fbbd45de))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.19 [skip ci] ([8177521](https://github.com/01cloud/01-Sandbox/commit/81775212cea8e1315468685c811aea26fca32e15))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.19 [skip ci] ([a2593f0](https://github.com/01cloud/01-Sandbox/commit/a2593f0105f74f074a1312ae091d67f3723b1831))
+
 ## [0.5.19](https://github.com/01cloud/01-Sandbox/compare/v0.5.18...v0.5.19) (2026-05-28)
 
 
