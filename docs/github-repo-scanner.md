@@ -795,3 +795,94 @@ _filter_findings_to_submitted_files(raw_findings, submitted_paths, "Python")
 | Sandbox per call | **1 auto-created** | `opensandbox-server` internal |
 | Calls per language | **1** (bulk) | `_submit_scan_job()` called once |
 | Languages in parallel | **No** — sequential | `for` loop in `_run_scan_pipeline()` |
+
+---
+
+## Deep Dive — JSON Wire Format for File Submission
+
+### Yes — All File Code Is Sent as JSON Strings
+
+When `_submit_scan_job()` calls `httpx_client.post(..., json=payload)`, Python serialises the entire `files_dict` into a JSON body. Each file's **full source code** becomes a plain JSON string value. Newlines in the source code become `\n` escape sequences inside the JSON string.
+
+### Exact JSON Payload Structure
+
+```json
+{
+  "files": {
+    "src/auth/tokens.py": "import hashlib\ndef hash_password(p):\n    return hashlib.md5(p.encode()).hexdigest()\n",
+    "src/api/views.py":   "from flask import request\n@app.route('/login')\ndef login():\n    user = request.json.get('user')\n    ...\n",
+    "tests/test_auth.py": "import unittest\nclass TestAuth(unittest.TestCase):\n    def test_hash(self):\n        ...\n"
+  },
+  "tools": ["bandit", "semgrep"]
+}
+```
+
+- **Key** → relative file path (e.g. `"src/auth/tokens.py"`)
+- **Value** → entire raw source code as a JSON string
+- **`tools`** → list of tool names the scan-jobs orchestrator should run
+
+All files for one language are inside a **single `"files"` object** in one HTTP request body.
+
+### How the Code Leaves the API Pod and Enters the Container
+
+```
+API pod (file_scanner.py)                  opensandbox-server container
+──────────────────────────────             ────────────────────────────────────────
+files_dict = {                             Receives JSON body
+  "src/auth/tokens.py": "<code>",   ──►   Parses "files" object
+  "src/api/views.py":   "<code>",          Writes each key-value as a real file:
+  ...                                        /workspace/src/auth/tokens.py  ← file on disk
+}                                            /workspace/src/api/views.py    ← file on disk
+                                           Runs tools against /workspace/:
+payload = {"files": files_dict,              bandit -r /workspace/
+           "tools": ["bandit","semgrep"]}    semgrep --config auto /workspace/
+                                           Tools read actual filesystem files
+POST /scan-jobs  ──────────────────►       (NOT the JSON — JSON was just transport)
+  Content-Type: application/json
+  Body: {JSON above}
+```
+
+The JSON is **only a transport mechanism**. By the time the security tools run, the code exists as normal files in `/workspace/` inside the container — the tools have no knowledge they came from JSON.
+
+### Field-Level Breakdown
+
+| JSON field | Python source | Example value |
+|------------|--------------|---------------|
+| `files` | `files_dict` from `_read_files_as_dict()` | `{"src/auth.py": "import hashlib\n..."}` |
+| `files.<key>` | `os.path.relpath(abs_path, repo_root)` | `"src/auth/tokens.py"` |
+| `files.<value>` | `open(path).read()` | Full source code as a string |
+| `tools` | `tool_hints` selected per language | `["bandit", "semgrep"]` |
+
+### What Happens to Non-String Characters in Source Code
+
+Since source code can contain characters that need escaping in JSON (backslashes, quotes, Unicode), `httpx` handles this automatically via Python's `json.dumps()`. The `opensandbox-server` decodes it back to the original bytes before writing to disk — the tools always see the original unescaped source.
+
+### Serialisation Path (Code to Wire)
+
+```
+open(path).read()          →  raw string in Python memory
+                                 e.g.  'import hashlib\ndef ...'
+                           ↓
+json=payload in httpx      →  json.dumps() encodes to JSON string
+                                 e.g.  "import hashlib\\ndef ..."
+                           ↓
+HTTP body (bytes)          →  UTF-8 encoded JSON sent over TCP
+                           ↓
+opensandbox-server         →  json.loads() decodes back to string
+                           ↓
+open(path, "w").write()    →  written as real file on container disk
+                           ↓
+bandit / semgrep           →  reads file from disk normally
+```
+
+### Size Implications
+
+Because the entire source code of all files goes into a single JSON body, very large files are excluded before building the dict to keep the payload manageable:
+
+```python
+if os.path.getsize(path) > 200 * 1024:   # 200 KB per file
+    skipped += 1
+    continue
+```
+
+With a cap of 100 files × 200 KB each, the theoretical maximum JSON body per language is **~20 MB** before JSON string escaping overhead.
