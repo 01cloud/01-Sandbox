@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.36](https://github.com/01cloud/01-Sandbox/compare/v0.5.35...v0.5.36) (2026-06-01)
+
+
+### 🐛 Bug Fixes
+
+* ratelimit with token validator ([9a6db03](https://github.com/01cloud/01-Sandbox/commit/9a6db034afbb55d2f768ffe3478a98d3fe19941e))
+* ratelimit with token validator ([839a363](https://github.com/01cloud/01-Sandbox/commit/839a36310583a6850c17c11c81209739365f20cd))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.35 [skip ci] ([1db1229](https://github.com/01cloud/01-Sandbox/commit/1db122975ffac43b5ef3f25f5dcc8653635b4c89))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.35 [skip ci] ([3b2301c](https://github.com/01cloud/01-Sandbox/commit/3b2301cfbc32df368ae28bdac38cfdd542694666))
+
 ## [0.5.35](https://github.com/01cloud/01-Sandbox/compare/v0.5.34...v0.5.35) (2026-06-01)
 
 
