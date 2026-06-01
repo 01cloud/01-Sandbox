@@ -1,3 +1,44 @@
+## Release v0.5.33 — 01-Sandbox
+**Release Date:** June 01, 2026
+
+---
+
+### Summary
+v0.5.33 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* report visibility in the frontend ([9788306](https://github.com/01cloud/01-Sandbox/commit/9788306253c09567e1c04fd56ba722c45e94a3c6))
+* report visibility in the frontend ([1bd8839](https://github.com/01cloud/01-Sandbox/commit/1bd88393bcdfcd5af29ccd6b09a2152c959741a2))
+* generate RELEASE.md for v0.5.32 [skip ci] ([0d2660c](https://github.com/01cloud/01-Sandbox/commit/0d2660cc81331d6fee8e3cc9521dda883c6afa00))
+* bump versions to v0.5.32 [skip ci] ([78b0eca](https://github.com/01cloud/01-Sandbox/commit/78b0ecaf36333dd4d54e16c4f818bf4f5bf72404))
+
+### Changes
+## [0.5.33](https://github.com/01cloud/01-Sandbox/compare/v0.5.32...v0.5.33) (2026-06-01)
+
+
+### 🐛 Bug Fixes
+
+* report visibility in the frontend ([9788306](https://github.com/01cloud/01-Sandbox/commit/9788306253c09567e1c04fd56ba722c45e94a3c6))
+* report visibility in the frontend ([1bd8839](https://github.com/01cloud/01-Sandbox/commit/1bd88393bcdfcd5af29ccd6b09a2152c959741a2))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.32 [skip ci] ([0d2660c](https://github.com/01cloud/01-Sandbox/commit/0d2660cc81331d6fee8e3cc9521dda883c6afa00))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.32 [skip ci] ([78b0eca](https://github.com/01cloud/01-Sandbox/commit/78b0ecaf36333dd4d54e16c4f818bf4f5bf72404))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.33)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.32 — 01-Sandbox
 **Release Date:** June 01, 2026
 
