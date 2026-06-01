@@ -54,7 +54,6 @@ apiServer:
     GATEWAY_SECRET_NAME: "apikey"
     GATEWAY_SECRET_NAMESPACE: "agentgateway-system"
     GATEWAY_SECRET_KEY: "api-key"
-    JWT_ALGORITHM: "HS256"
     JWT_EXPIRATION_MINUTES: "60"
     JWT_ISSUER: "01 Sandbox"
     JWT_ALGORITHM: "RS256"
@@ -66,6 +65,7 @@ apiServer:
   secret:
     E2B_API_KEY: ""
     JWT_PRIVATE_KEY: ""
+    JWT_PUBLIC_JWKS: ""
   deployment:
     replicaCount: 1
     image:
