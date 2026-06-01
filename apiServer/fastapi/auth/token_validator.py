@@ -42,8 +42,20 @@ async def validate_token(request: Request):
     """
     path = request.url.path
 
-    # 0. Bypass validation for public documentation and spec routes
-    if path.endswith(("/docs", "/redoc", "/openapi.json")):
+    # 0. Bypass validation for public documentation, spec, status, result, and report routes
+    if (
+        path.endswith(
+            (
+                "/docs",
+                "/redoc",
+                "/openapi.json",
+                "/status",
+                "/result",
+                "/report",
+            )
+        )
+        or "/scan-status/" in path
+    ):
         return {}
 
     # 1. Path-Aware Enforcement: Decide if we allow Cookie Fallbacks
