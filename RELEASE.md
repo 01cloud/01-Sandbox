@@ -1,3 +1,44 @@
+## Release v0.5.32 — 01-Sandbox
+**Release Date:** June 01, 2026
+
+---
+
+### Summary
+v0.5.32 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* public jks authentication access ([b965eb9](https://github.com/01cloud/01-Sandbox/commit/b965eb97b1cf46838e35500ecaa5ef1e7c93308e))
+* public jks authentication access ([d7d184e](https://github.com/01cloud/01-Sandbox/commit/d7d184e45cf217f8ce5a986be75ca8fe609dde5b))
+* generate RELEASE.md for v0.5.31 [skip ci] ([e688ac2](https://github.com/01cloud/01-Sandbox/commit/e688ac2505e5ecfb63de34719a9c5d7cf371df16))
+* bump versions to v0.5.31 [skip ci] ([9a80fd5](https://github.com/01cloud/01-Sandbox/commit/9a80fd5731e59393566fbb3cbd6e9209ab9fc1af))
+
+### Changes
+## [0.5.32](https://github.com/01cloud/01-Sandbox/compare/v0.5.31...v0.5.32) (2026-06-01)
+
+
+### 🐛 Bug Fixes
+
+* public jks authentication access ([b965eb9](https://github.com/01cloud/01-Sandbox/commit/b965eb97b1cf46838e35500ecaa5ef1e7c93308e))
+* public jks authentication access ([d7d184e](https://github.com/01cloud/01-Sandbox/commit/d7d184e45cf217f8ce5a986be75ca8fe609dde5b))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.31 [skip ci] ([e688ac2](https://github.com/01cloud/01-Sandbox/commit/e688ac2505e5ecfb63de34719a9c5d7cf371df16))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.31 [skip ci] ([9a80fd5](https://github.com/01cloud/01-Sandbox/commit/9a80fd5731e59393566fbb3cbd6e9209ab9fc1af))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.32)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.31 — 01-Sandbox
 **Release Date:** June 01, 2026
 
