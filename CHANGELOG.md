@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.33](https://github.com/01cloud/01-Sandbox/compare/v0.5.32...v0.5.33) (2026-06-01)
+
+
+### 🐛 Bug Fixes
+
+* report visibility in the frontend ([9788306](https://github.com/01cloud/01-Sandbox/commit/9788306253c09567e1c04fd56ba722c45e94a3c6))
+* report visibility in the frontend ([1bd8839](https://github.com/01cloud/01-Sandbox/commit/1bd88393bcdfcd5af29ccd6b09a2152c959741a2))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.32 [skip ci] ([0d2660c](https://github.com/01cloud/01-Sandbox/commit/0d2660cc81331d6fee8e3cc9521dda883c6afa00))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.32 [skip ci] ([78b0eca](https://github.com/01cloud/01-Sandbox/commit/78b0ecaf36333dd4d54e16c4f818bf4f5bf72404))
+
 ## [0.5.32](https://github.com/01cloud/01-Sandbox/compare/v0.5.31...v0.5.32) (2026-06-01)
 
 
