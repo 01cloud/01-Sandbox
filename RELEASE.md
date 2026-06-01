@@ -1,3 +1,44 @@
+## Release v0.5.37 — 01-Sandbox
+**Release Date:** June 01, 2026
+
+---
+
+### Summary
+v0.5.37 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* ratelimit ([ca64313](https://github.com/01cloud/01-Sandbox/commit/ca64313a8f7cc728cbd5e445caf04e27c4a9e4d9))
+* ratelimit ([7851e09](https://github.com/01cloud/01-Sandbox/commit/7851e0971ce83672c158e49381320df13b5e6846))
+* generate RELEASE.md for v0.5.36 [skip ci] ([0bcb645](https://github.com/01cloud/01-Sandbox/commit/0bcb645acb44e70b6499db0cce3ad9ca48d695b5))
+* bump versions to v0.5.36 [skip ci] ([1b9845a](https://github.com/01cloud/01-Sandbox/commit/1b9845a6bd9ce36099685b5dcc03a1b6d02b9146))
+
+### Changes
+## [0.5.37](https://github.com/01cloud/01-Sandbox/compare/v0.5.36...v0.5.37) (2026-06-01)
+
+
+### 🐛 Bug Fixes
+
+* ratelimit ([ca64313](https://github.com/01cloud/01-Sandbox/commit/ca64313a8f7cc728cbd5e445caf04e27c4a9e4d9))
+* ratelimit ([7851e09](https://github.com/01cloud/01-Sandbox/commit/7851e0971ce83672c158e49381320df13b5e6846))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.36 [skip ci] ([0bcb645](https://github.com/01cloud/01-Sandbox/commit/0bcb645acb44e70b6499db0cce3ad9ca48d695b5))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.36 [skip ci] ([1b9845a](https://github.com/01cloud/01-Sandbox/commit/1b9845a6bd9ce36099685b5dcc03a1b6d02b9146))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.37)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.36 — 01-Sandbox
 **Release Date:** June 01, 2026
 
