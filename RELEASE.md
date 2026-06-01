@@ -1,3 +1,44 @@
+## Release v0.5.29 — 01-Sandbox
+**Release Date:** June 01, 2026
+
+---
+
+### Summary
+v0.5.29 focuses on reliability, bug resolution, and maintenance. Under-the-hood code refactoring improves overall system maintainability. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* delete pem file ([aefd1c7](https://github.com/01cloud/01-Sandbox/commit/aefd1c7460b8707c790ae9c62e75d6c9a24a96eb))
+* delete pem file ([b213f4a](https://github.com/01cloud/01-Sandbox/commit/b213f4ad4f590086b7d93081411bd464f37d56bd))
+* generate RELEASE.md for v0.5.28 [skip ci] ([f0d7198](https://github.com/01cloud/01-Sandbox/commit/f0d71986a5f3a5aa9f7d81cfb91779e2cf324f5f))
+* bump versions to v0.5.28 [skip ci] ([6c4bdf5](https://github.com/01cloud/01-Sandbox/commit/6c4bdf5159b87faa8bd5c62ff6a329432ef4f12c))
+
+### Changes
+## [0.5.29](https://github.com/01cloud/01-Sandbox/compare/v0.5.28...v0.5.29) (2026-06-01)
+
+
+### 🐛 Bug Fixes
+
+* delete pem file ([aefd1c7](https://github.com/01cloud/01-Sandbox/commit/aefd1c7460b8707c790ae9c62e75d6c9a24a96eb))
+* delete pem file ([b213f4a](https://github.com/01cloud/01-Sandbox/commit/b213f4ad4f590086b7d93081411bd464f37d56bd))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.28 [skip ci] ([f0d7198](https://github.com/01cloud/01-Sandbox/commit/f0d71986a5f3a5aa9f7d81cfb91779e2cf324f5f))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.28 [skip ci] ([6c4bdf5](https://github.com/01cloud/01-Sandbox/commit/6c4bdf5159b87faa8bd5c62ff6a329432ef4f12c))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.29)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.28 — 01-Sandbox
 **Release Date:** June 01, 2026
 
