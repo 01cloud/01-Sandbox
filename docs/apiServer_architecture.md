@@ -108,3 +108,72 @@ If the rate limit is under the budget, the request proceeds to the respective ro
    Redis is used by `ratelimit` to sync rate counters, by `auth` to sync active keys globally, and by `scan_repository` to publish SSE status updates across container pod boundaries. If Redis experiences a connection blip, all modules gracefully fallback to Python local-in-memory states, ensuring the core platform does not crash.
 2. **Decoupled Gateway Throttling**:
    Envoy gateway policies are configured to only act as perimeter DDoS blocks. Fine-grained business logic (e.g., key scaling and selective Swagger spec bypasses) is kept entirely inside the FastAPI server, avoiding complex and fragile configuration deployments on Kubernetes.
+
+---
+
+## 5. Production Deployment & API Endpoint Reference
+
+### Deployment Topology
+
+The production environment is hosted on a Kubernetes cluster managed via Helm. The request path from the public internet to the FastAPI pod is:
+
+```
+Client Browser / React UI
+        │
+        ▼
+https://api-sandbox.01security.com  (Public DNS → 148.113.4.247)
+        │
+        ▼
+Agent Gateway (agentgateway-system namespace)
+  - TLS Termination (HTTPS port 443)
+  - JWT Strict-Mode Enforcement
+  - HTTPRoute → sandbox-api-service:80
+        │
+        ▼
+sandbox-api-service (ClusterIP, port 80 → targetPort 8000)
+        │
+        ▼
+FastAPI Pod (opensandbox-system namespace, port 8000)
+  - codeinspectior_api.py (app entry)
+  - auth/ → ratelimit/ → sandboxes/ | scan_repository/ | proxy/
+        │
+        ▼
+opensandbox-server (internal cluster service, gVisor sandboxed pods)
+```
+
+### Route Prefix
+
+All internal backend routes use the versioned prefix defined in `values.yaml`:
+
+```
+global.apiRoutePrefix: /api/v1/01sbx
+```
+
+---
+
+### Production API Endpoints
+
+**Base URL:** `https://api-sandbox.01security.com`
+
+| Feature | Method | Endpoint | Auth Required | Rate Limited |
+| :--- | :---: | :--- | :---: | :---: |
+| **Swagger UI (Interactive Docs)** | `GET` | `/api/v1/01sbx/docs` | Session Cookie | ✅ Yes |
+| **OpenAPI JSON Spec** | `GET` | `/api/v1/01sbx/openapi.json` | No | ❌ No |
+| **ReDoc UI** | `GET` | `/api/v1/01sbx/redoc` | Session Cookie | ✅ Yes |
+| **Health Check** | `GET` | `/health` | No | ❌ No |
+| **Quick Scan (Ingestion Engine)** | `POST` | `/api/v1/01sbx/scan-jobs` | Bearer API Key | ✅ Yes |
+| **Scan Status (polling)** | `GET` | `/api/v1/01sbx/scan-status/{job_id}` | Bearer API Key | ❌ No |
+| **Scan Report** | `GET` | `/api/v1/01sbx/scan-jobs/{job_id}/report` | Bearer API Key | ❌ No |
+| **Repository Scanner** | `POST` | `/v1/repo-scan` | Bearer API Key | ✅ Yes |
+| **List API Keys** | `GET` | `/v1/api-keys` | Auth0 Session | ❌ No |
+| **Create API Key** | `POST` | `/v1/api-keys` | Auth0 Session | ❌ No |
+| **Delete API Key** | `DELETE` | `/v1/api-keys/{jti}` | Auth0 Session | ❌ No |
+| **Run Code (Proxy)** | `POST` | `/api/v1/01sbx/run` | Bearer API Key | ❌ No |
+
+> **Note:** Endpoints marked **Rate Limited** enforce a fixed-window counter per API key. The limit scales dynamically: `N active API keys × 5 requests = total allowed per 60-second window`.
+
+### Accessing the Swagger UI in Production
+
+1. Log in to your dashboard at **`https://sandbox.01security.com`**.
+2. Navigate to **`https://api-sandbox.01security.com/api/v1/01sbx/docs`**.
+3. Your `inspector_auth` session cookie is automatically read and injected as a `Bearer` token by the Swagger UI's zero-touch `autoAuthorize` JavaScript — no manual authorization step is needed.
