@@ -16,7 +16,7 @@ async def cookie_auth_redirect_middleware(request: Request, call_next):
         request.url.path.startswith("/api/")
         and request.url.path.endswith(("/docs", "/redoc"))
     ):
-        # Allow documentation to be public to avoid cookie issues during development
+        # Allow documentation to be public to avoid cookie issues during developments
         return await call_next(request)
 
     return await call_next(request)
