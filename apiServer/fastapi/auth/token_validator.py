@@ -56,6 +56,40 @@ async def validate_token(request: Request):
         )
         or "/scan-status/" in path
     ):
+        # We only rate limit the "View Documentation" actions (docs, redoc, openapi.json)
+        if path.endswith(("/docs", "/redoc", "/openapi.json")):
+            jti = None
+            auth_header = request.headers.get("authorization") or request.headers.get(
+                "Authorization"
+            )
+            raw_token = None
+            if auth_header:
+                raw_token = (
+                    auth_header.replace("Bearer ", "", 1)
+                    if auth_header.startswith("Bearer ")
+                    else auth_header
+                )
+            if not raw_token:
+                raw_token = request.cookies.get(
+                    "execution_token"
+                ) or request.cookies.get("inspector_auth")
+
+            if raw_token:
+                try:
+                    payload = jwt.decode(raw_token, options={"verify_signature": False})
+                    jti = payload.get("jti")
+                except Exception:
+                    pass
+
+            if not jti and request.client:
+                jti = f"ip:{request.client.host}"
+
+            if jti:
+                print(
+                    f"[Rate Limit] Enforcing docs rate limit for client key/IP: {jti} on path: {path}"
+                )
+                await check_rate_limit(state, jti)
+
         return {}
 
     # 1. Path-Aware Enforcement: Decide if we allow Cookie Fallbacks
