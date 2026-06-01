@@ -240,13 +240,14 @@ async def check_rate_limit(state, jti: str):
             if current_count > requests_limit:
                 retry_after = max(1, ttl)
                 print(
-                    f"[SECURITY ALERT] RATE LIMIT EXCEEDED: Key ID '{jti}' reached {current_count}/{requests_limit} calls in window."
+                    f"[SECURITY ALERT] RATE LIMIT EXCEEDED: Key ID '{jti}' reached {current_count}/{requests_limit} calls."
                 )
                 raise HTTPException(
                     status_code=429,
                     detail={
                         "error": "Rate limit exceeded",
                         "jti": jti,
+                        "current_requests": current_count,
                         "requests_limit": requests_limit,
                         "window_seconds": window_secs,
                         "retry_after": retry_after,
@@ -281,13 +282,14 @@ async def check_rate_limit(state, jti: str):
 
         if window_data["count"] > requests_limit:
             print(
-                f"[SECURITY ALERT] RATE LIMIT EXCEEDED: Key ID '{jti}' reached {window_data['count']}/{requests_limit} calls in window."
+                f"[SECURITY ALERT] RATE LIMIT EXCEEDED: Key ID '{jti}' reached {window_data['count']}/{requests_limit} calls."
             )
             raise HTTPException(
                 status_code=429,
                 detail={
                     "error": "Rate limit exceeded",
                     "jti": jti,
+                    "current_requests": window_data["count"],
                     "requests_limit": requests_limit,
                     "window_seconds": window_secs,
                     "retry_after": retry_after,
