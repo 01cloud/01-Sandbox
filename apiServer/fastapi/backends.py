@@ -8,7 +8,12 @@ from typing import Optional
 
 import httpx
 from config import opensandbox_headers, opensandbox_route_prefix
-from models import CreateSandboxRequest, RunResponse, SandboxResponse, SessionResponse
+from sandboxes.models import (
+    CreateSandboxRequest,
+    RunResponse,
+    SandboxResponse,
+    SessionResponse,
+)
 
 
 class SandboxBackend(abc.ABC):

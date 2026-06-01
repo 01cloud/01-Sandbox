@@ -1,0 +1,20 @@
+# Private keys and certificates — NEVER commit these
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local dev environment
+.env
+.env.*
+*.db
+
+# Dev utility scripts (not part of the running app)
+pem_to_jwks.py
