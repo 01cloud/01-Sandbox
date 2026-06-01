@@ -1,3 +1,44 @@
+## Release v0.5.36 — 01-Sandbox
+**Release Date:** June 01, 2026
+
+---
+
+### Summary
+v0.5.36 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* ratelimit with token validator ([9a6db03](https://github.com/01cloud/01-Sandbox/commit/9a6db034afbb55d2f768ffe3478a98d3fe19941e))
+* ratelimit with token validator ([839a363](https://github.com/01cloud/01-Sandbox/commit/839a36310583a6850c17c11c81209739365f20cd))
+* generate RELEASE.md for v0.5.35 [skip ci] ([1db1229](https://github.com/01cloud/01-Sandbox/commit/1db122975ffac43b5ef3f25f5dcc8653635b4c89))
+* bump versions to v0.5.35 [skip ci] ([3b2301c](https://github.com/01cloud/01-Sandbox/commit/3b2301cfbc32df368ae28bdac38cfdd542694666))
+
+### Changes
+## [0.5.36](https://github.com/01cloud/01-Sandbox/compare/v0.5.35...v0.5.36) (2026-06-01)
+
+
+### 🐛 Bug Fixes
+
+* ratelimit with token validator ([9a6db03](https://github.com/01cloud/01-Sandbox/commit/9a6db034afbb55d2f768ffe3478a98d3fe19941e))
+* ratelimit with token validator ([839a363](https://github.com/01cloud/01-Sandbox/commit/839a36310583a6850c17c11c81209739365f20cd))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.35 [skip ci] ([1db1229](https://github.com/01cloud/01-Sandbox/commit/1db122975ffac43b5ef3f25f5dcc8653635b4c89))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.35 [skip ci] ([3b2301c](https://github.com/01cloud/01-Sandbox/commit/3b2301cfbc32df368ae28bdac38cfdd542694666))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.36)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.35 — 01-Sandbox
 **Release Date:** June 01, 2026
 
