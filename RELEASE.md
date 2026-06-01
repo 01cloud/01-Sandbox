@@ -1,3 +1,44 @@
+## Release v0.5.30 — 01-Sandbox
+**Release Date:** June 01, 2026
+
+---
+
+### Summary
+v0.5.30 focuses on reliability, bug resolution, and maintenance. Under-the-hood code refactoring improves overall system maintainability. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* authrization access ([df27e4b](https://github.com/01cloud/01-Sandbox/commit/df27e4b3f5f2300414e70b5ec027dc55bf1c18db))
+* authrization access ([b1bcf55](https://github.com/01cloud/01-Sandbox/commit/b1bcf55971c6a729b043e69c8d48842f3ffaab5e))
+* generate RELEASE.md for v0.5.29 [skip ci] ([f4bf944](https://github.com/01cloud/01-Sandbox/commit/f4bf94488ab7a576a7f53b11ca0e3398c5c0fec5))
+* bump versions to v0.5.29 [skip ci] ([f2b97cd](https://github.com/01cloud/01-Sandbox/commit/f2b97cd06beac2da6f287cddd1e50ff5e86f9117))
+
+### Changes
+## [0.5.30](https://github.com/01cloud/01-Sandbox/compare/v0.5.29...v0.5.30) (2026-06-01)
+
+
+### 🐛 Bug Fixes
+
+* authrization access ([df27e4b](https://github.com/01cloud/01-Sandbox/commit/df27e4b3f5f2300414e70b5ec027dc55bf1c18db))
+* authrization access ([b1bcf55](https://github.com/01cloud/01-Sandbox/commit/b1bcf55971c6a729b043e69c8d48842f3ffaab5e))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.29 [skip ci] ([f4bf944](https://github.com/01cloud/01-Sandbox/commit/f4bf94488ab7a576a7f53b11ca0e3398c5c0fec5))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.29 [skip ci] ([f2b97cd](https://github.com/01cloud/01-Sandbox/commit/f2b97cd06beac2da6f287cddd1e50ff5e86f9117))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.30)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.29 — 01-Sandbox
 **Release Date:** June 01, 2026
 
