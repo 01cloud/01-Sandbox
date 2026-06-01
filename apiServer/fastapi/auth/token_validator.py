@@ -490,9 +490,10 @@ async def validate_token(request: Request):
         )
         or "/scan-status/" in path
     ):
-        # We only rate limit the "View Documentation" actions (docs, redoc, openapi.json)
-        if path.endswith(("/docs", "/redoc", "/openapi.json")):
+        # We only rate limit the "View Documentation" HTML page actions (docs, redoc) - NOT openapi.json spec!
+        if path.endswith(("/docs", "/redoc")):
             jti = None
+            user_id = None
             auth_header = request.headers.get("authorization") or request.headers.get(
                 "Authorization"
             )
@@ -512,8 +513,57 @@ async def validate_token(request: Request):
                 try:
                     payload = jwt.decode(raw_token, options={"verify_signature": False})
                     jti = payload.get("jti")
+                    user_id = payload.get("sub")
                 except Exception:
                     pass
+
+            # Identity Bridge for Docs: Rotate active developer API keys to scale the rate limit
+            if user_id:
+                try:
+                    conn = state.get_db_conn()
+                    cursor = conn.cursor()
+                    query = (
+                        """
+                        SELECT id, expires_at FROM api_keys
+                        WHERE LOWER(user_id) = LOWER(%s) AND is_revoked = 0
+                    """
+                        if state.use_postgres
+                        else "SELECT id, expires_at FROM api_keys WHERE LOWER(user_id) = LOWER(?) AND is_revoked = 0"
+                    )
+                    cursor.execute(query, (user_id,))
+                    rows = cursor.fetchall()
+                    conn.close()
+
+                    active_keys = []
+                    now_utc = datetime.datetime.now(datetime.UTC)
+                    for row in rows:
+                        k_id, exp_str = row[0], row[1]
+                        try:
+                            from datetime import datetime as dt
+                            from datetime import timezone
+
+                            exp_dt = dt.fromisoformat(exp_str.replace("Z", "+00:00"))
+                            if exp_dt.tzinfo is None:
+                                exp_dt = exp_dt.replace(tzinfo=timezone.utc)
+                            if exp_dt > now_utc:
+                                active_keys.append(k_id)
+                        except Exception:
+                            if exp_str > now_utc.isoformat():
+                                active_keys.append(k_id)
+
+                    if active_keys:
+                        selected_jti = None
+                        for candidate_jti in active_keys:
+                            limited = is_key_rate_limited(state, candidate_jti)
+                            if not limited:
+                                selected_jti = candidate_jti
+                                break
+                        jti = selected_jti if selected_jti else active_keys[0]
+                        print(
+                            f"[Identity Bridge Docs] Mapped documentation view for {user_id} to key: {jti}"
+                        )
+                except Exception as e:
+                    print(f"[Identity Bridge Docs] Error resolving developer keys: {e}")
 
             if not jti and request.client:
                 jti = f"ip:{request.client.host}"
