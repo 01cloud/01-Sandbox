@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.32](https://github.com/01cloud/01-Sandbox/compare/v0.5.31...v0.5.32) (2026-06-01)
+
+
+### 🐛 Bug Fixes
+
+* public jks authentication access ([b965eb9](https://github.com/01cloud/01-Sandbox/commit/b965eb97b1cf46838e35500ecaa5ef1e7c93308e))
+* public jks authentication access ([d7d184e](https://github.com/01cloud/01-Sandbox/commit/d7d184e45cf217f8ce5a986be75ca8fe609dde5b))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.31 [skip ci] ([e688ac2](https://github.com/01cloud/01-Sandbox/commit/e688ac2505e5ecfb63de34719a9c5d7cf371df16))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.31 [skip ci] ([9a80fd5](https://github.com/01cloud/01-Sandbox/commit/9a80fd5731e59393566fbb3cbd6e9209ab9fc1af))
+
 ## [0.5.31](https://github.com/01cloud/01-Sandbox/compare/v0.5.30...v0.5.31) (2026-06-01)
 
 
