@@ -1,6 +1,11 @@
 import base64
 import os
 
+# Module-level cache for the auto-generated ephemeral key.
+# Ensures jwt_config() returns the SAME key for the entire process lifetime,
+# even though it is called on every request.
+_ephemeral_private_key_pem: str | None = None
+
 
 def backend_mappings() -> dict[str, str]:
     """
@@ -110,34 +115,41 @@ def jwt_config():
                 f"[config] JWT Private Key loaded from local file: {private_pem_path}"
             )
 
-    # Strategy 3: Auto-generate an ephemeral RSA-2048 key pair at startup
-    # This enables zero-config deployments. Tokens will be invalidated on pod restart.
-    # For persistence across restarts, inject JWT_PRIVATE_KEY via Kubernetes Secret.
+    # Strategy 3: Auto-generate an ephemeral RSA-2048 key pair at startup.
+    # The generated key is cached at module level so this only runs ONCE per
+    # process lifetime, not on every request. Tokens will be invalidated on
+    # pod restart. Set JWT_PRIVATE_KEY via Kubernetes Secret for persistence.
+    global _ephemeral_private_key_pem
     if not processed_key:
-        print(
-            "[config] WARNING: No JWT_PRIVATE_KEY env var or private.pem found. "
-            "Auto-generating an ephemeral RSA-2048 key pair for this session. "
-            "Tokens will be invalidated on pod restart. "
-            "Set JWT_PRIVATE_KEY in your Kubernetes Secret for persistence."
-        )
-        try:
-            from cryptography.hazmat.backends import default_backend
-            from cryptography.hazmat.primitives import serialization
-            from cryptography.hazmat.primitives.asymmetric import rsa
-
-            _generated_key = rsa.generate_private_key(
-                public_exponent=65537,
-                key_size=2048,
-                backend=default_backend(),
+        if _ephemeral_private_key_pem:
+            # Re-use the key generated earlier in this process
+            processed_key = _ephemeral_private_key_pem
+        else:
+            print(
+                "[config] WARNING: No JWT_PRIVATE_KEY env var or private.pem found. "
+                "Auto-generating an ephemeral RSA-2048 key pair for this session. "
+                "Tokens will be invalidated on pod restart. "
+                "Set JWT_PRIVATE_KEY in your Kubernetes Secret for persistence."
             )
-            processed_key = _generated_key.private_bytes(
-                encoding=serialization.Encoding.PEM,
-                format=serialization.PrivateFormat.PKCS8,
-                encryption_algorithm=serialization.NoEncryption(),
-            ).decode("utf-8")
-            print("[config] Ephemeral RSA-2048 key pair generated successfully.")
-        except Exception as e:
-            print(f"[config] CRITICAL: Auto key generation failed: {e}")
+            try:
+                from cryptography.hazmat.backends import default_backend
+                from cryptography.hazmat.primitives import serialization
+                from cryptography.hazmat.primitives.asymmetric import rsa
+
+                _generated_key = rsa.generate_private_key(
+                    public_exponent=65537,
+                    key_size=2048,
+                    backend=default_backend(),
+                )
+                processed_key = _generated_key.private_bytes(
+                    encoding=serialization.Encoding.PEM,
+                    format=serialization.PrivateFormat.PKCS8,
+                    encryption_algorithm=serialization.NoEncryption(),
+                ).decode("utf-8")
+                _ephemeral_private_key_pem = processed_key
+                print("[config] Ephemeral RSA-2048 key pair generated successfully.")
+            except Exception as e:
+                print(f"[config] CRITICAL: Auto key generation failed: {e}")
 
     public_jwks = os.environ.get("JWT_PUBLIC_JWKS", "").strip()
     private_key_obj = None
