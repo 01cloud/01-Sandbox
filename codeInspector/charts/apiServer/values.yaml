@@ -11,13 +11,14 @@ configMap:
   GATEWAY_SECRET_NAME: "apikey"
   GATEWAY_SECRET_NAMESPACE: "agentgateway-system"
   GATEWAY_SECRET_KEY: "api-key"
-  JWT_ALGORITHM: "HS256"
+  JWT_ALGORITHM: "RS256"
   JWT_EXPIRATION_MINUTES: "60"
   JWT_ISSUER: "code-inspector"
-  JWT_SIGNING_SECRET: "default-signing-secret-change-me"
 
 secret:
   E2B_API_KEY: ""
+  JWT_PRIVATE_KEY: ""   # Injected via: kubectl patch secret sandbox-api-secret -n sandbox
+  JWT_PUBLIC_JWKS: ""   # Auto-derived from JWT_PRIVATE_KEY if left empty
 
 deployment:
   replicaCount: 1
