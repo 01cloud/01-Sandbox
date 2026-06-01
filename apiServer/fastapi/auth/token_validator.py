@@ -40,8 +40,13 @@ async def validate_token(request: Request):
     Decodes and validates the RS256 JWT produced by the Edge Gateway's
     cookie transformation.
     """
-    # 1. Path-Aware Enforcement: Decide if we allow Cookie Fallbacks
     path = request.url.path
+
+    # 0. Bypass validation for public documentation and spec routes
+    if path.endswith(("/docs", "/redoc", "/openapi.json")):
+        return {}
+
+    # 1. Path-Aware Enforcement: Decide if we allow Cookie Fallbacks
     # Execution routes MUST use a header. No 'Ghost Authorization' via cookies allowed for execution.
     is_execution_route = path.startswith("/v1/run") or (
         "/api/z1sandbox/" in path
