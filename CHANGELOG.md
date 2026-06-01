@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.5.28](https://github.com/01cloud/01-Sandbox/compare/v0.5.27...v0.5.28) (2026-06-01)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.27 [skip ci] ([5c1d7ad](https://github.com/01cloud/01-Sandbox/commit/5c1d7ad93eed3e8461f2e07515812861f485e89b))
+* update readme file ([68f1e44](https://github.com/01cloud/01-Sandbox/commit/68f1e44a4edf22aad972eccc78ad3a0de1802d09))
+* update readme file ([f20436d](https://github.com/01cloud/01-Sandbox/commit/f20436d0f8eaadfa01c43f37597bb3f76740491c))
+* update readme file ([34bf7a4](https://github.com/01cloud/01-Sandbox/commit/34bf7a4a028e2bd543bc939822c7851de6738aff))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.27 [skip ci] ([5a3e790](https://github.com/01cloud/01-Sandbox/commit/5a3e7900c97d8054e4151f93aea79de8bdc554f2))
+
 ## [0.5.27](https://github.com/01cloud/01-Sandbox/compare/v0.5.26...v0.5.27) (2026-05-28)
 
 
