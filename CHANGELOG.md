@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.39](https://github.com/01cloud/01-Sandbox/compare/v0.5.38...v0.5.39) (2026-06-01)
+
+
+### 🐛 Bug Fixes
+
+* ratelimit fixes ([33802d2](https://github.com/01cloud/01-Sandbox/commit/33802d237d54e285c6f69089c1a9da6746471710))
+* ratelimit fixes ([1f17765](https://github.com/01cloud/01-Sandbox/commit/1f177652e5a2e139139b0fda07cdf76066fa1983))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.38 [skip ci] ([a63bb48](https://github.com/01cloud/01-Sandbox/commit/a63bb48d36eadb4e0bc8d85064c3e64901d3ca34))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.38 [skip ci] ([cb4af63](https://github.com/01cloud/01-Sandbox/commit/cb4af6329c5afa9559c351b28ca226375aef242d))
+
 ## [0.5.38](https://github.com/01cloud/01-Sandbox/compare/v0.5.37...v0.5.38) (2026-06-01)
 
 
