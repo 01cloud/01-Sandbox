@@ -886,3 +886,210 @@ if os.path.getsize(path) > 200 * 1024:   # 200 KB per file
 ```
 
 With a cap of 100 files × 200 KB each, the theoretical maximum JSON body per language is **~20 MB** before JSON string escaping overhead.
+
+---
+
+## Planned Improvements
+
+### 1 — Structured File Tracking (Hashmap)
+
+**What the problem is today:**
+The scanner currently holds only a flat list of file paths per language. It has no knowledge of each file's size or line count until it re-reads the file during the scan. When findings come back, the scanner has to guess which file belongs to which language using file extension rules — this is fragile.
+
+**What the improvement does:**
+Instead of a flat list, each file gets its own entry in a hashmap that stores its path, size, and line count upfront — collected once at the language detection stage. This metadata travels through the entire pipeline so nothing needs to be re-computed later.
+
+**Action items:**
+
+- [ ] Create a `FileEntry` structure to hold per-file info: relative path, absolute path, file size in bytes, line count
+- [ ] Update the language detection step to build a hashmap of `{file_path → FileEntry}` per language instead of a plain list of paths
+- [ ] Pass this hashmap through the pipeline so the scanner uses pre-collected metadata rather than opening files multiple times
+- [ ] Use the hashmap keys directly when matching findings back to files — removes the current extension-guessing fallback in the redistribution step
+- [ ] Surface per-file metadata (size, line count) in the final scan result for better observability
+
+---
+
+### 2 — Concurrent Independent Job Scanning
+
+**What the problem is today:**
+
+There are two gaps:
+
+1. **Within a single scan** — when a repo has multiple languages (e.g. Python + Go + Shell), they are scanned one after another. The Go scan cannot start until the Python scan finishes. This makes the total scan time the sum of all language scan times rather than the longest one.
+
+2. **Across multiple scans** — the backend already handles multiple jobs independently via job IDs. However, the frontend has no job history. If a user submits a second repo while the first is still scanning, they lose visibility into the first job. There is no way to switch between jobs or pick up where a previous scan left off.
+
+**What the improvement does:**
+
+- **Backend:** All languages within a single repo scan run at the same time instead of waiting for each other. Total scan time becomes roughly the time of the slowest language, not the total of all.
+- **Frontend:** A job history panel shows all submitted scans with their live status. The user can freely switch between jobs. Each job has its own independent live stream that continues running in the background regardless of which job the user is currently viewing.
+
+**Action items:**
+
+**Backend:**
+- [ ] Run all language scans at the same time (in parallel) within a single repo scan job instead of sequentially one by one
+- [ ] Add a `language` field to the live progress events so the frontend can display which specific language is currently being scanned when multiple run in parallel
+- [ ] Add a new endpoint to list all active and recently completed job IDs along with their current status — this lets the frontend restore the job history on page load
+- [ ] Allow the frontend to check whether a specific job is still running or already finished before deciding whether to reconnect to its live stream or load the cached result
+
+**Frontend:**
+- [ ] Keep a job history stored in the browser (persisted across page navigation) showing all submitted scans, their repo URL, current step, and progress
+- [ ] Each job gets its own independent live stream connection — switching to view a different job does not disconnect or cancel the others
+- [ ] When the user switches back to a job that is still running, reconnect its live stream automatically and resume showing real-time progress
+- [ ] When the user switches back to a job that has already finished, load its saved result directly without reconnecting to the stream
+- [ ] The scan results view is scoped to a specific job ID, not to the most recently submitted scan — this allows viewing any job from history at any time
+
+---
+
+## Detailed Implementation Plan
+
+### Plan 1 — Structured File Tracking (Hashmap)
+
+#### What changes and why
+
+**Step 1 — Create a `FileEntry` data structure**
+
+A new model is added to `models.py`. Every file discovered during language detection gets one `FileEntry` instead of just its path string. It holds:
+- The relative path (used as the key when submitting to scan-jobs)
+- The absolute path (used when reading file content from disk)
+- File size in bytes (collected once via `os.path.getsize` at detection time)
+- Line count (counted once at detection time, not re-counted during scanning)
+- The language it belongs to
+
+**Step 2 — Language detector returns a hashmap**
+
+Currently `detect_languages()` returns `Dict[str, List[str]]` — language name to list of absolute paths.
+
+After the change it returns `Dict[str, Dict[str, FileEntry]]` — language name to a dict keyed by relative path, each value being a `FileEntry`.
+
+All four detection paths (linguist, tokei, enry, extension walk) are updated to build this structure. Since the detector already has the absolute path, getting `rel_path` and `size_bytes` at this point costs nothing extra.
+
+**Step 3 — Scanner consumes the hashmap directly**
+
+`scan_language()` receives `Dict[str, FileEntry]` instead of `List[str]`.
+
+- `_count_loc()` is removed — the line count already lives in `FileEntry.loc`
+- `_read_files_as_dict()` uses `entry.size_bytes` from the hashmap to skip oversized files instead of calling `os.path.getsize()` again
+- The `submitted_rel_paths` set used by `_filter_findings_to_submitted_files()` is just `set(files_dict.keys())` — no change there, but the keys are now guaranteed to be clean relative paths from the hashmap
+
+**Step 4 — Finding redistribution becomes reliable**
+
+Currently `get_target_language()` in `scan_repository.py` guesses which language a finding belongs to by inspecting the file extension. This fails for edge cases.
+
+After the change, the pipeline builds a reverse lookup at the start: `rel_path → language` derived directly from the hashmap. When redistributing findings, the language is looked up from this map — no extension guessing needed.
+
+**Step 5 — Per-file metadata surfaces in the result**
+
+`LanguageScanResult` gains an optional `files` field holding the hashmap. The final `RepoScanResult` therefore exposes per-file size and line count for each language section. This is useful for the frontend to show file-level detail without a second API call.
+
+---
+
+#### Data flow before vs after
+
+```
+BEFORE:
+detect_languages() → {"Python": ["/tmp/.../auth.py", "/tmp/.../views.py"]}
+                               ↓ (must re-read disk to get size/loc)
+scan_language() → reads each file again for loc count
+                → reads each file again in _read_files_as_dict for content+size check
+
+AFTER:
+detect_languages() → {
+  "Python": {
+    "src/auth.py": FileEntry(abs="/tmp/.../auth.py", size=4200, loc=120),
+    "src/views.py": FileEntry(abs="/tmp/.../views.py", size=8100, loc=310),
+  }
+}
+                               ↓ (metadata already collected)
+scan_language() → uses FileEntry.loc directly, no second loc count
+               → uses FileEntry.size_bytes in _read_files_as_dict, no second stat call
+               → uses hashmap keys as authoritative rel_paths for finding attribution
+```
+
+---
+
+### Plan 2 — Concurrent Independent Job Scanning
+
+This plan has two independent parts: **backend parallelism** (languages scan at the same time) and **frontend job history** (users can manage multiple scans simultaneously).
+
+---
+
+#### Part A — Backend: Parallel Language Scanning
+
+**Step 1 — Replace sequential loop with parallel execution**
+
+In `scan_repository.py`, the pipeline currently does:
+
+```
+for language in lang_map:
+    result = await scan_language(...)   # waits here before moving to next language
+```
+
+This is changed to launch all language scans at the same time and wait for all of them to finish together. The total wall-clock time for the SCANNING step drops from the sum of all language scan times to roughly the time of the slowest single language.
+
+**Step 2 — Add `language` field to SSE progress events**
+
+When scans run in parallel, multiple languages are making progress simultaneously. The frontend needs to know which language each progress event refers to. A `language` field is added to `ScanEvent` in `models.py` (optional, only populated during `SCANNING` step events).
+
+The overall SCANNING progress percentage is recalculated based on how many language scans have completed out of the total, rather than the current loop index.
+
+**Step 3 — Finding redistribution still works the same**
+
+The redistribution step (Step 5.5) waits for all parallel results to be collected before running. No structural change needed — it just receives a dict of results built from the parallel outputs instead of the sequential loop's dict.
+
+**Step 4 — Add a job list endpoint**
+
+A new `GET /v1/repo-scan/jobs` endpoint is added. It returns a list of all job IDs known to the current pod's SSE manager plus any active job IDs from Redis. Each entry includes the job ID, repo URL, and current status. This allows the frontend to restore job history after a page refresh.
+
+**Step 5 — Add a job status check endpoint**
+
+A new `GET /v1/repo-scan/{job_id}/ping` endpoint (or reuse the existing status endpoint) returns just the current step of a job without opening an SSE stream. The frontend calls this when reconnecting to determine whether to open a live stream or go straight to loading the cached result.
+
+---
+
+#### Part B — Frontend: Multi-Job Management
+
+**Step 1 — Job registry in browser storage**
+
+When a user submits a scan, the returned `job_id`, `repo_url`, and initial status are saved to `localStorage`. On every page load, the frontend reads this registry back and displays all previously submitted jobs. Jobs remain in the registry until manually cleared or their TTL expires (10 minutes after completion).
+
+**Step 2 — Job history sidebar**
+
+A sidebar or tab list is added to the scanner page. Each entry shows:
+- The repo URL that was submitted
+- The current step (QUEUED, CLONING, SCANNING, DONE, ERROR)
+- A progress bar
+- A timestamp of when the scan was submitted
+
+Clicking a job entry switches the main view to that job's results or live progress.
+
+**Step 3 — Independent live stream per job**
+
+Each job's `EventSource` connection is created when the job is submitted and stored in a ref keyed by `job_id`. The connection is not closed when the user switches to view a different job — it continues receiving events in the background and updates the job's entry in the registry.
+
+When a `DONE` or `ERROR` event arrives on a background job's stream, the result is saved to `localStorage` under that job's ID and the stream is closed.
+
+**Step 4 — Smart reconnection when switching jobs**
+
+When the user clicks a job entry in the history sidebar:
+
+- **If the job is DONE or ERROR** → load the result from `localStorage` and render it immediately. No network call needed.
+- **If the job is still active** → check if the `EventSource` for this job is already open (running in background). If yes, just switch the view to show its live progress. If the stream was lost (e.g. page was refreshed), call `GET /ping` to check status, then either reconnect the stream or load the cached result.
+
+**Step 5 — Scope results view to job ID**
+
+The scan results and live progress panels are refactored to receive a `job_id` as input rather than reading from a global "latest scan" state. This allows any job in the history to be rendered in the main view without affecting other jobs.
+
+---
+
+#### How concurrent jobs stay isolated
+
+Each job already has a unique `job_id` (UUIDv4). The isolation is guaranteed at every layer:
+
+| Layer | How isolation works |
+|-------|-------------------|
+| Backend pipeline | Each job runs as a separate `BackgroundTask` with its own temp directory and SSE queue |
+| SSE queue | `SSEManager._jobs` is a dict keyed by `job_id` — queues never overlap |
+| Redis | All keys are namespaced with `job_id` — `repo_scan:status:{job_id}`, `repo_scan:result:{job_id}` |
+| Frontend stream | Each `EventSource` is opened to `/v1/repo-scan/{job_id}/status` — different URLs, no shared state |
+| Frontend storage | Results saved to `localStorage` under `job_id` key |
