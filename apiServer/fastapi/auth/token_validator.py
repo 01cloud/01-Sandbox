@@ -309,12 +309,17 @@ async def validate_token(request: Request):
 
         print(f"[DEBUG SECURITY] SUCCESS: Session Verified (Key ID: {jti})")
 
-        # Enforce dynamic key-specific rate limiting only on Quick Scan and View Documentation actions
+        # Enforce dynamic key-specific rate limiting only on Quick Scan, Repo Scan, and View Documentation actions
         path = request.url.path
         is_documentation = path.endswith("/docs")
-        is_quick_scan = path == "/v1/scan-jobs" or path.endswith("/scan-jobs")
+        is_quick_scan = (
+            path == "/v1/scan-jobs" or path.endswith("/scan-jobs")
+        ) and request.method == "POST"
+        is_repo_scan = (
+            path == "/v1/repo-scan" or path.endswith("/repo-scan")
+        ) and request.method == "POST"
 
-        if is_documentation or is_quick_scan:
+        if is_documentation or is_quick_scan or is_repo_scan:
             print(
                 f"[Rate Limit] Enforcing sliding window rate limit for action on path: {path}"
             )
