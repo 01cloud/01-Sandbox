@@ -1,0 +1,14 @@
+# Private keys — never bake into Docker image; inject via Kubernetes Secret at runtime
+*.pem
+*.key
+*.crt
+
+# Dev utility scripts — not part of the running app
+pem_to_jwks.py
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Local DB
+*.db

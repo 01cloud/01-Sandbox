@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import httpx
 from fastapi import APIRouter, Depends, Response, status
-from models import DependencyStatus, HealthResponse
+
+from .models import DependencyStatus, HealthResponse
 
 
 def check_postgresql_health(state) -> tuple[bool, str]:

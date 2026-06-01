@@ -59,8 +59,15 @@ RUN tokei --version && enry --version && github-linguist --version && linguist -
 
 # Copy application code
 
-COPY *.py *.pem ./
+COPY *.py ./
 COPY scan_repository/ ./scan_repository/
+COPY core/ ./core/
+COPY auth/ ./auth/
+COPY api_keys/ ./api_keys/
+COPY sandboxes/ ./sandboxes/
+COPY proxy/ ./proxy/
+COPY health/ ./health/
+COPY ratelimit/ ./ratelimit/
 
 # Switch to non-root user
 USER appuser
