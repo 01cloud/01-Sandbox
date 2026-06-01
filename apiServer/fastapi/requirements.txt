@@ -17,6 +17,11 @@ redis==5.2.0
 bleach==6.3.0
 
 
+# ── Optional backends ────────────────────────
+
+# E2B cloud sandbox backend (uncomment if using E2BBackend)
+# e2b-code-interpreter==1.5.0
+
 # ── Development / testing ────────────────────
 
 # HTTP client for testing FastAPI endpoints

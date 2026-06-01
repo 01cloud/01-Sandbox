@@ -17,4 +17,4 @@ __pycache__/
 *.db
 
 # Dev utility scripts (not part of the running app)
-pem_to_jwks.py
+# pem_to_jwks.py

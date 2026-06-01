@@ -100,7 +100,7 @@ def jwt_config():
 
     processed_key = repair_pem(raw_private_key, is_private=True)
 
-    # Strategy: Load from local file if env is empty
+    # Strategy 2: Load from local file if env var is empty
     if not processed_key:
         private_pem_path = "private.pem"
         if os.path.exists(private_pem_path):
@@ -109,6 +109,35 @@ def jwt_config():
             print(
                 f"[config] JWT Private Key loaded from local file: {private_pem_path}"
             )
+
+    # Strategy 3: Auto-generate an ephemeral RSA-2048 key pair at startup
+    # This enables zero-config deployments. Tokens will be invalidated on pod restart.
+    # For persistence across restarts, inject JWT_PRIVATE_KEY via Kubernetes Secret.
+    if not processed_key:
+        print(
+            "[config] WARNING: No JWT_PRIVATE_KEY env var or private.pem found. "
+            "Auto-generating an ephemeral RSA-2048 key pair for this session. "
+            "Tokens will be invalidated on pod restart. "
+            "Set JWT_PRIVATE_KEY in your Kubernetes Secret for persistence."
+        )
+        try:
+            from cryptography.hazmat.backends import default_backend
+            from cryptography.hazmat.primitives import serialization
+            from cryptography.hazmat.primitives.asymmetric import rsa
+
+            _generated_key = rsa.generate_private_key(
+                public_exponent=65537,
+                key_size=2048,
+                backend=default_backend(),
+            )
+            processed_key = _generated_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.PKCS8,
+                encryption_algorithm=serialization.NoEncryption(),
+            ).decode("utf-8")
+            print("[config] Ephemeral RSA-2048 key pair generated successfully.")
+        except Exception as e:
+            print(f"[config] CRITICAL: Auto key generation failed: {e}")
 
     public_jwks = os.environ.get("JWT_PUBLIC_JWKS", "").strip()
     private_key_obj = None
