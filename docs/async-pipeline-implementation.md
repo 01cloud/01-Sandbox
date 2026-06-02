@@ -4,6 +4,52 @@
 
 Create a **modular, reusable pipeline framework** that allows multiple different scan events (e.g. "GitHub Repository Scan", "Quick Code Ingestion Scan", "Bulk Sandboxed Audits") to inherit the exact same asynchronous execution, state persistence, reconnection, and GitHub Actions-style visualization capabilities.
 
+## Target UI Layout Schematic
+
+Below is an ASCII representation of the premium dark-mode dashboard UI designed for the pipeline scanning interface:
+
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│  🛡️  Pipeline Security Scan             [🔍 Search...]                  (AS) Actions ▾ │
+├───────────────────────────────────────┬────────────────────────────────────────────────┤
+│ ACTIVE SCANS                          │  webapp-frontend / main            Run #1459   │
+│ ┌───────────────────────────────────┐ │ ┌────────────────────────────────────────────┐ │
+│ │ 🔀 webapp-frontend                │ │ │ Repository: org/webapp-frontend            │ │
+│ │   main                            │ │ │ Event: push by alicewhite                  │ │
+│ │ ⟳ Scanning (72%)       12:31 / 12 │ │ │ Commit: 8a4f2b1                            │ │
+│ └───────────────────────────────────┘ │ │ Duration: 12m 31s (Elapsed)                │ │
+│ ┌───────────────────────────────────┐ │ │ Status: ⟳ Scanning                         │ │
+│ │ 🔀 data-api                       │ │ └────────────────────────────────────────────┘ │
+│ │   main                            │ │                                                │
+│ │ ✓ Completed                 11:45 │ │ ┌───┐                                          │
+│ └───────────────────────────────────┘ │ │ │ ✓ │ Setup Sandbox                     1m 02s │
+│ ┌───────────────────────────────────┐ │ │ └───┘                                          │
+│ │ 🔀 authentication-service         │ │ ┌───┐                                          │
+│ │   dev                             │ │ │ ✓ │ Clone Repository                  0m 48s │
+│ │ ✓ Completed                 10:55 │ │ └───┘                                          │
+│ └───────────────────────────────────┘ │ ┌───┐                                          │
+│ ┌───────────────────────────────────┐ │ │ ✓ │ Detect Languages                  2m 15s │
+│ │ 🔀 payment-gateway                │ │ │     │ JavaScript (81.4%), HTML, CSS              │
+│ │   master                          │ │ └───┘                                          │
+│ │ 🟡 Queued                   08:22 │ │ ┌───┐                                          │
+│ └───────────────────────────────────┘ │ │ │ ⟳ │ Security Scan                     7m 26s │
+│ ┌───────────────────────────────────┐ │ │ │   │ ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬░░░░░░ 72%            │
+│ │ 🔀 notification-engine            │ │ │ │   │ [INFO] Initializing scan...              │
+│ │   main                            │ │ │ │   │ [INFO] Analyzing SAST vulnerabilities... │
+│ │ ❌ Failed                   14:15 │ │ │ │   │ [SAST] Scanning file: src/api/handlers.js│
+│ └───────────────────────────────────┘ │ │ └───┘                                          │
+│                                       │ ┌───┐                                          │
+│                                       │ │ ─ │ Done                              Queued │
+│                                       │ └───┘                                          │
+│                                       │                                                │
+│                                       │ ┌───────────────┐ ┌─────────────┐ ┌──────────┐ │
+│                                       │ │ 🛡️ Vulns       │ │ 🕒 Scan Time│ │ 📄 Files │ │
+│                                       │ │ 8 Low | 1 Med │ │ 7m 26s      │ │ 315/437  │ │
+│                                       │ └───────────────┘ └─────────────┘ └──────────┘ │
+└───────────────────────────────────────┴────────────────────────────────────────────────┘
+```
+
+
 
 ## 2. Architectural Paradigm: Job Type Polymorphism
 
