@@ -222,3 +222,215 @@ To keep the React client lightweight, the frontend divides data storage between 
   - **Volatile React Cache**: The `useJobStore` hook holds the actual detailed scan findings in a React `volatileResults` state. This memory lives solely in volatile browser RAM.
   - **On-Demand Lazy Loading**: When a user selects a historical row in the dashboard, the system doesn't query a database. It invokes `lazyFetchResult(jobId)`, which makes an API request to `GET /v1/jobs/{job_id}/result`. The backend reads the persistent report file directly from the Read-Write-Many (RWX) PVC, returning the payload to React memory, bypassing local storage entirely.
   - **Responsive UI Actions**: The `UnifiedPipelineView.tsx` parses the job status and renders a beautiful, premium dark-mode sidebar, detailing step-by-step progress complete with animated indicators, matching the signature GitHub Actions execution aesthetic.
+
+---
+
+## Interconnected Code Sequence & Data Flow
+
+Below is the step-by-step code execution flow tracing a single scan request from the **User Interface (React)**, through the **API Gateway (FastAPI)**, down into the **State Engine (Redis & Python)**, and back up to the **Browser (SSE EventSource)**.
+
+### Step 1: Client Triggers Scan (React Frontend)
+When a user clicks "Scan Repository" in the dashboard, the frontend immediately fires a `POST` request and initializes local tracking.
+
+- **File Link**: [RepoScannerWidget.tsx](file:///home/berrybytes/Desktop/01-Sandbox/z1sandbox-website/src/components/dashboard/RepoScannerWidget.tsx)
+- **Code Flow**:
+```typescript
+const handleStartScan = async () => {
+  // 1. Submit the scan asynchronously
+  const response = await fetch(`${apiBase}/v1/repo-scan`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "Authorization": `Bearer ${token}` },
+    body: JSON.stringify({ repo_url: inputUrl })
+  });
+
+  const data = await response.json(); // Returns { job_id: "...", status: "QUEUED" }
+
+  // 2. Write basic metadata to localStorage
+  addJob({
+    job_id: data.job_id,
+    job_type: "repo-scan",
+    status: "QUEUED",
+    progress: 10,
+    stepMessage: "Initializing scan job...",
+    eventIndex: 0,
+    metadata: { repo_url: inputUrl, submitted_at: new Date().toISOString() },
+    summary: null,
+    result: null, // Always kept null to avoid bloating localStorage
+    completedAt: null
+  });
+
+  // 3. Open real-time SSE stream for this job
+  openStream(data.job_id, 0);
+};
+```
+
+---
+
+### Step 2: Job Ingestion & Background Task Handoff (FastAPI Router)
+The backend endpoint intercepts the post request, creates a state record, delegates the heavy work to a background thread pool, and replies to the client in **milliseconds**.
+
+- **File Link**: [scan_repository.py](file:///home/berrybytes/Desktop/01-Sandbox/apiServer/fastapi/scan_repository/scan_repository.py#L450-L485)
+- **Code Flow**:
+```python
+@router.post("")
+async def start_repository_scan(
+    payload: RepoScanRequest,
+    background_tasks: BackgroundTasks,
+    user_data: dict = Depends(validate_token)
+):
+    job_id = str(uuid4())
+
+    # 1. Register job in tracker & persistence layer
+    state.job_tracker.create_job(
+        job_id=job_id,
+        job_type="repo-scan",
+        metadata={"repo_url": payload.repo_url, "submitted_at": datetime.utcnow().isoformat()}
+    )
+
+    # 2. Emit the first status event
+    await state.job_tracker.push_event(job_id, "QUEUED", "Job added to background queue", 10)
+
+    # 3. Hand off the heavy clone & scan logic to the background thread pool
+    background_tasks.add_task(
+        _run_scan_pipeline,
+        job_id=job_id,
+        repo_url=payload.repo_url,
+        owner=payload.owner,
+        repo=payload.repo,
+        app_state=state
+    )
+
+    # 4. Instantly return HTTP 202 to the frontend
+    return {"job_id": job_id, "status": "QUEUED"}
+```
+
+---
+
+### Step 3: State Updates & Event Multiplexing (State Tracker)
+As the background scanning thread executes, it reports progress by calling `push_event`. The tracker instantly broadcasts the update to in-memory queues and Redis streams.
+
+- **File Link**: [tracker.py](file:///home/berrybytes/Desktop/01-Sandbox/apiServer/fastapi/core/jobs/tracker.py#L58-L102)
+- **Code Flow**:
+```python
+async def push_event(self, job_id: str, step: str, message: str, progress: int, detail: Optional[Any] = None):
+    job = self._jobs.get(job_id)
+    event = JobEvent(job_id=job_id, job_type=job.job_type if job else "unknown",
+                     step=step, message=message, progress=progress, detail=detail)
+    event_json = event.json()
+
+    # 1. Update active Local/In-Memory Thread-Queue (For current connection)
+    if job:
+        job.step = step
+        job.event_log.append(event)
+        await job.queue.put(event) # Feeds the active stream
+        if step in ("DONE", "ERROR"):
+            job.finished_at = time.monotonic()
+            job.result = detail
+            await job.queue.put(None) # Signal stream completion
+
+    # 2. Publish to Redis (For multi-pod cluster syncing & crash recovery)
+    if self.app_state.use_redis and self.app_state.redis_client:
+        r = self.app_state.redis_client
+        r.publish(f"job:{job_id}:chan", event_json)     # Real-time PubSub channel
+        r.rpush(f"job:{job_id}:events", event_json)     # Historic event log list
+        r.set(f"job:{job_id}:status", step, ex=86400)    # Global cache status
+        if step in ("DONE", "ERROR") and detail:
+            r.set(f"job:{job_id}:result", json.dumps(detail), ex=86400) # Save final report
+```
+
+---
+
+### Step 4: Real-Time SSE Status Streaming (SSE Router)
+When the browser requests status updates, it calls `GET /v1/jobs/{job_id}/status`. The backend handles fast-forward replay of missed historical events and hooks into Redis or memory for live streaming.
+
+- **File Links**: [router.py](file:///home/berrybytes/Desktop/01-Sandbox/apiServer/fastapi/core/jobs/router.py#L121-L129) & [tracker.py](file:///home/berrybytes/Desktop/01-Sandbox/apiServer/fastapi/core/jobs/tracker.py#L105-L174)
+- **Code Flow**:
+```python
+# router.py
+@router.get("/{job_id}/status")
+async def stream_job_status(job_id: str, since: int = 0):
+    # Returns an infinite Server-Sent Event stream
+    return StreamingResponse(
+        state.job_tracker.stream(job_id, since_index=since),
+        media_type="text/event-stream"
+    )
+
+# tracker.py Stream Generator
+async def stream(self, job_id: str, since_index: int = 0):
+    job = self._jobs.get(job_id)
+
+    # Recovery Mode: Job belongs to another cluster pod or server restarted
+    if not job:
+        r = self.app_state.redis_client
+        # 1. Fetch missing events history from Redis List starting at index 'since_index'
+        events_json = r.lrange(f"job:{job_id}:events", since_index, -1)
+        for ev_str in events_json:
+            yield f"data: {ev_str}\n\n" # Instant replay
+
+        # 2. Seamlessly subscribe to Redis Pub/Sub channel for live updates
+        pubsub = r.pubsub()
+        pubsub.subscribe(f"job:{job_id}:chan")
+        while True:
+            msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if msg:
+                yield f"data: {msg['data']}\n\n" # Relay incoming messages
+            else:
+                yield ": ping\n\n"
+
+    # Memory Mode: Stream directly from local RAM fast deque
+    for event in list(job.event_log)[since_index:]:
+        yield f"data: {event.json()}\n\n"
+
+    while True:
+        event = await job.queue.get() # Await next item inside memory queue
+        if event is None: break
+        yield f"data: {event.json()}\n\n"
+```
+
+---
+
+### Step 5: Event Consumption & UI Hydration (React Hook)
+The browser receives the SSE stream events via React `useJobStore`, parses the JSON message, updates the local localStorage index, and caches large reports inside transient React memory.
+
+- **File Link**: [useJobStore.ts](file:///home/berrybytes/Desktop/01-Sandbox/z1sandbox-website/src/hooks/useJobStore.ts#L67-L125)
+- **Code Flow**:
+```typescript
+const openStream = (jobId: string, since = 0) => {
+  const es = new EventSource(`${apiBase}/v1/jobs/${jobId}/status?since=${since}&token=${apiKey}`);
+
+  es.onmessage = (e) => {
+    const ev = JSON.parse(e.data); // Standardized JobEvent from backend
+    const stored = jobStore.get(jobId);
+    if (!stored) return es.close();
+
+    const isTerminal = ["DONE", "ERROR"].includes(ev.step);
+
+    // 1. If scan completed, save the heavy details in volatile React memory (not localStorage)
+    if (ev.step === "DONE" && ev.detail) {
+      setVolatileResults(prev => ({ ...prev, [jobId]: ev.detail }));
+    }
+
+    // 2. Synchronize progress metadata to localStorage database
+    const updatedJob: GenericJob = {
+      ...stored,
+      status: ev.step,
+      progress: ev.progress,
+      stepMessage: ev.message,
+      eventIndex: since + 1, // Advance hydration index for future refreshes
+      summary: ev.step === "DONE" && ev.detail ? {
+        high: ev.detail.high_count || 0,
+        medium: ev.detail.medium_count || 0,
+        low: ev.detail.low_count || 0
+      } : stored.summary,
+      completedAt: ev.step === "DONE" ? new Date().toISOString() : null
+    };
+
+    jobStore.upsert(updatedJob);
+    refresh(); // Trigger React re-render
+
+    if (isTerminal) {
+      es.close(); // Gracefully terminate EventSource connection
+    }
+  };
+};
+```
