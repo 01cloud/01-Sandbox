@@ -4,11 +4,6 @@
 
 Create a **modular, reusable pipeline framework** that allows multiple different scan events (e.g. "GitHub Repository Scan", "Quick Code Ingestion Scan", "Bulk Sandboxed Audits") to inherit the exact same asynchronous execution, state persistence, reconnection, and GitHub Actions-style visualization capabilities.
 
-## Target UX Mockup
-
-![Target UI Design Mockup](/home/berrybytes/.gemini/antigravity/brain/69e818d4-9962-4f8b-9406-d0a23e0ee92f/actions_style_pipeline_ui_1780385446869.png)
-
----
 
 ## 2. Architectural Paradigm: Job Type Polymorphism
 
