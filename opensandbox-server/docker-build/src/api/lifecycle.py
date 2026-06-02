@@ -416,6 +416,14 @@ async def create_scan_job(
                     status="FAILED",
                     error=f"Sandbox reached terminal state '{state}' before scan report was written.",
                 )
+        except HTTPException as he:
+            if he.status_code == 404:
+                return ScanJobResponse(
+                    job_id=job_id,
+                    sandbox_id=sandbox_id,
+                    status="FAILED",
+                    error="Sandbox was deleted or expired before the scan report was written.",
+                )
         except Exception:
             pass  # Ignore transient look-up errors; keep waiting
 
