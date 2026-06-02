@@ -60,8 +60,16 @@ class AppState:
         conn = self.get_db_conn()
         cursor = conn.cursor()
 
-        # Postgres uses slightly different syntax for PRIMARY KEY and types
+        # Create system_settings table for cluster-wide settings (e.g. shared JWT keys)
         if self.use_postgres:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """
+            )
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS api_keys (
@@ -79,6 +87,14 @@ class AppState:
             """
             )
         else:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """
+            )
             cursor.execute(
                 """
                 CREATE TABLE IF NOT EXISTS api_keys (
@@ -110,6 +126,80 @@ class AppState:
         except Exception:
             conn.rollback()
             pass
+
+        # Load or generate stable JWT signing key to avoid signature verification mismatch in multi-pod deployments
+        import config
+
+        has_env_key = bool(os.environ.get("JWT_PRIVATE_KEY")) or os.path.exists(
+            "private.pem"
+        )
+
+        if not has_env_key:
+            try:
+                cursor.execute(
+                    "SELECT value FROM system_settings WHERE key = %s"
+                    if self.use_postgres
+                    else "SELECT value FROM system_settings WHERE key = ?",
+                    ("jwt_private_key",),
+                )
+                row = cursor.fetchone()
+                if row:
+                    db_key = row[0]
+                    config._ephemeral_private_key_pem = db_key
+                    print(
+                        "[startup] Loaded cluster-wide JWT Private Key from system_settings table."
+                    )
+                else:
+                    print("[startup] Generating stable cluster-wide JWT Private Key...")
+                    from cryptography.hazmat.backends import default_backend
+                    from cryptography.hazmat.primitives import serialization
+                    from cryptography.hazmat.primitives.asymmetric import rsa
+
+                    generated_key = rsa.generate_private_key(
+                        public_exponent=65537,
+                        key_size=2048,
+                        backend=default_backend(),
+                    )
+                    pem_key = generated_key.private_bytes(
+                        encoding=serialization.Encoding.PEM,
+                        format=serialization.PrivateFormat.PKCS8,
+                        encryption_algorithm=serialization.NoEncryption(),
+                    ).decode("utf-8")
+
+                    try:
+                        cursor.execute(
+                            "INSERT INTO system_settings (key, value) VALUES (%s, %s)"
+                            if self.use_postgres
+                            else "INSERT INTO system_settings (key, value) VALUES (?, ?)",
+                            ("jwt_private_key", pem_key),
+                        )
+                        conn.commit()
+                        config._ephemeral_private_key_pem = pem_key
+                        print(
+                            "[startup] Stored generated JWT Private Key in system_settings table."
+                        )
+                    except Exception as db_err:
+                        # Another pod might have inserted it concurrently
+                        conn.rollback()
+                        cursor.execute(
+                            "SELECT value FROM system_settings WHERE key = %s"
+                            if self.use_postgres
+                            else "SELECT value FROM system_settings WHERE key = ?",
+                            ("jwt_private_key",),
+                        )
+                        fallback_row = cursor.fetchone()
+                        if fallback_row:
+                            config._ephemeral_private_key_pem = fallback_row[0]
+                            print(
+                                "[startup] Loaded concurrent JWT Private Key stored by parallel pod."
+                            )
+                        else:
+                            config._ephemeral_private_key_pem = pem_key
+                            print(
+                                f"[startup] Database write failed, using local ephemeral key: {db_err}"
+                            )
+            except Exception as e:
+                print(f"[startup] Stable JWT setup error: {e}")
 
         # Sync Active Registry to Redis for line-rate validation
         if self.use_redis:
