@@ -20,6 +20,11 @@ class AppState:
         )
         self.latest_job_id: str | None = None
 
+        # Instantiate reusable job tracker
+        from core.jobs.tracker import ReusableJobTracker
+
+        self.job_tracker = ReusableJobTracker(self)
+
         # Persistence Config
         self.use_postgres = os.environ.get("PG_HOST") is not None
         self.use_redis = os.environ.get("REDIS_HOST") is not None

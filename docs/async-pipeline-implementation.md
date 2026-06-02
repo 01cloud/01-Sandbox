@@ -240,7 +240,7 @@ No existing rate limit logic is bypassed, modified, or hindered. Rate limits con
 Make the `localStorage` key and model generic:
 
 ```typescript
-export interface GenericJob<TMetadata = any, TResult = any> {
+export interface GenericJob<TMetadata = any, TSummary = any> {
   job_id: string;
   job_type: "repo-scan" | "quick-scan";
   status: string;
@@ -248,7 +248,8 @@ export interface GenericJob<TMetadata = any, TResult = any> {
   stepMessage: string;
   eventIndex: number;
   metadata: TMetadata;
-  result: TResult | null;
+  summary: TSummary | null; // e.g. { high: 2, medium: 5, low: 10 } - minimal footprint
+  result: null;             // Full scan report is NEVER saved in localStorage to avoid bloat!
   submittedAt: string;
   completedAt: string | null;
 }
@@ -261,7 +262,11 @@ export const jobStore = {
   upsert: (job: GenericJob): void => {
     const all = JSON.parse(localStorage.getItem("unified_jobs_v1") || "[]");
     const idx = all.findIndex((j: any) => j.job_id === job.job_id);
-    idx >= 0 ? (all[idx] = job) : all.unshift(job);
+
+    // Ensure the heavy detailed result is stripped before saving to localStorage
+    const strippedJob = { ...job, result: null };
+
+    idx >= 0 ? (all[idx] = strippedJob) : all.unshift(strippedJob);
     localStorage.setItem("unified_jobs_v1", JSON.stringify(all));
   },
   get: (id: string): GenericJob | null =>
@@ -302,7 +307,12 @@ export function useJobStore(jobType: "repo-scan" | "quick-scan", apiBase: string
         progress: ev.progress,
         stepMessage: ev.message,
         eventIndex: stored.eventIndex + 1,
-        result: ev.step === "DONE" ? ev.detail : stored.result,
+        summary: ev.step === "DONE" && ev.detail ? {
+          high: ev.detail.high_count || 0,
+          medium: ev.detail.medium_count || 0,
+          low: ev.detail.low_count || 0
+        } : stored.summary,
+        result: null, // detailed result is fetched on-demand from PVC instead of stored in localState
         completedAt: ev.step === "DONE" ? new Date().toISOString() : null,
       });
       refresh();

@@ -128,3 +128,5 @@ class RepoScanSubmitResponse(BaseModel):
     status: ScanStep = ScanStep.QUEUED
     status_url: str
     result_url: str
+    repo_url: Optional[str] = None
+    submitted_at: Optional[str] = None
