@@ -1,105 +1,126 @@
-# Async Multi-Job Pipeline — GitHub Actions-Style Scanner
+# Reusable & Modular Async Scan Pipeline — GitHub Actions-Style
 
-## 1. Problem Statement
+## 1. Goal
 
-| Layer | Current Gap |
-|---|---|
-| **Frontend** | Single `useState` scan — refresh destroys all state. One scan at a time only. |
-| **SSEManager** | `asyncio.Queue` per job — drained once, no replay on reconnect. |
-| **Redis** | Only terminal state written (`DONE`/`ERROR`). No event history. |
+Create a **modular, reusable pipeline framework** that allows multiple different scan events (e.g. "GitHub Repository Scan", "Quick Code Ingestion Scan", "Bulk Sandboxed Audits") to inherit the exact same asynchronous execution, state persistence, reconnection, and GitHub Actions-style visualization capabilities.
 
-**Goal**: Every scan job behaves like a GitHub Actions workflow run — independently tracked, replayable, concurrently observable, and persisted across page refreshes.
+## Target UX Mockup
+
+![Target UI Design Mockup](/home/berrybytes/.gemini/antigravity/brain/69e818d4-9962-4f8b-9406-d0a23e0ee92f/actions_style_pipeline_ui_1780385446869.png)
 
 ---
 
-## 2. Target UX — GitHub Actions Model
+## 2. Architectural Paradigm: Job Type Polymorphism
+
+Instead of duplicating status routers, event log structures, and frontend components, we parameterize the entire lifecycle using a `JobType` classification:
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  GitHub Repository Scanner                          [Scan New]   │
-├────────────────────┬────────────────────────────────────────────┤
-│  SCAN JOBS         │  JOB DETAIL: github.com/org/repo-A         │
-│  ─────────────     │  ─────────────────────────────────────────  │
-│  ● repo-A  DONE ✓  │  ○ QUEUED          ✓  Job Queued           │
-│  ● repo-B  RUN… ⟳  │  ○ PROVISIONING    ✓  Sandbox ready        │
-│  ● repo-C  QUEUE   │  ○ CLONING         ✓  Cloned in 4.2s       │
-│                    │  ○ DETECTING       ✓  Python · Go · TS      │
-│                    │  ○ SCANNING        ⟳  Scanning Python…      │
-│                    │  ○ DONE            ─  Waiting               │
-│                    │                                             │
-│                    │  [████████████░░░]  72%                     │
-└────────────────────┴────────────────────────────────────────────┘
+                  ┌──────────────────────────────┐
+                  │      Unified SSEManager      │
+                  │  (generic JobRecord / type)  │
+                  └──────────────┬───────────────┘
+                                 │
+         ┌───────────────────────┴───────────────────────┐
+         ▼                                               ▼
+    [Type: repo-scan]                              [Type: quick-scan]
+    - Repository URL                               - Inline Code / Sandbox
+    - Steps: QUEUED → PROVISIONING →               - Steps: QUEUED → PROVISIONING →
+      CLONING → DETECTING → SCANNING → DONE          SCANNING → DONE
 ```
 
-Each row in the left panel is a live, independent scan. Clicking any row switches the right panel to that job's pipeline without pausing or cancelling any other job.
+### Key Modular Design Rules:
+1. **Unified Storage Structure**: All jobs (independent of type) share a single Redis schema pattern: `job:{job_type}:{job_id}:[status/result/events]`.
+2. **General Hook interface**: `useJobStore` becomes generic and receives `jobType` as a configuration key.
+3. **Reusable View Modules**: The visual pipeline display (`PipelineView`) reads step configurations dynamically based on the job's schema configuration.
 
 ---
 
-## 3. Architecture
+## 3. Detailed Component Plan
 
-```
-Browser
-  └── useJobStore (localStorage)
-        ├── JobsPanel  ← list of all jobs, status badges
-        └── PipelineView ← selected job's step-by-step progress
+### 3.1 Backend — `core/jobs/` (Modular Job Tracking Engine)
 
-FastAPI Pod
-  ├── POST /v1/repo-scan         → job_id, BackgroundTask
-  ├── GET  /v1/repo-scan/jobs    → all jobs (memory + Redis)
-  ├── GET  /v1/repo-scan/{id}/status?since=N  → SSE stream
-  └── GET  /v1/repo-scan/{id}/events?since=N  → event replay
+#### `core/jobs/tracker.py`
 
-Redis
-  ├── repo_scan:status:{id}     → current ScanStep (TTL 24h)
-  ├── repo_scan:result:{id}     → final JSON (TTL 24h)
-  ├── repo_scan:events:{id}     → RPUSH ordered event log (TTL 24h)
-  └── repo_scan:chan:{id}       → Pub/Sub live broadcast
-```
-
----
-
-## 4. Backend Changes
-
-### 4.1 `sse_manager.py` — Event Replay Buffer
-
-Add a `deque` replay log to every `JobRecord` so reconnecting clients can catch up:
+Create a reusable job tracking engine to manage all in-memory and Redis-based job lifecycles.
 
 ```python
+import asyncio
+import json
+import time
+from typing import Optional, List, Dict
 from collections import deque
+from pydantic import BaseModel
 
-class JobRecord:
-    def __init__(self, job_id, repo_url):
+class JobEvent(BaseModel):
+    job_id: str
+    job_type: str
+    step: str
+    message: str
+    progress: int
+    detail: Optional[dict] = None
+
+class GenericJobRecord:
+    def __init__(self, job_id: str, job_type: str, metadata: dict):
         self.job_id = job_id
-        self.repo_url = repo_url
+        self.job_type = job_type
+        self.metadata = metadata
         self.queue: asyncio.Queue = asyncio.Queue()
-        self.event_log: deque = deque(maxlen=200)  # NEW
-        self.result = None
-        self.finished_at = None
-        self.step = ScanStep.QUEUED
+        self.event_log: deque = deque(maxlen=200)
+        self.step: str = "QUEUED"
+        self.result: Optional[dict] = None
+        self.finished_at: Optional[float] = None
 
-class SSEManager:
-    async def push(self, job_id, step, message, progress, detail=None):
+class ReusableJobTracker:
+    def __init__(self, app_state):
+        self.app_state = app_state
+        self._jobs: Dict[str, GenericJobRecord] = {}
+
+    def create_job(self, job_id: str, job_type: str, metadata: dict) -> GenericJobRecord:
+        record = GenericJobRecord(job_id, job_type, metadata)
+        self._jobs[job_id] = record
+        return record
+
+    def get_job(self, job_id: str) -> Optional[GenericJobRecord]:
+        return self._jobs.get(job_id)
+
+    async def push_event(self, job_id: str, step: str, message: str, progress: int, detail: Optional[dict] = None):
         job = self._jobs.get(job_id)
-        if not job: return
-        event = ScanEvent(job_id=job_id, step=step,
-                          message=message, progress=progress, detail=detail)
-        job.event_log.append(event)       # buffer for replay
-        job.step = step
-        await job.queue.put(event)
-        if step in (ScanStep.DONE, ScanStep.ERROR):
-            job.finished_at = time.monotonic()
-            await job.queue.put(None)     # sentinel
+        event = JobEvent(job_id=job_id, job_type=job.job_type if job else "unknown",
+                         step=step, message=message, progress=progress, detail=detail)
+        event_json = event.json()
+
+        # 1. Update in-memory job
+        if job:
+            job.step = step
+            job.event_log.append(event)
+            await job.queue.put(event)
+            if step in ("DONE", "ERROR"):
+                job.finished_at = time.monotonic()
+                job.result = detail
+                await job.queue.put(None)
+
+        # 2. Update Redis
+        if self.app_state.use_redis and self.app_state.redis_client:
+            r = self.app_state.redis_client
+            r.publish(f"job:{job_id}:chan", event_json)
+            r.rpush(f"job:{job_id}:events", event_json)
+            r.expire(f"job:{job_id}:events", 86400)
+            r.set(f"job:{job_id}:status", step, ex=86400)
+            if step in ("DONE", "ERROR") and detail:
+                r.set(f"job:{job_id}:result", json.dumps(detail), ex=86400)
 
     async def stream(self, job_id: str, since_index: int = 0):
         job = self._jobs.get(job_id)
         if not job:
-            yield f'data: {{"step":"ERROR","message":"not found"}}\n\n'
+            yield f'data: {{"step":"ERROR","message":"Job not found"}}\n\n'
             return
-        # Replay buffered events client hasn't seen
+
         for event in list(job.event_log)[since_index:]:
             yield f"data: {event.json()}\n\n"
+
         if job.finished_at:
-            return   # already terminal — no live queue needed
+            return
+
         while True:
             try:
                 event = await asyncio.wait_for(job.queue.get(), timeout=30.0)
@@ -109,160 +130,101 @@ class SSEManager:
             if event is None:
                 break
             yield f"data: {event.json()}\n\n"
-            if event.step in (ScanStep.DONE, ScanStep.ERROR):
+            if event.step in ("DONE", "ERROR"):
                 break
-```
-
-### 4.2 `scan_repository.py` — Four New Behaviours
-
-**A. Redis event log on every push:**
-```python
-async def push_event(step, message, progress, detail=None):
-    await sse_manager.push(job_id, step, message, progress, detail)
-    if app_state.use_redis and app_state.redis_client:
-        event = ScanEvent(job_id=job_id, step=step,
-                          message=message, progress=progress, detail=detail)
-        event_json = event.json()
-        app_state.redis_client.publish(f"repo_scan:chan:{job_id}", event_json)
-        app_state.redis_client.rpush(f"repo_scan:events:{job_id}", event_json)
-        app_state.redis_client.expire(f"repo_scan:events:{job_id}", 86400)
-        app_state.redis_client.set(f"repo_scan:status:{job_id}",
-                                   step.value, ex=86400)  # 24h TTL
-```
-
-**B. Echo `repo_url` + `submitted_at` in submit response** (needed for localStorage indexing):
-```python
-return RepoScanSubmitResponse(
-    job_id=job_id, status=ScanStep.QUEUED,
-    status_url=f"{base}/{job_id}/status",
-    result_url=f"{base}/{job_id}/result",
-    repo_url=req.repo_url,                       # NEW
-    submitted_at=datetime.utcnow().isoformat(),  # NEW
-)
-```
-
-**C. `GET /v1/repo-scan/jobs` — list all jobs:**
-```python
-@router.get("/v1/repo-scan/jobs", tags=["Repo Scanner"],
-            dependencies=[Depends(validate_token)])
-async def list_scan_jobs():
-    jobs = {}
-    for jid, rec in sse_manager._jobs.items():
-        jobs[jid] = {"job_id": jid, "repo_url": rec.repo_url,
-                     "status": rec.step.value}
-    if app_state.use_redis and app_state.redis_client:
-        for key in app_state.redis_client.scan_iter("repo_scan:status:*"):
-            jid = key.decode().split(":")[-1]
-            status = app_state.redis_client.get(key).decode()
-            if jid not in jobs:
-                jobs[jid] = {"job_id": jid, "status": status}
-    return list(jobs.values())
-```
-
-**D. `GET /v1/repo-scan/{job_id}/events?since=N` — full replay:**
-```python
-@router.get("/v1/repo-scan/{job_id}/events",
-            dependencies=[Depends(validate_token)])
-async def get_job_events(job_id: str, since: int = 0):
-    job = sse_manager.get_job(job_id)
-    if job:
-        return [json.loads(e.json()) for e in list(job.event_log)[since:]]
-    if app_state.use_redis and app_state.redis_client:
-        raw = app_state.redis_client.lrange(
-            f"repo_scan:events:{job_id}", since, -1)
-        return [json.loads(e) for e in raw]
-    raise HTTPException(404, f"Job {job_id} not found")
-```
-
-**E. `?since=N` on SSE stream handler:**
-```python
-@router.get("/v1/repo-scan/{job_id}/status")
-async def stream_scan_status(job_id: str, since: int = 0):
-    job = sse_manager.get_job(job_id)
-    if job:
-        return StreamingResponse(sse_manager.stream(job_id, since_index=since),
-                                 media_type="text/event-stream", ...)
-```
-
-### 4.3 `models.py` — Updated Response Model
-
-```python
-class RepoScanSubmitResponse(BaseModel):
-    job_id: str
-    status: ScanStep = ScanStep.QUEUED
-    status_url: str
-    result_url: str
-    repo_url: str        # NEW
-    submitted_at: str    # NEW — ISO-8601
 ```
 
 ---
 
-## 5. Frontend Changes
+### 3.2 Backend Endpoints — Reusable Job Router
 
-### 5.1 `src/lib/jobStore.ts` (NEW)
+#### `core/jobs/router.py`
 
-Typed localStorage adapter — survives refresh, tab close, browser restart.
+This generic router exposes endpoints that operate on any `job_type`, serving as the engine for all scans.
+
+```python
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
+# Import Generic Job Tracker singleton
+
+router = APIRouter(prefix="/v1/jobs", tags=["Generic Jobs Infrastructure"])
+
+@router.get("", dependencies=[Depends(validate_token)])
+async def list_jobs(job_type: str):
+    """Lists active/cached jobs matching a specific type."""
+    # Queries Redis job:* prefix or memory filter by job_type
+    ...
+
+@router.get("/{job_id}/events", dependencies=[Depends(validate_token)])
+async def get_job_events(job_id: str, since: int = 0):
+    """Retrieves all past events for replay/hydration."""
+    ...
+
+@router.get("/{job_id}/status", dependencies=[Depends(validate_token)])
+async def stream_job_status(job_id: str, since: int = 0):
+    """Streams live events using the Generic SSE Manager."""
+    ...
+```
+
+---
+
+### 3.3 Frontend — Reusable Hooks & Types
+
+#### `src/lib/jobStore.ts`
+
+Make the `localStorage` key and model generic:
 
 ```typescript
-export interface PersistedJob {
+export interface GenericJob<TMetadata = any, TResult = any> {
   job_id: string;
-  repo_url: string;
-  status: string;        // ScanStep value
+  job_type: "repo-scan" | "quick-scan";
+  status: string;
   progress: number;
   stepMessage: string;
-  eventIndex: number;    // events consumed — used for ?since=N reconnect
-  result: ScanResult | null;
+  eventIndex: number;
+  metadata: TMetadata;
+  result: TResult | null;
   submittedAt: string;
   completedAt: string | null;
 }
 
-const KEY = "repo_scan_jobs_v1";
-
 export const jobStore = {
-  getAll: (): PersistedJob[] =>
-    JSON.parse(localStorage.getItem(KEY) || "[]"),
-
-  upsert: (job: PersistedJob): void => {
-    const all = jobStore.getAll();
-    const idx = all.findIndex(j => j.job_id === job.job_id);
+  getAll: (type?: string): GenericJob[] => {
+    const list: GenericJob[] = JSON.parse(localStorage.getItem("unified_jobs_v1") || "[]");
+    return type ? list.filter(j => j.job_type === type) : list;
+  },
+  upsert: (job: GenericJob): void => {
+    const all = JSON.parse(localStorage.getItem("unified_jobs_v1") || "[]");
+    const idx = all.findIndex((j: any) => j.job_id === job.job_id);
     idx >= 0 ? (all[idx] = job) : all.unshift(job);
-    localStorage.setItem(KEY, JSON.stringify(all));
+    localStorage.setItem("unified_jobs_v1", JSON.stringify(all));
   },
-
-  get: (id: string): PersistedJob | null =>
+  get: (id: string): GenericJob | null =>
     jobStore.getAll().find(j => j.job_id === id) ?? null,
-
-  remove: (id: string): void => {
-    localStorage.setItem(KEY,
-      JSON.stringify(jobStore.getAll().filter(j => j.job_id !== id)));
-  },
 };
 ```
 
-### 5.2 `src/hooks/useJobStore.ts` (NEW)
+#### `src/hooks/useJobStore.ts`
+
+Make the hook support filters and SSE streams for any job type.
 
 ```typescript
-export function useJobStore(apiBase: string, apiKey: string) {
-  const [jobs, setJobs] = useState<PersistedJob[]>(() => jobStore.getAll());
+export function useJobStore(jobType: "repo-scan" | "quick-scan", apiBase: string, apiKey: string) {
+  const [jobs, setJobs] = useState<GenericJob[]>(() => jobStore.getAll(jobType));
   const esRefs = useRef<Record<string, EventSource>>({});
 
-  // On mount — reconnect any in-progress jobs
-  useEffect(() => {
-    jobs
-      .filter(j => !["DONE", "ERROR"].includes(j.status))
-      .forEach(j => openStream(j.job_id, j.eventIndex));
-  }, []);
+  const refresh = () => setJobs(jobStore.getAll(jobType));
 
-  const refresh = () => setJobs(jobStore.getAll());
-
-  const addJob = (job: PersistedJob) => { jobStore.upsert(job); refresh(); };
+  const addJob = (job: GenericJob) => {
+    jobStore.upsert(job);
+    refresh();
+  };
 
   const openStream = (job_id: string, since = 0) => {
     esRefs.current[job_id]?.close();
+    // Connect to generic SSE router endpoint
     const es = new EventSource(
-      `${apiBase}/v1/repo-scan/${job_id}/status?since=${since}` +
-      `&token=${encodeURIComponent(apiKey)}`
+      `${apiBase}/v1/jobs/${job_id}/status?since=${since}&token=${encodeURIComponent(apiKey)}`
     );
     esRefs.current[job_id] = es;
 
@@ -284,191 +246,137 @@ export function useJobStore(apiBase: string, apiKey: string) {
         delete esRefs.current[job_id];
       }
     };
-
-    es.onerror = () => {
-      es.close();
-      // Reconnect from last known index
-      const stored = jobStore.get(job_id);
-      if (stored && !["DONE","ERROR"].includes(stored.status)) {
-        setTimeout(() => openStream(job_id, stored.eventIndex), 2000);
-      }
-    };
+    ...
   };
 
-  // Cleanup on unmount
-  useEffect(() => () => {
-    Object.values(esRefs.current).forEach(es => es.close());
+  // Reconnect active jobs on mount
+  useEffect(() => {
+    jobs.filter(j => !["DONE", "ERROR"].includes(j.status))
+        .forEach(j => openStream(j.job_id, j.eventIndex));
   }, []);
 
-  return { jobs, addJob, openStream };
+  return { jobs, addJob, openStream, refresh };
 }
 ```
 
-### 5.3 `RepoScanner.tsx` — Component Refactor
+---
 
-Split into three parts:
+### 3.4 Frontend Components — Configurable Pipeline Layout
 
-**`ScanSubmitForm`** — input + submit, calls POST, registers job:
+#### `src/components/dashboard/UnifiedPipelineView.tsx`
+
+This component renders the pipeline dynamically by parsing a step configuration schema:
+
 ```typescript
-const handleScan = async () => {
-  const resp = await fetch(`${API_BASE}/v1/repo-scan`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json",
-                Authorization: `Bearer ${apiKey}` },
-    body: JSON.stringify({ repo_url: url }),
-  });
-  const data = await resp.json();
-  addJob({
-    job_id: data.job_id,
-    repo_url: data.repo_url,
-    submittedAt: data.submitted_at,
-    status: "QUEUED", progress: 0, stepMessage: "",
-    eventIndex: 0, result: null, completedAt: null,
-  });
-  openStream(data.job_id, 0);  // starts SSE independently
-  setSelectedJobId(data.job_id);
-};
+export interface PipelineStepConfig {
+  key: string;
+  label: string;
+}
+
+interface UnifiedPipelineViewProps {
+  job: GenericJob;
+  steps: PipelineStepConfig[];
+  onResultRender: (result: any) => React.ReactNode;
+}
 ```
 
-**`JobsPanel`** — left sidebar listing all jobs:
 ```tsx
-{jobs.map(job => (
-  <button key={job.job_id}
-    onClick={() => setSelectedJobId(job.job_id)}
-    className={cn("job-row", selectedJobId === job.job_id && "active")}>
-    <StatusDot status={job.status} />
-    <span className="repo-name">{extractRepo(job.repo_url)}</span>
-    <StatusBadge status={job.status} />
-  </button>
-))}
-```
-
-**`PipelineView`** — GitHub Actions-style step list for selected job:
-```tsx
-const PIPELINE_STEPS = [
-  { key: "QUEUED",       label: "Job Queued" },
-  { key: "PROVISIONING", label: "Provision Sandbox" },
-  { key: "CLONING",      label: "Clone Repository" },
-  { key: "DETECTING",    label: "Detect Languages" },
-  { key: "SCANNING",     label: "Security Scan" },
-  { key: "DONE",         label: "Complete" },
-];
-
-{PIPELINE_STEPS.map((s, i) => {
-  const stepIdx = STEPS.indexOf(job.status);
-  const thisIdx = STEPS.indexOf(s.key);
-  const isDone   = thisIdx < stepIdx || job.status === "DONE";
-  const isActive = s.key === job.status && job.status !== "ERROR";
-  const isError  = job.status === "ERROR" && thisIdx >= stepIdx;
+export function UnifiedPipelineView({ job, steps, onResultRender }: UnifiedPipelineViewProps) {
+  const currentIdx = steps.findIndex(s => s.key === job.status);
 
   return (
-    <div key={s.key} className="pipeline-step">
-      <StepIcon done={isDone} active={isActive} error={isError} />
-      <span>{s.label}</span>
-      {isActive && <span className="step-msg">{job.stepMessage}</span>}
+    <div className="space-y-6">
+      <div className="flex flex-col gap-2">
+        {steps.map((step, idx) => {
+          const isDone = idx < currentIdx || job.status === "DONE";
+          const isActive = step.key === job.status && job.status !== "ERROR";
+          const isError = job.status === "ERROR" && idx >= currentIdx;
+
+          return (
+            <div key={step.key} className={cn("flex items-center gap-3", isActive && "text-primary")}>
+              <StepIndicator done={isDone} active={isActive} error={isError} />
+              <span>{step.label}</span>
+              {isActive && <span className="text-xs text-muted-foreground">{job.stepMessage}</span>}
+            </div>
+          );
+        })}
+      </div>
+      <ProgressBar value={job.progress} isError={job.status === "ERROR"} />
+      {job.status === "DONE" && job.result && onResultRender(job.result)}
     </div>
   );
-})}
-<ProgressBar value={job.progress} error={job.status === "ERROR"} />
+}
 ```
 
 ---
 
-## 6. Sequence Diagrams
+## 4. How Scans Integrate (Examples)
 
-### 6.1 — Concurrent Job Submission
+### A. Repository Scanner Pipeline Configuration
 
-```
-User              Browser (JobStore)        FastAPI             Redis
- │                      │                     │                   │
- ├─ Submit repo-A ──────►│                     │                   │
- │                      ├─ POST /v1/repo-scan ►│                   │
- │                      │                     ├─ create job aaa   │
- │                      │                     ├─ RPUSH events:aaa ►│
- │                      │◄── {job_id: aaa} ────┤                   │
- │                      ├─ localStorage.upsert(aaa, QUEUED)        │
- │                      ├─ EventSource /aaa/status?since=0         │
- │                      │       (independent SSE stream)           │
- │                      │                     │                   │
- ├─ Submit repo-B ──────►│   (aaa still scanning)                  │
- │                      ├─ POST /v1/repo-scan ►│                   │
- │                      │◄── {job_id: bbb} ────┤                   │
- │                      ├─ localStorage.upsert(bbb, QUEUED)        │
- │                      ├─ EventSource /bbb/status?since=0         │
- │                      │       (second independent SSE stream)    │
- │                      │                     │                   │
- │  JobsPanel shows:    │                     │                   │
- │  ● aaa SCANNING ⟳    │                     │                   │
- │  ● bbb QUEUED        │                     │                   │
-```
+- **Job Type**: `repo-scan`
+- **Steps Schema**:
+  ```typescript
+  const REPO_STEPS = [
+    { key: "QUEUED", label: "Job Queued" },
+    { key: "PROVISIONING", label: "Provision Sandbox" },
+    { key: "CLONING", label: "Clone Repository" },
+    { key: "DETECTING", label: "Detect Languages" },
+    { key: "SCANNING", label: "Security Scan" },
+    { key: "DONE", label: "Complete" }
+  ];
+  ```
 
-### 6.2 — Page Refresh / Reconnect
+### B. Quick Scan (Code Audit) Pipeline Configuration
 
-```
-User              localStorage          FastAPI           Redis
- │  (refresh)          │                   │                │
- ├──────────────────── page mount ─────────────────────────►
- │                     │                   │                │
- │              getAll() ── [{aaa, SCANNING, idx=14}, ...]  │
- │                     │                   │                │
- │         aaa not terminal                │                │
- │                     ├── GET /aaa/events?since=14 ────────►
- │                     │                   │◄── LRANGE 14 ──┤
- │                     │◄── [events 14..N] ┤                │
- │                     │                   │                │
- │          if N contains DONE:            │                │
- │                     ├── upsert(DONE, result)             │
- │          else still running:            │                │
- │                     ├── EventSource /aaa/status?since=N  │
- │                     │   (resumes live stream)            │
-```
+- **Job Type**: `quick-scan`
+- **Steps Schema**:
+  ```typescript
+  const QUICK_STEPS = [
+    { key: "QUEUED", label: "Job Queued" },
+    { key: "PROVISIONING", label: "Setup Sandbox Environment" },
+    { key: "SCANNING", label: "Analyze Code Structure" },
+    { key: "DONE", label: "Analysis Completed" }
+  ];
+  ```
 
-### 6.3 — Event Flow Per Pipeline Step
+---
 
-```
-BackgroundTask    SSEManager         Redis          EventSource (Browser)
-     │                │                │                    │
-     ├─ push(CLONING) ►│                │                    │
-     │                ├─ event_log.append(ev)               │
-     │                ├─ queue.put(ev)                      │
-     │                ├──── RPUSH events:{id} ─────────────►│
-     │                ├──── PUBLISH chan:{id} ──────────────►│
-     │                ├──── SET status:{id}=CLONING ────────►│
-     │                │                │◄── SSE data ────────┤
-     │                │                │  onmessage:         │
-     │                │                │  localStorage.upsert│
-     │                │                │  {status=CLONING,   │
-     │                │                │   eventIndex+1}     │
+## 5. Sequence Diagram: Polymorphic Job Submission
+
+```mermaid
+sequenceDiagram
+    participant Browser as Client Browser
+    participant API as FastAPI Router
+    participant Tracker as ReusableJobTracker
+    participant Redis as Redis Cache
+    participant Worker as BackgroundTask Ingestion
+
+    Note over Browser, Worker: Flow 1: Quick Scan Submission
+    Browser->>API: POST /api/v1/{backend_id}/scan-jobs?async=true {files}
+    API->>Tracker: create_job(job_id, type="quick-scan", metadata)
+    API->>Tracker: push_event(QUEUED, "Initial Setup")
+    Tracker->>Redis: RPUSH job:aaa:events, SET status=QUEUED
+    API-->>Browser: {job_id: "aaa", status: "QUEUED"}
+    Browser->>API: EventSource GET /v1/jobs/aaa/status?since=0
+    API->>Worker: add_task(run_quick_scan)
+    Note over Worker: Background task runs quick scan...
+
+    Note over Browser, Worker: Flow 2: Repository Scan Submission
+    Browser->>API: POST /v1/repo-scan {repo_url}
+    API->>Tracker: create_job(job_id, type="repo-scan", metadata)
+    API->>Tracker: push_event(QUEUED, "Queue Setup")
+    Tracker->>Redis: RPUSH job:bbb:events, SET status=QUEUED
+    API-->>Browser: {job_id: "bbb", status: "QUEUED"}
+    Browser->>API: EventSource GET /v1/jobs/bbb/status?since=0
+    API->>Worker: add_task(run_repo_scan)
+    Note over Worker: Background task runs repo scan...
 ```
 
 ---
 
-## 7. File Change Summary
+## 6. Verification Plan
 
-### Backend
-
-| File | Change Type | Description |
-|---|---|---|
-| `sse_manager.py` | Modify | Add `event_log: deque` to `JobRecord`; `since_index` param in `stream()` |
-| `scan_repository.py` | Modify | `RPUSH` every event to Redis; 24h TTL; `GET /jobs`; `GET /{id}/events`; `?since=N` on SSE |
-| `models.py` | Modify | Add `repo_url`, `submitted_at` to `RepoScanSubmitResponse` |
-
-### Frontend
-
-| File | Change Type | Description |
-|---|---|---|
-| `src/lib/jobStore.ts` | **NEW** | localStorage CRUD for `PersistedJob[]` |
-| `src/hooks/useJobStore.ts` | **NEW** | React hook; SSE management; reconnect logic |
-| `src/pages/RepoScanner.tsx` | Modify | Split into `ScanSubmitForm`, `JobsPanel`, `PipelineView` |
-
----
-
-## 8. Verification Plan
-
-| Test | Method | Pass Condition |
-|---|---|---|
-| Concurrent scans | Submit 2 URLs back-to-back | Both appear in `JobsPanel`; pipeline advances independently |
-| Refresh mid-scan | Refresh at step `SCANNING` | UI fast-forwards to current step from Redis replay |
-| Completed job restore | Complete scan, close tab, reopen | Result loads instantly from localStorage |
-| Cross-pod replay | Hit `/events` on a different pod | Returns full event list from Redis `LRANGE` |
-| Reconnect SSE | Kill network, restore | EventSource reopens with `?since=N` from stored `eventIndex` |
+- **Polymorphic Retrieval**: Submit a `repo-scan` and `quick-scan`. Call `GET /v1/jobs?job_type=repo-scan` and verify it does not return the `quick-scan` job.
+- **Dynamic Steps Rendering**: Render `UnifiedPipelineView` with both configurations and verify that missing steps (e.g. CLONING for Quick Scan) are correctly omitted and step numbers auto-align.
+- **Cross-page State Retention**: Run a "Quick Scan" inside the Dialog, close the dialog, trigger a "Repo Scan", and verify the Quick Scan progress continues running and preserves status in localStorage.
