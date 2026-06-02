@@ -205,7 +205,31 @@ async def get_job_events(job_id: str, since: int = 0):
 async def stream_job_status(job_id: str, since: int = 0):
     """Streams live events using the Generic SSE Manager."""
     ...
+
+@router.get("/{job_id}/result", dependencies=[Depends(validate_token)])
+async def get_job_result(job_id: str):
+    """Retrieves the completed JSON scan report for a specific job ID.
+    Visible even after the sandbox pod has finished.
+    """
+    # 1. Check in-memory generic jobs tracker
+    job = tracker.get_job(job_id)
+    if job and job.result:
+        return job.result
+
+    # 2. Check Redis cached result
+    if state.use_redis and state.redis_client:
+        cached = state.redis_client.get(f"job:{job_id}:result")
+        if cached:
+            return json.loads(cached)
+
+    raise HTTPException(status_code=404, detail="Scan result not found or job still running.")
 ```
+
+### 3.2.1 Rate Limiting Security Compliance
+
+Because the new `/v1/jobs` endpoints reuse the exact same standard token validation dependency (`dependencies=[Depends(validate_token)]`), all calls are **automatically subjected to the existing active sliding/fixed window rate limiters** inside `auth/token_validator.py`.
+
+No existing rate limit logic is bypassed, modified, or hindered. Rate limits continue to function flawlessly at line-rate speed across all generic job endpoints.
 
 ---
 

@@ -54,6 +54,7 @@ The modular pipeline framework solves all of this by **separating concerns** int
                         │  │  GET /v1/jobs                │     │
                         │  │  GET /v1/jobs/{id}/status    │     │
                         │  │  GET /v1/jobs/{id}/events    │     │
+                        │  │  GET /v1/jobs/{id}/result    │     │
                         │  └──────────────────────────────┘    │
                         └──────────────────────────────────────┘
 ```
@@ -138,6 +139,7 @@ class JobEvent(BaseModel):
 | `GET /v1/jobs?job_type=repo-scan` | Lists all jobs of a given type from memory + Redis |
 | `GET /v1/jobs/{id}/events?since=N` | Returns missed event history for reconnect/hydration |
 | `GET /v1/jobs/{id}/status?since=N` | Streams live SSE events (with initial replay from `since`) |
+| `GET /v1/jobs/{id}/result` | Retrieves the completed JSON scan report |
 
 **Benefits**:
 - **One router serves all scan types** — the existing `scan_repository.py` router and future scan types simply call `tracker.push_event()` and the client connects to the same generic SSE endpoint.
@@ -539,6 +541,12 @@ A: It finds the index of `job.status` in the `steps[]` array. All steps with an 
 
 ---
 
+**Q: Does implementing this new modular pipeline router bypass or hinder our existing API key rate limiters?**
+
+A: No. All endpoints inside `/v1/jobs` are registered with the standard `validate_token` dependency (`dependencies=[Depends(validate_token)]`). This dependency internally triggers `check_rate_limit(state, jti)` in `auth/token_validator.py`. As a result, the existing dynamic sliding-window and fixed-window rate limiters are completely active and enforced at line-rate on all new endpoints. No security logic is bypassed or hindered.
+
+---
+
 ## Design Principles
 
 These principles guided every decision in this architecture. Share them with the team to maintain consistency as the system grows:
@@ -709,7 +717,7 @@ Use this as a sequential task list when building out the pipeline framework:
 - [ ] Create `core/jobs/` directory
 - [ ] Implement `core/jobs/tracker.py` — `JobEvent`, `GenericJobRecord`, `ReusableJobTracker`
 - [ ] Add `tracker` singleton instantiation in `core/app_state.py`
-- [ ] Implement `core/jobs/router.py` — `GET /v1/jobs`, `GET /v1/jobs/{id}/events`, `GET /v1/jobs/{id}/status`
+- [ ] Implement `core/jobs/router.py` — `GET /v1/jobs`, `GET /v1/jobs/{id}/events`, `GET /v1/jobs/{id}/status`, `GET /v1/jobs/{id}/result`
 - [ ] Register `core/jobs/router.py` in the FastAPI app
 
 ### Phase 2 — Migrate Existing Scan Modules
