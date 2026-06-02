@@ -1,3 +1,44 @@
+## Release v0.5.41 — 01-Sandbox
+**Release Date:** June 02, 2026
+
+---
+
+### Summary
+v0.5.41 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* load or generate stable JWT signing key ([8f3a182](https://github.com/01cloud/01-Sandbox/commit/8f3a182ac2dadff9c02c9c57585fddb39c9431e9))
+* load or generate stable JWT signing key ([3007b6f](https://github.com/01cloud/01-Sandbox/commit/3007b6fed7154c1ff9bcd63e9b4bc30a62a386e1))
+* generate RELEASE.md for v0.5.40 [skip ci] ([ff1ec8f](https://github.com/01cloud/01-Sandbox/commit/ff1ec8f05a13554d6de4856f610f27f1aff48309))
+* bump versions to v0.5.40 [skip ci] ([aeaf71f](https://github.com/01cloud/01-Sandbox/commit/aeaf71f79baa13d8afaa836b0bd4a36a12002059))
+
+### Changes
+## [0.5.41](https://github.com/01cloud/01-Sandbox/compare/v0.5.40...v0.5.41) (2026-06-02)
+
+
+### 🐛 Bug Fixes
+
+* load or generate stable JWT signing key ([8f3a182](https://github.com/01cloud/01-Sandbox/commit/8f3a182ac2dadff9c02c9c57585fddb39c9431e9))
+* load or generate stable JWT signing key ([3007b6f](https://github.com/01cloud/01-Sandbox/commit/3007b6fed7154c1ff9bcd63e9b4bc30a62a386e1))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.40 [skip ci] ([ff1ec8f](https://github.com/01cloud/01-Sandbox/commit/ff1ec8f05a13554d6de4856f610f27f1aff48309))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.40 [skip ci] ([aeaf71f](https://github.com/01cloud/01-Sandbox/commit/aeaf71f79baa13d8afaa836b0bd4a36a12002059))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.41)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.40 — 01-Sandbox
 **Release Date:** June 02, 2026
 
