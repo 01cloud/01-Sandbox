@@ -59,6 +59,11 @@ app.include_router(get_sandboxes_router(state, validate_token))
 app.include_router(get_proxy_router(state, validate_token))
 app.include_router(get_repo_scan_router(state, validate_token))
 
+# Register Generic Jobs Infrastructure router
+from core.jobs.router import router as jobs_router
+
+app.include_router(jobs_router)
+
 if __name__ == "__main__":
     import uvicorn
 

@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Github, Search, CheckCircle2, AlertCircle, Loader2, X, BarChart3 } from "lucide-react";
+import { Github, Search, CheckCircle2, AlertCircle, Loader2, X, BarChart3, Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -9,51 +9,23 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell } from "recharts";
+import { useJobStore } from "@/hooks/useJobStore";
+import { JobsPanel } from "./JobsPanel";
+import { UnifiedPipelineView } from "./UnifiedPipelineView";
 
 interface RepoScannerWidgetProps {
   apiBaseUrl: string;
   keys: { id: string; backend: string }[];
 }
 
-interface ScanEvent {
-  job_id: string;
-  step: string;
-  message: string;
-  progress: number;
-  detail?: any;
-}
-
-interface LanguageResult {
-  language: string;
-  file_count: number;
-  lines_of_code: number;
-  percentage: number;
-  findings: { severity: string; file: string; line?: number; issue: string; tool: string; remediation?: string }[];
-}
-
-interface ScanResult {
-  job_id: string;
-  repo_url: string;
-  owner: string;
-  repo: string;
-  status: string;
-  languages: Record<string, LanguageResult>;
-  detection_tool: string;
-  total_files: number;
-  total_findings: number;
-  scan_duration_seconds: number;
-  error?: string;
-}
-
-const STEPS = ["QUEUED", "PROVISIONING", "CLONING", "DETECTING", "SCANNING", "DONE"];
-const STEP_LABELS: Record<string, string> = {
-  QUEUED: "Queued",
-  PROVISIONING: "Provisioning sandbox...",
-  CLONING: "Cloning repository...",
-  DETECTING: "Detecting languages...",
-  SCANNING: "Scanning files...",
-  DONE: "Done",
-};
+const REPO_SCAN_STEPS = [
+  { key: "QUEUED", label: "Job Queued" },
+  { key: "PROVISIONING", label: "Provisioning sandbox environment..." },
+  { key: "CLONING", label: "Cloning repository..." },
+  { key: "DETECTING", label: "Detecting languages..." },
+  { key: "SCANNING", label: "Running security scan..." },
+  { key: "DONE", label: "Scan complete" },
+];
 
 const LANG_COLORS = [
   "#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b",
@@ -67,12 +39,8 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
   const [repoUrl, setRepoUrl] = useState("");
   const [urlError, setUrlError] = useState("");
   const [isScanning, setIsScanning] = useState(false);
-  const [currentStep, setCurrentStep] = useState("");
-  const [stepMessage, setStepMessage] = useState("");
-  const [progress, setProgress] = useState(0);
-  const [result, setResult] = useState<ScanResult | null>(null);
+  const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [expandedLang, setExpandedLang] = useState<string | null>(null);
-  const esRef = useRef<EventSource | null>(null);
 
   const getApiKey = () => {
     for (const k of keys) {
@@ -81,6 +49,35 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
     }
     return null;
   };
+
+  const apiKey = getApiKey() || "";
+
+  // Initialize unified hook
+  const {
+    jobs,
+    volatileResults,
+    addJob,
+    removeJob,
+    openStream,
+    lazyFetchResult,
+  } = useJobStore("repo-scan", apiBaseUrl, apiKey);
+
+  // Auto-select latest job if any
+  useEffect(() => {
+    if (jobs.length > 0 && !selectedJobId) {
+      setSelectedJobId(jobs[0].job_id);
+    }
+  }, [jobs, selectedJobId]);
+
+  // Lazy load PVC report when selecting a completed job
+  useEffect(() => {
+    if (selectedJobId) {
+      const job = jobs.find((j) => j.job_id === selectedJobId);
+      if (job && job.status === "DONE" && !volatileResults[selectedJobId]) {
+        lazyFetchResult(selectedJobId);
+      }
+    }
+  }, [selectedJobId, jobs, volatileResults]);
 
   const validateUrl = (url: string) => {
     if (!url) { setUrlError(""); return; }
@@ -91,26 +88,19 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
     }
   };
 
-  const reset = () => {
-    setCurrentStep(""); setStepMessage(""); setProgress(0);
-    setResult(null); setExpandedLang(null);
-    if (esRef.current) { esRef.current.close(); esRef.current = null; }
-  };
-
   const handleScan = async () => {
     const url = repoUrl.trim();
     if (!GITHUB_PATTERN.test(url)) {
       setUrlError("Enter a valid public GitHub URL"); return;
     }
-    const apiKey = getApiKey();
+
     if (!apiKey) {
       toast.error("No API key found. Please create one in API Management tab."); return;
     }
 
-    reset();
-    setIsScanning(true);
-
     try {
+      setIsScanning(true);
+
       const resp = await fetch(`${apiBaseUrl}/v1/repo-scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
@@ -119,61 +109,170 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.detail || "Failed to start scan");
 
-      const { job_id } = data;
+      const { job_id, repo_url: data_repo_url, submitted_at } = data;
 
-      // Connect to SSE stream
-      const es = new EventSource(`${apiBaseUrl}/v1/repo-scan/${job_id}/status?token=${encodeURIComponent(apiKey)}`);
-      esRef.current = es;
+      // Add to store
+      addJob({
+        job_id,
+        job_type: "repo-scan",
+        status: "QUEUED",
+        progress: 5,
+        stepMessage: "Job queued",
+        eventIndex: 0,
+        metadata: {
+          repo_url: data_repo_url || url,
+          submitted_at: submitted_at || new Date().toISOString(),
+        },
+        summary: null,
+        result: null,
+        submittedAt: submitted_at || new Date().toISOString(),
+        completedAt: null
+      });
 
-      es.onmessage = (e) => {
-        try {
-          const event: ScanEvent = JSON.parse(e.data);
-          setCurrentStep(event.step);
-          setStepMessage(event.message);
-          setProgress(event.progress);
+      setSelectedJobId(job_id);
+      openStream(job_id, 0);
 
-          if (event.step === "DONE") {
-            if (event.detail) setResult(event.detail as ScanResult);
-            setIsScanning(false);
-            es.close();
-          } else if (event.step === "ERROR") {
-            toast.error(event.message);
-            setIsScanning(false);
-            es.close();
-          }
-        } catch { /* ignore parse errors */ }
-      };
-
-      es.onerror = () => {
-        es.close();
-        // Fallback: fetch result directly if job is already done
-        fetch(`${apiBaseUrl}/v1/repo-scan/${job_id}/result`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-        })
-          .then(r => r.ok ? r.json() : null)
-          .then(d => {
-            if (d && d.languages) {
-              setResult(d);
-              setIsScanning(false);
-            }
-          })
-          .catch(() => {});
-      };
+      toast.success("Repository scan initiated!");
     } catch (err: any) {
-      toast.error(err.message);
+      toast.error(err.message || "Failed to start scan");
+    } finally {
       setIsScanning(false);
     }
   };
 
-  useEffect(() => () => { esRef.current?.close(); }, []);
+  // Find currently selected job record
+  const selectedJob = jobs.find((j) => j.job_id === selectedJobId) || null;
+  const selectedResult = selectedJobId ? volatileResults[selectedJobId] : null;
 
-  const langEntries = result && result.languages ? Object.entries(result.languages) : [];
-  const chartData = langEntries.map(([lang, r]) => ({
-    name: lang, value: r && typeof r.percentage === "number" ? parseFloat(r.percentage.toFixed(1)) : 0,
-  }));
+  // Custom renderer for scan result findings
+  const renderRepoScanResult = (result: any) => {
+    const langEntries = result && result.languages ? Object.entries(result.languages) : [];
+    const chartData = langEntries.map(([lang, r]: [string, any]) => ({
+      name: lang, value: r && typeof r.percentage === "number" ? parseFloat(r.percentage.toFixed(1)) : 0,
+    }));
 
-  const stepIndex = STEPS.indexOf(currentStep);
-  const doneStepIndex = STEPS.indexOf("DONE");
+    return (
+      <div className="space-y-8 mt-4 animate-in fade-in duration-500">
+        {/* Summary Info Banner */}
+        <div className="flex flex-wrap items-center gap-4 p-5 rounded-2xl bg-emerald-500/5 border border-emerald-500/20 shadow-sm">
+          <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
+          <div className="flex-1 min-w-0">
+            <p className="font-black text-base text-foreground">{result.owner}/{result.repo}</p>
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {result.detection_tool} · {result.total_files} files · {result.scan_duration_seconds}s
+            </p>
+          </div>
+          <div className="flex gap-3 flex-wrap">
+            <Badge variant="outline" className="bg-violet-500/10 text-violet-500 border-violet-500/20 font-bold">
+              {langEntries.length} Languages
+            </Badge>
+            <Badge variant="outline" className={cn("font-bold", result.total_findings > 0 ? "bg-orange-500/10 text-orange-500 border-orange-500/20" : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20")}>
+              {result.total_findings} Findings
+            </Badge>
+          </div>
+        </div>
+
+        {/* Language distribution chart */}
+        {chartData.length > 0 && (
+          <div className="bg-muted/5 border border-border/40 p-5 rounded-2xl">
+            <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-4">Language Distribution</h3>
+            <div className="h-[180px] w-full">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={chartData} layout="vertical" margin={{ left: 50, right: 30, top: 0, bottom: 0 }}>
+                  <XAxis type="number" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={{ fontSize: 10 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fontWeight: 700 }} width={70} />
+                  <Tooltip formatter={(v: any) => [`${v}%`, "Share"]} contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", background: "hsl(var(--background))", fontSize: 11 }} />
+                  <Bar dataKey="value" radius={[0, 6, 6, 0]}>
+                    {chartData.map((_, i) => <Cell key={i} fill={LANG_COLORS[i % LANG_COLORS.length]} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        )}
+
+        {/* Per-language cards */}
+        <div>
+          <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-4">Per-Language Details</h3>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {langEntries.map(([lang, info]: [string, any], i) => (
+              <div key={lang} className="rounded-2xl border border-border/40 bg-card hover:bg-muted/15 transition-all overflow-hidden">
+                <button
+                  className="w-full p-4 flex items-center justify-between text-left"
+                  onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: LANG_COLORS[i % LANG_COLORS.length] }} />
+                    <span className="font-black text-xs text-foreground">{lang}</span>
+                  </div>
+                  <div className="flex items-center gap-3 text-right">
+                    <div className="text-right">
+                      <p className="text-[9px] text-muted-foreground">{info.file_count} files · {info.lines_of_code.toLocaleString()} LoC</p>
+                      <p className="text-xs font-bold text-foreground">{info.percentage.toFixed(1)}%</p>
+                    </div>
+                    {info.findings.length > 0 && (
+                      <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-500 border-orange-500/20 py-0">
+                        {info.findings.length}
+                      </Badge>
+                    )}
+                  </div>
+                </button>
+                {expandedLang === lang && (
+                  <div className="border-t border-border/20 bg-muted/5">
+                    {info.findings.length === 0 ? (
+                      <div className="p-4 text-xs font-semibold text-muted-foreground/60 text-center">
+                        No security findings for this language
+                      </div>
+                    ) : (
+                      <div className="overflow-y-auto p-4 space-y-3 max-h-[350px]">
+                        {info.findings.map((f: any, fi: number) => {
+                          const sev = f.severity?.toUpperCase() ?? "INFO";
+                          const sevColor =
+                            sev === "CRITICAL" ? "border-red-500/60 bg-red-500/5" :
+                            sev === "HIGH"     ? "border-orange-500/60 bg-orange-500/5" :
+                            sev === "MEDIUM"   ? "border-yellow-500/60 bg-yellow-500/5" :
+                            sev === "LOW"      ? "border-blue-500/60 bg-blue-500/5" :
+                                                 "border-border/50 bg-muted/10";
+                          const badgeColor =
+                            sev === "CRITICAL" ? "bg-red-500/15 text-red-500 border-red-500/30" :
+                            sev === "HIGH"     ? "bg-orange-500/15 text-orange-500 border-orange-500/30" :
+                            sev === "MEDIUM"   ? "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" :
+                            sev === "LOW"      ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
+                                                 "bg-muted text-muted-foreground border-border";
+                          return (
+                            <div key={fi} className={cn("p-3 rounded-xl border text-[11px] transition-all", sevColor)}>
+                              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide", badgeColor)}>
+                                  {sev}
+                                </Badge>
+                                <span className="text-[9px] font-bold text-muted-foreground">{f.tool}</span>
+                                {f.line && (
+                                  <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">L:{f.line}</span>
+                                )}
+                              </div>
+                              <p className="font-bold text-foreground leading-snug">{f.issue}</p>
+                              {f.file && (
+                                <div className="flex items-center gap-1.5 mt-1.5">
+                                  <p className="text-[9px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
+                                </div>
+                              )}
+                              {f.remediation && (
+                                <p className="text-[9px] text-muted-foreground/60 mt-1 leading-relaxed">{f.remediation}</p>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  };
 
   return (
     <>
@@ -202,34 +301,33 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
       </Card>
 
       {/* Full Scanner Dialog */}
-      <Dialog open={isOpen} onOpenChange={(o) => { if (!o) { reset(); } setIsOpen(o); }}>
+      <Dialog open={isOpen} onOpenChange={(o) => { if (!o) { setSelectedJobId(null); } setIsOpen(o); }}>
         <DialogContent className="max-w-[100vw] w-screen h-screen m-0 p-0 overflow-hidden border-none bg-background flex flex-col rounded-none">
 
           {/* Header */}
-          <DialogHeader className="px-10 py-7 border-b bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
+          <DialogHeader className="px-8 py-5 border-b bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
             <div className="flex items-center gap-4">
-              <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-500">
+              <div className="p-2 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-500">
                 <Github className="w-5 h-5" />
               </div>
               <div>
-                <DialogTitle className="text-xl font-black tracking-tight">GitHub Repository Scanner</DialogTitle>
-                <DialogDescription className="text-[11px] font-bold text-muted-foreground uppercase tracking-[0.25em] flex items-center gap-2 mt-1">
+                <DialogTitle className="text-lg font-black tracking-tight">GitHub Repository Scanner</DialogTitle>
+                <DialogDescription className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.25em] flex items-center gap-2 mt-1">
                   <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse" />
                   linguist · tokei · enry · static analysis
                 </DialogDescription>
               </div>
             </div>
-            <button onClick={() => { reset(); setIsOpen(false); }} className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground">
+            <button onClick={() => { setSelectedJobId(null); setIsOpen(false); }} className="p-2 rounded-xl hover:bg-muted/50 transition-colors text-muted-foreground">
               <X className="w-5 h-5" />
             </button>
           </DialogHeader>
 
+          {/* Triple Panel Layout */}
           <div className="flex-1 flex overflow-hidden">
 
-            {/* Left Panel — Input + Status */}
-            <div className="w-[400px] shrink-0 flex flex-col p-8 border-r border-border/50 bg-muted/10 gap-6">
-
-              {/* URL Input */}
+            {/* Panel 1: Input URL and Submission Controls (left) */}
+            <div className="w-[400px] shrink-0 flex flex-col p-6 border-r border-border/50 bg-muted/5 gap-5">
               <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Repository URL</label>
                 <Input
@@ -248,207 +346,47 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
                 id="scan-repo-btn"
                 onClick={handleScan}
                 disabled={isScanning || !!urlError || !repoUrl}
-                className="h-11 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold flex items-center gap-2 shadow-lg shadow-violet-600/20 transition-all disabled:opacity-60"
+                className="h-11 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold flex items-center gap-2 shadow-lg shadow-violet-600/15 transition-all disabled:opacity-60"
               >
-                {isScanning ? <><Loader2 className="w-4 h-4 animate-spin" /> Scanning...</> : <><Search className="w-4 h-4" /> Scan Repository</>}
+                {isScanning ? <><Loader2 className="w-4 h-4 animate-spin" /> Ingesting...</> : <><Search className="w-4 h-4" /> Scan Repository</>}
               </Button>
-
-              {/* Step Timeline */}
-              {currentStep && (
-                <div className="flex flex-col gap-1 mt-2 animate-in fade-in slide-in-from-bottom-4 duration-300">
-                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-3">Pipeline Status</label>
-                  {STEPS.filter(s => s !== "QUEUED").map((step, i) => {
-                    const stepI = STEPS.indexOf(step);
-                    const isDone = currentStep === "DONE" ? true : stepI < stepIndex;
-                    const isActive = step === currentStep;
-                    const isError = currentStep === "ERROR" && step === "SCANNING";
-                    return (
-                      <div key={step} className={cn("flex items-center gap-3 py-2 px-3 rounded-xl transition-all", isActive ? "bg-violet-500/10" : "")}>
-                        <div className={cn("w-5 h-5 rounded-full flex items-center justify-center shrink-0 text-[10px] font-black border transition-all",
-                          isError ? "border-destructive text-destructive bg-destructive/10" :
-                          isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
-                          isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
-                          "border-border text-muted-foreground/30")}>
-                          {isDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : isActive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>{i + 1}</span>}
-                        </div>
-                        <span className={cn("text-xs font-semibold", isActive ? "text-foreground" : isDone ? "text-emerald-500" : "text-muted-foreground/40")}>
-                          {STEP_LABELS[step]}
-                        </span>
-                      </div>
-                    );
-                  })}
-
-                  {/* Progress bar */}
-                  <div className="mt-3 h-1.5 rounded-full bg-muted overflow-hidden">
-                    <div className="h-full bg-violet-500 rounded-full transition-all duration-700 ease-out" style={{ width: `${progress}%` }} />
-                  </div>
-                  {stepMessage && (
-                    <p className="text-[11px] text-muted-foreground mt-2 leading-relaxed">{stepMessage}</p>
-                  )}
-                </div>
-              )}
-
-              {/* Error state */}
-              {currentStep === "ERROR" && (
-                <div className="p-4 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive text-xs font-medium flex items-start gap-2 animate-in fade-in duration-300">
-                  <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
-                  <span>{stepMessage}</span>
-                </div>
-              )}
             </div>
 
-            {/* Right Panel — Results */}
-            <div className="flex-1 overflow-hidden flex flex-col bg-background">
-              {!result && !isScanning && (
-                <div className="flex-1 flex flex-col items-center justify-center text-center gap-4 opacity-30">
-                  <BarChart3 className="w-16 h-16 text-muted-foreground" />
-                  <div>
-                    <p className="font-black uppercase tracking-widest text-sm">Awaiting Scan</p>
-                    <p className="text-xs text-muted-foreground mt-1">Enter a public GitHub repository URL and click Scan Repository</p>
-                  </div>
-                </div>
-              )}
+            {/* Panel 2: Sidebar list panel (middle) */}
+            <JobsPanel
+              jobs={jobs}
+              selectedJobId={selectedJobId}
+              onSelectJob={setSelectedJobId}
+              onDeleteJob={removeJob}
+              jobType="repo-scan"
+            />
 
-              {isScanning && !result && (
-                <div className="flex-1 flex flex-col items-center justify-center gap-6 animate-in fade-in duration-500">
-                  <div className="relative">
-                    <div className="w-16 h-16 rounded-full border-2 border-violet-500/20 animate-ping absolute inset-0" />
-                    <div className="w-16 h-16 rounded-full border-2 border-violet-500/40 flex items-center justify-center relative">
-                      <Github className="w-7 h-7 text-violet-500 animate-pulse" />
-                    </div>
-                  </div>
-                  <div className="text-center">
-                    <p className="font-black text-lg uppercase tracking-tight">{STEP_LABELS[currentStep] || "Processing..."}</p>
-                    <p className="text-xs text-muted-foreground mt-1 max-w-xs">{stepMessage}</p>
-                  </div>
-                </div>
-              )}
-
-              {result && result.status === "DONE" && (
-                <ScrollArea className="flex-1">
-                  <div className="p-8 space-y-8 max-w-4xl mx-auto">
-
-                    {/* Summary bar */}
-                    <div className="flex flex-wrap items-center gap-4 p-5 rounded-2xl bg-emerald-500/5 border border-emerald-500/20">
-                      <CheckCircle2 className="w-6 h-6 text-emerald-500 shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="font-black text-base">{result.owner}/{result.repo}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {result.detection_tool} · {result.total_files} files · {result.scan_duration_seconds}s
+            {/* Panel 3: Execution View / Result renderer (right) */}
+            <div className="flex-1 bg-background overflow-hidden flex flex-col p-6">
+              <ScrollArea className="flex-1">
+                <div className="max-w-5xl mx-auto w-full">
+                  {selectedJob ? (
+                    <UnifiedPipelineView
+                      job={selectedJob}
+                      steps={REPO_SCAN_STEPS}
+                      result={selectedResult}
+                      onResultRender={renderRepoScanResult}
+                    />
+                  ) : (
+                    <div className="h-[60vh] flex flex-col items-center justify-center text-center gap-4 opacity-40">
+                      <Activity className="w-12 h-12 text-muted-foreground animate-pulse" />
+                      <div>
+                        <h3 className="text-sm font-black uppercase tracking-wider">No Scan Selected</h3>
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Select a repository scan job from the panel or run a new scan.
                         </p>
                       </div>
-                      <div className="flex gap-3 flex-wrap">
-                        <Badge variant="outline" className="bg-violet-500/10 text-violet-500 border-violet-500/20 font-bold">
-                          {langEntries.length} Languages
-                        </Badge>
-                        <Badge variant="outline" className={cn("font-bold", result.total_findings > 0 ? "bg-orange-500/10 text-orange-500 border-orange-500/20" : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20")}>
-                          {result.total_findings} Findings
-                        </Badge>
-                      </div>
                     </div>
-
-                    {/* Language Bar Chart */}
-                    {chartData.length > 0 && (
-                      <div>
-                        <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-4">Language Distribution</h3>
-                        <div className="h-[200px] w-full">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <BarChart data={chartData} layout="vertical" margin={{ left: 80, right: 30, top: 0, bottom: 0 }}>
-                              <XAxis type="number" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={{ fontSize: 10 }} />
-                              <YAxis type="category" dataKey="name" tick={{ fontSize: 11, fontWeight: 700 }} width={80} />
-                              <Tooltip formatter={(v: any) => [`${v}%`, "Share"]} contentStyle={{ borderRadius: 12, border: "1px solid hsl(var(--border))", background: "hsl(var(--background))", fontSize: 11 }} />
-                              <Bar dataKey="value" radius={[0, 6, 6, 0]}>
-                                {chartData.map((_, i) => <Cell key={i} fill={LANG_COLORS[i % LANG_COLORS.length]} />)}
-                              </Bar>
-                            </BarChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Per-language cards */}
-                    <div>
-                      <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-4">Per-Language Results</h3>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        {langEntries.map(([lang, info], i) => (
-                          <div key={lang} className="rounded-2xl border border-border/50 bg-muted/10 hover:bg-muted/20 transition-all">
-                            <button
-                              className="w-full p-5 flex items-center justify-between text-left"
-                              onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
-                            >
-                              <div className="flex items-center gap-3">
-                                <span className="w-3 h-3 rounded-full shrink-0" style={{ background: LANG_COLORS[i % LANG_COLORS.length] }} />
-                                <span className="font-black text-sm">{lang}</span>
-                              </div>
-                              <div className="flex items-center gap-3 text-right">
-                                <div className="text-right">
-                                  <p className="text-[10px] text-muted-foreground">{info.file_count} files · {info.lines_of_code.toLocaleString()} LoC</p>
-                                  <p className="text-xs font-bold">{info.percentage.toFixed(1)}%</p>
-                                </div>
-                                {info.findings.length > 0 && (
-                                  <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-500 border-orange-500/20 py-0">
-                                    {info.findings.length}
-                                  </Badge>
-                                )}
-                              </div>
-                            </button>
-                            {expandedLang === lang && (
-                              <div className="border-t border-border/50">
-                                {info.findings.length === 0 ? (
-                                  <div className="p-5 text-xs font-semibold text-muted-foreground/60">
-                                    No security findings for this language
-                                  </div>
-                                ) : (
-                                  <div className="overflow-y-auto p-4 space-y-2.5 max-h-[420px]">
-                                    {info.findings.map((f, fi) => {
-                                      const sev = f.severity?.toUpperCase() ?? "INFO";
-                                      const sevColor =
-                                        sev === "CRITICAL" ? "border-red-500/60 bg-red-500/5" :
-                                        sev === "HIGH"     ? "border-orange-500/60 bg-orange-500/5" :
-                                        sev === "MEDIUM"   ? "border-yellow-500/60 bg-yellow-500/5" :
-                                        sev === "LOW"      ? "border-blue-500/60 bg-blue-500/5" :
-                                                             "border-border/50 bg-muted/10";
-                                      const badgeColor =
-                                        sev === "CRITICAL" ? "bg-red-500/15 text-red-500 border-red-500/30" :
-                                        sev === "HIGH"     ? "bg-orange-500/15 text-orange-500 border-orange-500/30" :
-                                        sev === "MEDIUM"   ? "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" :
-                                        sev === "LOW"      ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
-                                                             "bg-muted text-muted-foreground border-border";
-                                      return (
-                                        <div key={fi} className={cn("p-3 rounded-xl border text-xs transition-all", sevColor)}>
-                                          <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                                            <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide", badgeColor)}>
-                                              {sev}
-                                            </Badge>
-                                            <span className="text-[10px] font-bold text-muted-foreground">{f.tool}</span>
-                                            {f.line && (
-                                              <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">L:{f.line}</span>
-                                            )}
-                                          </div>
-                                          <p className="font-semibold text-foreground/90 leading-snug">{f.issue}</p>
-                                          {f.file && (
-                                            <div className="flex items-center gap-1.5 mt-1.5">
-                                              <p className="text-[9px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
-                                            </div>
-                                          )}
-                                          {f.remediation && (
-                                            <p className="text-[9px] text-muted-foreground/60 mt-1 leading-relaxed">{f.remediation}</p>
-                                          )}
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                </ScrollArea>
-              )}
+                  )}
+                </div>
+              </ScrollArea>
             </div>
+
           </div>
         </DialogContent>
       </Dialog>

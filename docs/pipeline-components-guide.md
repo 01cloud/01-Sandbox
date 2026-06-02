@@ -165,6 +165,7 @@ class JobEvent(BaseModel):
 
 **Benefits**:
 - **Survives page refresh, tab close, and browser restart** — jobs are always recoverable.
+- **Zero LocalStorage Bloat (PVC-Backed results)** — The full, heavy security JSON report is stripped and kept `null` in browser storage. Instead, only a tiny metadata `summary` (severity counts) is stored. When a user views a finished job, the frontend dynamically lazy-fetches the full JSON report from the backend's persistent volume claim (PVC) and stores it in volatile React memory only.
 - Filtering by `job_type` in `getAll()` means `RepoScanner` and `SecurityScanner` see only their own jobs, with zero overlap.
 - The `unified_jobs_v1` key name is versioned — if the schema changes, bumping the version prevents stale-data conflicts without a migration step.
 
@@ -701,10 +702,10 @@ Run through these scenarios manually before merging the feature branch:
 | 1 | Submit a repo scan → watch the step list advance | Steps turn green one by one; progress bar fills |
 | 2 | Submit two repo scans back to back | Both appear in `JobsPanel`; each advances independently |
 | 3 | Refresh the page while a scan is at SCANNING step | UI reconnects and fast-forwards to current step |
-| 4 | Open the page after a DONE scan (within 24h) | Result loads from localStorage instantly; no SSE needed |
+| 4 | Open the page after a DONE scan (within 24h) | Job metadata and minimal summary loads from localStorage instantly; detailed report fetched dynamically on selection |
 | 5 | Click "Quick Scan" while a repo scan is running | Both badges update independently; dialog shows Quick Scan progress |
 | 6 | Kill network connection during a scan, restore it | EventSource reconnects automatically; resumes from `eventIndex` |
-| 7 | Wait for scan to complete on one tab; open the same URL in a new tab | New tab shows DONE state with full result from localStorage |
+| 7 | Wait for scan to complete on one tab; open the same URL in a new tab | New tab shows DONE state with summary; clicking historical row triggers dynamic on-demand fetch of detailed report from PVC |
 | 8 | Call `GET /v1/jobs?job_type=quick-scan` via curl | Returns only quick-scan jobs; no repo-scan jobs in response |
 
 ---
