@@ -1,3 +1,54 @@
+## Release v0.5.40 — 01-Sandbox
+**Release Date:** June 02, 2026
+
+---
+
+### Summary
+v0.5.40 focuses on new functionality and platform enhancements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* async scan jobs across all the scanners ([84421e2](https://github.com/01cloud/01-Sandbox/commit/84421e2e335919eb52ca88e40147471ccd8daa36))
+* async scan jobs across all the scanners ([67edf2f](https://github.com/01cloud/01-Sandbox/commit/67edf2f3461fe81b33453289bcc7855f68e8c35a))
+* generate RELEASE.md for v0.5.39 [skip ci] ([d80e027](https://github.com/01cloud/01-Sandbox/commit/d80e0272791afa1c041d6ce97002820eaa066886))
+* update the readme file ([4a4113f](https://github.com/01cloud/01-Sandbox/commit/4a4113f75c3a53349dff8798883f20a8d0bfc053))
+
+### Changes
+## [0.5.40](https://github.com/01cloud/01-Sandbox/compare/v0.5.39...v0.5.40) (2026-06-02)
+
+
+### 🚀 New Features
+
+* async scan jobs across all the scanners ([84421e2](https://github.com/01cloud/01-Sandbox/commit/84421e2e335919eb52ca88e40147471ccd8daa36))
+* async scan jobs across all the scanners ([67edf2f](https://github.com/01cloud/01-Sandbox/commit/67edf2f3461fe81b33453289bcc7855f68e8c35a))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.39 [skip ci] ([d80e027](https://github.com/01cloud/01-Sandbox/commit/d80e0272791afa1c041d6ce97002820eaa066886))
+* update the readme file ([4a4113f](https://github.com/01cloud/01-Sandbox/commit/4a4113f75c3a53349dff8798883f20a8d0bfc053))
+* update the readme file ([8b6b6d7](https://github.com/01cloud/01-Sandbox/commit/8b6b6d7bee8d6e5ede2eadf21d0e8f491d9d1dcc))
+* update the readme file ([daf30d1](https://github.com/01cloud/01-Sandbox/commit/daf30d18ad503ac9d1d0de452cc31025e6f9e4c9))
+* update the readme file ([7186050](https://github.com/01cloud/01-Sandbox/commit/71860503b0e51730a9419b136007645670d459c8))
+* update the readme file ([cd049a1](https://github.com/01cloud/01-Sandbox/commit/cd049a1fa31e182a9236f13e58d5380ce8134af0))
+* update the readme file ([9e2ddc1](https://github.com/01cloud/01-Sandbox/commit/9e2ddc1325aad78941014c4ae0194ab0cdd2fc97))
+* update the readme file ([a4a9015](https://github.com/01cloud/01-Sandbox/commit/a4a901566b1a1971547c8a251cf93822353bed54))
+* update the readme file ([307322f](https://github.com/01cloud/01-Sandbox/commit/307322fe8daf7435df5860e4ba8c46804b108610))
+* update the readme file ([2fb419f](https://github.com/01cloud/01-Sandbox/commit/2fb419fc80ca843c95e637272ed446c155c44368))
+* update the readme file ([fb9b461](https://github.com/01cloud/01-Sandbox/commit/fb9b46137fd2d7158bfcfca7c937c479b0fc8a05))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.39 [skip ci] ([ff19d93](https://github.com/01cloud/01-Sandbox/commit/ff19d93ee28bc19e8539b092e88a2bb58bdccaf1))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.40)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.39 — 01-Sandbox
 **Release Date:** June 01, 2026
 
