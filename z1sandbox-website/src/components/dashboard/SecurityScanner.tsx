@@ -41,11 +41,6 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
   const [isScanning, setIsScanning] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
 
-  // Strip any trailing /v1 so useJobStore can safely prepend /v1/jobs/... without doubling the prefix.
-  // e.g. "https://host/api/v1" → "https://host/api"
-  //      "https://host/api"    → "https://host/api"  (unchanged)
-  const apiBase = baseUrl.replace(/\/v1\/?$/, "");
-
   // Initialize unified hook
   const {
     jobs,
@@ -54,7 +49,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
     removeJob,
     openStream,
     lazyFetchResult,
-  } = useJobStore("quick-scan", apiBase, apiKey);
+  } = useJobStore("quick-scan", baseUrl, apiKey);
 
   // Auto-select latest job if any
   useEffect(() => {
@@ -149,7 +144,6 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
       const filename = `input.${apiExt}`;
 
       // POST asynchronously to support SSE streams
-      // Always use the raw baseUrl (which already includes /v1) for the scan-jobs endpoint
       const response = await fetch(`${baseUrl}/scan-jobs?async=true`, {
         method: "POST",
         headers: {
