@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.42](https://github.com/01cloud/01-Sandbox/compare/v0.5.41...v0.5.42) (2026-06-03)
+
+
+### 🐛 Bug Fixes
+
+* load or generate stable JWT signing key ([af0ede5](https://github.com/01cloud/01-Sandbox/commit/af0ede51611b2fa15e8e43049652f0f7a95c206d))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.41 [skip ci] ([8082075](https://github.com/01cloud/01-Sandbox/commit/8082075bd8b975794e6b1b34ac7e590f298dcade))
+* update documentation ([48ed716](https://github.com/01cloud/01-Sandbox/commit/48ed7166e72eb6c9c49b2d499ad257a3836b718b))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.41 [skip ci] ([3b50e09](https://github.com/01cloud/01-Sandbox/commit/3b50e0927b77b5aca163b4e201e63154177e5163))
+
 ## [0.5.41](https://github.com/01cloud/01-Sandbox/compare/v0.5.40...v0.5.41) (2026-06-02)
 
 
