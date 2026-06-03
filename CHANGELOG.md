@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.43](https://github.com/01cloud/01-Sandbox/compare/v0.5.42...v0.5.43) (2026-06-03)
+
+
+### 🐛 Bug Fixes
+
+* prfix collision ([4dad9c4](https://github.com/01cloud/01-Sandbox/commit/4dad9c467fed4382f20ad59067a5571775ff5e13))
+* prfix collision ([118f9b9](https://github.com/01cloud/01-Sandbox/commit/118f9b9b505094355cec4146bb204cb0adfb3658))
+* tracker and routers issues ([b6f1359](https://github.com/01cloud/01-Sandbox/commit/b6f13597347f3c61590245a5c7b84f4ca17b8ef5))
+* tracker and routers issues ([7517f95](https://github.com/01cloud/01-Sandbox/commit/7517f95d4603955fe01599c4312a0233de01beb4))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.42 [skip ci] ([5feef47](https://github.com/01cloud/01-Sandbox/commit/5feef47fa2ee378e9b5b214ec81f3b38cb1079e3))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.42 [skip ci] ([d331f25](https://github.com/01cloud/01-Sandbox/commit/d331f251c8b6ab694d8306394344946ff31c50d6))
+
 ## [0.5.42](https://github.com/01cloud/01-Sandbox/compare/v0.5.41...v0.5.42) (2026-06-03)
 
 
