@@ -58,3 +58,28 @@ hpa:
   maxReplicas: 10
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
+
+postgresql:
+  enabled: false
+  host: "postgresql-service"
+  port: 5432
+  user: "postgres"
+  password: "password123"
+  database: "apikeys"
+  storage: "5Gi"
+  storageClassName: "standard"
+
+redis:
+  enabled: false
+  host: "redis-service"
+  port: 6379
+  password: ""
+
+rabbitmq:
+  enabled: false
+  host: "rabbitmq-service"
+  port: 5672
+  user: "admin"
+  password: "changeme"
+  maxQuickScanWorkers: "5"
+  maxRepoScanWorkers: "3"

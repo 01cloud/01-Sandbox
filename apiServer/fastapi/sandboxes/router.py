@@ -161,6 +161,15 @@ def get_sandboxes_router(state, validate_token: Callable) -> APIRouter:
             job_id, "QUEUED", "Job queued — preparing files...", 5
         )
 
+        from core.queue import QUICK_SCAN, is_available, publish
+
+        if is_available():
+            await publish(
+                QUICK_SCAN.routing_key,
+                {"job_id": job_id, "req_dict": req.dict(exclude_none=True)},
+            )
+            return ScanJobResponse(job_id=job_id, status="PROCESSING")
+
         if is_async:
             background_tasks.add_task(
                 run_scan_in_background, job_id, req.dict(exclude_none=True)

@@ -75,6 +75,14 @@ spec:
               value: {{ .Values.redis.port | quote }}
             - name: REDIS_PASSWORD
               value: {{ .Values.redis.password | quote }}
+            {{- if .Values.rabbitmq.enabled }}
+            - name: RABBITMQ_URL
+              value: "amqp://{{ .Values.rabbitmq.user }}:{{ .Values.rabbitmq.password }}@{{ .Values.rabbitmq.host }}:5672/"
+            - name: MAX_QUICK_SCAN_WORKERS
+              value: {{ .Values.rabbitmq.maxQuickScanWorkers | quote }}
+            - name: MAX_REPO_SCAN_WORKERS
+              value: {{ .Values.rabbitmq.maxRepoScanWorkers | quote }}
+            {{- end }}
 
 
           livenessProbe:
