@@ -15,6 +15,78 @@ from .models import (
 )
 
 
+async def run_scan_in_background(job_id: str, req_dict: dict):
+    """Background worker to trigger scan without blocking HTTP requests."""
+    import asyncio
+    import json
+
+    from core.app_state import state
+
+    try:
+        await state.job_tracker.push_event(
+            job_id,
+            "PROVISIONING",
+            "Provisioning remote sandbox and uploading files...",
+            25,
+        )
+        # Add small delay so UI status transitions are clean
+        await asyncio.sleep(1.0)
+        await state.job_tracker.push_event(
+            job_id, "SCANNING", "Running Semgrep security analysis...", 60
+        )
+        data = await state.backend.create_scan_job(req_dict)
+
+        # Count severity findings
+        high_count = 0
+        medium_count = 0
+        low_count = 0
+        findings = data.get("findings", [])
+        for f in findings:
+            sev = str(f.get("severity", "INFO")).upper()
+            if "HIGH" in sev:
+                high_count += 1
+            elif "MEDIUM" in sev:
+                medium_count += 1
+            elif "LOW" in sev:
+                low_count += 1
+
+        # Save summary count to job tracker metadata
+        job_record = state.job_tracker.get_job(job_id)
+        if job_record:
+            job_record.metadata["summary"] = {
+                "high": high_count,
+                "medium": medium_count,
+                "low": low_count,
+            }
+            if state.use_redis and state.redis_client:
+                try:
+                    metadata_copy = dict(job_record.metadata)
+                    metadata_copy["job_type"] = "quick-scan"
+                    state.redis_client.set(
+                        f"job:{job_id}:metadata",
+                        json.dumps(metadata_copy),
+                        ex=86400,
+                    )
+                except Exception:
+                    pass
+
+        detail_dict = dict(data)
+        detail_dict["high_count"] = high_count
+        detail_dict["medium_count"] = medium_count
+        detail_dict["low_count"] = low_count
+
+        await state.job_tracker.push_event(
+            job_id,
+            "DONE",
+            f"Scan complete — found {len(findings)} security findings.",
+            100,
+            detail=detail_dict,
+        )
+    except Exception as e:
+        print(f"[BACKGROUND TASK ERROR] Scan job failed: {e}")
+        await state.job_tracker.push_event(job_id, "ERROR", f"Scan failed: {e}", 0)
+
+
 def get_sandboxes_router(state, validate_token: Callable) -> APIRouter:
     router = APIRouter()
 
@@ -49,75 +121,6 @@ def get_sandboxes_router(state, validate_token: Callable) -> APIRouter:
     def list_sandboxes():
         """Retrieves a list of all currently active sandboxes from the backend."""
         return state.backend.list_sandboxes()
-
-    async def run_scan_in_background(job_id: str, req_dict: dict):
-        """Background worker to trigger scan without blocking HTTP requests."""
-        import asyncio
-        import json
-
-        try:
-            await state.job_tracker.push_event(
-                job_id,
-                "PROVISIONING",
-                "Provisioning remote sandbox and uploading files...",
-                25,
-            )
-            # Add small delay so UI status transitions are clean
-            await asyncio.sleep(1.0)
-            await state.job_tracker.push_event(
-                job_id, "SCANNING", "Running Semgrep security analysis...", 60
-            )
-            data = await state.backend.create_scan_job(req_dict)
-
-            # Count severity findings
-            high_count = 0
-            medium_count = 0
-            low_count = 0
-            findings = data.get("findings", [])
-            for f in findings:
-                sev = str(f.get("severity", "INFO")).upper()
-                if "HIGH" in sev:
-                    high_count += 1
-                elif "MEDIUM" in sev:
-                    medium_count += 1
-                elif "LOW" in sev:
-                    low_count += 1
-
-            # Save summary count to job tracker metadata
-            job_record = state.job_tracker.get_job(job_id)
-            if job_record:
-                job_record.metadata["summary"] = {
-                    "high": high_count,
-                    "medium": medium_count,
-                    "low": low_count,
-                }
-                if state.use_redis and state.redis_client:
-                    try:
-                        metadata_copy = dict(job_record.metadata)
-                        metadata_copy["job_type"] = "quick-scan"
-                        state.redis_client.set(
-                            f"job:{job_id}:metadata",
-                            json.dumps(metadata_copy),
-                            ex=86400,
-                        )
-                    except Exception:
-                        pass
-
-            detail_dict = dict(data)
-            detail_dict["high_count"] = high_count
-            detail_dict["medium_count"] = medium_count
-            detail_dict["low_count"] = low_count
-
-            await state.job_tracker.push_event(
-                job_id,
-                "DONE",
-                f"Scan complete — found {len(findings)} security findings.",
-                100,
-                detail=detail_dict,
-            )
-        except Exception as e:
-            print(f"[BACKGROUND TASK ERROR] Scan job failed: {e}")
-            await state.job_tracker.push_event(job_id, "ERROR", f"Scan failed: {e}", 0)
 
     @router.post(
         "/v1/scan-jobs",
