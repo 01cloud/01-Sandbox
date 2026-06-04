@@ -479,14 +479,27 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
             job_id, ScanStep.QUEUED.value, "Job queued — awaiting sandbox...", 5
         )
 
-        background_tasks.add_task(
-            _run_scan_pipeline,
-            job_id,
-            req.repo_url,
-            owner,
-            repo,
-            app_state,
-        )
+        from core.queue import REPO_SCAN, is_available, publish
+
+        if is_available():
+            await publish(
+                REPO_SCAN.routing_key,
+                {
+                    "job_id": job_id,
+                    "repo_url": req.repo_url,
+                    "owner": owner,
+                    "repo": repo,
+                },
+            )
+        else:
+            background_tasks.add_task(
+                _run_scan_pipeline,
+                job_id,
+                req.repo_url,
+                owner,
+                repo,
+                app_state,
+            )
 
         return RepoScanSubmitResponse(
             job_id=job_id,
