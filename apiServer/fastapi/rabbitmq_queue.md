@@ -401,3 +401,58 @@ ALL_SCAN_JOB_TYPES = [QUICK_SCAN, REPO_SCAN, BULK_SCAN]  # add here
 **Step 3 — New router**: Call `publish(BULK_SCAN.routing_key, payload)` in the submission handler.
 
 **No changes needed** to: connection, publisher, lifespan, Helm chart, Redis, auth, rate limiter, or any other existing file.
+
+---
+
+## 10. Prevention of Server Overload & Architectural Advantages
+
+### How It Prevents Server Overload (Technical Flow)
+
+When a massive traffic spike (e.g., 20+ concurrent scans) hits the endpoints:
+
+1. **Low-Overhead Ingestion**: The API server authenticates, validates, and serializes the payload. Instead of running the heavy background scan process (cloning git repos, provision sandboxes) inside the HTTP thread, it publishes a tiny metadata payload directly to RabbitMQ (`core.queue.publisher.publish`). This takes `<10ms` and consumes negligible CPU/RAM.
+2. **Immediate Client Acknowledgment**: The API returns a `200/201` status containing a `job_id` and SSE status URL. The connection terminates cleanly, freeing up the HTTP worker.
+3. **Broker Backpressure & Queueing**: The RabbitMQ broker durably holds the messages in the queue.
+4. **Hard Worker Cap (QoS Prefetch)**: Workers bind to the queue and configure their prefetch limit:
+   ```python
+   await channel.set_qos(prefetch_count=prefetch)
+   ```
+   This is the critical overload control valve. RabbitMQ will never send more than `prefetch_count` messages to a worker instance.
+5. **Draining via Acknowledgments**: A worker processes its active tasks. Only when a scan finishes or fails does the worker acknowledge the message (`message.ack()`). Upon receiving the acknowledgment, the RabbitMQ broker pushes the next message down the channel.
+
+---
+
+### Architectural Advantages
+
+1. **Guaranteed Resource Isolation & OOM Protection**: By setting explicit `prefetch_count` limits, the pods will never exceed their memory constraints due to unbounded parallel git cloning and sandboxing, preventing Kubernetes Out-Of-Memory (OOM) pod kills.
+2. **Elastic Throughput**: You can increase or decrease system-wide scanning throughput instantly by scaling the API replicas:
+   ```bash
+   kubectl -n opensandbox-system scale deploy/sandbox-api --replicas=10
+   ```
+   The additional workers instantly register as consumers and begin pulling jobs from the queue with zero configuration changes.
+3. **Crash Resilience & Auto-Redelivery**: If a container crashes, loses network connectivity, or gets evicted mid-scan, the message remains "unacknowledged" in RabbitMQ. The broker detects the dropped connection and automatically re-queues the message to be processed by a healthy worker pod, ensuring zero lost jobs.
+4. **Decoupled Scaling**: Heavy workloads (e.g., scanning large git repos) are isolated in `scan.repo` and do not starve lightweight workloads (e.g., quick single-file lints) in `scan.quick`.
+5. **Buffer Capacity**: Sudden bursts of submissions are stored in the queue rather than returned to the client as connection timeouts or 503 Service Unavailable errors.
+6. **Graceful Fallback Mode**: If the RabbitMQ broker goes offline, the application automatically detects the disconnection and fails over to FastAPI `BackgroundTasks`, preserving basic functionality.
+
+---
+
+### Real-World Verification Metrics (20 Parallel Scans Test Case)
+
+During load-testing on the remote server with 20 parallel repository scans, the following real-time RabbitMQ behaviors were observed and validated:
+
+1. **Active Backpressure (Initial State with 5 Pods)**:
+   ```
+   name         messages    messages_ready    messages_unacknowledged    consumers
+   scan.repo    20          5                 15                         5
+   ```
+   * **Result**: Since the prefetch limit is set to **3** per pod, the 5 active consumer pods pulled exactly `5 pods * 3 limit = 15` concurrent tasks (`messages_unacknowledged`).
+   * The remaining **5** tasks were held safely in the queue (`messages_ready`), protecting the server from CPU/RAM exhaustion.
+
+2. **Elastic Scaling (State after scaling to 8 Consumers)**:
+   ```
+   name         messages    messages_ready    messages_unacknowledged    consumers
+   scan.repo    20          0                 20                         8
+   ```
+   * **Result**: When additional worker processes initialized, the consumer count grew to **8** (increasing aggregate cluster capacity to `8 pods * 3 limit = 24` tasks).
+   * RabbitMQ instantly released the remaining queued tasks, executing all **20** scans concurrently in a load-balanced fashion without any system degradation.
