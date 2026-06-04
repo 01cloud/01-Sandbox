@@ -1,3 +1,46 @@
+## Release v0.5.46 — 01-Sandbox
+**Release Date:** June 04, 2026
+
+---
+
+### Summary
+v0.5.46 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* testing the ratelimit ([9c39577](https://github.com/01cloud/01-Sandbox/commit/9c39577ebbd14488b1fb97baeb6eaff8b9c2376f))
+* testing the ratelimit ([cf3b41f](https://github.com/01cloud/01-Sandbox/commit/cf3b41f12da619191c3baa3f35892e4427fda435))
+* testing the ratelimit ([906090f](https://github.com/01cloud/01-Sandbox/commit/906090fc1dd5244f4e4270d2b5e704579fcf9cfc))
+* testing the ratelimit ([0885ead](https://github.com/01cloud/01-Sandbox/commit/0885ead43e76be079de97845de21fd84609d86c9))
+
+### Changes
+## [0.5.46](https://github.com/01cloud/01-Sandbox/compare/v0.5.45...v0.5.46) (2026-06-04)
+
+
+### 🐛 Bug Fixes
+
+* testing the ratelimit ([9c39577](https://github.com/01cloud/01-Sandbox/commit/9c39577ebbd14488b1fb97baeb6eaff8b9c2376f))
+* testing the ratelimit ([cf3b41f](https://github.com/01cloud/01-Sandbox/commit/cf3b41f12da619191c3baa3f35892e4427fda435))
+* testing the ratelimit ([906090f](https://github.com/01cloud/01-Sandbox/commit/906090fc1dd5244f4e4270d2b5e704579fcf9cfc))
+* testing the ratelimit ([0885ead](https://github.com/01cloud/01-Sandbox/commit/0885ead43e76be079de97845de21fd84609d86c9))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.45 [skip ci] ([748f94e](https://github.com/01cloud/01-Sandbox/commit/748f94edbca3d86a0bb4f85b342afad9ebb43302))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.45 [skip ci] ([d6e81aa](https://github.com/01cloud/01-Sandbox/commit/d6e81aa3090e1247dd72b752eac4c469c1712fd4))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.46)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.45 — 01-Sandbox
 **Release Date:** June 04, 2026
 
