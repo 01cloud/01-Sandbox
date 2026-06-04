@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 
 def render_swagger_ui(openapi_url: str, title: str):
     """
+    swaagerUI
     Manually renders Swagger UI HTML with a raw JS requestInterceptor
     to enable automatic cookie forwarding (withCredentials).
     """
