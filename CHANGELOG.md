@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.5.44](https://github.com/01cloud/01-Sandbox/compare/v0.5.43...v0.5.44) (2026-06-04)
+
+
+### 🚀 New Features
+
+* implemenation of rabbitmq ([de35eea](https://github.com/01cloud/01-Sandbox/commit/de35eea40dea00bc651bdc0ec299810f022d04e4))
+* implemenation of rabbitmq ([3f9b9d1](https://github.com/01cloud/01-Sandbox/commit/3f9b9d17d1f217cd8d72107d5af2dbb850957776))
+
+
+### 🐛 Bug Fixes
+
+* delete unwanted files ([1ddb877](https://github.com/01cloud/01-Sandbox/commit/1ddb8775afb318a3b79e372dd44e5b6dac77cce9))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.43 [skip ci] ([0bca47a](https://github.com/01cloud/01-Sandbox/commit/0bca47a46bf73c1c03cfe09285764455d64afda5))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.43 [skip ci] ([09ca7a4](https://github.com/01cloud/01-Sandbox/commit/09ca7a4833f6e8e2d1ad12bc77d1c371cd6e5820))
+
 ## [0.5.43](https://github.com/01cloud/01-Sandbox/compare/v0.5.42...v0.5.43) (2026-06-03)
 
 
