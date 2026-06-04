@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.45](https://github.com/01cloud/01-Sandbox/compare/v0.5.44...v0.5.45) (2026-06-04)
+
+
+### 🐛 Bug Fixes
+
+* **queue:** refactor quick-scan background worker import ([5eee61a](https://github.com/01cloud/01-Sandbox/commit/5eee61a3864a14df9bfd56fad00f6319c9838d0e))
+* **queue:** refactor quick-scan background worker import ([d58afa8](https://github.com/01cloud/01-Sandbox/commit/d58afa87b66c133d0d9762b1943e10513d9bc1fc))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.44 [skip ci] ([7ede068](https://github.com/01cloud/01-Sandbox/commit/7ede068e7d0629d40269162b26d5baa6ad131529))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.44 [skip ci] ([6e949c9](https://github.com/01cloud/01-Sandbox/commit/6e949c990d1cbb249f521d5f473485c986914316))
+
 ## [0.5.44](https://github.com/01cloud/01-Sandbox/compare/v0.5.43...v0.5.44) (2026-06-04)
 
 
