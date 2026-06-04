@@ -456,3 +456,112 @@ During load-testing on the remote server with 20 parallel repository scans, the 
    ```
    * **Result**: When additional worker processes initialized, the consumer count grew to **8** (increasing aggregate cluster capacity to `8 pods * 3 limit = 24` tasks).
    * RabbitMQ instantly released the remaining queued tasks, executing all **20** scans concurrently in a load-balanced fashion without any system degradation.
+
+---
+
+## 11. Queue Column Glossary (Plain Language)
+
+When you run `rabbitmqctl list_queues`, the output shows the following columns:
+
+```
+name        messages    messages_ready    messages_unacknowledged    consumers
+scan.repo   20          5                 15                         5
+```
+
+### `messages` — Total jobs RabbitMQ knows about
+> Everything in this number — both jobs waiting in line AND jobs actively being worked on.
+
+In the example above: **20** total repo scan jobs have been submitted and are tracked by the broker.
+
+---
+
+### `messages_ready` — Waiting in line, not yet picked up
+> These jobs are sitting in the queue doing nothing, waiting for a free pod to pick them up.
+
+In the example above: **5** jobs are queued and idle — they cannot start yet because all worker slots are full.
+
+Think of it as people waiting outside a restaurant because all the chefs are busy.
+
+---
+
+### `messages_unacknowledged` — Currently being worked on
+> These jobs have been handed to a pod and are actively scanning right now.
+
+A job stays "unacknowledged" until it finishes. The moment it completes, the pod sends an `ack` (acknowledgment) back to RabbitMQ saying **"done — give me the next one."**
+
+In the example above: **15** repos are actively cloning, scanning, or provisioning sandboxes across the running pods.
+
+---
+
+### `consumers` — Number of pods connected and listening
+> Each running `sandbox-api` pod registers itself as exactly **1 consumer** on startup.
+
+In the example above: **5** pods are connected to the `scan.repo` queue and ready to receive jobs.
+
+---
+
+### Reading the full row in one sentence
+
+```
+scan.repo   20   5   15   5
+```
+
+> **"Out of 20 total repo scan jobs — 15 are actively being scanned across 5 pods, and 5 are patiently waiting in line for a free slot."**
+
+And for `scan.quick` when idle:
+```
+scan.quick  0    0   0    5
+```
+> **"No quick scan jobs at all — the queue is empty and 5 pods are connected and idle."**
+
+---
+
+## 12. How One Pod Handles Repository Scans (Plain Language)
+
+The simplest mental model:
+
+```
+1 sandbox-api pod  →  scans 3 repos at the same time (maxRepoScanWorkers = 3)
+2 sandbox-api pods →  scans 6 repos at the same time
+5 sandbox-api pods →  scans 15 repos at the same time
+```
+
+**Step-by-step flow when 20 repos are submitted:**
+
+```
+You submit 20 repos
+        │
+        ▼
+RabbitMQ holds all 20 safely in the queue
+        │
+        ▼
+1 sandbox-api pod connects and says:
+  "I'll take 3 repos — the rest stay in queue"
+        │
+        ▼
+Those 3 repos are scanned in parallel inside that 1 pod
+        │
+        ▼
+When 1 repo finishes → pod picks up the next one from the queue
+        │
+        ▼
+Kubernetes HPA detects rising CPU/memory → starts more pods
+Each new pod also picks up 3 repos from the queue
+        │
+        ▼
+Eventually all 20 repos are being scanned across multiple pods
+```
+
+**Kitchen analogy:**
+
+| RabbitMQ Concept | Kitchen Equivalent |
+|:---|:---|
+| Queue | Order tickets on the board |
+| 1 pod | 1 chef |
+| `maxRepoScanWorkers: "3"` | Each chef cooks max 3 dishes at once |
+| HPA scaling | Calling in more chefs when kitchen gets busy |
+| `messages_ready` | Tickets on the board waiting for a free chef |
+| `messages_unacknowledged` | Dishes currently being cooked |
+| `ack` (acknowledgment) | Chef yells "Done!" and grabs the next ticket |
+
+The `maxRepoScanWorkers: "3"` limit is a **safety valve** — it stops 1 pod from trying to clone, provision sandboxes, and scan all 20 repos at once, which would crash it from memory exhaustion.
