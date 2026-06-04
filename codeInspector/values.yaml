@@ -49,7 +49,7 @@ apiServer:
     APP_ENV: "production"
     PORT: "8000"
     BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"
-    RATE_LIMIT_REQUESTS: "5"
+    RATE_LIMIT_REQUESTS: "20"
     RATE_LIMIT_WINDOW_SECS: "60"
     GATEWAY_SECRET_NAME: "apikey"
     GATEWAY_SECRET_NAMESPACE: "agentgateway-system"
