@@ -157,8 +157,7 @@ export default function RepoScanner() {
 
   /**
    * Poll /v1/repo-scan/jobs every 5 seconds.
-   * If an active job exists that we are not already streaming, auto-connect.
-   * This surfaces CLI-triggered scans without requiring the user to submit via the UI.
+   * Surfaces CLI-triggered scans (active OR already-completed) in the UI.
    */
   useEffect(() => {
     const apiKey = getApiKey();
@@ -175,13 +174,41 @@ export default function RepoScanner() {
         const serverJobs: Array<{ job_id: string; status: string; eventIndex: number }> =
           await resp.json();
 
-        // Pick the first active job that isn't already displayed
+        if (!serverJobs.length) return;
+
+        // 1. Prefer an active job — stream live events
         const active = serverJobs.find(
           j => !["DONE", "ERROR"].includes(j.status)
         );
         if (active && active.job_id !== activeJobId) {
           toast.info("CLI scan detected — connecting to live stream...");
           connectStream(active.job_id, apiKey, active.eventIndex ?? 0);
+          return;
+        }
+
+        // 2. If no active job, check for a completed job not yet shown
+        const latest = serverJobs[0]; // already sorted newest-first by backend
+        if (!latest || latest.job_id === activeJobId || result) return;
+
+        if (latest.status === "DONE") {
+          // Fetch the stored result directly — no need to open an SSE stream
+          const res = await fetch(`${API_BASE}/v1/repo-scan/${latest.job_id}/result`, {
+            headers: { Authorization: `Bearer ${apiKey}` },
+          });
+          if (res.ok) {
+            const data = await res.json();
+            setActiveJobId(latest.job_id);
+            setCurrentStep("DONE");
+            setProgress(100);
+            setStepMessage("Scan completed");
+            setResult(data);
+            setIsScanning(false);
+            toast.info("CLI scan result loaded.");
+          }
+        } else if (latest.status === "ERROR") {
+          // Replay the error event via the SSE stream (returns immediately from Redis)
+          toast.info("CLI scan detected (failed) — replaying error...");
+          connectStream(latest.job_id, apiKey, 0);
         }
       } catch { /* silent */ }
     };
@@ -190,7 +217,7 @@ export default function RepoScanner() {
     const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [API_BASE, activeJobId]);
+  }, [API_BASE, activeJobId, result]);
 
   const handleScan = async () => {
     const url = repoUrl.trim();

@@ -186,9 +186,13 @@ export function useJobStore(
           jobStore.upsert({ ...sj, result: null });
           didUpdate = true;
 
-          // Open SSE stream if the job is still active
           if (!["DONE", "ERROR"].includes(sj.status) && !esRefs.current[sj.job_id]) {
+            // Active job: open SSE stream to receive live events
             openStream(sj.job_id, sj.eventIndex ?? 0);
+          } else if (sj.status === "DONE") {
+            // Completed job: eagerly fetch result so the report renders immediately
+            // without waiting for the component's lazyFetchResult useEffect
+            lazyFetchResult(sj.job_id);
           }
         } else if (
           // Reconnect lost SSE stream for an active known job (e.g. after page reload)
