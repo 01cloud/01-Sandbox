@@ -554,8 +554,10 @@ const Dashboard = () => {
       }
     }
 
-    if (!foundKey) {
-      toast.error(`No locally saved API Key found for ${backend}. Please create one or ensure it's in this browser's storage.`);
+    const keyToUse = foundKey || authToken;
+
+    if (!keyToUse) {
+      toast.error(`No API Key or session token found for ${backend}. Please create one or login.`);
       return;
     }
 
@@ -563,7 +565,7 @@ const Dashboard = () => {
       isOpen: true,
       backend,
       baseUrl,
-      apiKey: foundKey
+      apiKey: keyToUse
     });
   };
 
@@ -579,14 +581,16 @@ const Dashboard = () => {
       }
     }
 
-    if (!foundKey) {
-      toast.error(`No locally saved API Key found for ${backend}. Please create one in the API Management tab.`);
+    const keyToUse = foundKey || authToken;
+
+    if (!keyToUse) {
+      toast.error(`No API Key or session token found for ${backend}. Please create one in the API Management tab.`);
       return;
     }
     // Bind both execution token and management token for Swagger
     const token = await getAccessTokenSilently();
     document.cookie = `inspector_auth=${token}; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24}`;
-    document.cookie = `execution_token=${foundKey}; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 7}`;
+    document.cookie = `execution_token=${keyToUse}; SameSite=Lax; Path=/; Max-Age=${60 * 60 * 24 * 7}`;
 
     window.open(url, '_blank');
   };
