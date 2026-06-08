@@ -1,3 +1,41 @@
+## Release v0.5.47 — 01-Sandbox
+**Release Date:** June 08, 2026
+
+---
+
+### Summary
+v0.5.47 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* generate RELEASE.md for v0.5.46 [skip ci] ([38fc59d](https://github.com/01cloud/01-Sandbox/commit/38fc59d3b90f9a0972768c111a26181c5f855eeb))
+* update the reamdme file ([b09bba5](https://github.com/01cloud/01-Sandbox/commit/b09bba5ccf291d04e0bc182001050e3f96723048))
+* update the reamdme file ([51fda86](https://github.com/01cloud/01-Sandbox/commit/51fda86b98675068721f5b5241b6b61b72fc5d63))
+* update the reamdme file ([9a30c21](https://github.com/01cloud/01-Sandbox/commit/9a30c217ea5088a1554e6ab7fdc1b83fb6a4de77))
+
+### Changes
+## [0.5.47](https://github.com/01cloud/01-Sandbox/compare/v0.5.46...v0.5.47) (2026-06-08)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.46 [skip ci] ([38fc59d](https://github.com/01cloud/01-Sandbox/commit/38fc59d3b90f9a0972768c111a26181c5f855eeb))
+* update the reamdme file ([b09bba5](https://github.com/01cloud/01-Sandbox/commit/b09bba5ccf291d04e0bc182001050e3f96723048))
+* update the reamdme file ([51fda86](https://github.com/01cloud/01-Sandbox/commit/51fda86b98675068721f5b5241b6b61b72fc5d63))
+* update the reamdme file ([9a30c21](https://github.com/01cloud/01-Sandbox/commit/9a30c217ea5088a1554e6ab7fdc1b83fb6a4de77))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.46 [skip ci] ([ac5a9ec](https://github.com/01cloud/01-Sandbox/commit/ac5a9ec4e46120d0244f10c54f5d11dd4e1391cf))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.47)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.46 — 01-Sandbox
 **Release Date:** June 04, 2026
 
