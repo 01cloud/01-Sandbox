@@ -74,7 +74,27 @@ interface APIKey {
 }
 
 const Dashboard = () => {
-  const API_BASE_URL = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "";
+  // Derive the API base URL.
+  // Priority: explicit VITE_API_BASE_URL → origin extracted from the first backend's
+  // baseUrl (works in production where baseUrl is an absolute URL like
+  // "https://api-sandbox.01security.com/api/v1/01sbx") → "" (local dev, same origin).
+  const API_BASE_URL = (() => {
+    const explicit = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL;
+    if (explicit) return explicit;
+    try {
+      const backendsRaw = (window as any)._env_?.VITE_DASHBOARD_BACKENDS_JSON
+        || import.meta.env.VITE_DASHBOARD_BACKENDS_JSON;
+      if (backendsRaw) {
+        const backends = JSON.parse(backendsRaw);
+        if (Array.isArray(backends) && backends.length > 0) {
+          const parsed = new URL(backends[0].baseUrl);
+          // Only use cross-origin API servers; same-origin relative paths return ""
+          if (parsed.origin !== window.location.origin) return parsed.origin;
+        }
+      }
+    } catch { /* local dev uses relative paths — fall through */ }
+    return "";
+  })();
   const { user, getAccessTokenSilently, isAuthenticated, isLoading: authLoading } = useAuth0();
   const [keys, setKeys] = useState<APIKey[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -294,32 +314,32 @@ const Dashboard = () => {
             let reportData = null;
 
             while (true) {
-                if (bulkScanCancelledRef.current) {
-                    break;
+              if (bulkScanCancelledRef.current) {
+                break;
+              }
+              await new Promise(r => setTimeout(r, 5000)); // Poll every 5 seconds
+              if (bulkScanCancelledRef.current) {
+                break;
+              }
+              const pollRes = await fetch(`${baseUrl}/scan-jobs/${jobId}/report`, {
+                headers: {
+                  "accept": "application/json",
+                  "Authorization": `Bearer ${foundKey}`
                 }
-                await new Promise(r => setTimeout(r, 5000)); // Poll every 5 seconds
-                if (bulkScanCancelledRef.current) {
-                    break;
-                }
-                const pollRes = await fetch(`${baseUrl}/scan-jobs/${jobId}/report`, {
-                    headers: {
-                        "accept": "application/json",
-                        "Authorization": `Bearer ${foundKey}`
-                    }
-                });
+              });
 
-                if (pollRes.status === 200) {
-                    reportData = await pollRes.json();
-                    break;
-                } else if (pollRes.status !== 404) {
-                    throw new Error("Polling failed with status " + pollRes.status);
-                }
+              if (pollRes.status === 200) {
+                reportData = await pollRes.json();
+                break;
+              } else if (pollRes.status !== 404) {
+                throw new Error("Polling failed with status " + pollRes.status);
+              }
             }
 
             if (bulkScanCancelledRef.current) {
-                setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'idle' } : log));
-                attemptScan = false;
-                break;
+              setBulkScanLogs(prev => prev.map((log, idx) => idx === i ? { ...log, status: 'idle' } : log));
+              attemptScan = false;
+              break;
             }
 
             // 3. Process the retrieved report
@@ -636,189 +656,189 @@ const Dashboard = () => {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
             <div className="space-y-6 h-full flex flex-col">
               {backends.map((app) => {
-              const IconComponent = app.icon === "terminal" ? Terminal : (app.icon === "box" ? Box : Code);
-              const colorClass = app.color === "indigo" ? "bg-indigo-500/10 text-indigo-500 border-indigo-500/20" : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+                const IconComponent = app.icon === "terminal" ? Terminal : (app.icon === "box" ? Box : Code);
+                const colorClass = app.color === "indigo" ? "bg-indigo-500/10 text-indigo-500 border-indigo-500/20" : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
 
-              return (
-                <Card key={app.id} className="group relative overflow-hidden rounded-[2rem] border-border/50 bg-background/50 backdrop-blur-sm transition-all hover:border-primary/50 hover:shadow-2xl hover:shadow-primary/5">
-                  <CardHeader className="p-8 pb-4">
-                    <div className="flex items-center gap-3 mb-4">
-                      <div className={cn("p-3 rounded-2xl border", colorClass)}>
-                        <IconComponent className="w-6 h-6" />
+                return (
+                  <Card key={app.id} className="group relative overflow-hidden rounded-[2rem] border-border/50 bg-background/50 backdrop-blur-sm transition-all hover:border-primary/50 hover:shadow-2xl hover:shadow-primary/5">
+                    <CardHeader className="p-8 pb-4">
+                      <div className="flex items-center gap-3 mb-4">
+                        <div className={cn("p-3 rounded-2xl border", colorClass)}>
+                          <IconComponent className="w-6 h-6" />
+                        </div>
+                        <CardTitle className="text-2xl font-black">{app.name}</CardTitle>
                       </div>
-                      <CardTitle className="text-2xl font-black">{app.name}</CardTitle>
-                    </div>
-                    <CardDescription className="text-base text-muted-foreground">
-                      {app.description}
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="px-8 pb-8 flex flex-col gap-3 min-h-[140px] justify-end">
-                    {app.baseUrl && (
-                      <Button
-                        className="w-full bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-2xl h-12 font-bold flex items-center gap-2 transition-all"
-                        onClick={() => handleQuickScan(app.id, app.baseUrl)}
-                      >
-                        <Search className="w-4 h-4" />
-                        Quick Scan
-                      </Button>
-                    )}
-                    <Button
-                      className="w-full bg-white/5 hover:bg-white/10 text-foreground border border-border/50 rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all"
-                      onClick={() => bindAndVisit(app.id, app.documentationUrl)}
-                    >
-                      {app.id === "OPEN_SANDBOX" ? "Go to Application" : "View Documentation"}
-                      <ExternalLinkIcon className="w-4 h-4 opacity-50" />
-                    </Button>
-
-                    {devMode && app.baseUrl && (
-                      <div className="mt-6 pt-6 border-t border-border/40 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300">
-                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">
-                          RAW INGESTION ENGINE
-                        </label>
-
-                        <div
-                          onDragOver={(e) => e.preventDefault()}
-                          onDrop={(e) => {
-                            e.preventDefault();
-                            if (e.dataTransfer.files) {
-                              processFiles(e.dataTransfer.files);
-                            }
-                          }}
-                          onClick={() => document.getElementById(`dev-upload-${app.id}`)?.click()}
-                          className="p-8 rounded-2xl border border-dashed border-border/70 hover:border-indigo-500/50 hover:bg-indigo-500/5 bg-secondary/5 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 relative group overflow-hidden"
+                      <CardDescription className="text-base text-muted-foreground">
+                        {app.description}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="px-8 pb-8 flex flex-col gap-3 min-h-[140px] justify-end">
+                      {app.baseUrl && (
+                        <Button
+                          className="w-full bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-2xl h-12 font-bold flex items-center gap-2 transition-all"
+                          onClick={() => handleQuickScan(app.id, app.baseUrl)}
                         >
-                          <input
-                            type="file"
-                            multiple
-                            id={`dev-upload-${app.id}`}
-                            className="hidden"
-                            onChange={(e) => {
-                              if (e.target.files) {
-                                processFiles(e.target.files);
+                          <Search className="w-4 h-4" />
+                          Quick Scan
+                        </Button>
+                      )}
+                      <Button
+                        className="w-full bg-white/5 hover:bg-white/10 text-foreground border border-border/50 rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all"
+                        onClick={() => bindAndVisit(app.id, app.documentationUrl)}
+                      >
+                        {app.id === "OPEN_SANDBOX" ? "Go to Application" : "View Documentation"}
+                        <ExternalLinkIcon className="w-4 h-4 opacity-50" />
+                      </Button>
+
+                      {devMode && app.baseUrl && (
+                        <div className="mt-6 pt-6 border-t border-border/40 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300">
+                          <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">
+                            RAW INGESTION ENGINE
+                          </label>
+
+                          <div
+                            onDragOver={(e) => e.preventDefault()}
+                            onDrop={(e) => {
+                              e.preventDefault();
+                              if (e.dataTransfer.files) {
+                                processFiles(e.dataTransfer.files);
                               }
                             }}
-                          />
-                          <UploadCloud className="w-10 h-10 text-muted-foreground group-hover:text-indigo-400 group-hover:scale-110 transition-all duration-300" />
-                          <div className="text-center">
-                            <p className="text-sm font-bold text-foreground">Drag & drop files or click to import</p>
-                            <p className="text-[11px] text-muted-foreground mt-1">Supported: .yaml, .py, .go, .js, .sh</p>
-                          </div>
-                        </div>
-
-                        {bulkQueue.length > 0 && (
-                          <div className="flex flex-col gap-3">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-muted-foreground">{bulkQueue.length} Targets Loaded</span>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-8 text-xs font-bold text-destructive hover:bg-destructive/10"
-                                onClick={() => {
-                                  setBulkQueue([]);
-                                  setBulkScanLogs([]);
-                                }}
-                              >
-                                Clear All
-                              </Button>
-                            </div>
-
-                            <div className="flex gap-2 w-full animate-in fade-in duration-200">
-                              <Button
-                                onClick={() => runBulkSecurityAudit(app.id, app.baseUrl)}
-                                disabled={isBulkScanning}
-                                className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl h-11 font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 transition-all disabled:opacity-90 disabled:cursor-not-allowed"
-                              >
-                                {isBulkScanning ? (
-                                  <>
-                                    <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                                    Scanning Queue... {rateLimitCountdown ? `[ Retry in ${rateLimitCountdown}s ]` : ''}
-                                  </>
-                                ) : (
-                                  <>
-                                    <Play className="w-4 h-4 fill-current mr-2" />
-                                    Run Bulk Scan (2s Cooldown)
-                                  </>
-                                )}
-                              </Button>
-
-                              {isBulkScanning && (
-                                <Button
-                                  type="button"
-                                  onClick={stopBulkSecurityAudit}
-                                  className="bg-rose-600 hover:bg-rose-500 text-white rounded-2xl h-11 px-4 font-bold flex items-center justify-center gap-2 shadow-lg transition-all animate-in zoom-in duration-200"
-                                >
-                                  <Square className="w-4 h-4 fill-current" />
-                                  Stop
-                                </Button>
-                              )}
-                            </div>
-
-                            {/* Telemetry Console widget */}
-                            <div className="bg-zinc-950 rounded-2xl border border-white/5 p-4 max-h-[220px] overflow-y-auto custom-scrollbar font-mono text-[11px] leading-relaxed flex flex-col gap-2">
-                              <div className="pb-2 border-b border-white/5 flex items-center justify-between text-[10px] text-muted-foreground">
-                                <span>INGESTION STREAM</span>
-                                <span>STATUS</span>
-                              </div>
-                              {bulkScanLogs.map((log, idx) => {
-                                let statusIcon = "⚪";
-                                let statusColor = "text-muted-foreground";
-                                if (log.status === "scanning") {
-                                  statusIcon = "🟡 Ingesting...";
-                                  statusColor = "text-amber-400 animate-pulse";
-                                } else if (log.status === "clean") {
-                                  statusIcon = "✅ SECURE";
-                                  statusColor = "text-emerald-400 font-bold";
-                                } else if (log.status === "risks") {
-                                  statusIcon = `🛑 VULN [${log.findingsCount || 0} risks]`;
-                                  statusColor = "text-red-400 font-bold";
-                                } else if (log.status === "429") {
-                                  statusIcon = "⚠️ LIMIT (429)";
-                                  statusColor = "text-yellow-500 font-bold animate-pulse";
-                                } else if (log.status === "401") {
-                                  statusIcon = "❌ BAD KEY (401)";
-                                  statusColor = "text-rose-500 font-bold";
-                                } else if (log.status === "error") {
-                                  statusIcon = "❌ FAULT";
-                                  statusColor = "text-rose-500 font-bold";
+                            onClick={() => document.getElementById(`dev-upload-${app.id}`)?.click()}
+                            className="p-8 rounded-2xl border border-dashed border-border/70 hover:border-indigo-500/50 hover:bg-indigo-500/5 bg-secondary/5 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 relative group overflow-hidden"
+                          >
+                            <input
+                              type="file"
+                              multiple
+                              id={`dev-upload-${app.id}`}
+                              className="hidden"
+                              onChange={(e) => {
+                                if (e.target.files) {
+                                  processFiles(e.target.files);
                                 }
-
-                                const isInteractive = ["clean", "risks", "error"].includes(log.status);
-
-                                return (
-                                  <div
-                                    key={idx}
-                                    onClick={() => {
-                                      if (isInteractive) {
-                                        setSelectedBulkLogName(log.name);
-                                      }
-                                    }}
-                                    className={cn(
-                                      "flex items-center justify-between py-1.5 border-b border-white/5 last:border-0 transition-all",
-                                      isInteractive ? "cursor-pointer hover:bg-white/5 px-2 rounded-lg" : ""
-                                    )}
-                                  >
-                                    <div className="flex items-center gap-2 truncate max-w-[65%]">
-                                      <FileCode className="w-3.5 h-3.5 opacity-40 shrink-0" />
-                                      <span className="truncate text-zinc-300">{log.name}</span>
-                                    </div>
-                                    <span className={cn("text-[10px] shrink-0 font-bold", statusColor)}>
-                                      {statusIcon}
-                                    </span>
-                                  </div>
-                                );
-                              })}
+                              }}
+                            />
+                            <UploadCloud className="w-10 h-10 text-muted-foreground group-hover:text-indigo-400 group-hover:scale-110 transition-all duration-300" />
+                            <div className="text-center">
+                              <p className="text-sm font-bold text-foreground">Drag & drop files or click to import</p>
+                              <p className="text-[11px] text-muted-foreground mt-1">Supported: .yaml, .py, .go, .js, .sh</p>
                             </div>
                           </div>
-                        )}
-                      </div>
-                    )}
-                  </CardContent>
-                </Card>
-              );
-            })}
 
-            {/* GitHub Repository Scanner Widget */}
-            <RepoScannerWidget apiBaseUrl={API_BASE_URL} keys={keys} />
+                          {bulkQueue.length > 0 && (
+                            <div className="flex flex-col gap-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold text-muted-foreground">{bulkQueue.length} Targets Loaded</span>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 text-xs font-bold text-destructive hover:bg-destructive/10"
+                                  onClick={() => {
+                                    setBulkQueue([]);
+                                    setBulkScanLogs([]);
+                                  }}
+                                >
+                                  Clear All
+                                </Button>
+                              </div>
+
+                              <div className="flex gap-2 w-full animate-in fade-in duration-200">
+                                <Button
+                                  onClick={() => runBulkSecurityAudit(app.id, app.baseUrl)}
+                                  disabled={isBulkScanning}
+                                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl h-11 font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 transition-all disabled:opacity-90 disabled:cursor-not-allowed"
+                                >
+                                  {isBulkScanning ? (
+                                    <>
+                                      <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                                      Scanning Queue... {rateLimitCountdown ? `[ Retry in ${rateLimitCountdown}s ]` : ''}
+                                    </>
+                                  ) : (
+                                    <>
+                                      <Play className="w-4 h-4 fill-current mr-2" />
+                                      Run Bulk Scan (2s Cooldown)
+                                    </>
+                                  )}
+                                </Button>
+
+                                {isBulkScanning && (
+                                  <Button
+                                    type="button"
+                                    onClick={stopBulkSecurityAudit}
+                                    className="bg-rose-600 hover:bg-rose-500 text-white rounded-2xl h-11 px-4 font-bold flex items-center justify-center gap-2 shadow-lg transition-all animate-in zoom-in duration-200"
+                                  >
+                                    <Square className="w-4 h-4 fill-current" />
+                                    Stop
+                                  </Button>
+                                )}
+                              </div>
+
+                              {/* Telemetry Console widget */}
+                              <div className="bg-zinc-950 rounded-2xl border border-white/5 p-4 max-h-[220px] overflow-y-auto custom-scrollbar font-mono text-[11px] leading-relaxed flex flex-col gap-2">
+                                <div className="pb-2 border-b border-white/5 flex items-center justify-between text-[10px] text-muted-foreground">
+                                  <span>INGESTION STREAM</span>
+                                  <span>STATUS</span>
+                                </div>
+                                {bulkScanLogs.map((log, idx) => {
+                                  let statusIcon = "⚪";
+                                  let statusColor = "text-muted-foreground";
+                                  if (log.status === "scanning") {
+                                    statusIcon = "🟡 Ingesting...";
+                                    statusColor = "text-amber-400 animate-pulse";
+                                  } else if (log.status === "clean") {
+                                    statusIcon = "✅ SECURE";
+                                    statusColor = "text-emerald-400 font-bold";
+                                  } else if (log.status === "risks") {
+                                    statusIcon = `🛑 VULN [${log.findingsCount || 0} risks]`;
+                                    statusColor = "text-red-400 font-bold";
+                                  } else if (log.status === "429") {
+                                    statusIcon = "⚠️ LIMIT (429)";
+                                    statusColor = "text-yellow-500 font-bold animate-pulse";
+                                  } else if (log.status === "401") {
+                                    statusIcon = "❌ BAD KEY (401)";
+                                    statusColor = "text-rose-500 font-bold";
+                                  } else if (log.status === "error") {
+                                    statusIcon = "❌ FAULT";
+                                    statusColor = "text-rose-500 font-bold";
+                                  }
+
+                                  const isInteractive = ["clean", "risks", "error"].includes(log.status);
+
+                                  return (
+                                    <div
+                                      key={idx}
+                                      onClick={() => {
+                                        if (isInteractive) {
+                                          setSelectedBulkLogName(log.name);
+                                        }
+                                      }}
+                                      className={cn(
+                                        "flex items-center justify-between py-1.5 border-b border-white/5 last:border-0 transition-all",
+                                        isInteractive ? "cursor-pointer hover:bg-white/5 px-2 rounded-lg" : ""
+                                      )}
+                                    >
+                                      <div className="flex items-center gap-2 truncate max-w-[65%]">
+                                        <FileCode className="w-3.5 h-3.5 opacity-40 shrink-0" />
+                                        <span className="truncate text-zinc-300">{log.name}</span>
+                                      </div>
+                                      <span className={cn("text-[10px] shrink-0 font-bold", statusColor)}>
+                                        {statusIcon}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </CardContent>
+                  </Card>
+                );
+              })}
+
+              {/* GitHub Repository Scanner Widget */}
+              <RepoScannerWidget apiBaseUrl={API_BASE_URL} keys={keys} />
             </div>
 
             {/* Sticky Right-Side Telemetry log reader panel */}
@@ -876,9 +896,9 @@ const Dashboard = () => {
                               {findings.map((f: any, i: number) => {
                                 const severity = (f.Severity || f.severity || "MEDIUM").toUpperCase();
                                 const sevColor = severity === "CRITICAL" ? "bg-red-500/10 text-red-500 border-red-500/20" :
-                                                 severity === "HIGH" ? "bg-orange-500/10 text-orange-500 border-orange-500/20" :
-                                                 severity === "MEDIUM" ? "bg-amber-500/10 text-amber-500 border-amber-500/20" :
-                                                 "bg-blue-500/10 text-blue-500 border-blue-500/20";
+                                  severity === "HIGH" ? "bg-orange-500/10 text-orange-500 border-orange-500/20" :
+                                    severity === "MEDIUM" ? "bg-amber-500/10 text-amber-500 border-amber-500/20" :
+                                      "bg-blue-500/10 text-blue-500 border-blue-500/20";
 
                                 const tool = f.Type || f.tool || "security check";
                                 const issue = f.Title || f.Message || f.issue || "security violation";

@@ -503,8 +503,8 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         return RepoScanSubmitResponse(
             job_id=job_id,
             status=ScanStep.QUEUED,
-            status_url=f"/v1/jobs/{job_id}/status",
-            result_url=f"/v1/jobs/{job_id}/result",
+            status_url=f"/v1/repo-scan/{job_id}/status",
+            result_url=f"/v1/repo-scan/{job_id}/result",
             repo_url=req.repo_url,
             submitted_at=submitted_at,
         )

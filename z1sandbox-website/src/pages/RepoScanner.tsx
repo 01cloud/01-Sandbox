@@ -83,7 +83,20 @@ function getApiKey(): string | null {
 }
 
 function getApiBaseUrl(): string {
-  return (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "";
+  const explicit = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL;
+  if (explicit) return explicit;
+  try {
+    const backendsRaw = (window as any)._env_?.VITE_DASHBOARD_BACKENDS_JSON
+      || import.meta.env.VITE_DASHBOARD_BACKENDS_JSON;
+    if (backendsRaw) {
+      const backends = JSON.parse(backendsRaw);
+      if (Array.isArray(backends) && backends.length > 0) {
+        const parsed = new URL(backends[0].baseUrl);
+        if (parsed.origin !== window.location.origin) return parsed.origin;
+      }
+    }
+  } catch { /* local dev — fall through */ }
+  return "";
 }
 
 export default function RepoScanner() {
