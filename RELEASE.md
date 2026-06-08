@@ -1,3 +1,46 @@
+## Release v0.5.51 — 01-Sandbox
+**Release Date:** June 08, 2026
+
+---
+
+### Summary
+v0.5.51 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* cli quick scan ([8c3d5df](https://github.com/01cloud/01-Sandbox/commit/8c3d5df55878377522f59c85ff0248f57089b0af))
+* ui changes to show up ([c67cbfe](https://github.com/01cloud/01-Sandbox/commit/c67cbfe43034273bf55f9b62c606585a34ce4858))
+* ui changes to show up ([3a168d8](https://github.com/01cloud/01-Sandbox/commit/3a168d89c6951fee608bea5274bafde138c5749d))
+* ui changes to show up ([3b3412a](https://github.com/01cloud/01-Sandbox/commit/3b3412a04db0381bdd773a890e2351021180ae25))
+
+### Changes
+## [0.5.51](https://github.com/01cloud/01-Sandbox/compare/v0.5.50...v0.5.51) (2026-06-08)
+
+
+### 🐛 Bug Fixes
+
+* cli quick scan ([8c3d5df](https://github.com/01cloud/01-Sandbox/commit/8c3d5df55878377522f59c85ff0248f57089b0af))
+* ui changes to show up ([c67cbfe](https://github.com/01cloud/01-Sandbox/commit/c67cbfe43034273bf55f9b62c606585a34ce4858))
+* ui changes to show up ([3a168d8](https://github.com/01cloud/01-Sandbox/commit/3a168d89c6951fee608bea5274bafde138c5749d))
+* ui changes to show up ([3b3412a](https://github.com/01cloud/01-Sandbox/commit/3b3412a04db0381bdd773a890e2351021180ae25))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.50 [skip ci] ([274d308](https://github.com/01cloud/01-Sandbox/commit/274d308b3051b887d41fce226aa83f04d1f1ee20))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.50 [skip ci] ([a9a3bab](https://github.com/01cloud/01-Sandbox/commit/a9a3bab6b8356e62e9a1bb641ef9e584e79d8944))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.51)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.50 — 01-Sandbox
 **Release Date:** June 08, 2026
 
