@@ -1,3 +1,44 @@
+## Release v0.5.49 — 01-Sandbox
+**Release Date:** June 08, 2026
+
+---
+
+### Summary
+v0.5.49 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* fix sse reconnects ([18cd702](https://github.com/01cloud/01-Sandbox/commit/18cd7027ebc04bcb0da53fea6a402285eaaef8fd))
+* fix sse reconnects ([4b0b43f](https://github.com/01cloud/01-Sandbox/commit/4b0b43fb34ba5936594a98f39c2d6f0d7c15f759))
+* generate RELEASE.md for v0.5.48 [skip ci] ([0046d86](https://github.com/01cloud/01-Sandbox/commit/0046d86f16c051ce3014f7933f38b7c988ff0c6c))
+* bump versions to v0.5.48 [skip ci] ([8173bb2](https://github.com/01cloud/01-Sandbox/commit/8173bb20b8798e24c95bf914472b0d1115e2b22d))
+
+### Changes
+## [0.5.49](https://github.com/01cloud/01-Sandbox/compare/v0.5.48...v0.5.49) (2026-06-08)
+
+
+### 🐛 Bug Fixes
+
+* fix sse reconnects ([18cd702](https://github.com/01cloud/01-Sandbox/commit/18cd7027ebc04bcb0da53fea6a402285eaaef8fd))
+* fix sse reconnects ([4b0b43f](https://github.com/01cloud/01-Sandbox/commit/4b0b43fb34ba5936594a98f39c2d6f0d7c15f759))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.48 [skip ci] ([0046d86](https://github.com/01cloud/01-Sandbox/commit/0046d86f16c051ce3014f7933f38b7c988ff0c6c))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.48 [skip ci] ([8173bb2](https://github.com/01cloud/01-Sandbox/commit/8173bb20b8798e24c95bf914472b0d1115e2b22d))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.49)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.48 — 01-Sandbox
 **Release Date:** June 08, 2026
 
