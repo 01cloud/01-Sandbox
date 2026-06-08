@@ -516,12 +516,14 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         summary="Stream live scan progress via Server-Sent Events",
         dependencies=[Depends(validate_token)],
     )
-    async def stream_scan_status(job_id: str) -> StreamingResponse:
+    async def stream_scan_status(job_id: str, since: int = 0) -> StreamingResponse:
         """
         SSE endpoint streaming scan step events in real-time.
+        Accepts an optional ``since`` query parameter to resume from a specific
+        event index (avoids replaying the full log on reconnect).
         """
         return StreamingResponse(
-            app_state.job_tracker.stream(job_id),
+            app_state.job_tracker.stream(job_id, since_index=since),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
