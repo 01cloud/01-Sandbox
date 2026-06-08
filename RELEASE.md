@@ -1,3 +1,44 @@
+## Release v0.5.50 — 01-Sandbox
+**Release Date:** June 08, 2026
+
+---
+
+### Summary
+v0.5.50 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* repo scan urls ([416cb38](https://github.com/01cloud/01-Sandbox/commit/416cb38f960613494a14e88381bedf26e80edfaf))
+* repo scan urls ([6e2a469](https://github.com/01cloud/01-Sandbox/commit/6e2a469e9be6d154d195f8eb659ddbad5a59e5da))
+* generate RELEASE.md for v0.5.49 [skip ci] ([d8933b9](https://github.com/01cloud/01-Sandbox/commit/d8933b9e6aa0e8a42b0798a6faacff0f819e0061))
+* bump versions to v0.5.49 [skip ci] ([6848ab7](https://github.com/01cloud/01-Sandbox/commit/6848ab7fb5bc2f1dd45e02c1a7ace6ab74cab8c9))
+
+### Changes
+## [0.5.50](https://github.com/01cloud/01-Sandbox/compare/v0.5.49...v0.5.50) (2026-06-08)
+
+
+### 🐛 Bug Fixes
+
+* repo scan urls ([416cb38](https://github.com/01cloud/01-Sandbox/commit/416cb38f960613494a14e88381bedf26e80edfaf))
+* repo scan urls ([6e2a469](https://github.com/01cloud/01-Sandbox/commit/6e2a469e9be6d154d195f8eb659ddbad5a59e5da))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.49 [skip ci] ([d8933b9](https://github.com/01cloud/01-Sandbox/commit/d8933b9e6aa0e8a42b0798a6faacff0f819e0061))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.49 [skip ci] ([6848ab7](https://github.com/01cloud/01-Sandbox/commit/6848ab7fb5bc2f1dd45e02c1a7ace6ab74cab8c9))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.50)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.49 — 01-Sandbox
 **Release Date:** June 08, 2026
 
