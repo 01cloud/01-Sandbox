@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.49](https://github.com/01cloud/01-Sandbox/compare/v0.5.48...v0.5.49) (2026-06-08)
+
+
+### 🐛 Bug Fixes
+
+* fix sse reconnects ([18cd702](https://github.com/01cloud/01-Sandbox/commit/18cd7027ebc04bcb0da53fea6a402285eaaef8fd))
+* fix sse reconnects ([4b0b43f](https://github.com/01cloud/01-Sandbox/commit/4b0b43fb34ba5936594a98f39c2d6f0d7c15f759))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.48 [skip ci] ([0046d86](https://github.com/01cloud/01-Sandbox/commit/0046d86f16c051ce3014f7933f38b7c988ff0c6c))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.48 [skip ci] ([8173bb2](https://github.com/01cloud/01-Sandbox/commit/8173bb20b8798e24c95bf914472b0d1115e2b22d))
+
 ## [0.5.48](https://github.com/01cloud/01-Sandbox/compare/v0.5.47...v0.5.48) (2026-06-08)
 
 
