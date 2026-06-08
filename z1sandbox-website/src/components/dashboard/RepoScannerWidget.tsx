@@ -16,6 +16,7 @@ import { UnifiedPipelineView } from "./UnifiedPipelineView";
 interface RepoScannerWidgetProps {
   apiBaseUrl: string;
   keys: { id: string; backend: string }[];
+  authToken?: string;
 }
 
 const REPO_SCAN_STEPS = [
@@ -34,7 +35,7 @@ const LANG_COLORS = [
 
 const GITHUB_PATTERN = /^https:\/\/github\.com\/[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+\/?$/;
 
-export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidgetProps) {
+export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoScannerWidgetProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [repoUrl, setRepoUrl] = useState("");
   const [urlError, setUrlError] = useState("");
@@ -50,7 +51,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
     return null;
   };
 
-  const apiKey = getApiKey() || "";
+  const apiKey = getApiKey() || authToken || "";
 
   // Initialize unified hook
   const {
