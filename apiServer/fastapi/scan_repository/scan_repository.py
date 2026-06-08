@@ -500,7 +500,6 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 repo,
                 app_state,
             )
-
         return RepoScanSubmitResponse(
             job_id=job_id,
             status=ScanStep.QUEUED,
@@ -564,5 +563,107 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 )
 
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # ── GET /v1/repo-scan/jobs ──────────────────────────────────────────────
+    @router.get(
+        "/v1/repo-scan/jobs",
+        tags=["Repo Scanner"],
+        summary="List all repo-scan jobs — API-key auth (enables CLI→UI sync)",
+        dependencies=[Depends(validate_token)],
+    )
+    async def list_repo_scan_jobs():
+        """
+        Lists all repo-scan jobs from in-memory tracker and Redis.
+        Uses API-key Bearer authentication — same as POST /v1/repo-scan.
+
+        The frontend polls this endpoint every 5 seconds so that scans triggered
+        externally (via CLI or API) automatically appear in the UI with live
+        real-time status and report rendering, without requiring the user to
+        submit through the browser.
+        """
+        import json as _json
+
+        jobs = []
+        seen_ids: set = set()
+
+        # ── 1. In-memory active jobs ───────────────────────────────────────
+        for jid, job in app_state.job_tracker._jobs.items():
+            if job.job_type != "repo-scan":
+                continue
+            jobs.append(
+                {
+                    "job_id": job.job_id,
+                    "job_type": job.job_type,
+                    "status": job.step,
+                    "progress": (
+                        100
+                        if job.step in ("DONE", "ERROR")
+                        else (len(job.event_log) * 10 if job.event_log else 10)
+                    ),
+                    "stepMessage": job.event_log[-1].message if job.event_log else "",
+                    "eventIndex": len(job.event_log),
+                    "metadata": job.metadata,
+                    "summary": job.metadata.get("summary"),
+                    "result": None,
+                    "submittedAt": job.metadata.get("submitted_at", ""),
+                    "completedAt": job.metadata.get("completed_at", ""),
+                }
+            )
+            seen_ids.add(jid)
+
+        # ── 2. Redis historical jobs (multi-pod / crash recovery) ──────────
+        if app_state.use_redis and app_state.redis_client:
+            r = app_state.redis_client
+            try:
+                status_keys = r.keys("job:*:status")
+                for key in status_keys:
+                    parts = key.split(":")
+                    if len(parts) < 3:
+                        continue
+                    jid = parts[1]
+                    if jid in seen_ids:
+                        continue
+
+                    metadata_str = r.get(f"job:{jid}:metadata")
+                    if not metadata_str:
+                        continue
+
+                    metadata = _json.loads(metadata_str)
+                    if metadata.get("job_type") != "repo-scan":
+                        continue
+
+                    status = r.get(key)
+                    events_len = r.llen(f"job:{jid}:events")
+
+                    last_msg = ""
+                    last_ev_str = r.lindex(f"job:{jid}:events", -1)
+                    if last_ev_str:
+                        try:
+                            last_msg = _json.loads(last_ev_str).get("message", "")
+                        except Exception:
+                            pass
+
+                    jobs.append(
+                        {
+                            "job_id": jid,
+                            "job_type": "repo-scan",
+                            "status": status,
+                            "progress": 100 if status in ("DONE", "ERROR") else 10,
+                            "stepMessage": last_msg,
+                            "eventIndex": events_len,
+                            "metadata": metadata,
+                            "summary": metadata.get("summary"),
+                            "result": None,
+                            "submittedAt": metadata.get("submitted_at", ""),
+                            "completedAt": metadata.get("completed_at", ""),
+                        }
+                    )
+                    seen_ids.add(jid)
+            except Exception as exc:
+                print(f"[RepoScanner] list_repo_scan_jobs Redis error: {exc}")
+
+        # Return newest first
+        jobs.sort(key=lambda j: j.get("submittedAt", ""), reverse=True)
+        return jobs
 
     return router
