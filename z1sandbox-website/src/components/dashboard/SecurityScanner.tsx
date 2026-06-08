@@ -49,6 +49,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
     removeJob,
     openStream,
     lazyFetchResult,
+    syncFromServer,
   } = useJobStore("quick-scan", baseUrl, apiKey);
 
   // Auto-select latest job if any
@@ -181,6 +182,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
 
       setSelectedJobId(job_id);
       openStream(job_id, 0);
+      // Force immediate sync so any concurrent CLI-triggered jobs surface at once
+      syncFromServer();
 
       toast.success("Security audit pipeline initiated!");
     } catch (error: any) {

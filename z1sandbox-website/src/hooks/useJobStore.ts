@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { GenericJob, jobStore } from "@/lib/jobStore";
 
 export function useJobStore(
@@ -64,7 +64,7 @@ export function useJobStore(
     }
   };
 
-  const openStream = (jobId: string, since = 0) => {
+  const openStream = useCallback((jobId: string, since = 0) => {
     if (esRefs.current[jobId]) {
       esRefs.current[jobId].close();
     }
@@ -81,7 +81,7 @@ export function useJobStore(
         const stored = jobStore.get(jobId);
 
         if (!stored) {
-          // If the job was deleted or not in storage, ignore or stop
+          // If the job was deleted or not in storage, close stream
           es.close();
           delete esRefs.current[jobId];
           return;
@@ -89,7 +89,7 @@ export function useJobStore(
 
         const isTerminal = ["DONE", "ERROR"].includes(ev.step);
 
-        // Extract and volatile-cache full result if done
+        // Extract and volatile-cache full result when done
         if (ev.step === "DONE" && ev.detail) {
           setVolatileResults(prev => ({
             ...prev,
@@ -103,17 +103,19 @@ export function useJobStore(
           progress: ev.progress,
           stepMessage: ev.message,
           eventIndex: since + 1,
-          summary: ev.step === "DONE" && ev.detail ? {
-            high: ev.detail.high_count || 0,
-            medium: ev.detail.medium_count || 0,
-            low: ev.detail.low_count || 0
-          } : stored.summary,
+          summary: ev.step === "DONE" && ev.detail
+            ? {
+                high: ev.detail.high_count || 0,
+                medium: ev.detail.medium_count || 0,
+                low: ev.detail.low_count || 0
+              }
+            : stored.summary,
           result: null, // Keep localStorage entry result stripped
           completedAt: ev.step === "DONE" ? new Date().toISOString() : stored.completedAt
         };
 
         jobStore.upsert(updatedJob);
-        refresh();
+        setJobs(jobStore.getAll(jobType));
 
         if (isTerminal) {
           es.close();
@@ -128,7 +130,7 @@ export function useJobStore(
       es.close();
       delete esRefs.current[jobId];
 
-      // Fallback: Check if job completed in the background and fetch result
+      // Fallback: poll for result if SSE drops mid-scan
       setTimeout(() => {
         lazyFetchResult(jobId).then(data => {
           if (data) {
@@ -142,15 +144,70 @@ export function useJobStore(
                 completedAt: new Date().toISOString()
               };
               jobStore.upsert(updatedJob);
-              refresh();
+              setJobs(jobStore.getAll(jobType));
             }
           }
         });
       }, 3000);
     };
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase, apiKey, jobType]);
 
-  // Reconnect active streams on mount
+  // ─── Server sync: discover CLI/API-triggered jobs ────────────────────────────
+  //
+  // URL derivation:
+  //   quick-scan → GET ${apiBase}/jobs?job_type=quick-scan
+  //                (intercepted by proxy/router.py before the catch-all, API-key auth)
+  //   repo-scan  → GET ${apiBase}/v1/repo-scan/jobs
+  //                (scan_repository/scan_repository.py, API-key auth)
+  const getJobsListUrl = useCallback(() => {
+    if (jobType === "quick-scan") {
+      return `${apiBase}/jobs?job_type=quick-scan`;
+    }
+    return `${apiBase}/v1/repo-scan/jobs`;
+  }, [jobType, apiBase]);
+
+  const syncFromServer = useCallback(async () => {
+    if (!apiKey) return;
+    try {
+      const resp = await fetch(getJobsListUrl(), {
+        headers: { Authorization: `Bearer ${apiKey}` }
+      });
+      if (!resp.ok) return;
+
+      const serverJobs: GenericJob[] = await resp.json();
+      let didUpdate = false;
+
+      for (const sj of serverJobs) {
+        const existing = jobStore.get(sj.job_id);
+
+        if (!existing) {
+          // ── New job discovered externally (CLI/API-triggered) ──────────────
+          jobStore.upsert({ ...sj, result: null });
+          didUpdate = true;
+
+          // Open SSE stream if the job is still active
+          if (!["DONE", "ERROR"].includes(sj.status) && !esRefs.current[sj.job_id]) {
+            openStream(sj.job_id, sj.eventIndex ?? 0);
+          }
+        } else if (
+          // Reconnect lost SSE stream for an active known job (e.g. after page reload)
+          !["DONE", "ERROR"].includes(existing.status) &&
+          !esRefs.current[sj.job_id]
+        ) {
+          openStream(sj.job_id, existing.eventIndex ?? 0);
+        }
+      }
+
+      if (didUpdate) {
+        setJobs(jobStore.getAll(jobType));
+      }
+    } catch {
+      // Polling is best-effort; never surface network errors to the user
+    }
+  }, [apiKey, getJobsListUrl, openStream, jobType]);
+
+  // Reconnect active streams on mount (handles page refresh mid-scan)
   useEffect(() => {
     const activeJobs = jobStore.getAll(jobType).filter(
       j => !["DONE", "ERROR"].includes(j.status)
@@ -163,7 +220,19 @@ export function useJobStore(
       // Cleanup all open event sources on unmount
       Object.values(esRefs.current).forEach(es => es.close());
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobType, apiKey]);
+
+  // Poll server every 5 seconds to pick up CLI/API-triggered jobs
+  useEffect(() => {
+    if (!apiKey) return;
+
+    // Sync immediately on mount or key change — don't wait 5 seconds
+    syncFromServer();
+
+    const interval = setInterval(syncFromServer, 5000);
+    return () => clearInterval(interval);
+  }, [syncFromServer, apiKey]);
 
   return {
     jobs,
@@ -172,6 +241,7 @@ export function useJobStore(
     removeJob,
     openStream,
     lazyFetchResult,
-    refresh
+    refresh,
+    syncFromServer  // exposed so components can trigger an immediate sync after submit
   };
 }

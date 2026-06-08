@@ -60,6 +60,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
     removeJob,
     openStream,
     lazyFetchResult,
+    syncFromServer,
   } = useJobStore("repo-scan", apiBaseUrl, apiKey);
 
   // Auto-select latest job if any
@@ -131,6 +132,8 @@ export default function RepoScannerWidget({ apiBaseUrl, keys }: RepoScannerWidge
 
       setSelectedJobId(job_id);
       openStream(job_id, 0);
+      // Force immediate sync so concurrent CLI-triggered repo scans surface at once
+      syncFromServer();
 
       toast.success("Repository scan initiated!");
     } catch (err: any) {

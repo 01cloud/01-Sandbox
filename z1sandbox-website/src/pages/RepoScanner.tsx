@@ -98,6 +98,8 @@ export default function RepoScanner() {
   const [progress, setProgress] = useState(0);
   const [result, setResult] = useState<ScanResult | null>(null);
   const [expandedLang, setExpandedLang] = useState<string | null>(null);
+  // ID of the job currently streamed on this page (UI-submitted or CLI-detected)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
   const esRef = useRef<EventSource | null>(null);
 
@@ -110,8 +112,85 @@ export default function RepoScanner() {
 
   const resetScan = () => {
     setCurrentStep(""); setStepMessage(""); setProgress(0); setResult(null); setExpandedLang(null);
+    setActiveJobId(null);
     esRef.current?.close(); esRef.current = null;
   };
+
+  /** Connect an SSE stream for any job_id — shared by UI-submit and CLI-detect paths. */
+  const connectStream = (job_id: string, apiKey: string, since = 0) => {
+    esRef.current?.close();
+    setActiveJobId(job_id);
+    setIsScanning(true);
+
+    const es = new EventSource(
+      `${API_BASE}/v1/repo-scan/${job_id}/status?token=${encodeURIComponent(apiKey)}&since=${since}`
+    );
+    esRef.current = es;
+
+    es.onmessage = (e) => {
+      try {
+        const ev: ScanEvent = JSON.parse(e.data);
+        setCurrentStep(ev.step);
+        setStepMessage(ev.message);
+        setProgress(ev.progress);
+
+        if (ev.step === "DONE") {
+          if (ev.detail) setResult(ev.detail as ScanResult);
+          setIsScanning(false); es.close();
+        } else if (ev.step === "ERROR") {
+          toast.error(ev.message);
+          setIsScanning(false); es.close();
+        }
+      } catch { /* ignore */ }
+    };
+
+    es.onerror = () => {
+      es.close();
+      fetch(`${API_BASE}/v1/repo-scan/${job_id}/result`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(d => { if (d) setResult(d); setIsScanning(false); })
+        .catch(() => setIsScanning(false));
+    };
+  };
+
+  /**
+   * Poll /v1/repo-scan/jobs every 5 seconds.
+   * If an active job exists that we are not already streaming, auto-connect.
+   * This surfaces CLI-triggered scans without requiring the user to submit via the UI.
+   */
+  useEffect(() => {
+    const apiKey = getApiKey();
+    if (!apiKey) return;
+
+    const poll = async () => {
+      // Don't interrupt an already-running stream
+      if (esRef.current) return;
+      try {
+        const resp = await fetch(`${API_BASE}/v1/repo-scan/jobs`, {
+          headers: { Authorization: `Bearer ${apiKey}` },
+        });
+        if (!resp.ok) return;
+        const serverJobs: Array<{ job_id: string; status: string; eventIndex: number }> =
+          await resp.json();
+
+        // Pick the first active job that isn't already displayed
+        const active = serverJobs.find(
+          j => !["DONE", "ERROR"].includes(j.status)
+        );
+        if (active && active.job_id !== activeJobId) {
+          toast.info("CLI scan detected — connecting to live stream...");
+          connectStream(active.job_id, apiKey, active.eventIndex ?? 0);
+        }
+      } catch { /* silent */ }
+    };
+
+    poll(); // immediate on mount
+    const interval = setInterval(poll, 5000);
+    return () => clearInterval(interval);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [API_BASE, activeJobId]);
 
   const handleScan = async () => {
     const url = repoUrl.trim();
@@ -135,37 +214,7 @@ export default function RepoScanner() {
       const data = await resp.json();
       if (!resp.ok) throw new Error(data.detail || "Failed to start scan");
 
-      const { job_id } = data;
-
-      const es = new EventSource(`${API_BASE}/v1/repo-scan/${job_id}/status?token=${encodeURIComponent(apiKey)}`);
-      esRef.current = es;
-
-      es.onmessage = (e) => {
-        try {
-          const ev: ScanEvent = JSON.parse(e.data);
-          setCurrentStep(ev.step);
-          setStepMessage(ev.message);
-          setProgress(ev.progress);
-
-          if (ev.step === "DONE") {
-            if (ev.detail) setResult(ev.detail as ScanResult);
-            setIsScanning(false); es.close();
-          } else if (ev.step === "ERROR") {
-            toast.error(ev.message);
-            setIsScanning(false); es.close();
-          }
-        } catch { /* ignore */ }
-      };
-
-      es.onerror = () => {
-        es.close();
-        fetch(`${API_BASE}/v1/repo-scan/${job_id}/result`, {
-          headers: { Authorization: `Bearer ${apiKey}` },
-        })
-          .then(r => r.ok ? r.json() : null)
-          .then(d => { if (d) setResult(d); setIsScanning(false); })
-          .catch(() => setIsScanning(false));
-      };
+      connectStream(data.job_id, apiKey, 0);
     } catch (err: any) {
       toast.error(err.message);
       setIsScanning(false);
