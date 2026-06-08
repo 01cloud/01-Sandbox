@@ -83,17 +83,30 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
 
   const validateUrl = (url: string) => {
     if (!url) { setUrlError(""); return; }
-    if (!GITHUB_PATTERN.test(url.trim())) {
-      setUrlError("Must be a valid GitHub URL: https://github.com/owner/repo");
+    const urls = url.split(/[\s,;\n]+/).map(u => u.trim()).filter(Boolean);
+    const invalid = urls.filter(u => !GITHUB_PATTERN.test(u));
+    if (invalid.length > 0) {
+      setUrlError(`Invalid URL(s): ${invalid.slice(0, 2).join(", ")}${invalid.length > 2 ? "..." : ""}`);
     } else {
       setUrlError("");
     }
   };
 
   const handleScan = async () => {
-    const url = repoUrl.trim();
-    if (!GITHUB_PATTERN.test(url)) {
-      setUrlError("Enter a valid public GitHub URL"); return;
+    const urls = repoUrl
+      .split(/[\s,;\n]+/)
+      .map((u) => u.trim())
+      .filter((u) => u.length > 0);
+
+    if (urls.length === 0) {
+      setUrlError("Enter a valid public GitHub URL");
+      return;
+    }
+
+    const invalidUrls = urls.filter(u => !GITHUB_PATTERN.test(u));
+    if (invalidUrls.length > 0) {
+      setUrlError(`Invalid GitHub URL(s): ${invalidUrls.join(", ")}`);
+      return;
     }
 
     if (!apiKey) {
@@ -102,41 +115,64 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
 
     try {
       setIsScanning(true);
+      let successCount = 0;
+      let failCount = 0;
+      let lastJobId = "";
 
-      const resp = await fetch(`${apiBaseUrl}/v1/repo-scan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ repo_url: url }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || "Failed to start scan");
+      for (const url of urls) {
+        try {
+          const resp = await fetch(`${apiBaseUrl}/v1/repo-scan`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ repo_url: url }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.detail || "Failed to start scan");
 
-      const { job_id, repo_url: data_repo_url, submitted_at } = data;
+          const { job_id, repo_url: data_repo_url, submitted_at } = data;
+          lastJobId = job_id;
 
-      // Add to store
-      addJob({
-        job_id,
-        job_type: "repo-scan",
-        status: "QUEUED",
-        progress: 5,
-        stepMessage: "Job queued",
-        eventIndex: 0,
-        metadata: {
-          repo_url: data_repo_url || url,
-          submitted_at: submitted_at || new Date().toISOString(),
-        },
-        summary: null,
-        result: null,
-        submittedAt: submitted_at || new Date().toISOString(),
-        completedAt: null
-      });
+          // Add to store
+          addJob({
+            job_id,
+            job_type: "repo-scan",
+            status: "QUEUED",
+            progress: 5,
+            stepMessage: "Job queued",
+            eventIndex: 0,
+            metadata: {
+              repo_url: data_repo_url || url,
+              submitted_at: submitted_at || new Date().toISOString(),
+            },
+            summary: null,
+            result: null,
+            submittedAt: submitted_at || new Date().toISOString(),
+            completedAt: null
+          });
 
-      setSelectedJobId(job_id);
-      openStream(job_id, 0);
-      // Force immediate sync so concurrent CLI-triggered repo scans surface at once
+          openStream(job_id, 0);
+          successCount++;
+        } catch (err: any) {
+          console.error(`Failed to trigger scan for ${url}:`, err);
+          failCount++;
+        }
+      }
+
+      if (lastJobId) {
+        setSelectedJobId(lastJobId);
+      }
+
+      // Force immediate sync
       syncFromServer();
 
-      toast.success("Repository scan initiated!");
+      if (failCount === 0) {
+        toast.success(`Successfully initiated ${successCount} repository scan(s)!`);
+        setRepoUrl(""); // Clear input on complete success
+      } else if (successCount > 0) {
+        toast.warning(`Initiated ${successCount} scan(s), but ${failCount} failed.`);
+      } else {
+        toast.error("Failed to initiate repository scans.");
+      }
     } catch (err: any) {
       toast.error(err.message || "Failed to start scan");
     } finally {
@@ -339,7 +375,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                   value={repoUrl}
                   onChange={(e) => { setRepoUrl(e.target.value); validateUrl(e.target.value); }}
                   onBlur={() => validateUrl(repoUrl)}
-                  placeholder="https://github.com/owner/repo"
+                  placeholder="https://github.com/owner/repo1, repo2..."
                   className={cn("rounded-xl h-11 font-mono text-sm border transition-colors", urlError ? "border-destructive" : "")}
                   disabled={isScanning}
                 />
