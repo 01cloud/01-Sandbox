@@ -97,6 +97,7 @@ const Dashboard = () => {
   })();
   const { user, getAccessTokenSilently, isAuthenticated, isLoading: authLoading } = useAuth0();
   const [keys, setKeys] = useState<APIKey[]>([]);
+  const [authToken, setAuthToken] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [newKey, setNewKey] = useState<{ id: string; key: string; status?: string } | null>(null);
@@ -442,6 +443,7 @@ const Dashboard = () => {
     try {
       setIsLoading(true);
       const token = await getAccessTokenSilently();
+      setAuthToken(token);
       const response = await fetch(`${API_BASE_URL}/v1/api-keys`, {
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -838,7 +840,7 @@ const Dashboard = () => {
               })}
 
               {/* GitHub Repository Scanner Widget */}
-              <RepoScannerWidget apiBaseUrl={API_BASE_URL} keys={keys} />
+              <RepoScannerWidget apiBaseUrl={API_BASE_URL} keys={keys} authToken={authToken} />
             </div>
 
             {/* Sticky Right-Side Telemetry log reader panel */}
