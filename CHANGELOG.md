@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.48](https://github.com/01cloud/01-Sandbox/compare/v0.5.47...v0.5.48) (2026-06-08)
+
+
+### 🚀 New Features
+
+* implement job scans via cli to reflect in the UI ([0cd0b5b](https://github.com/01cloud/01-Sandbox/commit/0cd0b5bf7c235984760cd832e1762eeaf36af7de))
+* implement job scans via cli to reflect in the UI ([ae92861](https://github.com/01cloud/01-Sandbox/commit/ae928610dcbaca410bcc3b3afc8001b42224ee3e))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.47 [skip ci] ([5bb3062](https://github.com/01cloud/01-Sandbox/commit/5bb3062e3e45962b971b0cd06b090f7ca9b46623))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.47 [skip ci] ([68a8d14](https://github.com/01cloud/01-Sandbox/commit/68a8d14e1d3cf1d7260eb65385bebd76704071c9))
+
 ## [0.5.47](https://github.com/01cloud/01-Sandbox/compare/v0.5.46...v0.5.47) (2026-06-08)
 
 
