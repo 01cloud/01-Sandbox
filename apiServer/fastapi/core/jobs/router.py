@@ -126,6 +126,11 @@ async def stream_job_status(
     return StreamingResponse(
         state.job_tracker.stream(job_id, since_index=since),
         media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
     )
 
 

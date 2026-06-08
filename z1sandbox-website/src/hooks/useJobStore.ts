@@ -36,7 +36,7 @@ export function useJobStore(
     refresh();
   };
 
-  const lazyFetchResult = async (jobId: string): Promise<any> => {
+  const lazyFetchResult = useCallback(async (jobId: string): Promise<any> => {
     if (volatileResults[jobId]) {
       return volatileResults[jobId];
     }
@@ -49,7 +49,7 @@ export function useJobStore(
           Authorization: `Bearer ${apiKey}`
         }
       });
-      if (!resp.ok) throw new Error("Failed to fetch result");
+      if (!resp.ok) throw new Error(`Failed to fetch result (HTTP ${resp.status})`);
       const data = await resp.json();
 
       // Cache in volatile React memory
@@ -62,7 +62,8 @@ export function useJobStore(
       console.error(`[useJobStore] Error fetching result for job ${jobId}`, e);
       return null;
     }
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [apiBase, apiKey]);
 
   const openStream = useCallback((jobId: string, since = 0) => {
     if (esRefs.current[jobId]) {
@@ -173,9 +174,13 @@ export function useJobStore(
       const resp = await fetch(getJobsListUrl(), {
         headers: { Authorization: `Bearer ${apiKey}` }
       });
-      if (!resp.ok) return;
+      if (!resp.ok) {
+        console.warn(`[useJobStore] syncFromServer: ${getJobsListUrl()} returned HTTP ${resp.status}`);
+        return;
+      }
 
       const serverJobs: GenericJob[] = await resp.json();
+      console.debug(`[useJobStore] syncFromServer: got ${serverJobs.length} job(s) from server`);
       let didUpdate = false;
 
       for (const sj of serverJobs) {
@@ -191,7 +196,6 @@ export function useJobStore(
             openStream(sj.job_id, sj.eventIndex ?? 0);
           } else if (sj.status === "DONE") {
             // Completed job: eagerly fetch result so the report renders immediately
-            // without waiting for the component's lazyFetchResult useEffect
             lazyFetchResult(sj.job_id);
           }
         } else if (
@@ -206,9 +210,10 @@ export function useJobStore(
       if (didUpdate) {
         setJobs(jobStore.getAll(jobType));
       }
-    } catch {
-      // Polling is best-effort; never surface network errors to the user
+    } catch (err) {
+      console.warn("[useJobStore] syncFromServer error:", err);
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiKey, getJobsListUrl, openStream, jobType]);
 
   // Reconnect active streams on mount (handles page refresh mid-scan)
