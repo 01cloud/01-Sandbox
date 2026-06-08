@@ -225,8 +225,67 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
             )
             return ScanJobResponse(job_id=job_id, status="PROCESSING")
         else:
-            data = await state.backend.create_scan_job(req.dict(exclude_none=True))
-            return ScanJobResponse(**data)
+            try:
+                await state.job_tracker.push_event(
+                    job_id,
+                    "PROVISIONING",
+                    "Provisioning remote sandbox and uploading files...",
+                    25,
+                )
+                await state.job_tracker.push_event(
+                    job_id, "SCANNING", "Running Semgrep security analysis...", 60
+                )
+                data = await state.backend.create_scan_job(req.dict(exclude_none=True))
+
+                high_count = medium_count = low_count = 0
+                findings = data.get("findings", [])
+                for f in findings:
+                    sev = str(f.get("severity", "INFO")).upper()
+                    if "HIGH" in sev:
+                        high_count += 1
+                    elif "MEDIUM" in sev:
+                        medium_count += 1
+                    elif "LOW" in sev:
+                        low_count += 1
+
+                job_record = state.job_tracker.get_job(job_id)
+                if job_record:
+                    job_record.metadata["summary"] = {
+                        "high": high_count,
+                        "medium": medium_count,
+                        "low": low_count,
+                    }
+                    if state.use_redis and state.redis_client:
+                        try:
+                            metadata_copy = dict(job_record.metadata)
+                            metadata_copy["job_type"] = "quick-scan"
+                            state.redis_client.set(
+                                f"job:{job_id}:metadata",
+                                json.dumps(metadata_copy),
+                                ex=86400,
+                            )
+                        except Exception:
+                            pass
+
+                detail_dict = dict(data)
+                detail_dict["high_count"] = high_count
+                detail_dict["medium_count"] = medium_count
+                detail_dict["low_count"] = low_count
+
+                await state.job_tracker.push_event(
+                    job_id,
+                    "DONE",
+                    f"Scan complete — found {len(findings)} security findings.",
+                    100,
+                    detail=detail_dict,
+                )
+                return ScanJobResponse(**data)
+            except Exception as e:
+                print(f"[PROXY SCAN ERROR] Synchronous scan job {job_id} failed: {e}")
+                await state.job_tracker.push_event(
+                    job_id, "ERROR", f"Scan failed: {e}", 0
+                )
+                raise HTTPException(status_code=500, detail=str(e))
 
     @router.get(
         "/api/{version}/{backend_id}/v1/jobs/{job_id}/status",

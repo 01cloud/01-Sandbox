@@ -120,7 +120,13 @@ export default function RepoScanner() {
 
   const validateUrl = (url: string) => {
     if (!url) { setUrlError(""); return; }
-    setUrlError(GITHUB_PATTERN.test(url.trim()) ? "" : "Must be: https://github.com/owner/repo");
+    const urls = url.split(/[\s,;\n]+/).map(u => u.trim()).filter(Boolean);
+    const invalid = urls.filter(u => !GITHUB_PATTERN.test(u));
+    if (invalid.length > 0) {
+      setUrlError(`Invalid URL(s): ${invalid.slice(0, 2).join(", ")}${invalid.length > 2 ? "..." : ""}`);
+    } else {
+      setUrlError("");
+    }
   };
 
   const resetScan = () => {
@@ -233,8 +239,21 @@ export default function RepoScanner() {
   }, [API_BASE, activeJobId, result]);
 
   const handleScan = async () => {
-    const url = repoUrl.trim();
-    if (!GITHUB_PATTERN.test(url)) { setUrlError("Enter a valid public GitHub URL"); return; }
+    const urls = repoUrl
+      .split(/[\s,;\n]+/)
+      .map((u) => u.trim())
+      .filter((u) => u.length > 0);
+
+    if (urls.length === 0) {
+      setUrlError("Enter a valid public GitHub URL");
+      return;
+    }
+
+    const invalidUrls = urls.filter(u => !GITHUB_PATTERN.test(u));
+    if (invalidUrls.length > 0) {
+      setUrlError(`Invalid GitHub URL(s): ${invalidUrls.join(", ")}`);
+      return;
+    }
 
     const apiKey = getApiKey();
     if (!apiKey) {
@@ -246,15 +265,37 @@ export default function RepoScanner() {
     setIsScanning(true);
 
     try {
-      const resp = await fetch(`${API_BASE}/v1/repo-scan`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-        body: JSON.stringify({ repo_url: url }),
-      });
-      const data = await resp.json();
-      if (!resp.ok) throw new Error(data.detail || "Failed to start scan");
+      let successCount = 0;
+      let firstJobId = "";
 
-      connectStream(data.job_id, apiKey, 0);
+      for (const url of urls) {
+        try {
+          const resp = await fetch(`${API_BASE}/v1/repo-scan`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
+            body: JSON.stringify({ repo_url: url }),
+          });
+          const data = await resp.json();
+          if (!resp.ok) throw new Error(data.detail || `Failed to start scan for ${url}`);
+
+          if (!firstJobId) {
+            firstJobId = data.job_id;
+          }
+          successCount++;
+        } catch (err: any) {
+          console.error(`Failed to scan ${url}:`, err);
+        }
+      }
+
+      if (successCount > 0) {
+        toast.success(`Successfully started ${successCount} repository scan(s)! You can track all of them on the Dashboard.`);
+        setRepoUrl(""); // Clear input on success
+        if (firstJobId) {
+          connectStream(firstJobId, apiKey, 0);
+        }
+      } else {
+        throw new Error("Failed to start repository scans.");
+      }
     } catch (err: any) {
       toast.error(err.message);
       setIsScanning(false);
@@ -307,7 +348,7 @@ export default function RepoScanner() {
                 value={repoUrl}
                 onChange={(e) => { setRepoUrl(e.target.value); validateUrl(e.target.value); }}
                 onBlur={() => validateUrl(repoUrl)}
-                placeholder="https://github.com/owner/repo"
+                placeholder="https://github.com/owner/repo1, repo2..."
                 className={cn("rounded-xl h-12 font-mono text-sm border-2 transition-colors",
                   urlError ? "border-destructive" : "border-border/50 focus:border-violet-500/50")}
                 disabled={isScanning}
