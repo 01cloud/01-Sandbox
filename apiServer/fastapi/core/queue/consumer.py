@@ -88,7 +88,10 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
 
         except asyncio.CancelledError:
             print(f"[Cancellation] Message processing cancelled for job {job_id[:8]}")
-            await msg.ack()
+            try:
+                await msg.ack()
+            except Exception:
+                pass
 
         except Exception as e:
             print(f"[RabbitMQ] Worker execution failure: {e}")

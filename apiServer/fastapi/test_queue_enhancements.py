@@ -1,8 +1,15 @@
 #!/usr/bin/env python3
-import asyncio
-import json
 import os
 import sys
+
+# Set default env vars before importing core modules (which evaluate them at load time)
+if not os.environ.get("RABBITMQ_URL"):
+    os.environ["RABBITMQ_URL"] = "amqp://admin:changeme@rabbitmq-service:5672/"
+if not os.environ.get("REDIS_HOST"):
+    os.environ["REDIS_HOST"] = "redis-service"
+
+import asyncio
+import json
 import uuid
 
 # Inject current directory into python path to load core modules correctly
@@ -28,27 +35,42 @@ async def run_scan_in_background_mock(job_id: str, req_dict: dict):
 
 async def test_retry_and_dlq(conn, app_state):
     print("\n--- Test 1: Testing Retry with Backoff and DLQ routing ---")
-    job_id = str(uuid.uuid4())
-    payload = {"job_id": job_id, "req_dict": {"simulate_error": True}}
+    job_id_retry = str(uuid.uuid4())
+    payload_retry = {"job_id": job_id_retry, "req_dict": {"simulate_error": True}}
 
-    app_state.job_tracker.create_job(job_id, "quick-scan", {})
+    app_state.job_tracker.create_job(job_id_retry, "quick-scan", {})
 
-    # 1. Publish message that will fail
-    print(f"Publishing failing job: {job_id[:8]}")
-    await publish("scan.quick", payload)
+    # 1. Publish message that will fail and verify the first retry backoff
+    print(f"Publishing failing job to test retry backoff: {job_id_retry[:8]}")
+    await publish("scan.quick", payload_retry)
 
-    # 2. Wait and monitor status changes
-    print("Waiting to observe retries (5s, then 30s, etc.)...")
-    # We wait about 8 seconds to see the first retry finish (5s delay)
-    for i in range(12):
+    # We wait about 7 seconds to see the first retry finish (5s delay)
+    print("Waiting 7 seconds to observe the first retry (5s backoff)...")
+    for i in range(7):
         await asyncio.sleep(1)
-        job = app_state.job_tracker.get_job(job_id)
+        job = app_state.job_tracker.get_job(job_id_retry)
         if job:
             print(f"Time {i+1}s: Job Step = {job.step}")
 
-    # Check if the job eventually goes to ERROR status after exhausting retries
-    job = app_state.job_tracker.get_job(job_id)
-    print(f"Final Job Step: {job.step if job else 'None'}")
+    # 2. Publish message that already has 3 retries to test DLQ routing immediately
+    job_id_dlq = str(uuid.uuid4())
+    payload_dlq = {
+        "job_id": job_id_dlq,
+        "req_dict": {"simulate_error": True},
+        "retry_count": 3,
+    }
+    app_state.job_tracker.create_job(job_id_dlq, "quick-scan", {})
+
+    print(
+        f"\nPublishing failing job with 3 existing retries to test DLQ: {job_id_dlq[:8]}"
+    )
+    await publish("scan.quick", payload_dlq)
+
+    # Wait 2 seconds for it to fail and route to DLQ
+    await asyncio.sleep(2)
+
+    job = app_state.job_tracker.get_job(job_id_dlq)
+    print(f"DLQ Job Step: {job.step if job else 'None'} (Expected: ERROR)")
 
     # Verify DLQ
     ch = await conn.channel()
@@ -109,6 +131,12 @@ async def main():
     print("Starting workers...")
     await start_all_consumers(state)
 
+    # Start Redis Pub/Sub cancellation listener if Redis is active
+    if state.use_redis and state.redis_client:
+        from core.queue.cancellation import setup_cancellation_listener
+
+        asyncio.create_task(setup_cancellation_listener(state))
+
     # Run tests
     try:
         await test_retry_and_dlq(conn, state)
@@ -119,10 +147,4 @@ async def main():
 
 
 if __name__ == "__main__":
-    if not os.environ.get("RABBITMQ_URL"):
-        # Provide default local values for testing if not set
-        os.environ["RABBITMQ_URL"] = "amqp://guest:guest@localhost:5672/"
-    if not os.environ.get("REDIS_HOST"):
-        os.environ["REDIS_HOST"] = "localhost"
-
     asyncio.run(main())
