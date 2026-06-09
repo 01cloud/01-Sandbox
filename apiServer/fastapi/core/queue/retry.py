@@ -93,9 +93,7 @@ async def handle_worker_failure(
         # Acknowledge the original message because we have successfully rescheduled it
         await msg.ack()
     else:
-        print(
-            f"[RabbitMQ] Retry limit exceeded for job={job_id[:8]}. Routing to DLQ."
-        )
+        print(f"[RabbitMQ] Retry limit exceeded for job={job_id[:8]}. Routing to DLQ.")
         await app_state.job_tracker.push_event(
             job_id,
             "ERROR",

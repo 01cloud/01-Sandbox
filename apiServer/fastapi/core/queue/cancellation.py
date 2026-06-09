@@ -23,9 +23,7 @@ async def setup_cancellation_listener(app_state) -> None:
             msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
             if msg:
                 job_id = msg["data"]
-                print(
-                    f"[Cancellation] Received cancellation request for job: {job_id}"
-                )
+                print(f"[Cancellation] Received cancellation request for job: {job_id}")
                 await cancel_active_task(app_state, job_id)
         except Exception as e:
             print(f"[Cancellation] Listener error: {e}")
@@ -55,9 +53,7 @@ def is_job_cancelled(app_state, job_id: str) -> bool:
     """Checks if a job has been flagged as cancelled in Redis."""
     if app_state.use_redis and app_state.redis_client:
         try:
-            return (
-                app_state.redis_client.get(f"job:{job_id}:cancelled") == "true"
-            )
+            return app_state.redis_client.get(f"job:{job_id}:cancelled") == "true"
         except Exception as e:
             print(f"[Cancellation] Failed to check status in Redis: {e}")
     return False
