@@ -87,21 +87,15 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
             await msg.ack()
 
         except asyncio.CancelledError:
-            print(
-                f"[Cancellation] Message processing cancelled for job {job_id[:8]}"
-            )
+            print(f"[Cancellation] Message processing cancelled for job {job_id[:8]}")
             await msg.ack()
 
         except Exception as e:
             print(f"[RabbitMQ] Worker execution failure: {e}")
             try:
-                await handle_worker_failure(
-                    msg, p, e, jt.routing_key, app_state
-                )
+                await handle_worker_failure(msg, p, e, jt.routing_key, app_state)
             except Exception as retry_err:
-                print(
-                    f"[RabbitMQ] Error while executing retry handler: {retry_err}"
-                )
+                print(f"[RabbitMQ] Error while executing retry handler: {retry_err}")
                 await msg.reject(requeue=False)
 
         finally:
@@ -122,4 +116,3 @@ async def start_all_consumers(app_state) -> None:
         *[_start_single_consumer(jt, app_state) for jt in ALL_SCAN_JOB_TYPES]
     )
     print(f"[RabbitMQ] All {len(ALL_SCAN_JOB_TYPES)} consumers active.")
-

@@ -84,9 +84,7 @@ async def run_scan_in_background(job_id: str, req_dict: dict):
         )
     except asyncio.CancelledError:
         print(f"[BACKGROUND TASK] Scan job cancelled: {job_id}")
-        await state.job_tracker.push_event(
-            job_id, "CANCELLED", "Job was cancelled.", 0
-        )
+        await state.job_tracker.push_event(job_id, "CANCELLED", "Job was cancelled.", 0)
         raise
     except Exception as e:
         print(f"[BACKGROUND TASK ERROR] Scan job failed: {e}")
