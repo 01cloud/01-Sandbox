@@ -1,3 +1,44 @@
+## Release v0.5.53 — 01-Sandbox
+**Release Date:** June 09, 2026
+
+---
+
+### Summary
+v0.5.53 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* rabbitmq dlq ([b83b35c](https://github.com/01cloud/01-Sandbox/commit/b83b35cc7ea94761901e02a4390194f5e8bccc6b))
+* rabbitmq dlq ([3f4626b](https://github.com/01cloud/01-Sandbox/commit/3f4626bb8706f5c9bc58b30ffce25cbd8cc85780))
+* generate RELEASE.md for v0.5.52 [skip ci] ([c359beb](https://github.com/01cloud/01-Sandbox/commit/c359beb413874af33d3b5823063794f1a0294dda))
+* bump versions to v0.5.52 [skip ci] ([0e0c369](https://github.com/01cloud/01-Sandbox/commit/0e0c36913e45ceeda647b0c0a768a188e9be9a45))
+
+### Changes
+## [0.5.53](https://github.com/01cloud/01-Sandbox/compare/v0.5.52...v0.5.53) (2026-06-09)
+
+
+### 🐛 Bug Fixes
+
+* rabbitmq dlq ([b83b35c](https://github.com/01cloud/01-Sandbox/commit/b83b35cc7ea94761901e02a4390194f5e8bccc6b))
+* rabbitmq dlq ([3f4626b](https://github.com/01cloud/01-Sandbox/commit/3f4626bb8706f5c9bc58b30ffce25cbd8cc85780))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.52 [skip ci] ([c359beb](https://github.com/01cloud/01-Sandbox/commit/c359beb413874af33d3b5823063794f1a0294dda))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.52 [skip ci] ([0e0c369](https://github.com/01cloud/01-Sandbox/commit/0e0c36913e45ceeda647b0c0a768a188e9be9a45))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.53)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.52 — 01-Sandbox
 **Release Date:** June 09, 2026
 
