@@ -399,7 +399,11 @@ async def _run_scan_pipeline(
             detail=detail_dict,
         )
 
-    except asyncio.TimeoutError:
+    except asyncio.CancelledError:
+        log("CANCELLED", "Job was cancelled by the user")
+        raise
+
+    except asyncio.TimeoutError as exc:
         msg = "Scan timed out (5-minute limit exceeded)"
         log("ERROR", msg)
         result = RepoScanResult(
@@ -412,6 +416,7 @@ async def _run_scan_pipeline(
             scan_duration_seconds=round(time.monotonic() - start_time, 2),
         )
         await push_event(ScanStep.ERROR, msg, 0, detail=result.dict())
+        raise exc
 
     except Exception as exc:
         msg = str(exc)
@@ -426,6 +431,7 @@ async def _run_scan_pipeline(
             scan_duration_seconds=round(time.monotonic() - start_time, 2),
         )
         await push_event(ScanStep.ERROR, f"Scan failed: {msg}", 0, detail=result.dict())
+        raise exc
 
     finally:
         if sandbox_id:

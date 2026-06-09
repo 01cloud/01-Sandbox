@@ -23,6 +23,11 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[RabbitMQ] Startup warning: {e} — running in fallback mode.")
 
+    # Start Redis Pub/Sub cancellation listener
+    from .queue.cancellation import setup_cancellation_listener
+
+    asyncio.create_task(setup_cancellation_listener(state))
+
     yield
     print("[shutdown] Ceasing operations successfully...")
     await close_rabbitmq()

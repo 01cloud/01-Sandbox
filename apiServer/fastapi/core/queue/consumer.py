@@ -6,8 +6,11 @@ import os
 
 import aio_pika
 
+from .cancellation import is_job_cancelled
 from .connection import get_connection
+from .dlq import DLQ_ROUTING_KEY, DLX_EXCHANGE_NAME, declare_dlq
 from .job_types import ALL_SCAN_JOB_TYPES, EXCHANGE_NAME, ScanJobType
+from .retry import declare_retry_topology, handle_worker_failure
 
 
 async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
@@ -22,47 +25,101 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
     ex = await ch.declare_exchange(
         EXCHANGE_NAME, aio_pika.ExchangeType.DIRECT, durable=True
     )
-    q = await ch.declare_queue(jt.queue_name, durable=True)
+
+    try:
+        q = await ch.declare_queue(
+            jt.queue_name,
+            durable=True,
+            arguments={
+                "x-dead-letter-exchange": DLX_EXCHANGE_NAME,
+                "x-dead-letter-routing-key": DLQ_ROUTING_KEY,
+            },
+        )
+    except Exception:
+        # Recreate channel and delete existing queue if arguments mismatch
+        ch = await conn.channel()
+        await ch.queue_delete(jt.queue_name)
+        q = await ch.declare_queue(
+            jt.queue_name,
+            durable=True,
+            arguments={
+                "x-dead-letter-exchange": DLX_EXCHANGE_NAME,
+                "x-dead-letter-routing-key": DLQ_ROUTING_KEY,
+            },
+        )
+
     await q.bind(ex, routing_key=jt.routing_key)
+    for rk in jt.retry_routing_keys:
+        await q.bind(ex, routing_key=rk)
+
     print(f"[RabbitMQ] Consumer ready: queue={jt.queue_name} prefetch={prefetch}")
 
-    if jt.job_type == "quick-scan":
-        from sandboxes.router import run_scan_in_background
+    async def on_message(msg: aio_pika.IncomingMessage):
+        try:
+            p = json.loads(msg.body)
+            job_id = p.get("job_id")
 
-        async def on_message(msg: aio_pika.IncomingMessage):
-            async with msg.process():
-                try:
-                    p = json.loads(msg.body)
-                    print(f"[RabbitMQ][quick-scan] job={p['job_id'][:8]}")
-                    await run_scan_in_background(p["job_id"], p["req_dict"])
-                except Exception as e:
-                    print(f"[RabbitMQ][quick-scan] Error: {e}")
+            if is_job_cancelled(app_state, job_id):
+                print(
+                    f"[Cancellation] Job {job_id[:8]} was cancelled before execution. Discarding message."
+                )
+                await msg.ack()
+                return
 
-    elif jt.job_type == "repo-scan":
-        from scan_repository.scan_repository import _run_scan_pipeline
+            current_task = asyncio.current_task()
+            app_state.active_tasks[job_id] = current_task
 
-        async def on_message(msg: aio_pika.IncomingMessage):
-            async with msg.process():
-                try:
-                    p = json.loads(msg.body)
-                    print(
-                        f"[RabbitMQ][repo-scan] job={p['job_id'][:8]} {p['owner']}/{p['repo']}"
-                    )
-                    await _run_scan_pipeline(
-                        p["job_id"], p["repo_url"], p["owner"], p["repo"], app_state
-                    )
-                except Exception as e:
-                    print(f"[RabbitMQ][repo-scan] Error: {e}")
+            if jt.job_type == "quick-scan":
+                print(f"[RabbitMQ][quick-scan] job={job_id[:8]}")
+                from sandboxes.router import run_scan_in_background
 
-    else:
-        print(f"[RabbitMQ] No handler for job_type={jt.job_type}")
-        return
+                await run_scan_in_background(job_id, p["req_dict"])
+            elif jt.job_type == "repo-scan":
+                print(
+                    f"[RabbitMQ][repo-scan] job={job_id[:8]} {p['owner']}/{p['repo']}"
+                )
+                from scan_repository.scan_repository import _run_scan_pipeline
+
+                await _run_scan_pipeline(
+                    job_id, p["repo_url"], p["owner"], p["repo"], app_state
+                )
+
+            await msg.ack()
+
+        except asyncio.CancelledError:
+            print(
+                f"[Cancellation] Message processing cancelled for job {job_id[:8]}"
+            )
+            await msg.ack()
+
+        except Exception as e:
+            print(f"[RabbitMQ] Worker execution failure: {e}")
+            try:
+                await handle_worker_failure(
+                    msg, p, e, jt.routing_key, app_state
+                )
+            except Exception as retry_err:
+                print(
+                    f"[RabbitMQ] Error while executing retry handler: {retry_err}"
+                )
+                await msg.reject(requeue=False)
+
+        finally:
+            if "job_id" in locals():
+                app_state.active_tasks.pop(job_id, None)
 
     await q.consume(on_message)
 
 
 async def start_all_consumers(app_state) -> None:
+    conn = get_connection()
+    if conn:
+        async with conn.channel() as ch:
+            await declare_dlq(ch)
+            await declare_retry_topology(ch)
+
     await asyncio.gather(
         *[_start_single_consumer(jt, app_state) for jt in ALL_SCAN_JOB_TYPES]
     )
     print(f"[RabbitMQ] All {len(ALL_SCAN_JOB_TYPES)} consumers active.")
+
