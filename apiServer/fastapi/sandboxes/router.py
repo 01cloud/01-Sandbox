@@ -82,9 +82,16 @@ async def run_scan_in_background(job_id: str, req_dict: dict):
             100,
             detail=detail_dict,
         )
+    except asyncio.CancelledError:
+        print(f"[BACKGROUND TASK] Scan job cancelled: {job_id}")
+        await state.job_tracker.push_event(
+            job_id, "CANCELLED", "Job was cancelled.", 0
+        )
+        raise
     except Exception as e:
         print(f"[BACKGROUND TASK ERROR] Scan job failed: {e}")
         await state.job_tracker.push_event(job_id, "ERROR", f"Scan failed: {e}", 0)
+        raise
 
 
 def get_sandboxes_router(state, validate_token: Callable) -> APIRouter:
@@ -297,5 +304,36 @@ def get_sandboxes_router(state, validate_token: Callable) -> APIRouter:
                 status_code=404, detail="No scan jobs have been initiated yet."
             )
         return state.backend.get_scan_status(state.latest_job_id)
+
+    @router.delete(
+        "/v1/jobs/{job_id}",
+        tags=["Security Scan Pipeline"],
+        dependencies=[Depends(validate_token)],
+        summary="Cancel a queued or running scan job",
+    )
+    async def cancel_job(job_id: str):
+        """
+        Flags a scan job as cancelled in Redis and broadcasts the cancellation request.
+        """
+        if state.use_redis and state.redis_client:
+            try:
+                # Set cancellation flag in Redis
+                state.redis_client.set(f"job:{job_id}:cancelled", "true", ex=86400)
+                # Broadcast cancellation event
+                state.redis_client.publish("job:cancellations", job_id)
+                print(f"[Cancellation] Published cancellation event for job {job_id}")
+            except Exception as e:
+                print(f"[Cancellation] Redis cancel error: {e}")
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to publish cancellation to Redis: {e}",
+                )
+        else:
+            # Fallback to local cancellation if Redis not active
+            from core.queue.cancellation import cancel_active_task
+
+            await cancel_active_task(state, job_id)
+
+        return {"job_id": job_id, "status": "CANCEL_REQUESTED"}
 
     return router

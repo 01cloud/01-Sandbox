@@ -19,6 +19,7 @@ class AppState:
             "opensandbox", opensandbox_base_url()
         )
         self.latest_job_id: str | None = None
+        self.active_tasks: dict[str, asyncio.Task] = {}
 
         # Instantiate reusable job tracker
         from core.jobs.tracker import ReusableJobTracker
