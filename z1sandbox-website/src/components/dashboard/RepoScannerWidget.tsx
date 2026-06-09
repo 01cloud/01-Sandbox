@@ -180,6 +180,30 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
     }
   };
 
+  const handleCancelJob = async (jobId: string) => {
+    if (!apiKey) {
+      toast.error("No API key found.");
+      return;
+    }
+    try {
+      const response = await fetch(`${apiBaseUrl}/v1/jobs/${jobId}`, {
+        method: "DELETE",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`
+        }
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data.detail || data.error || "Failed to cancel job");
+      }
+      toast.success("Job cancellation requested.");
+      syncFromServer();
+    } catch (error: any) {
+      console.error("Cancel job error:", error);
+      toast.error(error.message || "Failed to cancel job");
+    }
+  };
+
   // Find currently selected job record
   const selectedJob = jobs.find((j) => j.job_id === selectedJobId) || null;
   const selectedResult = selectedJobId ? volatileResults[selectedJobId] : null;
@@ -411,6 +435,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                       steps={REPO_SCAN_STEPS}
                       result={selectedResult}
                       onResultRender={renderRepoScanResult}
+                      onCancel={handleCancelJob}
                     />
                   ) : (
                     <div className="h-[60vh] flex flex-col items-center justify-center text-center gap-4 opacity-40">
