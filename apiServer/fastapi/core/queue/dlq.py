@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import aio_pika
 
+# DLQ
 DLX_EXCHANGE_NAME = "scan_jobs.dlx"
 DLQ_QUEUE_NAME = "scan.failed"
 DLQ_ROUTING_KEY = "scan.failed"
