@@ -14,6 +14,7 @@ interface UnifiedPipelineViewProps {
   steps: PipelineStepConfig[];
   result: any | null;
   onResultRender: (result: any) => React.ReactNode;
+  onCancel?: (jobId: string) => void;
 }
 
 export function UnifiedPipelineView({
@@ -21,6 +22,7 @@ export function UnifiedPipelineView({
   steps,
   result,
   onResultRender,
+  onCancel,
 }: UnifiedPipelineViewProps) {
   const currentStep = job.status;
   const currentIdx = steps.findIndex((s) => s.key === currentStep);
@@ -108,7 +110,8 @@ export function UnifiedPipelineView({
           <span>Overall Progress</span>
           <span className={cn(
             job.status === "DONE" && "text-emerald-500",
-            job.status === "ERROR" && "text-destructive"
+            job.status === "ERROR" && "text-destructive",
+            job.status === "CANCELLED" && "text-orange-500"
           )}>
             {job.progress}%
           </span>
@@ -117,10 +120,34 @@ export function UnifiedPipelineView({
           value={job.progress}
           className={cn(
             "h-2 rounded-full overflow-hidden transition-all duration-500",
-            job.status === "ERROR" && "bg-destructive/10"
+            job.status === "ERROR" && "bg-destructive/10",
+            job.status === "CANCELLED" && "bg-orange-500/10"
           )}
         />
       </div>
+
+      {/* Cancel Button for Active Scans */}
+      {!["DONE", "ERROR", "CANCELLED"].includes(job.status) && onCancel && (
+        <div className="flex justify-end pt-2">
+          <button
+            onClick={() => onCancel(job.job_id)}
+            className="px-4 py-2 bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/20 rounded-xl font-bold text-xs uppercase tracking-wider transition-all active:scale-[0.98]"
+          >
+            Cancel Scan
+          </button>
+        </div>
+      )}
+
+      {/* Cancellation Banner */}
+      {job.status === "CANCELLED" && (
+        <div className="p-5 rounded-2xl flex items-center gap-3.5 border border-orange-500/20 bg-orange-500/5 text-orange-500 animate-in fade-in duration-300">
+          <AlertCircle className="w-5 h-5 shrink-0" />
+          <div>
+            <h4 className="text-xs font-black uppercase tracking-tight">Scan Cancelled</h4>
+            <p className="text-[10px] opacity-80 mt-0.5">This job was cancelled by the user and sandbox resources were reclaimed.</p>
+          </div>
+        </div>
+      )}
 
       {/* Render detailed report on-demand */}
       {job.status === "DONE" && result && (
