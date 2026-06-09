@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.52](https://github.com/01cloud/01-Sandbox/compare/v0.5.51...v0.5.52) (2026-06-09)
+
+
+### 🚀 New Features
+
+* rabbitmq dlq implementation ([224809a](https://github.com/01cloud/01-Sandbox/commit/224809a8be3f4b8a77215cccaec0a1607441c841))
+* rabbitmq dlq implementation ([ded5144](https://github.com/01cloud/01-Sandbox/commit/ded51448d6cd37489d8984fd700d1305ce530aed))
+* rabbitmq dlq implementation ([1413c91](https://github.com/01cloud/01-Sandbox/commit/1413c914ff3fc61a54beb19ede6ca6abe8bd80a8))
+* rabbitmq dlq implementation ([ac95b5f](https://github.com/01cloud/01-Sandbox/commit/ac95b5f1800737f276e4ebbb1dd8dd8df12f82ff))
+* rabbitmq dlq implementation ([012a5d7](https://github.com/01cloud/01-Sandbox/commit/012a5d75e94846ade616c29ef71d135f1adef12c))
+* rabbitmq dlq implementation ([a272db4](https://github.com/01cloud/01-Sandbox/commit/a272db448b3bc3270eb122e71d62e1432fe0d356))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.51 [skip ci] ([1400823](https://github.com/01cloud/01-Sandbox/commit/14008235bd886b5d3fd3a53ec3f59b3d49db66e0))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.51 [skip ci] ([5de598a](https://github.com/01cloud/01-Sandbox/commit/5de598acb3d36da0e7d5951fbab1cab8d654fa98))
+
 ## [0.5.51](https://github.com/01cloud/01-Sandbox/compare/v0.5.50...v0.5.51) (2026-06-08)
 
 
