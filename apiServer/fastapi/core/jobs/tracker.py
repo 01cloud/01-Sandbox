@@ -55,6 +55,23 @@ class ReusableJobTracker:
     def get_job(self, job_id: str) -> Optional[GenericJobRecord]:
         return self._jobs.get(job_id)
 
+    def delete_job(self, job_id: str):
+        if job_id in self._jobs:
+            del self._jobs[job_id]
+
+        if self.app_state.use_redis and self.app_state.redis_client:
+            r = self.app_state.redis_client
+            try:
+                r.delete(
+                    f"job:{job_id}:metadata",
+                    f"job:{job_id}:status",
+                    f"job:{job_id}:events",
+                    f"job:{job_id}:result",
+                    f"job:{job_id}:cancelled",
+                )
+            except Exception as e:
+                print(f"[tracker] Failed to delete job from Redis: {e}")
+
     async def push_event(
         self,
         job_id: str,

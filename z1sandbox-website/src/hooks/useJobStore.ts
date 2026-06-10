@@ -22,7 +22,8 @@ export function useJobStore(
     refresh();
   };
 
-  const removeJob = (jobId: string) => {
+  const removeJob = async (jobId: string) => {
+    // 1. Remove from local store immediately
     jobStore.remove(jobId);
     if (esRefs.current[jobId]) {
       esRefs.current[jobId].close();
@@ -34,6 +35,20 @@ export function useJobStore(
       return copy;
     });
     refresh();
+
+    // 2. Call backend to delete job & PVC report
+    if (apiKey) {
+      try {
+        await fetch(`${apiBase}/v1/jobs/${jobId}?purge=true`, {
+          method: "DELETE",
+          headers: {
+            Authorization: `Bearer ${apiKey}`
+          }
+        });
+      } catch (e) {
+        console.error("[useJobStore] Failed to delete job from backend", e);
+      }
+    }
   };
 
   const lazyFetchResult = useCallback(async (jobId: string): Promise<any> => {

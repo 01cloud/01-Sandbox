@@ -227,9 +227,26 @@ async def _submit_scan_job(
             )
             resp.raise_for_status()
             data = resp.json()
+            child_job_id = data.get("job_id")
             report = data.get("report") or {}
             raw_count = len(report.get("findings", []))
             print(f"{_TAG}   ← report received: {raw_count} raw finding(s)")
+
+            # Immediately clean up the temporary child scan job from PVC
+            if child_job_id:
+                try:
+                    await client.delete(
+                        f"{base_url.rstrip('/')}{prefix}/scan-jobs/{child_job_id}",
+                        headers=opensandbox_headers(),
+                    )
+                    print(
+                        f"{_TAG}   ← cleaned up temporary child job {child_job_id} from PVC"
+                    )
+                except Exception as clean_err:
+                    print(
+                        f"{_TAG}   WARNING: failed to clean up child job {child_job_id}: {clean_err}"
+                    )
+
             return report
     except httpx.HTTPStatusError as exc:
         elapsed = time.monotonic() - t0

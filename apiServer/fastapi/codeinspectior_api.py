@@ -23,6 +23,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from health import get_health_router
 from proxy import get_proxy_router
 from sandboxes import get_sandboxes_router
+from scan_jobs import get_scan_jobs_router
 from scan_repository import get_repo_scan_router
 
 # Initialize central database
@@ -58,6 +59,7 @@ app.include_router(get_api_keys_router(state, validate_token))
 app.include_router(get_sandboxes_router(state, validate_token))
 app.include_router(get_proxy_router(state, validate_token))
 app.include_router(get_repo_scan_router(state, validate_token))
+app.include_router(get_scan_jobs_router(state, validate_token))
 
 # Register Generic Jobs Infrastructure router
 from core.jobs.router import router as jobs_router

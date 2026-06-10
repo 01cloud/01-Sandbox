@@ -470,6 +470,36 @@ async def get_scan_report(job_id: str):
         )
 
 
+@router.delete(
+    "/scan-jobs/{job_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["Security Scan Pipeline"],
+)
+async def delete_scan_job(job_id: str):
+    """
+    Deletes the persistent scan reports and workspace files for a job ID from the PVC.
+    """
+    import os
+    import shutil
+
+    data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
+    job_dir = os.path.join(data_root, job_id)
+
+    if os.path.exists(job_dir):
+        try:
+            shutil.rmtree(job_dir)
+            print(f"[SERVER] Deleted scan job directory from PVC: {job_dir}")
+        except Exception as e:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail={
+                    "code": "FILE_SYSTEM_ERROR",
+                    "message": f"Failed to delete scan job directory from PVC: {str(e)}",
+                },
+            )
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.get(
     "/scan-jobs/{job_id}/workspace/{file_path:path}", tags=["Security Scan Pipeline"]
 )
