@@ -52,6 +52,10 @@ class SandboxBackend(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def delete_scan_job(self, job_id: str) -> None:
+        pass
+
+    @abc.abstractmethod
     def list_sandboxes(self) -> list[SandboxResponse]:
         pass
 
@@ -175,6 +179,18 @@ class GenericHTTPBackend(SandboxBackend):
             )
             r.raise_for_status()
             return r.json()
+
+    def delete_scan_job(self, job_id: str) -> None:
+        """Deletes a persistent scan report and workspace from the remote PVC."""
+        prefix = opensandbox_route_prefix()
+        with httpx.Client(timeout=10) as client:
+            r = client.delete(
+                f"{self._url}{prefix}/scan-jobs/{job_id}",
+                headers=opensandbox_headers(),
+            )
+            if r.status_code == 404:
+                return  # If already deleted, treat as success
+            r.raise_for_status()
 
     def list_sandboxes(self) -> list[SandboxResponse]:
         """Retrieves active sandboxes from the remote OpenSandbox server."""

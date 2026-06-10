@@ -339,6 +339,50 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
             detail="Scan result not found or job still running.",
         )
 
+    @router.delete(
+        "/api/{version}/{backend_id}/v1/jobs/{job_id}",
+        tags=["Generic Jobs Infrastructure"],
+        dependencies=[Depends(validate_token)],
+        summary="Cancel a queued or running scan job, or permanently purge a completed job (via proxy)",
+    )
+    async def proxy_cancel_or_delete_job(
+        version: str, backend_id: str, job_id: str, purge: bool = Query(False)
+    ):
+        """
+        Intercepts DELETE requests for jobs to cancel or permanently delete them
+        from the gateway tracker, Redis, and remote PVC.
+        """
+        # 1. Trigger cancellation
+        if state.use_redis and state.redis_client:
+            try:
+                state.redis_client.set(f"job:{job_id}:cancelled", "true", ex=86400)
+                state.redis_client.publish("job:cancellations", job_id)
+                print(f"[Proxy Cancellation] Published cancellation for job {job_id}")
+            except Exception as e:
+                print(f"[Proxy Cancellation] Redis cancel error: {e}")
+        else:
+            try:
+                from core.queue.cancellation import cancel_active_task
+
+                await cancel_active_task(state, job_id)
+            except Exception as e:
+                print(f"[Proxy Cancellation] Local cancel error: {e}")
+
+        # 2. If purge=True, delete from memory, Redis and PVC
+        if purge:
+            state.job_tracker.delete_job(job_id)
+            try:
+                state.backend.delete_scan_job(job_id)
+                print(
+                    f"[Proxy Purge] Deleted report and workspace from PVC for job {job_id}"
+                )
+            except Exception as e:
+                print(f"[Proxy Purge] PVC report deletion failed for job {job_id}: {e}")
+
+            return {"job_id": job_id, "status": "DELETED"}
+
+        return {"job_id": job_id, "status": "CANCEL_REQUESTED"}
+
     @router.get(
         "/api/{version}/{backend_id}/jobs",
         tags=["Generic Jobs Infrastructure"],
