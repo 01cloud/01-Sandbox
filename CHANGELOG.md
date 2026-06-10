@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.60](https://github.com/01cloud/01-Sandbox/compare/v0.5.59...v0.5.60) (2026-06-10)
+
+
+### 🐛 Bug Fixes
+
+* immediate cluster sandbox deletion ([8b1b536](https://github.com/01cloud/01-Sandbox/commit/8b1b5366405cca4efbddc52f3e969f64e602fbcd))
+* sync job deletions across all pods in cluster ([3be58e9](https://github.com/01cloud/01-Sandbox/commit/3be58e9787844ea73f49a3f85015a331c6f7df14))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.59 [skip ci] ([85cda51](https://github.com/01cloud/01-Sandbox/commit/85cda51a7d660689c1d0a738450e5d537ad15bb5))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.59 [skip ci] ([dfed0b4](https://github.com/01cloud/01-Sandbox/commit/dfed0b4beb8e23ed56ca5f4e9aa311746eae132e))
+
 ## [0.5.59](https://github.com/01cloud/01-Sandbox/compare/v0.5.58...v0.5.59) (2026-06-10)
 
 
