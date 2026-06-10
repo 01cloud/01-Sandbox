@@ -1,3 +1,44 @@
+## Release v0.5.56 — 01-Sandbox
+**Release Date:** June 10, 2026
+
+---
+
+### Summary
+v0.5.56 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* docerfile ([2b930c9](https://github.com/01cloud/01-Sandbox/commit/2b930c9347dec560bcd4094b1a6aed2432f58ff6))
+* docerfile ([480b344](https://github.com/01cloud/01-Sandbox/commit/480b344a62475bca469655813bd42f4285257817))
+* generate RELEASE.md for v0.5.55 [skip ci] ([cbf61e0](https://github.com/01cloud/01-Sandbox/commit/cbf61e01188b1db3c19292c41a616e2bccc4dc33))
+* bump versions to v0.5.55 [skip ci] ([7bea105](https://github.com/01cloud/01-Sandbox/commit/7bea1057f567cbd7e8281799c73aaa447ed28129))
+
+### Changes
+## [0.5.56](https://github.com/01cloud/01-Sandbox/compare/v0.5.55...v0.5.56) (2026-06-10)
+
+
+### 🐛 Bug Fixes
+
+* docerfile ([2b930c9](https://github.com/01cloud/01-Sandbox/commit/2b930c9347dec560bcd4094b1a6aed2432f58ff6))
+* docerfile ([480b344](https://github.com/01cloud/01-Sandbox/commit/480b344a62475bca469655813bd42f4285257817))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.55 [skip ci] ([cbf61e0](https://github.com/01cloud/01-Sandbox/commit/cbf61e01188b1db3c19292c41a616e2bccc4dc33))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.55 [skip ci] ([7bea105](https://github.com/01cloud/01-Sandbox/commit/7bea1057f567cbd7e8281799c73aaa447ed28129))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.56)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.55 — 01-Sandbox
 **Release Date:** June 10, 2026
 
