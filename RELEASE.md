@@ -1,3 +1,44 @@
+## Release v0.5.60 — 01-Sandbox
+**Release Date:** June 10, 2026
+
+---
+
+### Summary
+v0.5.60 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* immediate cluster sandbox deletion ([8b1b536](https://github.com/01cloud/01-Sandbox/commit/8b1b5366405cca4efbddc52f3e969f64e602fbcd))
+* sync job deletions across all pods in cluster ([3be58e9](https://github.com/01cloud/01-Sandbox/commit/3be58e9787844ea73f49a3f85015a331c6f7df14))
+* generate RELEASE.md for v0.5.59 [skip ci] ([85cda51](https://github.com/01cloud/01-Sandbox/commit/85cda51a7d660689c1d0a738450e5d537ad15bb5))
+* bump versions to v0.5.59 [skip ci] ([dfed0b4](https://github.com/01cloud/01-Sandbox/commit/dfed0b4beb8e23ed56ca5f4e9aa311746eae132e))
+
+### Changes
+## [0.5.60](https://github.com/01cloud/01-Sandbox/compare/v0.5.59...v0.5.60) (2026-06-10)
+
+
+### 🐛 Bug Fixes
+
+* immediate cluster sandbox deletion ([8b1b536](https://github.com/01cloud/01-Sandbox/commit/8b1b5366405cca4efbddc52f3e969f64e602fbcd))
+* sync job deletions across all pods in cluster ([3be58e9](https://github.com/01cloud/01-Sandbox/commit/3be58e9787844ea73f49a3f85015a331c6f7df14))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.59 [skip ci] ([85cda51](https://github.com/01cloud/01-Sandbox/commit/85cda51a7d660689c1d0a738450e5d537ad15bb5))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.59 [skip ci] ([dfed0b4](https://github.com/01cloud/01-Sandbox/commit/dfed0b4beb8e23ed56ca5f4e9aa311746eae132e))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.60)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.59 — 01-Sandbox
 **Release Date:** June 10, 2026
 
