@@ -26,6 +26,11 @@ export function UnifiedPipelineView({
 }: UnifiedPipelineViewProps) {
   const currentStep = job.status;
   const currentIdx = steps.findIndex((s) => s.key === currentStep);
+  const isRetrying = currentStep === "RETRYING";
+  // Map retrying to the step that was likely executing (e.g., SCANNING or CLONING)
+  const activeIdx = isRetrying
+    ? (steps.findIndex(s => s.key === "SCANNING") !== -1 ? steps.findIndex(s => s.key === "SCANNING") : 1)
+    : currentIdx;
 
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
@@ -37,10 +42,11 @@ export function UnifiedPipelineView({
 
         {steps.map((step, idx) => {
           // Status evaluation for this specific step
-          const isDone = currentStep === "DONE" || (currentIdx !== -1 && idx < currentIdx);
-          const isActive = step.key === currentStep;
-          const isFailedStep = currentStep === "ERROR" && idx === Math.max(0, currentIdx);
-          const isPending = !isDone && !isActive && !isFailedStep;
+          const isFailedStep = currentStep === "ERROR" && idx === Math.max(0, activeIdx);
+          const isDone = currentStep === "DONE" || (activeIdx !== -1 && idx < activeIdx);
+          const isActive = idx === activeIdx && !isFailedStep && !isRetrying;
+          const isActiveRetry = isRetrying && idx === activeIdx;
+          const isPending = !isDone && !isActive && !isActiveRetry && !isFailedStep;
 
           return (
             <div
@@ -48,6 +54,7 @@ export function UnifiedPipelineView({
               className={cn(
                 "flex items-center gap-3.5 py-2 px-3.5 rounded-xl border border-transparent transition-all duration-300",
                 isActive && "bg-violet-500/10 border-violet-500/15 shadow-sm shadow-violet-500/5",
+                isActiveRetry && "bg-yellow-500/10 border-yellow-500/15 shadow-sm shadow-yellow-500/5",
                 isFailedStep && "bg-destructive/10 border-destructive/15",
                 isDone && "bg-emerald-500/5 border-emerald-500/10"
               )}
@@ -61,6 +68,10 @@ export function UnifiedPipelineView({
                 ) : isFailedStep ? (
                   <div className="w-5 h-5 rounded-full flex items-center justify-center bg-destructive/15 border border-destructive/30 text-destructive animate-bounce">
                     <AlertCircle className="w-3.5 h-3.5" />
+                  </div>
+                ) : isActiveRetry ? (
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center bg-yellow-500/15 border border-yellow-500/30 text-yellow-500 shadow-[0_0_8px_rgba(234,179,8,0.3)] animate-pulse">
+                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
                   </div>
                 ) : isActive ? (
                   <div className="w-5 h-5 rounded-full flex items-center justify-center bg-violet-500/15 border border-violet-500/30 text-violet-500 shadow-[0_0_8px_rgba(139,92,246,0.3)]">
@@ -80,6 +91,7 @@ export function UnifiedPipelineView({
                     "text-xs font-bold transition-colors",
                     isDone && "text-emerald-500",
                     isActive && "text-foreground",
+                    isActiveRetry && "text-yellow-500",
                     isFailedStep && "text-destructive",
                     isPending && "text-muted-foreground/40"
                   )}
@@ -90,6 +102,11 @@ export function UnifiedPipelineView({
                 {/* Active message details */}
                 {isActive && job.stepMessage && (
                   <span className="text-[10px] text-muted-foreground/80 truncate mt-0.5 animate-pulse font-mono">
+                    {job.stepMessage}
+                  </span>
+                )}
+                {isActiveRetry && job.stepMessage && (
+                  <span className="text-[10px] text-yellow-500/80 truncate mt-0.5 animate-pulse font-mono">
                     {job.stepMessage}
                   </span>
                 )}
@@ -111,7 +128,8 @@ export function UnifiedPipelineView({
           <span className={cn(
             job.status === "DONE" && "text-emerald-500",
             job.status === "ERROR" && "text-destructive",
-            job.status === "CANCELLED" && "text-orange-500"
+            job.status === "CANCELLED" && "text-orange-500",
+            job.status === "RETRYING" && "text-yellow-500"
           )}>
             {job.progress}%
           </span>
@@ -121,7 +139,8 @@ export function UnifiedPipelineView({
           className={cn(
             "h-2 rounded-full overflow-hidden transition-all duration-500",
             job.status === "ERROR" && "bg-destructive/10",
-            job.status === "CANCELLED" && "bg-orange-500/10"
+            job.status === "CANCELLED" && "bg-orange-500/10",
+            job.status === "RETRYING" && "bg-yellow-500/10"
           )}
         />
       </div>
@@ -135,6 +154,17 @@ export function UnifiedPipelineView({
           >
             Cancel Scan
           </button>
+        </div>
+      )}
+
+      {/* Retry Banner */}
+      {job.status === "RETRYING" && (
+        <div className="p-5 rounded-2xl flex items-center gap-3.5 border border-yellow-500/20 bg-yellow-500/5 text-yellow-500 animate-in fade-in duration-300">
+          <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
+          <div className="flex-1 min-w-0">
+            <h4 className="text-xs font-black uppercase tracking-tight">Retry in Progress</h4>
+            <p className="text-[10px] opacity-80 mt-0.5 font-mono truncate">{job.stepMessage}</p>
+          </div>
         </div>
       )}
 
