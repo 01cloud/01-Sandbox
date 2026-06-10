@@ -485,7 +485,10 @@ async def delete_scan_job(job_id: str):
 
     # 1. Terminate associated sandboxes
     try:
-        list_req = ListSandboxesRequest(filter=SandboxFilter(), pagination=None)
+        list_req = ListSandboxesRequest(
+            filter=SandboxFilter(),
+            pagination=PaginationRequest(page=1, pageSize=200),
+        )
         sandbox_list = sandbox_service.list_sandboxes(list_req)
         for sb in sandbox_list.items:
             if sb.metadata and sb.metadata.get("job_id") == job_id:
