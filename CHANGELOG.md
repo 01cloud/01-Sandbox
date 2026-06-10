@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.57](https://github.com/01cloud/01-Sandbox/compare/v0.5.56...v0.5.57) (2026-06-10)
+
+
+### 🐛 Bug Fixes
+
+* immediate cluster sandbox deletion ([46c05e6](https://github.com/01cloud/01-Sandbox/commit/46c05e6bbbd076c1f8b26f34bd99a61591e4d108))
+* immediate cluster sandbox deletion ([80f685c](https://github.com/01cloud/01-Sandbox/commit/80f685c51a64164be7f0a20238ca89e816066f96))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.56 [skip ci] ([3f2e185](https://github.com/01cloud/01-Sandbox/commit/3f2e1858eb16f46cf47446a837d18d9740210d9b))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.56 [skip ci] ([2db80cd](https://github.com/01cloud/01-Sandbox/commit/2db80cde670db1b341507945225146e9b525730c))
+
 ## [0.5.56](https://github.com/01cloud/01-Sandbox/compare/v0.5.55...v0.5.56) (2026-06-10)
 
 
