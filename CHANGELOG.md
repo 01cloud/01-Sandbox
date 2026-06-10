@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.56](https://github.com/01cloud/01-Sandbox/compare/v0.5.55...v0.5.56) (2026-06-10)
+
+
+### 🐛 Bug Fixes
+
+* docerfile ([2b930c9](https://github.com/01cloud/01-Sandbox/commit/2b930c9347dec560bcd4094b1a6aed2432f58ff6))
+* docerfile ([480b344](https://github.com/01cloud/01-Sandbox/commit/480b344a62475bca469655813bd42f4285257817))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.55 [skip ci] ([cbf61e0](https://github.com/01cloud/01-Sandbox/commit/cbf61e01188b1db3c19292c41a616e2bccc4dc33))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.55 [skip ci] ([7bea105](https://github.com/01cloud/01-Sandbox/commit/7bea1057f567cbd7e8281799c73aaa447ed28129))
+
 ## [0.5.55](https://github.com/01cloud/01-Sandbox/compare/v0.5.54...v0.5.55) (2026-06-10)
 
 
