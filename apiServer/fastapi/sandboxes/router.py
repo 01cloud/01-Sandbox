@@ -23,6 +23,12 @@ async def run_scan_in_background(job_id: str, req_dict: dict):
     from core.app_state import state
 
     try:
+        # Simulation check for retry/DLQ testing
+        files = req_dict.get("files") or {}
+        for file_content in files.values():
+            if "# SIMULATE_RETRY" in file_content or "# SIMULATE_ERROR" in file_content:
+                raise ValueError("Simulated processing error for retry/DLQ testing")
+
         await state.job_tracker.push_event(
             job_id,
             "PROVISIONING",

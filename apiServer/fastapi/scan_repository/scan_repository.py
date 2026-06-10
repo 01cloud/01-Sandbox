@@ -68,6 +68,16 @@ async def _run_scan_pipeline(
     print("\n[INFO] Repository scan started")
     print(f"Repository: {repo_url}\n")
 
+    # Simulation check for retry/DLQ testing
+    if (
+        "simulate_retry" in repo_url.lower()
+        or "simulate_error" in repo_url.lower()
+        or owner.lower() == "simulate"
+    ):
+        raise ValueError(
+            "Simulated repository scan processing error for retry/DLQ testing"
+        )
+
     try:
         # ── Step 1: Provision sandbox ────────────────────────────────
         log("PROVISIONING", "Creating isolated local sandbox directory...")
