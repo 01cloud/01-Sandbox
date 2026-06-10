@@ -35,6 +35,25 @@ def _build_headers() -> dict:
     return headers
 
 
+def parse_github_url(url: str) -> Tuple[str, str]:
+    """
+    Parse a GitHub repository URL and return the (owner, repo) tuple.
+    Does not perform external API calls.
+    Raises HTTPException(400) for invalid URL format.
+    """
+    url = url.strip()
+    match = GITHUB_URL_PATTERN.match(url)
+    if not match:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Invalid GitHub URL format. "
+                "Expected: https://github.com/{owner}/{repo}"
+            ),
+        )
+    return match.group(1), match.group(2)
+
+
 async def validate_github_repo(url: str) -> Tuple[str, str]:
     """
     Validate a GitHub repo URL and confirm it is public and accessible.

@@ -25,7 +25,7 @@ from .file_scanner import (
     current_parent_job_id,
     scan_language,
 )
-from .github_validator import validate_github_repo
+from .github_validator import parse_github_url, validate_github_repo
 from .language_detector import detect_languages
 from .models import RepoScanRequest, RepoScanResult, RepoScanSubmitResponse, ScanStep
 from .sandbox_provisioner import clone_repo, destroy_sandbox, provision_sandbox
@@ -85,6 +85,20 @@ async def _run_scan_pipeline(
         )
 
     try:
+        # ── Step 0: Validate Repository Accessibility ────────────────
+        log(
+            "VALIDATING", f"Verifying accessibility of {owner}/{repo} via GitHub API..."
+        )
+        await push_event(
+            ScanStep.PROVISIONING,
+            f"Verifying accessibility of {owner}/{repo} via GitHub API...",
+            5,
+        )
+        try:
+            await validate_github_repo(repo_url)
+        except HTTPException as he:
+            raise RuntimeError(he.detail)
+
         # ── Step 1: Provision sandbox ────────────────────────────────
         log("PROVISIONING", "Creating isolated local sandbox directory...")
         await push_event(ScanStep.PROVISIONING, "Provisioning isolated sandbox...", 10)
@@ -491,7 +505,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         """
         Validates a public GitHub repository URL and enqueues a full scan job.
         """
-        owner, repo = await validate_github_repo(req.repo_url)
+        owner, repo = parse_github_url(req.repo_url)
 
         job_id = str(uuid.uuid4())
 
