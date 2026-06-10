@@ -1,3 +1,44 @@
+## Release v0.5.62 — 01-Sandbox
+**Release Date:** June 10, 2026
+
+---
+
+### Summary
+v0.5.62 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* **api:** decouple github validation from request ([117d2ff](https://github.com/01cloud/01-Sandbox/commit/117d2ff743434215a90ac4e77dde113a35b22d84))
+* **api:** decouple github validation from request ([f9c2297](https://github.com/01cloud/01-Sandbox/commit/f9c2297d16d2987f7d072097a9b2ef41e3e3de63))
+* generate RELEASE.md for v0.5.61 [skip ci] ([58aa9dc](https://github.com/01cloud/01-Sandbox/commit/58aa9dc750da3d5a0fd8d2e5d8e74e037afa18a9))
+* bump versions to v0.5.61 [skip ci] ([087b688](https://github.com/01cloud/01-Sandbox/commit/087b688aaec3d890376d489b152ca907a533f07a))
+
+### Changes
+## [0.5.62](https://github.com/01cloud/01-Sandbox/compare/v0.5.61...v0.5.62) (2026-06-10)
+
+
+### 🐛 Bug Fixes
+
+* **api:** decouple github validation from request ([117d2ff](https://github.com/01cloud/01-Sandbox/commit/117d2ff743434215a90ac4e77dde113a35b22d84))
+* **api:** decouple github validation from request ([f9c2297](https://github.com/01cloud/01-Sandbox/commit/f9c2297d16d2987f7d072097a9b2ef41e3e3de63))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.61 [skip ci] ([58aa9dc](https://github.com/01cloud/01-Sandbox/commit/58aa9dc750da3d5a0fd8d2e5d8e74e037afa18a9))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.61 [skip ci] ([087b688](https://github.com/01cloud/01-Sandbox/commit/087b688aaec3d890376d489b152ca907a533f07a))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.62)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.61 — 01-Sandbox
 **Release Date:** June 10, 2026
 
