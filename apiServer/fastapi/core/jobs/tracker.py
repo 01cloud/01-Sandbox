@@ -69,6 +69,7 @@ class ReusableJobTracker:
                     f"job:{job_id}:result",
                     f"job:{job_id}:cancelled",
                 )
+                r.publish("job:deletions", job_id)
             except Exception as e:
                 print(f"[tracker] Failed to delete job from Redis: {e}")
 

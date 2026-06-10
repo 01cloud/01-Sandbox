@@ -217,7 +217,9 @@ async def cleanup_child_jobs(job_ids: set[str]) -> None:
         for jid in list(job_ids):
             try:
                 url = f"{base_url.rstrip('/')}{prefix}/scan-jobs/{jid}"
-                await client.delete(url, headers=opensandbox_headers())
+                await client.delete(
+                    url, params={"terminate": "true"}, headers=opensandbox_headers()
+                )
                 print(f"{_TAG} [CLEANUP] Deleted dangling child job {jid}")
             except Exception as e:
                 print(f"{_TAG} [CLEANUP] Failed to delete child job {jid}: {e}")

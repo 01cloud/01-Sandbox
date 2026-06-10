@@ -6,25 +6,36 @@ import redis
 
 
 async def setup_cancellation_listener(app_state) -> None:
-    """Listens to Redis Pub/Sub for job cancellation requests and cancels active tasks."""
+    """Listens to Redis Pub/Sub for job cancellation and deletion requests."""
     if not app_state.use_redis or not app_state.redis_client:
         print(
-            "[Cancellation] Redis not available — cross-pod job cancellation disabled."
+            "[Cancellation] Redis not available — cross-pod job cancellation/deletion disabled."
         )
         return
 
-    print("[Cancellation] Starting Redis Pub/Sub cancellation listener...")
+    print("[Cancellation] Starting Redis Pub/Sub cancellation/deletion listener...")
     pubsub = app_state.redis_client.pubsub()
-    pubsub.subscribe("job:cancellations")
+    pubsub.subscribe("job:cancellations", "job:deletions")
 
     while True:
         try:
             # Polling get_message with timeout to keep it non-blocking
             msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
             if msg:
-                job_id = msg["data"]
-                print(f"[Cancellation] Received cancellation request for job: {job_id}")
-                await cancel_active_task(app_state, job_id)
+                channel = msg.get("channel")
+                job_id = msg.get("data")
+                if channel == "job:cancellations":
+                    print(
+                        f"[Cancellation] Received cancellation request for job: {job_id}"
+                    )
+                    await cancel_active_task(app_state, job_id)
+                elif channel == "job:deletions":
+                    print(f"[Deletion] Received deletion request for job: {job_id}")
+                    # 1. Cancel task first
+                    await cancel_active_task(app_state, job_id)
+                    # 2. Purge from in-memory tracker
+                    if job_id in app_state.job_tracker._jobs:
+                        del app_state.job_tracker._jobs[job_id]
         except Exception as e:
             print(f"[Cancellation] Listener error: {e}")
         await asyncio.sleep(0.5)
