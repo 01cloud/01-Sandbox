@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.55](https://github.com/01cloud/01-Sandbox/compare/v0.5.54...v0.5.55) (2026-06-10)
+
+
+### 🐛 Bug Fixes
+
+* delete the job ([b547d65](https://github.com/01cloud/01-Sandbox/commit/b547d65a48f9435beab6ec12d23b3840f0a2932c))
+* delete the job ([a188b68](https://github.com/01cloud/01-Sandbox/commit/a188b688d1dbfb32d1c87191d68484801a68581f))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.54 [skip ci] ([073c2b1](https://github.com/01cloud/01-Sandbox/commit/073c2b13e5bff55d622976e4b5c9d6d692246f34))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.54 [skip ci] ([a4398f8](https://github.com/01cloud/01-Sandbox/commit/a4398f8006a8634e0d0dee43b04f5de2750cc2a4))
+
 ## [0.5.54](https://github.com/01cloud/01-Sandbox/compare/v0.5.53...v0.5.54) (2026-06-10)
 
 
