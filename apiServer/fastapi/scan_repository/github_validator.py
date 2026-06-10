@@ -68,10 +68,11 @@ async def validate_github_repo(url: str) -> Tuple[str, str]:
         async with httpx.AsyncClient(timeout=10.0) as client:
             response = await client.get(api_url, headers=_build_headers())
     except httpx.RequestError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Could not reach GitHub API: {exc}",
+        print(
+            f"[github_validator] Warning: Could not reach GitHub API ({exc}). "
+            f"Bypassing API check and proceeding with regex-matched {owner}/{repo}."
         )
+        return owner, repo
 
     if response.status_code == 404:
         raise HTTPException(
@@ -83,16 +84,18 @@ async def validate_github_repo(url: str) -> Tuple[str, str]:
         )
 
     if response.status_code == 403:
-        raise HTTPException(
-            status_code=403,
-            detail="GitHub API rate limit exceeded. Set GITHUB_TOKEN env var to increase limit.",
+        print(
+            f"[github_validator] Warning: GitHub API rate limit exceeded. "
+            f"Bypassing API check and proceeding with regex-matched {owner}/{repo}."
         )
+        return owner, repo
 
     if not response.is_success:
-        raise HTTPException(
-            status_code=response.status_code,
-            detail=f"GitHub API returned unexpected status {response.status_code}",
+        print(
+            f"[github_validator] Warning: GitHub API returned unexpected status {response.status_code}. "
+            f"Bypassing API check and proceeding with regex-matched {owner}/{repo}."
         )
+        return owner, repo
 
     data = response.json()
 
