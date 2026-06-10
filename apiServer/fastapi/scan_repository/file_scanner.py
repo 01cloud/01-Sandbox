@@ -15,6 +15,7 @@ YAML handling:
   Plain YAML  → yamllint only              (section: "YAML")
   K8s YAML    → kubelinter, kubescore, kubeconform  (section: "Kubernetes YAML")
 """
+
 from __future__ import annotations
 
 import collections
@@ -238,7 +239,14 @@ async def _submit_scan_job(
     prefix = opensandbox_route_prefix()
     url = f"{base_url.rstrip('/')}{prefix}/scan-jobs"
 
-    payload: dict = {"files": files_dict, "metadata": {"job_id": child_job_id}}
+    payload: dict = {
+        "files": files_dict,
+        "metadata": {
+            "job_id": child_job_id,
+        },
+    }
+    if parent_id:
+        payload["metadata"]["parent_job_id"] = parent_id
     if tools:
         payload["tools"] = tools
 

@@ -348,9 +348,11 @@ async def create_scan_job(
         env={
             "SCAN_DIR": "/workspace",
             "SCAN_REPORT": "/reports/security_scan_report.json",
-            "SCAN_TOOLS": ",".join(scan_request.tools)
-            if scan_request and scan_request.tools
-            else "",
+            "SCAN_TOOLS": (
+                ",".join(scan_request.tools)
+                if scan_request and scan_request.tools
+                else ""
+            ),
         },
         volumes=[
             Volume(
@@ -491,7 +493,10 @@ async def delete_scan_job(job_id: str):
         )
         sandbox_list = sandbox_service.list_sandboxes(list_req)
         for sb in sandbox_list.items:
-            if sb.metadata and sb.metadata.get("job_id") == job_id:
+            if sb.metadata and (
+                sb.metadata.get("job_id") == job_id
+                or sb.metadata.get("parent_job_id") == job_id
+            ):
                 print(f"[SERVER] Terminating sandbox {sb.id} for job {job_id}")
                 try:
                     sandbox_service.delete_sandbox(sb.id)
@@ -1110,9 +1115,11 @@ async def proxy_sandbox_endpoint_request(
             url=f"http://{target_host}/{full_path}",
             params=query_string if query_string else None,
             headers=headers,
-            content=request.stream()
-            if request.method in ("POST", "PUT", "PATCH", "DELETE")
-            else None,
+            content=(
+                request.stream()
+                if request.method in ("POST", "PUT", "PATCH", "DELETE")
+                else None
+            ),
         )
 
         resp = await client.send(req, stream=True)

@@ -296,17 +296,19 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
             except Exception as e:
                 print(f"[Cancellation] Local cancel error: {e}")
 
-        # 2. If purge=True, delete metadata, status, events from Redis and memory, and delete PVC report
+        # Always trigger backend sandbox/PVC cleanup on cancellation or deletion
+        try:
+            state.backend.delete_scan_job(job_id)
+            print(
+                f"[Cleanup] Deleted report and workspace from PVC and terminated sandboxes for job {job_id}"
+            )
+        except Exception as e:
+            print(f"[Cleanup] Remote PVC/sandbox deletion failed for job {job_id}: {e}")
+
+        # 2. If purge=True, delete metadata, status, events from Redis and memory
         if purge:
             # Delete from in-memory tracker and Redis
             state.job_tracker.delete_job(job_id)
-            # Delete reports from PVC on the remote OpenSandbox server
-            try:
-                state.backend.delete_scan_job(job_id)
-                print(f"[Purge] Deleted report and workspace from PVC for job {job_id}")
-            except Exception as e:
-                print(f"[Purge] PVC report deletion failed for job {job_id}: {e}")
-
             return {"job_id": job_id, "status": "DELETED"}
 
         return {"job_id": job_id, "status": "CANCEL_REQUESTED"}
