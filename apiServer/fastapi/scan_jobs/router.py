@@ -298,7 +298,7 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
 
         # Always trigger backend sandbox/PVC cleanup on cancellation or deletion
         try:
-            state.backend.delete_scan_job(job_id)
+            state.backend.delete_scan_job(job_id, terminate=True)
             print(
                 f"[Cleanup] Deleted report and workspace from PVC and terminated sandboxes for job {job_id}"
             )

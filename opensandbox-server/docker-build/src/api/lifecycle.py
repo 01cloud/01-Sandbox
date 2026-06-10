@@ -477,33 +477,34 @@ async def get_scan_report(job_id: str):
     status_code=status.HTTP_204_NO_CONTENT,
     tags=["Security Scan Pipeline"],
 )
-async def delete_scan_job(job_id: str):
+async def delete_scan_job(job_id: str, terminate: bool = Query(False)):
     """
     Deletes the persistent scan reports and workspace files for a job ID from the PVC,
-    and terminates any running sandboxes associated with this job.
+    and terminates associated sandboxes if terminate parameter is True.
     """
     import os
     import shutil
 
-    # 1. Terminate associated sandboxes
-    try:
-        list_req = ListSandboxesRequest(
-            filter=SandboxFilter(),
-            pagination=PaginationRequest(page=1, pageSize=200),
-        )
-        sandbox_list = sandbox_service.list_sandboxes(list_req)
-        for sb in sandbox_list.items:
-            if sb.metadata and (
-                sb.metadata.get("job_id") == job_id
-                or sb.metadata.get("parent_job_id") == job_id
-            ):
-                print(f"[SERVER] Terminating sandbox {sb.id} for job {job_id}")
-                try:
-                    sandbox_service.delete_sandbox(sb.id)
-                except Exception as del_err:
-                    print(f"[SERVER] Failed to delete sandbox {sb.id}: {del_err}")
-    except Exception as e:
-        print(f"[SERVER] Failed to list sandboxes for job {job_id} cleanup: {e}")
+    # 1. Terminate associated sandboxes if requested
+    if terminate:
+        try:
+            list_req = ListSandboxesRequest(
+                filter=SandboxFilter(),
+                pagination=PaginationRequest(page=1, pageSize=200),
+            )
+            sandbox_list = sandbox_service.list_sandboxes(list_req)
+            for sb in sandbox_list.items:
+                if sb.metadata and (
+                    sb.metadata.get("job_id") == job_id
+                    or sb.metadata.get("parent_job_id") == job_id
+                ):
+                    print(f"[SERVER] Terminating sandbox {sb.id} for job {job_id}")
+                    try:
+                        sandbox_service.delete_sandbox(sb.id)
+                    except Exception as del_err:
+                        print(f"[SERVER] Failed to delete sandbox {sb.id}: {del_err}")
+        except Exception as e:
+            print(f"[SERVER] Failed to list sandboxes for job {job_id} cleanup: {e}")
 
     # 2. Delete PVC directories
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")

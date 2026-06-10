@@ -368,17 +368,20 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
             except Exception as e:
                 print(f"[Proxy Cancellation] Local cancel error: {e}")
 
+        # Always trigger backend sandbox/PVC cleanup on cancellation or deletion
+        try:
+            state.backend.delete_scan_job(job_id, terminate=True)
+            print(
+                f"[Proxy Cleanup] Deleted report and workspace from PVC and terminated sandboxes for job {job_id}"
+            )
+        except Exception as e:
+            print(
+                f"[Proxy Cleanup] Remote PVC/sandbox deletion failed for job {job_id}: {e}"
+            )
+
         # 2. If purge=True, delete from memory, Redis and PVC
         if purge:
             state.job_tracker.delete_job(job_id)
-            try:
-                state.backend.delete_scan_job(job_id)
-                print(
-                    f"[Proxy Purge] Deleted report and workspace from PVC for job {job_id}"
-                )
-            except Exception as e:
-                print(f"[Proxy Purge] PVC report deletion failed for job {job_id}: {e}")
-
             return {"job_id": job_id, "status": "DELETED"}
 
         return {"job_id": job_id, "status": "CANCEL_REQUESTED"}
