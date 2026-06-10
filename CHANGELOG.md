@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.61](https://github.com/01cloud/01-Sandbox/compare/v0.5.60...v0.5.61) (2026-06-10)
+
+
+### 🐛 Bug Fixes
+
+* bypass github api validation when rate-limited or unreachable ([0857212](https://github.com/01cloud/01-Sandbox/commit/08572122188f87b1ad890a7879843f698491b81e))
+* bypass github api validation when rate-limited or unreachable ([82fe04b](https://github.com/01cloud/01-Sandbox/commit/82fe04b65e7c880008e7688fcc2e7ffeb9021306))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.60 [skip ci] ([7c2d366](https://github.com/01cloud/01-Sandbox/commit/7c2d366cc1ceb1b7a045bdab004d9b637f2b56e9))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.60 [skip ci] ([0d7afcc](https://github.com/01cloud/01-Sandbox/commit/0d7afcc0dfc373067d3a3a588f0ff9dab8dd0dc0))
+
 ## [0.5.60](https://github.com/01cloud/01-Sandbox/compare/v0.5.59...v0.5.60) (2026-06-10)
 
 
