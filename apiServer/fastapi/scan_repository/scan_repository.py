@@ -19,7 +19,12 @@ from typing import AsyncIterator, Callable, Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
-from .file_scanner import scan_language
+from .file_scanner import (
+    active_child_jobs_by_parent,
+    cleanup_child_jobs,
+    current_parent_job_id,
+    scan_language,
+)
 from .github_validator import validate_github_repo
 from .language_detector import detect_languages
 from .models import RepoScanRequest, RepoScanResult, RepoScanSubmitResponse, ScanStep
@@ -41,6 +46,7 @@ async def _run_scan_pipeline(
     Full scan pipeline executed as a background task.
     Pushes SSE events locally and broadcasts them via Redis Pub/Sub.
     """
+    token = current_parent_job_id.set(job_id)
     sandbox_id: Optional[str] = None
     start_time = time.monotonic()
     backend = app_state.backend
@@ -447,6 +453,14 @@ async def _run_scan_pipeline(
         if sandbox_id:
             log("CLEANUP", f"Destroying sandbox: {sandbox_id}")
             await destroy_sandbox(sandbox_id)
+
+        # Clean up any active/dangling child scan jobs on the server
+        child_jobs = active_child_jobs_by_parent.pop(job_id, set())
+        if child_jobs:
+            log("CLEANUP", f"Cleaning up dangling child jobs on server: {child_jobs}")
+            await asyncio.shield(cleanup_child_jobs(child_jobs))
+
+        current_parent_job_id.reset(token)
         log("CLEANUP", "Pipeline teardown complete")
 
 

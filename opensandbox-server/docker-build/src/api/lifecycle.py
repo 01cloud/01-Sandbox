@@ -477,11 +477,27 @@ async def get_scan_report(job_id: str):
 )
 async def delete_scan_job(job_id: str):
     """
-    Deletes the persistent scan reports and workspace files for a job ID from the PVC.
+    Deletes the persistent scan reports and workspace files for a job ID from the PVC,
+    and terminates any running sandboxes associated with this job.
     """
     import os
     import shutil
 
+    # 1. Terminate associated sandboxes
+    try:
+        list_req = ListSandboxesRequest(filter=SandboxFilter(), pagination=None)
+        sandbox_list = sandbox_service.list_sandboxes(list_req)
+        for sb in sandbox_list.items:
+            if sb.metadata and sb.metadata.get("job_id") == job_id:
+                print(f"[SERVER] Terminating sandbox {sb.id} for job {job_id}")
+                try:
+                    sandbox_service.delete_sandbox(sb.id)
+                except Exception as del_err:
+                    print(f"[SERVER] Failed to delete sandbox {sb.id}: {del_err}")
+    except Exception as e:
+        print(f"[SERVER] Failed to list sandboxes for job {job_id} cleanup: {e}")
+
+    # 2. Delete PVC directories
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
     job_dir = os.path.join(data_root, job_id)
 

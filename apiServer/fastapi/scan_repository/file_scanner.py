@@ -17,10 +17,13 @@ YAML handling:
 """
 from __future__ import annotations
 
+import collections
+import contextvars
 import json
 import os
 import time
 from typing import List, Optional, Tuple
+from uuid import uuid4
 
 import httpx
 from config import opensandbox_base_url, opensandbox_headers, opensandbox_route_prefix
@@ -200,6 +203,25 @@ def _filter_findings_to_submitted_files(
     return kept
 
 
+# Map parent_job_id -> set of active child_job_ids
+active_child_jobs_by_parent = collections.defaultdict(set)
+current_parent_job_id = contextvars.ContextVar("current_parent_job_id", default=None)
+
+
+async def cleanup_child_jobs(job_ids: set[str]) -> None:
+    """Sends DELETE requests to opensandbox-server to destroy dangling child jobs and their sandboxes."""
+    base_url = opensandbox_base_url()
+    prefix = opensandbox_route_prefix()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for jid in list(job_ids):
+            try:
+                url = f"{base_url.rstrip('/')}{prefix}/scan-jobs/{jid}"
+                await client.delete(url, headers=opensandbox_headers())
+                print(f"{_TAG} [CLEANUP] Deleted dangling child job {jid}")
+            except Exception as e:
+                print(f"{_TAG} [CLEANUP] Failed to delete child job {jid}: {e}")
+
+
 async def _submit_scan_job(
     files_dict: dict[str, str], tools: Optional[list[str]] = None
 ) -> dict:
@@ -207,15 +229,22 @@ async def _submit_scan_job(
     Submit files to POST /scan-jobs and wait for the result.
     Returns the parsed report dict, or {} on failure.
     """
+    parent_id = current_parent_job_id.get()
+    child_job_id = str(uuid4())
+    if parent_id:
+        active_child_jobs_by_parent[parent_id].add(child_job_id)
+
     base_url = opensandbox_base_url()
     prefix = opensandbox_route_prefix()
     url = f"{base_url.rstrip('/')}{prefix}/scan-jobs"
 
-    payload: dict = {"files": files_dict}
+    payload: dict = {"files": files_dict, "metadata": {"job_id": child_job_id}}
     if tools:
         payload["tools"] = tools
 
-    print(f"{_TAG}   → POST {url}  (files={len(files_dict)}, tools={tools})")
+    print(
+        f"{_TAG}   → POST {url}  (files={len(files_dict)}, tools={tools}, child_job_id={child_job_id})"
+    )
     t0 = time.monotonic()
 
     try:
@@ -227,25 +256,23 @@ async def _submit_scan_job(
             )
             resp.raise_for_status()
             data = resp.json()
-            child_job_id = data.get("job_id")
             report = data.get("report") or {}
             raw_count = len(report.get("findings", []))
             print(f"{_TAG}   ← report received: {raw_count} raw finding(s)")
 
             # Immediately clean up the temporary child scan job from PVC
-            if child_job_id:
-                try:
-                    await client.delete(
-                        f"{base_url.rstrip('/')}{prefix}/scan-jobs/{child_job_id}",
-                        headers=opensandbox_headers(),
-                    )
-                    print(
-                        f"{_TAG}   ← cleaned up temporary child job {child_job_id} from PVC"
-                    )
-                except Exception as clean_err:
-                    print(
-                        f"{_TAG}   WARNING: failed to clean up child job {child_job_id}: {clean_err}"
-                    )
+            try:
+                await client.delete(
+                    f"{base_url.rstrip('/')}{prefix}/scan-jobs/{child_job_id}",
+                    headers=opensandbox_headers(),
+                )
+                print(
+                    f"{_TAG}   ← cleaned up temporary child job {child_job_id} from PVC"
+                )
+            except Exception as clean_err:
+                print(
+                    f"{_TAG}   WARNING: failed to clean up child job {child_job_id}: {clean_err}"
+                )
 
             return report
     except httpx.HTTPStatusError as exc:
@@ -258,6 +285,9 @@ async def _submit_scan_job(
         elapsed = time.monotonic() - t0
         print(f"{_TAG}   ✗ scan-jobs submission error after {elapsed:.2f}s: {exc}")
         return {}
+    finally:
+        if parent_id:
+            active_child_jobs_by_parent[parent_id].discard(child_job_id)
 
 
 def _log_tool_execution(
