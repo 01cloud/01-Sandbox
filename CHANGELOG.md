@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.54](https://github.com/01cloud/01-Sandbox/compare/v0.5.53...v0.5.54) (2026-06-10)
+
+
+### 🐛 Bug Fixes
+
+* dlq frontend integration ([94a9b6c](https://github.com/01cloud/01-Sandbox/commit/94a9b6c17923de9938da1377afe2425fc2b82b26))
+* dlq frontend integration ([cee5f89](https://github.com/01cloud/01-Sandbox/commit/cee5f89dcb0337e63e790e44d74dbc8ae68a0c58))
+* dlq retry issues ([0da74bc](https://github.com/01cloud/01-Sandbox/commit/0da74bcb4bd8780823de70c9b356dd36619d1fd7))
+* dlq retry issues ([244aeff](https://github.com/01cloud/01-Sandbox/commit/244aeff1cf9193a8181e6ef13ebbf091f3e2f85f))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.53 [skip ci] ([3c8fb30](https://github.com/01cloud/01-Sandbox/commit/3c8fb30923d396991446fb692e08af03fadd9219))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.53 [skip ci] ([63f3c9c](https://github.com/01cloud/01-Sandbox/commit/63f3c9cabfc437a4aa424293487a7d5686d67a54))
+
 ## [0.5.53](https://github.com/01cloud/01-Sandbox/compare/v0.5.52...v0.5.53) (2026-06-09)
 
 
