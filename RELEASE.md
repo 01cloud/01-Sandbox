@@ -1,3 +1,44 @@
+## Release v0.5.61 — 01-Sandbox
+**Release Date:** June 10, 2026
+
+---
+
+### Summary
+v0.5.61 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* bypass github api validation when rate-limited or unreachable ([0857212](https://github.com/01cloud/01-Sandbox/commit/08572122188f87b1ad890a7879843f698491b81e))
+* bypass github api validation when rate-limited or unreachable ([82fe04b](https://github.com/01cloud/01-Sandbox/commit/82fe04b65e7c880008e7688fcc2e7ffeb9021306))
+* generate RELEASE.md for v0.5.60 [skip ci] ([7c2d366](https://github.com/01cloud/01-Sandbox/commit/7c2d366cc1ceb1b7a045bdab004d9b637f2b56e9))
+* bump versions to v0.5.60 [skip ci] ([0d7afcc](https://github.com/01cloud/01-Sandbox/commit/0d7afcc0dfc373067d3a3a588f0ff9dab8dd0dc0))
+
+### Changes
+## [0.5.61](https://github.com/01cloud/01-Sandbox/compare/v0.5.60...v0.5.61) (2026-06-10)
+
+
+### 🐛 Bug Fixes
+
+* bypass github api validation when rate-limited or unreachable ([0857212](https://github.com/01cloud/01-Sandbox/commit/08572122188f87b1ad890a7879843f698491b81e))
+* bypass github api validation when rate-limited or unreachable ([82fe04b](https://github.com/01cloud/01-Sandbox/commit/82fe04b65e7c880008e7688fcc2e7ffeb9021306))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.60 [skip ci] ([7c2d366](https://github.com/01cloud/01-Sandbox/commit/7c2d366cc1ceb1b7a045bdab004d9b637f2b56e9))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.60 [skip ci] ([0d7afcc](https://github.com/01cloud/01-Sandbox/commit/0d7afcc0dfc373067d3a3a588f0ff9dab8dd0dc0))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.61)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.60 — 01-Sandbox
 **Release Date:** June 10, 2026
 
