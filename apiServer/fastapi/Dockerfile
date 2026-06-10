@@ -61,6 +61,7 @@ RUN tokei --version && enry --version && github-linguist --version && linguist -
 
 COPY *.py ./
 COPY scan_repository/ ./scan_repository/
+COPY scan_jobs/ ./scan_jobs/
 COPY core/ ./core/
 COPY auth/ ./auth/
 COPY api_keys/ ./api_keys/
