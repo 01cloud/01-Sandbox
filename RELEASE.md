@@ -1,3 +1,44 @@
+## Release v0.5.66 — 01-Sandbox
+**Release Date:** June 11, 2026
+
+---
+
+### Summary
+v0.5.66 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* rabbitmq concurrency ([b632e71](https://github.com/01cloud/01-Sandbox/commit/b632e71125078e52756afb09ae898d64e303a48e))
+* rabbitmq concurrency ([d4fadfc](https://github.com/01cloud/01-Sandbox/commit/d4fadfcf59a63d5ee7a6a20b6252fed8950c96f2))
+* generate RELEASE.md for v0.5.65 [skip ci] ([360f97d](https://github.com/01cloud/01-Sandbox/commit/360f97d45f6e2f890493dcb7c0c525b119807771))
+* bump versions to v0.5.65 [skip ci] ([995d621](https://github.com/01cloud/01-Sandbox/commit/995d621969055c6c9d85ca05d8bdfd56e065f03c))
+
+### Changes
+## [0.5.66](https://github.com/01cloud/01-Sandbox/compare/v0.5.65...v0.5.66) (2026-06-11)
+
+
+### 🐛 Bug Fixes
+
+* rabbitmq concurrency ([b632e71](https://github.com/01cloud/01-Sandbox/commit/b632e71125078e52756afb09ae898d64e303a48e))
+* rabbitmq concurrency ([d4fadfc](https://github.com/01cloud/01-Sandbox/commit/d4fadfcf59a63d5ee7a6a20b6252fed8950c96f2))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.65 [skip ci] ([360f97d](https://github.com/01cloud/01-Sandbox/commit/360f97d45f6e2f890493dcb7c0c525b119807771))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.65 [skip ci] ([995d621](https://github.com/01cloud/01-Sandbox/commit/995d621969055c6c9d85ca05d8bdfd56e065f03c))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.66)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.65 — 01-Sandbox
 **Release Date:** June 11, 2026
 
