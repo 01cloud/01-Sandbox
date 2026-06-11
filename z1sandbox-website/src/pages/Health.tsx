@@ -124,7 +124,7 @@ const Health = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-b from-background to-background/95 py-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+    <div className="min-h-screen bg-gradient-to-b from-background to-background/95 pt-32 pb-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
 
       {/* Decorative Blur Spheres */}
       <div className="absolute top-1/4 left-1/10 w-96 h-96 rounded-full bg-primary/5 blur-[120px] pointer-events-none -z-10" />
