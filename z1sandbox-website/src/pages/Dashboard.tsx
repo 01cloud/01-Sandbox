@@ -22,7 +22,8 @@ import {
   UploadCloud,
   Play,
   FileCode,
-  Square
+  Square,
+  Activity
 } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Button } from "@/components/ui/button";
@@ -62,6 +63,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import SecurityScanner from "@/components/dashboard/SecurityScanner";
 import RepoScannerWidget from "@/components/dashboard/RepoScannerWidget";
+import QueueMonitorWidget from "@/components/dashboard/QueueMonitorWidget";
 
 interface APIKey {
   id: string;
@@ -103,6 +105,7 @@ const Dashboard = () => {
   const [newKey, setNewKey] = useState<{ id: string; key: string; status?: string } | null>(null);
   const [form, setForm] = useState({ name: "", backend: "Z1_SANDBOX", ttl: "never", ttlValue: "1" });
   const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
+  const [activeTab, setActiveTab] = useState("apps");
 
   // --- DEVELOPER TESTING MODE STATES & FUNCTIONS ---
   const [devMode, setDevMode] = useState(false);
@@ -618,7 +621,7 @@ const Dashboard = () => {
         </p>
       </header>
 
-      <Tabs defaultValue="apps" className="space-y-8">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
         <TabsList className="bg-secondary/30 p-1.5 rounded-2xl border border-border/50 h-auto gap-1 flex-nowrap overflow-x-auto no-scrollbar justify-start sm:justify-center">
           <TabsTrigger value="apps" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
             <Box className="w-4 h-4" />
@@ -627,6 +630,10 @@ const Dashboard = () => {
           <TabsTrigger value="apis" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
             <Key className="w-4 h-4" />
             API Management
+          </TabsTrigger>
+          <TabsTrigger value="queues" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
+            <Activity className="w-4 h-4" />
+            Queue Monitor
           </TabsTrigger>
         </TabsList>
 
@@ -1209,6 +1216,10 @@ const Dashboard = () => {
               </p> */}
             </CardFooter>
           </Card>
+        </TabsContent>
+
+        <TabsContent value="queues" className="animate-in fade-in-50 slide-in-from-bottom-5 duration-500">
+          <QueueMonitorWidget apiBaseUrl={API_BASE_URL} activeTab={activeTab} />
         </TabsContent>
       </Tabs>
 

@@ -100,10 +100,12 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
             except Exception as retry_err:
                 print(f"[RabbitMQ] Error while executing retry handler: {retry_err}")
                 await msg.reject(requeue=False)
+                app_state.queue_stats.record_processed("scan.failed")
 
         finally:
             if "job_id" in locals():
                 app_state.active_tasks.pop(job_id, None)
+            app_state.queue_stats.record_processed(jt.queue_name)
 
     await q.consume(on_message)
 

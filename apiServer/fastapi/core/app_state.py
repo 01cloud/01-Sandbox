@@ -26,6 +26,11 @@ class AppState:
 
         self.job_tracker = ReusableJobTracker(self)
 
+        # Initialize queue metrics tracker
+        from core.queue.stats import QueueStatsTracker
+
+        self.queue_stats = QueueStatsTracker()
+
         # Persistence Config
         self.use_postgres = os.environ.get("PG_HOST") is not None
         self.use_redis = os.environ.get("REDIS_HOST") is not None

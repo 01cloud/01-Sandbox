@@ -66,6 +66,11 @@ from core.jobs.router import router as jobs_router
 
 app.include_router(jobs_router)
 
+# Register Queue Metrics router
+from core.queue.router import router as queue_router
+
+app.include_router(queue_router)
+
 if __name__ == "__main__":
     import uvicorn
 
