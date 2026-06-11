@@ -21,7 +21,7 @@ class AppState:
         self.latest_job_id: str | None = None
         self.active_tasks: dict[str, asyncio.Task] = {}
 
-        # Instantiate reusable job tracker
+        # Instantiate reusable job trackers
         from core.jobs.tracker import ReusableJobTracker
 
         self.job_tracker = ReusableJobTracker(self)
