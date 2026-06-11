@@ -11,9 +11,11 @@ Here is the summary of the key issues resolved and tasks completed today:
 * **Issue**: Launching many scans concurrently on single-node servers caused the Kubernetes scheduler to run out of allocatable CPU. Sandbox runner pods got stuck in `Pending` with scheduling warnings: `FailedScheduling: 0/1 nodes are available: 1 Insufficient cpu`.
 * **Fix**: Disabled the Horizontal Pod Autoscaler (`hpa.enabled: false`) and capped replicas to `2` to align with physical CPU limits. Excess scan requests now wait securely inside RabbitMQ queue buffers rather than overloading the cluster, preventing false timeouts.
 
-### 3. Layout & Overlap Fixes
-* **Issue**: The floating navigation header overlapped the content cards on the telemetry and cluster health pages.
-* **Fix**: Updated top padding on the containers inside `QueueStatsPage.tsx` and `Health.tsx` from `py-12` to `pt-32 pb-12` to clear the navbar. Added the public `/queue-stats` route inside `App.tsx` and verified it.
+### 3. New Queue Telemetry Dashboard (UI Metrics Integration)
+* **Feature**: Added a live RabbitMQ Queue Telemetry Dashboard directly into the web interface.
+  * **Metrics Displayed**: Real-time tracking of queue depth, active consumer counts, and rolling throughput (processed messages/sec) for the `scan.quick`, `scan.repo`, and `scan.failed` (DLQ) queues.
+  * **Routing**: Registered the public, unauthenticated frontend route `/queue-stats` in `App.tsx` matching the public backend stats endpoint, as well as the authenticated stats tab.
+  * **Layout Padding Fixes**: Standardized top padding on the containers of both `QueueStatsPage.tsx` and `Health.tsx` (from `py-12` to `pt-32 pb-12`) to prevent the floating navigation header from overlapping dashboard cards.
 
 ### 4. Enterprise Client Presentation & Capacity Sizing Kit
 * **Sizing Guide**: Created `docs/sizing/sizingformula.md` detailing the formula to calculate safe replica counts and prefetch limits based on available server specs ($R \times P \le N$).
