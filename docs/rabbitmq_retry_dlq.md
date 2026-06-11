@@ -98,3 +98,60 @@ If the job fails for a 4th time:
 3. The worker rejects the message by calling `msg.reject(requeue=False)`.
 4. RabbitMQ intercepts the rejected message and automatically forwards it to the **Dead Letter Exchange (`scan_jobs.dlx`)** which places it in the **Dead Letter Queue (`scan.failed`)**.
 5. The message is stored in `scan.failed` indefinitely and does not clog active worker queues.
+
+---
+
+## 3. How to Test Retries & DLQ
+
+You can test the retry and Dead Letter Queue (DLQ) topology in a live environment using the built-in simulation hook.
+
+### Step 1: Submit a Scan Job with Simulation Keyword
+Submit a scan request with a URL containing the string `simulate_retry` or `simulate_error`.
+
+* **Via the React UI**: Enter `https://github.com/simulate/demo-repo` in the scan input.
+* **Via cURL / REST API**:
+  ```bash
+  curl -X POST https://api-sandbox.01security.com/v1/repo-scan \
+    -H "Authorization: Bearer <your_api_key>" \
+    -H "Content-Type: application/json" \
+    -d '{"repo_url": "https://github.com/simulate/demo-repo"}'
+  ```
+
+### Step 2: Monitor UI Progress
+The job will fail immediately upon starting, initiating the retry sequence:
+1. **First Failure**: Enters 5s delay queue. Status becomes `RETRYING` with message: `Retry 1/3 (backing off)`.
+2. **Second Failure**: Enters 30s delay queue. Status becomes `RETRYING` with message: `Retry 2/3 (backing off)`.
+3. **Third Failure**: Enters 2m delay queue. Status becomes `RETRYING` with message: `Retry 3/3 (backing off)`.
+4. **Final Failure**: Exceeds limits. Status becomes `ERROR` with message: `Scan failed after 3 retries`.
+
+### Step 3: Verify the Dead Letter Queue (DLQ)
+Once the job transitions to `ERROR`, RabbitMQ rejects the message and places it in the DLQ (`scan.failed`). Run the following command inside your RabbitMQ container or service to verify the message count:
+```bash
+rabbitmqctl list_queues | grep scan.failed
+```
+
+---
+
+## 4. Retriable vs. Non-Retriable Errors (Validation vs. Execution)
+
+When testing retry behavior, it is important to distinguish between **transient execution failures** and **permanent input/validation failures**:
+
+### A. Non-Retriable Errors (Permanent Validation Failures)
+* **Example**: Submitting a private or non-existent repository like `https://github.com/agentgateway/kamal`.
+* **Behavior**: The background worker contacts the GitHub API and receives a `404 Not Found` or `403 Forbidden` (private repo check).
+* **Rationale**: Because a repository being private or non-existent is a permanent condition, retrying the check multiple times would waste worker queue resources and delay displaying the final status. Thus, the system is designed to **fail immediately** and transition the job status to `ERROR` without retrying.
+
+### B. Retriable Errors (Transient/Simulation Failures)
+* **Example**: Submitting a URL using the simulation keyword `https://github.com/simulate/kamal`.
+* **Behavior**: The background worker bypasses the external GitHub accessibility check (preventing a 404 validation error) and goes straight into the scanning phase where it intentionally throws a simulated runtime error.
+* **Rationale**: This simulates an infrastructure or transient runtime failure (e.g., database timeout, runner crash, or network glitch). Such failures are highly likely to resolve upon retry, triggering the exponential backoff sequence (`5s` -> `30s` -> `2m`).
+
+### C. Real-World Transient/Execution Failures (Automatically Retried)
+Apart from simulation keys, any unexpected error during the execution of a real repository scan will automatically trigger retries and the DLQ flow:
+* **Sandbox Provisioning Timeout**: If the Kubernetes or docker sandbox environment fails to provision or times out (60-second limit).
+* **Git Clone Failures**: If Git fails to clone the repository due to transient network drops or repository server issues.
+* **Language Detection Failures**: If the language analyzer fails or crashes during profiling.
+* **Overall Scan Timeout**: If the overall execution exceeds the 5-minute container/job processing limit.
+* **Service Crash**: Any unhandled runtime error from the underlying scanning tools (Semgrep, Trivy, Enry).
+
+In all these real-world failure cases, the worker will catch the error, log a execution failure, retry up to 3 times with exponential backoff, and ultimately route the message to the DLQ (`scan.failed`) if all attempts fail.
