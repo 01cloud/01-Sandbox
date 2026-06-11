@@ -1,3 +1,46 @@
+## Release v0.5.63 — 01-Sandbox
+**Release Date:** June 11, 2026
+
+---
+
+### Summary
+v0.5.63 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement rabbitmq metric endpoints ([73f6a84](https://github.com/01cloud/01-Sandbox/commit/73f6a84921b552d1f9d0ff70c2492fe762bbcbc3))
+* implement rabbitmq metric endpoints ([ed935d1](https://github.com/01cloud/01-Sandbox/commit/ed935d1898513b1e950d3a31969f007f26245bd7))
+* generate RELEASE.md for v0.5.62 [skip ci] ([719e246](https://github.com/01cloud/01-Sandbox/commit/719e2467c266f4aba72292307081bb152268311c))
+* **readme:** update readme files ([b0fc118](https://github.com/01cloud/01-Sandbox/commit/b0fc118384c5c0ba27bb598ef4a02a2555e2ec76))
+
+### Changes
+## [0.5.63](https://github.com/01cloud/01-Sandbox/compare/v0.5.62...v0.5.63) (2026-06-11)
+
+
+### 🚀 New Features
+
+* implement rabbitmq metric endpoints ([73f6a84](https://github.com/01cloud/01-Sandbox/commit/73f6a84921b552d1f9d0ff70c2492fe762bbcbc3))
+* implement rabbitmq metric endpoints ([ed935d1](https://github.com/01cloud/01-Sandbox/commit/ed935d1898513b1e950d3a31969f007f26245bd7))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.62 [skip ci] ([719e246](https://github.com/01cloud/01-Sandbox/commit/719e2467c266f4aba72292307081bb152268311c))
+* **readme:** update readme files ([b0fc118](https://github.com/01cloud/01-Sandbox/commit/b0fc118384c5c0ba27bb598ef4a02a2555e2ec76))
+* **readme:** update readme files ([31b9df1](https://github.com/01cloud/01-Sandbox/commit/31b9df1417d225d846cc7f9d7cdfe7e59c010a90))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.62 [skip ci] ([637cc07](https://github.com/01cloud/01-Sandbox/commit/637cc07aea51dd0087d92bcff810b575687aa1e2))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.63)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.62 — 01-Sandbox
 **Release Date:** June 10, 2026
 
