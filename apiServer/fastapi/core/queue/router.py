@@ -50,3 +50,48 @@ async def get_queue_stats(user_data: dict = Depends(validate_token)):
         "available": True,
         "queues": stats,
     }
+
+
+public_router = APIRouter(tags=["Queue Metrics Public"])
+
+
+@public_router.get("/queue-stats")
+async def get_public_queue_stats():
+    """
+    Public, unauthenticated endpoint returning live statistics for the RabbitMQ queues.
+    """
+    conn = get_connection()
+    if not conn or conn.is_closed:
+        return {
+            "available": False,
+            "queues": {},
+        }
+
+    queues_to_query = ["scan.quick", "scan.repo", "scan.failed"]
+    stats = {}
+
+    for q_name in queues_to_query:
+        depth = 0
+        consumers = 0
+        try:
+            async with conn.channel() as ch:
+                q = await ch.declare_queue(q_name, passive=True)
+                depth = q.declaration_result.message_count
+                consumers = q.declaration_result.consumer_count
+        except Exception as e:
+            print(
+                f"[Queue Stats Public] Failed to query queue '{q_name}' passively: {e}"
+            )
+            pass
+
+        throughput = state.queue_stats.get_throughput(q_name)
+        stats[q_name] = {
+            "depth": depth,
+            "consumers": consumers,
+            "throughput": throughput,
+        }
+
+    return {
+        "available": True,
+        "queues": stats,
+    }
