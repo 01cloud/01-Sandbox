@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.63](https://github.com/01cloud/01-Sandbox/compare/v0.5.62...v0.5.63) (2026-06-11)
+
+
+### 🚀 New Features
+
+* implement rabbitmq metric endpoints ([73f6a84](https://github.com/01cloud/01-Sandbox/commit/73f6a84921b552d1f9d0ff70c2492fe762bbcbc3))
+* implement rabbitmq metric endpoints ([ed935d1](https://github.com/01cloud/01-Sandbox/commit/ed935d1898513b1e950d3a31969f007f26245bd7))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.62 [skip ci] ([719e246](https://github.com/01cloud/01-Sandbox/commit/719e2467c266f4aba72292307081bb152268311c))
+* **readme:** update readme files ([b0fc118](https://github.com/01cloud/01-Sandbox/commit/b0fc118384c5c0ba27bb598ef4a02a2555e2ec76))
+* **readme:** update readme files ([31b9df1](https://github.com/01cloud/01-Sandbox/commit/31b9df1417d225d846cc7f9d7cdfe7e59c010a90))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.62 [skip ci] ([637cc07](https://github.com/01cloud/01-Sandbox/commit/637cc07aea51dd0087d92bcff810b575687aa1e2))
+
 ## [0.5.62](https://github.com/01cloud/01-Sandbox/compare/v0.5.61...v0.5.62) (2026-06-10)
 
 
