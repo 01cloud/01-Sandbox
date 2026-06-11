@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.67](https://github.com/01cloud/01-Sandbox/compare/v0.5.66...v0.5.67) (2026-06-11)
+
+
+### 🐛 Bug Fixes
+
+* rabbitmq concurrency ([f30c46b](https://github.com/01cloud/01-Sandbox/commit/f30c46bc78339988a24cfaa00c44e99515fc83a0))
+* rabbitmq concurrency ([ef9a8d3](https://github.com/01cloud/01-Sandbox/commit/ef9a8d3c103d0ad4606d020171e3eee5b703fc60))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.66 [skip ci] ([193a7fb](https://github.com/01cloud/01-Sandbox/commit/193a7fb60c76a741c0ecb6ddc6c7946c2c962ba2))
+
 ## [0.5.66](https://github.com/01cloud/01-Sandbox/compare/v0.5.65...v0.5.66) (2026-06-11)
 
 
