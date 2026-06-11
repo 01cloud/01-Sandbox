@@ -53,9 +53,9 @@ ingress:
     nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
 
 hpa:
-  enabled: true
+  enabled: false
   minReplicas: 1
-  maxReplicas: 10
+  maxReplicas: 2
   targetCPUUtilizationPercentage: 70
   targetMemoryUtilizationPercentage: 80
 
