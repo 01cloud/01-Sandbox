@@ -1,3 +1,44 @@
+## Release v0.5.64 — 01-Sandbox
+**Release Date:** June 11, 2026
+
+---
+
+### Summary
+v0.5.64 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implemented both the public unauthenticated ([b35ed5f](https://github.com/01cloud/01-Sandbox/commit/b35ed5fca192baaf7518c0f9dd8876e7c244f960))
+* implemented both the public unauthenticated ([82b7045](https://github.com/01cloud/01-Sandbox/commit/82b7045668bea4fbd591f36cf8fc2b9c269865ed))
+* generate RELEASE.md for v0.5.63 [skip ci] ([36093f1](https://github.com/01cloud/01-Sandbox/commit/36093f1e239441e586e7d99e2a459ab74df4d87c))
+* bump versions to v0.5.63 [skip ci] ([a8cc7c9](https://github.com/01cloud/01-Sandbox/commit/a8cc7c9a3d26cb3a68cd7493f05ecac7a02b2f04))
+
+### Changes
+## [0.5.64](https://github.com/01cloud/01-Sandbox/compare/v0.5.63...v0.5.64) (2026-06-11)
+
+
+### 🚀 New Features
+
+* implemented both the public unauthenticated ([b35ed5f](https://github.com/01cloud/01-Sandbox/commit/b35ed5fca192baaf7518c0f9dd8876e7c244f960))
+* implemented both the public unauthenticated ([82b7045](https://github.com/01cloud/01-Sandbox/commit/82b7045668bea4fbd591f36cf8fc2b9c269865ed))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.63 [skip ci] ([36093f1](https://github.com/01cloud/01-Sandbox/commit/36093f1e239441e586e7d99e2a459ab74df4d87c))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.63 [skip ci] ([a8cc7c9](https://github.com/01cloud/01-Sandbox/commit/a8cc7c9a3d26cb3a68cd7493f05ecac7a02b2f04))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.64)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.63 — 01-Sandbox
 **Release Date:** June 11, 2026
 
