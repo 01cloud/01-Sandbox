@@ -88,3 +88,16 @@ async def test_queue_stats_endpoint_available():
             assert q_stats["throughput"] > 0.0
     finally:
         app.dependency_overrides.clear()
+
+
+def test_public_queue_stats_endpoint_unavailable():
+    from codeinspectior_api import app
+
+    with patch("core.queue.router.get_connection", return_value=None):
+        client = TestClient(app)
+        # Verify no Authorization header is needed
+        response = client.get("/queue-stats")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["available"] is False
+        assert data["queues"] == {}
