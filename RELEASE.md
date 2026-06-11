@@ -1,3 +1,44 @@
+## Release v0.5.65 — 01-Sandbox
+**Release Date:** June 11, 2026
+
+---
+
+### Summary
+v0.5.65 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* ui padding on the wrapper ([130ae27](https://github.com/01cloud/01-Sandbox/commit/130ae27aba7605bb17a6a98defa1bb64b7bd1340))
+* ui padding on the wrapper ([2bde152](https://github.com/01cloud/01-Sandbox/commit/2bde152d05f01f3b77f91665d68aec85f5bdd443))
+* generate RELEASE.md for v0.5.64 [skip ci] ([63d02a2](https://github.com/01cloud/01-Sandbox/commit/63d02a2b41c9ffa91d22bf23e72fba5bfcad77c4))
+* bump versions to v0.5.64 [skip ci] ([1ba97a9](https://github.com/01cloud/01-Sandbox/commit/1ba97a944eab60eb0643c965ff31362bbe5669c6))
+
+### Changes
+## [0.5.65](https://github.com/01cloud/01-Sandbox/compare/v0.5.64...v0.5.65) (2026-06-11)
+
+
+### 🐛 Bug Fixes
+
+* ui padding on the wrapper ([130ae27](https://github.com/01cloud/01-Sandbox/commit/130ae27aba7605bb17a6a98defa1bb64b7bd1340))
+* ui padding on the wrapper ([2bde152](https://github.com/01cloud/01-Sandbox/commit/2bde152d05f01f3b77f91665d68aec85f5bdd443))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.64 [skip ci] ([63d02a2](https://github.com/01cloud/01-Sandbox/commit/63d02a2b41c9ffa91d22bf23e72fba5bfcad77c4))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.64 [skip ci] ([1ba97a9](https://github.com/01cloud/01-Sandbox/commit/1ba97a944eab60eb0643c965ff31362bbe5669c6))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.65)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.64 — 01-Sandbox
 **Release Date:** June 11, 2026
 
