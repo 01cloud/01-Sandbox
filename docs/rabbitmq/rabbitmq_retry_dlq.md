@@ -158,7 +158,18 @@ Warning  FailedScheduling  default-scheduler  0/1 nodes are available: 1 Insuffi
 
 ---
 
-## 5. Queue Metrics & Telemetry
+## 5. Startup Connection Resiliency (Retry Loop)
+
+During cluster deployments or upgrades, the `sandbox-api` pods and the `rabbitmq` pod are often scheduled in parallel. Since the RabbitMQ broker takes around 15–20 seconds to fully initialize and listen on port `5672`, the API pods might fail to connect on their very first attempt, raising a `ConnectionRefusedError`.
+
+To handle this race condition, `connect_rabbitmq()` implements a startup connection retry loop:
+* **Max Attempts:** 10 retries
+* **Interval:** 3 seconds between attempts
+* **Behavior:** The API pod will wait and retry connecting for up to 30 seconds rather than failing immediately and falling back to offline/fallback mode permanently. Once the broker is ready, the connection completes successfully and starts all consumer worker queues.
+
+---
+
+## 6. Queue Metrics & Telemetry
 
 The application exposes real-time broker telemetry to help operators monitor queue behavior. The statistics can be viewed on the web dashboard (under the **Queue Monitor** tab) or accessed directly via the API.
 
@@ -173,7 +184,7 @@ The application exposes real-time broker telemetry to help operators monitor que
 
 ---
 
-## 6. How to Test Retries & DLQ
+## 7. How to Test Retries & DLQ
 
 You can test the retry and Dead Letter Queue (DLQ) topology in a live environment using the built-in simulation hook.
 
