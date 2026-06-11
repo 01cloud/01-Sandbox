@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.65](https://github.com/01cloud/01-Sandbox/compare/v0.5.64...v0.5.65) (2026-06-11)
+
+
+### 🐛 Bug Fixes
+
+* ui padding on the wrapper ([130ae27](https://github.com/01cloud/01-Sandbox/commit/130ae27aba7605bb17a6a98defa1bb64b7bd1340))
+* ui padding on the wrapper ([2bde152](https://github.com/01cloud/01-Sandbox/commit/2bde152d05f01f3b77f91665d68aec85f5bdd443))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.64 [skip ci] ([63d02a2](https://github.com/01cloud/01-Sandbox/commit/63d02a2b41c9ffa91d22bf23e72fba5bfcad77c4))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.64 [skip ci] ([1ba97a9](https://github.com/01cloud/01-Sandbox/commit/1ba97a944eab60eb0643c965ff31362bbe5669c6))
+
 ## [0.5.64](https://github.com/01cloud/01-Sandbox/compare/v0.5.63...v0.5.64) (2026-06-11)
 
 
