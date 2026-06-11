@@ -102,3 +102,4 @@ async def handle_worker_failure(
         )
         # Reject the message to route it to the DLX
         await msg.reject(requeue=False)
+        app_state.queue_stats.record_processed("scan.failed")

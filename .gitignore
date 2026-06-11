@@ -22,3 +22,7 @@ apiServer/fastapi/venv/
 apiServer/fastapi/bleach/
 apiServer/fastapi/webencodings/
 test.sh
+
+
+__pycache__/
+*.pyc
