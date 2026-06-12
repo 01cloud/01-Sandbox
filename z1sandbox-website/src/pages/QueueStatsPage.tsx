@@ -1,7 +1,10 @@
 import { useState, useEffect } from "react";
 import { Zap, Code, AlertTriangle, CheckCircle2, Layers, RefreshCw, Activity, Clock } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useAuth0 } from "@auth0/auth0-react";
+import { toast } from "sonner";
 
 interface QueueStat {
   depth: number;
@@ -15,18 +18,54 @@ interface QueueStatsResponse {
 }
 
 export default function QueueStatsPage() {
+  const { getAccessTokenSilently, isAuthenticated } = useAuth0();
   const [queueStats, setQueueStats] = useState<QueueStatsResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isRequeueing, setIsRequeueing] = useState(false);
 
   // Dynamically resolve base API URL with fallbacks
   const API_BASE_URL = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "";
   let resolvedUrl = "https://api-sandbox.01security.com/queue-stats";
+  let requeueUrl = "https://api-sandbox.01security.com/v1/queue/requeue-failed";
   if (API_BASE_URL) {
     const cleanBase = API_BASE_URL.replace(/\/api\/z1sandbox\/?$/, "").replace(/\/v1\/?$/, "");
     resolvedUrl = `${cleanBase}/queue-stats`;
+    requeueUrl = `${cleanBase}/v1/queue/requeue-failed`;
   }
+
+  const handleRequeueFailed = async () => {
+    if (!isAuthenticated) {
+      toast.error("You must be logged in to requeue failed jobs.");
+      return;
+    }
+    setIsRequeueing(true);
+    try {
+      const token = await getAccessTokenSilently();
+      const response = await fetch(requeueUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({})
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        toast.success(`Successfully re-queued ${data.requeued || 0} failed job(s)!`);
+        fetchQueueStats();
+      } else {
+        toast.error(data.detail || "Failed to re-queue jobs.");
+      }
+    } catch (err: any) {
+      console.error("Error re-queueing jobs:", err);
+      toast.error(err.message || "An unexpected error occurred.");
+    } finally {
+      setIsRequeueing(false);
+    }
+  };
 
   const fetchQueueStats = async () => {
     setIsRefreshing(true);
@@ -216,6 +255,30 @@ export default function QueueStatsPage() {
                             }}
                           />
                         </div>
+
+                        {name === "scan.failed" && (
+                          <Button
+                            onClick={handleRequeueFailed}
+                            disabled={isRequeueing || stat.depth === 0}
+                            variant="outline"
+                            className={cn(
+                              "w-full rounded-2xl h-11 font-bold mt-4 border-rose-500/20 hover:border-rose-500/50 hover:bg-rose-500/10 text-rose-500 transition-all flex items-center justify-center gap-2",
+                              stat.depth === 0 && "opacity-50 cursor-not-allowed border-muted hover:bg-transparent text-muted-foreground"
+                            )}
+                          >
+                            {isRequeueing ? (
+                              <>
+                                <RefreshCw className="w-4 h-4 animate-spin" />
+                                Requeueing...
+                              </>
+                            ) : (
+                              <>
+                                <RefreshCw className="w-4 h-4" />
+                                Requeue Failed Jobs
+                              </>
+                            )}
+                          </Button>
+                        )}
                       </CardContent>
                     </Card>
                   );

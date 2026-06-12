@@ -61,7 +61,7 @@
 
 - [ ] **Structured JSON Logging** — Replace all `print()` statements across the codebase with structured JSON logs `{"level": "INFO", "component": "RabbitMQ", "job_id": "..."}` — makes logs searchable in Grafana Loki or similar tools.
 - [ ] **OpenTelemetry Tracing** — Add distributed tracing to track the full lifecycle of a scan (HTTP submit → RabbitMQ publish → consumer pickup → sandbox → result) as a single trace in Jaeger or Tempo.
-- [ ] **Admin Dashboard API** — Add operator-only endpoints: force-drain a queue, inspect raw job state, manually re-queue a failed job, view per-user submission stats.
+- [/] **Admin Dashboard API** — Add operator-only endpoints: force-drain a queue, inspect raw job state, manually re-queue a failed job [x], view per-user submission stats.
 
 ---
 
