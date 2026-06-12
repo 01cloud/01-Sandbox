@@ -66,30 +66,49 @@ Point to the output of **DEMO 2**:
 
 ---
 
-## 4. Architectural Summary Diagram
+## 4. Architectural Summary & Diagram
 
+### The Core Platform Architecture
+The platform is built on a distributed, decoupled, and containerized microservices architecture running inside Kubernetes:
+* **API Server Gateway (`apiServer`)**: A high-performance FastAPI web server that handles client REST requests, rate-limiting, and job submission.
+* **Message Broker (`RabbitMQ`)**: The asynchronous backbone that buffers incoming scan jobs, protecting the server from crash-inducing spikes in concurrent traffic.
+* **Cache & State Store (`Redis`)**: Used for rate-limiting, active job tracking, and worker orchestration (such as broadcasting job cancellations via Redis Pub/Sub).
+* **Hardened Sandbox Manager (`OpenSandbox`)**: Coordinates dynamic, isolated sandbox runner pods. Each sandbox is constrained in resources (CPU/Memory) and runs code analysis tools (Semgrep, Trivy, Git Clone) securely.
+
+### Capacity & Resource Allocation (8 GB RAM Configuration)
+Based on the platform's mathematical capacity formula, the system ensures 100% stability under load by reserving a buffer for system overhead and bottleneck limits:
+* **System Overhead Reserve**: $1.5\text{ CPU Cores}$ and $2.5\text{ GiB RAM}$ (for PostgreSQL, Redis, RabbitMQ, and Gateway).
+* **Free Resources (on a 4 Core / 8 GB Node)**: $2.5\text{ Cores}$ and $5.5\text{ GiB RAM}$.
+* **Sandbox Runner Footprint**: Each dynamic sandbox pod requests $0.5\text{ CPU}$ and $0.5\text{ GiB RAM}$.
+* **Bottleneck Calculation**: Max safe parallel scans = $\min(2.5 / 0.5, 5.5 / 0.5) = \mathbf{5}$ concurrent sandboxes.
+* **Scalable Configuration Applied**:
+  * **API Replicas ($R = 2$)**: Ensures high availability and zero-downtime rolling upgrades.
+  * **Prefetch Workers ($P = 2$)**: Limits each worker pod to processing a maximum of 2 parallel scans (`maxRepoScanWorkers` and `maxQuickScanWorkers`).
+  * **Total Concurrency**: $\text{Replicas (2)} \times \text{Prefetch (2)} = \mathbf{4}$ parallel scans. This utilizes the cluster optimally while staying safely under the 5-pod safety limit to prevent scheduler failures or node out-of-memory (OOM) crashes.
+
+### Asynchronous Job Lifecycle & Resilience Diagram
 You can share this flow chart with the client to summarize how tasks move through the system:
 
 ```mermaid
 graph TD
-    User([Client Bulk Input: 20+ Scans]) -->|Submit| API[FastAPI Web Server]
-    API -->|Publish| Ex[Main Exchange]
-    Ex -->|Route| QMain[Active Scan Queue]
+    User(["Client Bulk Input: 20+ Scans"]) -->|Submit| API["FastAPI Web Server"]
+    API -->|Publish| Ex["Main Exchange"]
+    Ex -->|Route| QMain["Active Scan Queue"]
 
-    subgraph Worker Pool
-        W[Worker 1]
-        W2[Worker 2]
-        W3[Worker 3]
+    subgraph WorkerPool ["Worker Pool (Prefetch: 2)"]
+        W["Worker 1"]
+        W2["Worker 2"]
+        W3["Worker 3"]
     end
 
-    QMain -->|Prefetch Limit = 3| Worker Pool
+    QMain -->|Prefetch Limit = 2| WorkerPool
 
-    Worker Pool -->|Success| Out[Complete Scan Result]
-    Worker Pool -->|Transient Failure| ExRetry[Retry Exchange]
+    WorkerPool -->|Success| Out["Complete Scan Result"]
+    WorkerPool -->|Transient Failure| ExRetry["Retry Exchange"]
 
-    ExRetry -->|TTL Delay Queue| QDelay[Delay Queue: 5s / 30s / 2m]
+    ExRetry -->|TTL Delay Queue| QDelay["Delay Queue: 5s / 30s / 2m"]
     QDelay -->|TTL Expires| Ex
 
-    Worker Pool -->|Exceeded 3 Retries| ExDLX[Dead Letter Exchange]
-    ExDLX -->|Isolate| QDlq[DLQ Queue: scan.failed]
+    WorkerPool -->|Exceeded 3 Retries| ExDLX["Dead Letter Exchange"]
+    ExDLX -->|Isolate| QDlq["DLQ Queue: scan.failed"]
 ```

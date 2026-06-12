@@ -1,7 +1,9 @@
 from auth import validate_token
 from core import state
 from core.queue.connection import get_connection
-from fastapi import APIRouter, Depends
+from core.queue.requeue import requeue_failed_jobs
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
 
 router = APIRouter(prefix="/v1/queue", tags=["Queue Metrics"])
 
@@ -50,6 +52,29 @@ async def get_queue_stats(user_data: dict = Depends(validate_token)):
         "available": True,
         "queues": stats,
     }
+
+
+class RequeueRequest(BaseModel):
+    job_id: str | None = None
+
+
+@router.post("/requeue-failed")
+async def requeue_failed_jobs_endpoint(
+    req: RequeueRequest | None = None,
+    user_data: dict = Depends(validate_token),
+):
+    """
+    Manually re-queue failed scan jobs from the Dead Letter Queue (DLQ) back to active queues.
+    If job_id is provided, only that specific job is re-queued. Otherwise, all failed jobs are re-queued.
+    """
+    job_id = req.job_id if req else None
+    try:
+        res = await requeue_failed_jobs(job_id)
+        return res
+    except RuntimeError as e:
+        raise HTTPException(status_code=503, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to requeue jobs: {str(e)}")
 
 
 public_router = APIRouter(tags=["Queue Metrics Public"])

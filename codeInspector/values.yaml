@@ -67,7 +67,7 @@ apiServer:
     JWT_PRIVATE_KEY: ""
     JWT_PUBLIC_JWKS: ""
   deployment:
-    replicaCount: 1
+    replicaCount: 2
     image:
       repository: 01community/01sandbox-api
       tag: "v0.5.68"
@@ -121,8 +121,8 @@ apiServer:
     port: 5672
     user: "admin"
     password: "changeme"
-    maxQuickScanWorkers: "5"
-    maxRepoScanWorkers: "3"
+    maxQuickScanWorkers: "2"
+    maxRepoScanWorkers: "2"
 ################################################################
 # MetalLB component values
 ################################################################

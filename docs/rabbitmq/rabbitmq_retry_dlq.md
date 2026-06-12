@@ -132,8 +132,8 @@ When running multiple scans concurrently (e.g., 20+ scans), it is critical to ba
 ### Concurrency Formula
 * The maximum number of concurrent scans processed is calculated as:
   $$\text{Total Concurrent Scans} = \text{Active API Replicas} \times \text{Prefetch Limit per Worker}$$
-* By default, the Repository Scan Queue (`scan.repo`) has a prefetch limit of **3 concurrent scans per worker**.
-* If you have `7` active `sandbox-api` replicas, the cluster will attempt to run `21` repository scans concurrently.
+* By default, the Repository Scan Queue (`scan.repo`) has a prefetch limit of **2 concurrent scans per worker**.
+* If you have `7` active `sandbox-api` replicas, the cluster will attempt to run `14` repository scans concurrently.
 
 ### Cluster Saturation (FailedScheduling / Insufficient CPU)
 If the number of concurrent scans exceeds the physical CPU/Memory resources of the node, incoming sandbox pods will get stuck in the `Pending` state.
@@ -212,3 +212,29 @@ Once the job transitions to `ERROR`, RabbitMQ rejects the message and places it 
 ```bash
 rabbitmqctl list_queues | grep scan.failed
 ```
+
+---
+
+## 8. Re-queuing Failed Jobs (DLQ Recovery)
+
+When jobs fail permanently (after 3 retries or due to a code bug that has since been fixed), they land in the Dead Letter Queue (`scan.failed`). Instead of manually copying payloads in the RabbitMQ management panel, operators can use the Administrative API or the Queue Monitor UI to requeue them back into active processing queues.
+
+### A. Administrative Re-queuing API
+An authenticated endpoint is available for operators:
+* **Endpoint**: `POST /v1/queue/requeue-failed`
+* **Headers**: `Authorization: Bearer <developer_api_key_or_auth0_token>`
+* **Optional Payload**:
+  ```json
+  {
+    "job_id": "optional-specific-job-id"
+  }
+  ```
+* **Behavior**:
+  1. If `job_id` is supplied, the API iterates through the messages in the DLQ, pulls the matching message, resets its `retry_count` to `0`, and publishes it back to the main exchange `scan_jobs` using its original routing key (restored from the message's `x-death` headers). Other messages in the DLQ remain untouched.
+  2. If no `job_id` is supplied, all messages currently in the DLQ are re-queued.
+  3. Non-matching messages are put back into the DLQ preserving their metadata.
+
+### B. Dashboard UI Button
+On the **Queue Monitor** tab of the Developer Dashboard:
+* If the **Dead Letter Queue** depth is greater than `0`, a **"Requeue Failed Jobs"** button is displayed.
+* Clicking this button calls the API, shows a loading state, displays a success notification with the number of re-queued jobs, and immediately updates the queue telemetry counters.

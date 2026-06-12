@@ -12,8 +12,8 @@ The original implementation used FastAPI's `BackgroundTasks.add_task()` to run s
 
 | Scenario | Old Behaviour | New Behaviour |
 |---|---|---|
-| 10 simultaneous repo scans | 10 `_run_scan_pipeline()` coroutines run immediately, each cloning a Git repo and spinning a sandbox — server memory spikes | Max 3 pipelines run; 7 wait durably in the RabbitMQ queue |
-| 20 quick scans at once | 20 concurrent file submissions to the scan-jobs endpoint | Max 5 run; 15 sit in `scan.quick` queue, processed as slots free |
+| 10 simultaneous repo scans | 10 `_run_scan_pipeline()` coroutines run immediately, each cloning a Git repo and spinning a sandbox — server memory spikes | Max 4 pipelines run; 6 wait durably in the RabbitMQ queue (at 2 replicas * 2 prefetch) |
+| 20 quick scans at once | 20 concurrent file submissions to the scan-jobs endpoint | Max 4 run; 16 sit in `scan.quick` queue, processed as slots free (at 2 replicas * 2 prefetch) |
 | RabbitMQ unavailable / not configured | N/A | Automatic silent fallback to existing `BackgroundTasks` behaviour — zero downtime |
 
 ---
@@ -274,14 +274,17 @@ Production override added under the `apiServer:` block (set to `enabled: true` f
 ```yaml
 apiServer:
   ...
+  deployment:
+    replicaCount: 2
+  ...
   rabbitmq:
     enabled: true
     host: "rabbitmq-service"
     port: 5672
     user: "admin"
     password: "changeme"
-    maxQuickScanWorkers: "5"
-    maxRepoScanWorkers: "3"
+    maxQuickScanWorkers: "2"
+    maxRepoScanWorkers: "2"
 ```
 
 ---
@@ -304,8 +307,8 @@ POST /v1/scan-jobs  OR  POST /v1/repo-scan
   │           RabbitMQ Broker                │
   │  Exchange: "scan_jobs" (DIRECT, durable) │
   │                                          │
-  │  scan.quick ──► prefetch=5 consumers     │
-  │  scan.repo  ──► prefetch=3 consumers     │
+  │  scan.quick ──► prefetch=2 consumers     │
+  │  scan.repo  ──► prefetch=2 consumers     │
   └────────────────────┬─────────────────────┘
                        │  (worker slot becomes free)
                        ▼
@@ -360,14 +363,14 @@ docker run -d \
 # 2. Run the apiServer with RabbitMQ enabled
 export RABBITMQ_URL=amqp://admin:changeme@localhost:5672/
 export MAX_QUICK_SCAN_WORKERS=2
-export MAX_REPO_SCAN_WORKERS=1
+export MAX_REPO_SCAN_WORKERS=2
 cd apiServer/fastapi
 uvicorn codeinspectior_api:app --reload --port 8000
 
 # 3. Expected startup logs
 # [RabbitMQ] Connected: localhost:5672/
 # [RabbitMQ] Consumer ready: queue=scan.quick prefetch=2
-# [RabbitMQ] Consumer ready: queue=scan.repo prefetch=1
+# [RabbitMQ] Consumer ready: queue=scan.repo prefetch=2
 # [RabbitMQ] All 2 consumers active.
 
 # 4. Verify queue depth at
@@ -444,17 +447,17 @@ During load-testing on the remote server with 20 parallel repository scans, the 
 1. **Active Backpressure (Initial State with 5 Pods)**:
    ```
    name         messages    messages_ready    messages_unacknowledged    consumers
-   scan.repo    20          5                 15                         5
+   scan.repo    20          10                10                         5
    ```
-   * **Result**: Since the prefetch limit is set to **3** per pod, the 5 active consumer pods pulled exactly `5 pods * 3 limit = 15` concurrent tasks (`messages_unacknowledged`).
-   * The remaining **5** tasks were held safely in the queue (`messages_ready`), protecting the server from CPU/RAM exhaustion.
+   * **Result**: Since the prefetch limit is set to **2** per pod, the 5 active consumer pods pulled exactly `5 pods * 2 limit = 10` concurrent tasks (`messages_unacknowledged`).
+   * The remaining **10** tasks were held safely in the queue (`messages_ready`), protecting the server from CPU/RAM exhaustion.
 
-2. **Elastic Scaling (State after scaling to 8 Consumers)**:
+2. **Elastic Scaling (State after scaling to 10 Consumers)**:
    ```
    name         messages    messages_ready    messages_unacknowledged    consumers
-   scan.repo    20          0                 20                         8
+   scan.repo    20          0                 20                         10
    ```
-   * **Result**: When additional worker processes initialized, the consumer count grew to **8** (increasing aggregate cluster capacity to `8 pods * 3 limit = 24` tasks).
+   * **Result**: When additional worker processes initialized, the consumer count grew to **10** (increasing aggregate cluster capacity to `10 pods * 2 limit = 20` tasks).
    * RabbitMQ instantly released the remaining queued tasks, executing all **20** scans concurrently in a load-balanced fashion without any system degradation.
 
 ---
@@ -465,7 +468,7 @@ When you run `rabbitmqctl list_queues`, the output shows the following columns:
 
 ```
 name        messages    messages_ready    messages_unacknowledged    consumers
-scan.repo   20          5                 15                         5
+scan.repo   20          10                10                         5
 ```
 
 ### `messages` — Total jobs RabbitMQ knows about
@@ -478,7 +481,7 @@ In the example above: **20** total repo scan jobs have been submitted and are tr
 ### `messages_ready` — Waiting in line, not yet picked up
 > These jobs are sitting in the queue doing nothing, waiting for a free pod to pick them up.
 
-In the example above: **5** jobs are queued and idle — they cannot start yet because all worker slots are full.
+In the example above: **10** jobs are queued and idle — they cannot start yet because all worker slots are full.
 
 Think of it as people waiting outside a restaurant because all the chefs are busy.
 
@@ -489,7 +492,7 @@ Think of it as people waiting outside a restaurant because all the chefs are bus
 
 A job stays "unacknowledged" until it finishes. The moment it completes, the pod sends an `ack` (acknowledgment) back to RabbitMQ saying **"done — give me the next one."**
 
-In the example above: **15** repos are actively cloning, scanning, or provisioning sandboxes across the running pods.
+In the example above: **10** repos are actively cloning, scanning, or provisioning sandboxes across the running pods.
 
 ---
 
@@ -503,10 +506,10 @@ In the example above: **5** pods are connected to the `scan.repo` queue and read
 ### Reading the full row in one sentence
 
 ```
-scan.repo   20   5   15   5
+scan.repo   20   10  10   5
 ```
 
-> **"Out of 20 total repo scan jobs — 15 are actively being scanned across 5 pods, and 5 are patiently waiting in line for a free slot."**
+> **"Out of 20 total repo scan jobs — 10 are actively being scanned across 5 pods, and 10 are patiently waiting in line for a free slot."**
 
 And for `scan.quick` when idle:
 ```
@@ -521,9 +524,9 @@ scan.quick  0    0   0    5
 The simplest mental model:
 
 ```
-1 sandbox-api pod  →  scans 3 repos at the same time (maxRepoScanWorkers = 3)
-2 sandbox-api pods →  scans 6 repos at the same time
-5 sandbox-api pods →  scans 15 repos at the same time
+1 sandbox-api pod  →  scans 2 repos at the same time (maxRepoScanWorkers = 2)
+2 sandbox-api pods →  scans 4 repos at the same time
+5 sandbox-api pods →  scans 10 repos at the same time
 ```
 
 **Step-by-step flow when 20 repos are submitted:**
@@ -536,17 +539,17 @@ RabbitMQ holds all 20 safely in the queue
         │
         ▼
 1 sandbox-api pod connects and says:
-  "I'll take 3 repos — the rest stay in queue"
+  "I'll take 2 repos — the rest stay in queue"
         │
         ▼
-Those 3 repos are scanned in parallel inside that 1 pod
+Those 2 repos are scanned in parallel inside that 1 pod
         │
         ▼
 When 1 repo finishes → pod picks up the next one from the queue
         │
         ▼
 Kubernetes HPA detects rising CPU/memory → starts more pods
-Each new pod also picks up 3 repos from the queue
+Each new pod also picks up 2 repos from the queue
         │
         ▼
 Eventually all 20 repos are being scanned across multiple pods
@@ -558,10 +561,10 @@ Eventually all 20 repos are being scanned across multiple pods
 |:---|:---|
 | Queue | Order tickets on the board |
 | 1 pod | 1 chef |
-| `maxRepoScanWorkers: "3"` | Each chef cooks max 3 dishes at once |
+| `maxRepoScanWorkers: "2"` | Each chef cooks max 2 dishes at once |
 | HPA scaling | Calling in more chefs when kitchen gets busy |
 | `messages_ready` | Tickets on the board waiting for a free chef |
 | `messages_unacknowledged` | Dishes currently being cooked |
 | `ack` (acknowledgment) | Chef yells "Done!" and grabs the next ticket |
 
-The `maxRepoScanWorkers: "3"` limit is a **safety valve** — it stops 1 pod from trying to clone, provision sandboxes, and scan all 20 repos at once, which would crash it from memory exhaustion.
+The `maxRepoScanWorkers: "2"` limit is a **safety valve** — it stops 1 pod from trying to clone, provision sandboxes, and scan all 20 repos at once, which would crash it from memory exhaustion.
