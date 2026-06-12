@@ -1,3 +1,53 @@
+## Release v0.5.69 — 01-Sandbox
+**Release Date:** June 12, 2026
+
+---
+
+### Summary
+v0.5.69 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement requeue of dlq ([fdf5e13](https://github.com/01cloud/01-Sandbox/commit/fdf5e13b0e25af1b0f837be8a6e1fa48694a0951))
+* update the values.yaml file to be scalable ([0adb160](https://github.com/01cloud/01-Sandbox/commit/0adb1601a9e23c1e4222637170d258b45edac2f6))
+* generate RELEASE.md for v0.5.68 [skip ci] ([51e0dcc](https://github.com/01cloud/01-Sandbox/commit/51e0dccb05424a525dd7bea16d2158a8d1e07589))
+* **readme:** update readme file ([3d59e95](https://github.com/01cloud/01-Sandbox/commit/3d59e9546ae61a52048104debe253e2ebd254b07))
+
+### Changes
+## [0.5.69](https://github.com/01cloud/01-Sandbox/compare/v0.5.68...v0.5.69) (2026-06-12)
+
+
+### 🚀 New Features
+
+* implement requeue of dlq ([fdf5e13](https://github.com/01cloud/01-Sandbox/commit/fdf5e13b0e25af1b0f837be8a6e1fa48694a0951))
+
+
+### 🐛 Bug Fixes
+
+* update the values.yaml file to be scalable ([0adb160](https://github.com/01cloud/01-Sandbox/commit/0adb1601a9e23c1e4222637170d258b45edac2f6))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.68 [skip ci] ([51e0dcc](https://github.com/01cloud/01-Sandbox/commit/51e0dccb05424a525dd7bea16d2158a8d1e07589))
+* **readme:** update readme file ([3d59e95](https://github.com/01cloud/01-Sandbox/commit/3d59e9546ae61a52048104debe253e2ebd254b07))
+* **readme:** update readme file ([5193630](https://github.com/01cloud/01-Sandbox/commit/51936307c077995ff81af78aec8e18af8751973f))
+* **readme:** update readme file ([52e9d72](https://github.com/01cloud/01-Sandbox/commit/52e9d72f25619a3a495b679037dddccc8f3fb632))
+* **readme:** update the readmefiles ([6b29777](https://github.com/01cloud/01-Sandbox/commit/6b297772378d0abbf6bdec94e71ae0a9cb4a08e8))
+* **readme:** update the readmefiles ([5fd8329](https://github.com/01cloud/01-Sandbox/commit/5fd83295847630b48865b5dfc334daafb2372c6e))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.68 [skip ci] ([75ab244](https://github.com/01cloud/01-Sandbox/commit/75ab2441b9ec54f418be29a638e5810ee76b26bf))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.69)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.68 — 01-Sandbox
 **Release Date:** June 11, 2026
 
