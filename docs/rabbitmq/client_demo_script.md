@@ -72,24 +72,24 @@ You can share this flow chart with the client to summarize how tasks move throug
 
 ```mermaid
 graph TD
-    User([Client Bulk Input: 20+ Scans]) -->|Submit| API[FastAPI Web Server]
-    API -->|Publish| Ex[Main Exchange]
-    Ex -->|Route| QMain[Active Scan Queue]
+    User(["Client Bulk Input: 20+ Scans"]) -->|Submit| API["FastAPI Web Server"]
+    API -->|Publish| Ex["Main Exchange"]
+    Ex -->|Route| QMain["Active Scan Queue"]
 
-    subgraph Worker Pool
-        W[Worker 1]
-        W2[Worker 2]
-        W3[Worker 3]
+    subgraph WorkerPool ["Worker Pool"]
+        W["Worker 1"]
+        W2["Worker 2"]
+        W3["Worker 3"]
     end
 
-    QMain -->|Prefetch Limit = 3| Worker Pool
+    QMain -->|Prefetch Limit = 3| WorkerPool
 
-    Worker Pool -->|Success| Out[Complete Scan Result]
-    Worker Pool -->|Transient Failure| ExRetry[Retry Exchange]
+    WorkerPool -->|Success| Out["Complete Scan Result"]
+    WorkerPool -->|Transient Failure| ExRetry["Retry Exchange"]
 
-    ExRetry -->|TTL Delay Queue| QDelay[Delay Queue: 5s / 30s / 2m]
+    ExRetry -->|TTL Delay Queue| QDelay["Delay Queue: 5s / 30s / 2m"]
     QDelay -->|TTL Expires| Ex
 
-    Worker Pool -->|Exceeded 3 Retries| ExDLX[Dead Letter Exchange]
-    ExDLX -->|Isolate| QDlq[DLQ Queue: scan.failed]
+    WorkerPool -->|Exceeded 3 Retries| ExDLX["Dead Letter Exchange"]
+    ExDLX -->|Isolate| QDlq["DLQ Queue: scan.failed"]
 ```

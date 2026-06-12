@@ -83,36 +83,36 @@ The following diagram illustrates the lifecycle of a scan job including publishi
 
 ```mermaid
 flowchart TD
-    Client[Client / SDK] -->|POST /v1/scan-jobs| API[API Server Gateway]
+    Client["Client / SDK"] -->|POST /v1/scan-jobs| API["API Server Gateway"]
     Client -->|DELETE /v1/jobs/id| API
 
-    API -->|Publish Job| RMQ_Main_Ex[RabbitMQ: scan_jobs Exchange]
-    API -->|Write Redis Cancel Key & Pub| Redis_PubSub[(Redis Pub/Sub & Cache)]
+    API -->|Publish Job| RMQ_Main_Ex["RabbitMQ: scan_jobs Exchange"]
+    API -->|Write Redis Cancel Key & Pub| Redis_PubSub[("Redis Pub/Sub & Cache")]
 
-    RMQ_Main_Ex -->|Route| RMQ_Q_Quick[Queue: scan.quick]
-    RMQ_Main_Ex -->|Route| RMQ_Q_Repo[Queue: scan.repo]
+    RMQ_Main_Ex -->|Route| RMQ_Q_Quick["Queue: scan.quick"]
+    RMQ_Main_Ex -->|Route| RMQ_Q_Repo["Queue: scan.repo"]
 
-    RMQ_Q_Quick --> Worker[API Worker Pod]
+    RMQ_Q_Quick --> Worker["API Worker Pod"]
     RMQ_Q_Repo --> Worker
 
     %% Cancellation Flow %%
     Redis_PubSub -.->|Broadcast Cancellation| Worker
     Worker -->|Cancel Running asyncio.Task| Worker
-    Worker -->|Clean up Sandbox / Cloned Dir| Clean[Cleanup Resources]
+    Worker -->|Clean up Sandbox / Cloned Dir| Clean["Cleanup Resources"]
 
     %% Retry Flow %%
-    Worker -->|Processing Fails & Retries < 3| RMQ_Retry_Ex[RabbitMQ: scan_jobs.retry Exchange]
-    RMQ_Retry_Ex -->|Route to Delay Q| RMQ_Q_5s[Queue: scan.retry.5s]
-    RMQ_Retry_Ex -->|Route to Delay Q| RMQ_Q_30s[Queue: scan.retry.30s]
-    RMQ_Retry_Ex -->|Route to Delay Q| RMQ_Q_2m[Queue: scan.retry.2m]
+    Worker -->|Processing Fails & Retries < 3| RMQ_Retry_Ex["RabbitMQ: scan_jobs.retry Exchange"]
+    RMQ_Retry_Ex -->|Route to Delay Q| RMQ_Q_5s["Queue: scan.retry.5s"]
+    RMQ_Retry_Ex -->|Route to Delay Q| RMQ_Q_30s["Queue: scan.retry.30s"]
+    RMQ_Retry_Ex -->|Route to Delay Q| RMQ_Q_2m["Queue: scan.retry.2m"]
 
     RMQ_Q_5s -->|TTL Expires: Dead-Lettered| RMQ_Main_Ex
     RMQ_Q_30s -->|TTL Expires: Dead-Lettered| RMQ_Main_Ex
     RMQ_Q_2m -->|TTL Expires: Dead-Lettered| RMQ_Main_Ex
 
     %% DLQ Flow %%
-    Worker -->|Processing Fails & Retries >= 3| RMQ_DLX[RabbitMQ: scan_jobs.dead_letter Exchange]
-    RMQ_DLX -->|Route| RMQ_Q_Failed[Queue: scan.failed DLQ]
+    Worker -->|Processing Fails & Retries >= 3| RMQ_DLX["RabbitMQ: scan_jobs.dead_letter Exchange"]
+    RMQ_DLX -->|Route| RMQ_Q_Failed["Queue: scan.failed DLQ"]
 ```
 
 ---
