@@ -63,12 +63,12 @@ apiServer:
 ```
 
 ### Setting Prefetch Limits ($P$)
-Prefetch limits are configured in the environment variables under `apiServer.configMap`:
+Prefetch limits are configured under the `apiServer.rabbitmq` block:
 ```yaml
 apiServer:
-  configMap:
-    MAX_REPO_SCAN_WORKERS: "4"   # <-- Match with P for repository scans
-    MAX_QUICK_SCAN_WORKERS: "5"  # <-- Match with P for quick scans
+  rabbitmq:
+    maxRepoScanWorkers: "4"   # <-- Match with P for repository scans
+    maxQuickScanWorkers: "5"  # <-- Match with P for quick scans
 ```
 
 ---
