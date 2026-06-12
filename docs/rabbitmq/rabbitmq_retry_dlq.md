@@ -132,8 +132,8 @@ When running multiple scans concurrently (e.g., 20+ scans), it is critical to ba
 ### Concurrency Formula
 * The maximum number of concurrent scans processed is calculated as:
   $$\text{Total Concurrent Scans} = \text{Active API Replicas} \times \text{Prefetch Limit per Worker}$$
-* By default, the Repository Scan Queue (`scan.repo`) has a prefetch limit of **3 concurrent scans per worker**.
-* If you have `7` active `sandbox-api` replicas, the cluster will attempt to run `21` repository scans concurrently.
+* By default, the Repository Scan Queue (`scan.repo`) has a prefetch limit of **2 concurrent scans per worker**.
+* If you have `7` active `sandbox-api` replicas, the cluster will attempt to run `14` repository scans concurrently.
 
 ### Cluster Saturation (FailedScheduling / Insufficient CPU)
 If the number of concurrent scans exceeds the physical CPU/Memory resources of the node, incoming sandbox pods will get stuck in the `Pending` state.
