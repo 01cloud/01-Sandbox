@@ -1,3 +1,29 @@
+# Daily Update: Sandbox Queue & Scanning Reliability Fixes (date: June 11 2026)
+
+Here is the summary of the key issues resolved and tasks completed today:
+
+### 1. Fixed "Broker Offline" Bug (Startup Race Condition)
+* **Issue**: During Helm upgrades and restarts, the `sandbox-api` container starts in parallel with the `rabbitmq` container. Since RabbitMQ takes ~15 seconds to fully boot and listen on port `5672`, the API's initial connection attempt failed. The API server caught the exception and locked itself into a fallback offline mode permanently, causing the UI dashboard to display `Broker Offline`.
+* **Fix**: Implemented a connection retry loop in `connect_rabbitmq()` that attempts connection up to 10 times with a 3-second delay, waiting up to 30 seconds for RabbitMQ to become ready.
+* **Release Config**: Bumped the API image tag in Helm values to `v0.5.67`.
+
+### 2. Resolved Concurrency Failures under Parallel Bulk Scans (20+ repos)
+* **Issue**: Launching many scans concurrently on single-node servers caused the Kubernetes scheduler to run out of allocatable CPU. Sandbox runner pods got stuck in `Pending` with scheduling warnings: `FailedScheduling: 0/1 nodes are available: 1 Insufficient cpu`.
+* **Fix**: Disabled the Horizontal Pod Autoscaler (`hpa.enabled: false`) and capped replicas to `2` to align with physical CPU limits. Excess scan requests now wait securely inside RabbitMQ queue buffers rather than overloading the cluster, preventing false timeouts.
+
+### 3. New Queue Telemetry Dashboard (UI Metrics Integration)
+* **Feature**: Added a live RabbitMQ Queue Telemetry Dashboard directly into the web interface.
+  * **Metrics Displayed**: Real-time tracking of queue depth, active consumer counts, and rolling throughput (processed messages/sec) for the `scan.quick`, `scan.repo`, and `scan.failed` (DLQ) queues.
+  * **Routing**: Registered the public, unauthenticated frontend route `/queue-stats` in `App.tsx` matching the public backend stats endpoint, as well as the authenticated stats tab.
+  * **Layout Padding Fixes**: Standardized top padding on the containers of both `QueueStatsPage.tsx` and `Health.tsx` (from `py-12` to `pt-32 pb-12`) to prevent the floating navigation header from overlapping dashboard cards.
+
+### 4. Enterprise Client Presentation & Capacity Sizing Kit
+* **Sizing Guide**: Created `docs/sizing/sizingformula.md` detailing the formula to calculate safe replica counts and prefetch limits based on available server specs ($R \times P \le N$).
+* **Live Simulator**: Built a CLI simulator (`apiServer/fastapi/demo_rabbitmq.py`) to show client-facing animations of 20 concurrent jobs queueing up, worker prefetch throttling, and DLQ routing.
+* **Demo Guide**: Created `docs/rabbitmq/client_demo_script.md` containing the client presentation pitch, walkthrough steps, and mermaid flow chart.
+
+---
+
 # Daily Update: Sandbox Queue & Scanning Reliability Fixes (date: June 10 2026)
 
 Here is the summary of the key issues resolved and tasks completed today:
