@@ -93,7 +93,7 @@ The whole solution is natively wrapped in an omni-chart located in `codeInspecto
 
 ### MetalLB (`metallb`)
 Configures Layer 2 routing bridging bare-metal/Kind setups globally.
-- **IP Address Pool**: Exposes external ranges natively (e.g., `148.113.4.247/32`).
+- **IP Address Pool**: Exposes external ranges natively (e.g., `10.0.10.9`).
 
 ### Agent Gateway (`agentgateway`)
 - **Gateway Config**: Sets the `agentgateway` GatewayClass.
