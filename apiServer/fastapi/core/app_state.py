@@ -88,7 +88,8 @@ class AppState:
                     expires_at TEXT,
                     last_used_at TEXT,
                     is_revoked INTEGER DEFAULT 0,
-                    prefix TEXT
+                    prefix TEXT,
+                    expiry_notification_sent INTEGER DEFAULT 0
                 )
             """
             )
@@ -113,7 +114,8 @@ class AppState:
                     expires_at TEXT,
                     last_used_at TEXT,
                     is_revoked INTEGER DEFAULT 0,
-                    prefix TEXT
+                    prefix TEXT,
+                    expiry_notification_sent INTEGER DEFAULT 0
                 )
             """
             )
@@ -129,6 +131,21 @@ class AppState:
             )
             conn.commit()
             print("[startup] Database migration: Added user_email column to api_keys")
+        except Exception:
+            conn.rollback()
+            pass
+
+        # Schema Guard: Ensure expiry_notification_sent exists (Migration)
+        try:
+            cursor.execute(
+                "ALTER TABLE api_keys ADD COLUMN expiry_notification_sent INTEGER DEFAULT 0"
+                if self.use_postgres
+                else "ALTER TABLE api_keys ADD COLUMN expiry_notification_sent INTEGER DEFAULT 0"
+            )
+            conn.commit()
+            print(
+                "[startup] Database migration: Added expiry_notification_sent column to api_keys"
+            )
         except Exception:
             conn.rollback()
             pass

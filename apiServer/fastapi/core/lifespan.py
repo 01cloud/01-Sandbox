@@ -16,6 +16,11 @@ async def lifespan(app: FastAPI):
     # Launch the key janitor to purge expired keys automatically
     asyncio.create_task(cleanup_expired_keys_task())
 
+    # Launch the expiring key notifier task
+    from services.expiry_checker import check_expiring_keys_task
+
+    asyncio.create_task(check_expiring_keys_task(state))
+
     try:
         conn = await connect_rabbitmq()
         if conn:

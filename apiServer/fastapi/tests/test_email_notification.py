@@ -1,0 +1,294 @@
+import asyncio
+import datetime
+import os
+import sqlite3
+import sys
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+
+# Inject current directory into python path to load core modules correctly
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+
+from core.app_state import state
+from services.email import send_expiry_email
+from services.expiry_checker import check_expiring_keys_task
+
+
+@pytest.fixture(autouse=True)
+def setup_db():
+    # Make sure database is initialized and migrated
+    state.init_db()
+    # Clean up api_keys for a fresh state
+    conn = state.get_db_conn()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM api_keys")
+    conn.commit()
+    conn.close()
+
+
+def test_database_migration():
+    """Verify that the database migration added the expiry_notification_sent column."""
+    conn = state.get_db_conn()
+    cursor = conn.cursor()
+    try:
+        # If the column exists, this query succeeds
+        cursor.execute("SELECT expiry_notification_sent FROM api_keys LIMIT 1")
+        cursor.fetchall()
+        has_column = True
+    except Exception:
+        has_column = False
+    finally:
+        conn.close()
+
+    assert has_column, "expiry_notification_sent column should exist in database table"
+
+
+@pytest.mark.asyncio
+async def test_expiry_checker_detection():
+    """Verify that the checker enqueues only active keys expiring within the warning threshold."""
+    now = datetime.datetime.now(datetime.UTC)
+
+    # 1. Expires in 2.5 minutes, TTL 8 minutes (Should be notified: TTL <= 10, lead time 3m)
+    key_a = {
+        "id": "key_a_jti",
+        "name": "Key A",
+        "backend": "Z1_SANDBOX",
+        "user_id": "user_a",
+        "user_email": "user_a@example.com",
+        "created_at": (now - datetime.timedelta(minutes=5.5)).isoformat(),
+        "expires_at": (now + datetime.timedelta(minutes=2.5)).isoformat(),
+        "prefix": "ci_keya",
+        "expiry_notification_sent": 0,
+    }
+
+    # 2. Expires in 4 minutes, TTL 8 minutes (Should NOT be notified: TTL <= 10, lead time 3m, 4m remaining)
+    key_b = {
+        "id": "key_b_jti",
+        "name": "Key B",
+        "backend": "Z1_SANDBOX",
+        "user_id": "user_b",
+        "user_email": "user_b@example.com",
+        "created_at": (now - datetime.timedelta(minutes=4)).isoformat(),
+        "expires_at": (now + datetime.timedelta(minutes=4)).isoformat(),
+        "prefix": "ci_keyb",
+        "expiry_notification_sent": 0,
+    }
+
+    # 3. Already expired, TTL 8 minutes (Should NOT be notified)
+    key_c = {
+        "id": "key_c_jti",
+        "name": "Key C",
+        "backend": "Z1_SANDBOX",
+        "user_id": "user_c",
+        "user_email": "user_c@example.com",
+        "created_at": (now - datetime.timedelta(minutes=10)).isoformat(),
+        "expires_at": (now - datetime.timedelta(minutes=2)).isoformat(),
+        "prefix": "ci_keyc",
+        "expiry_notification_sent": 0,
+    }
+
+    # 4. Expires in 4 minutes, TTL 2 hours (Should be notified: TTL > 10, lead time 5m, 4m remaining)
+    key_d = {
+        "id": "key_d_jti",
+        "name": "Key D",
+        "backend": "Z1_SANDBOX",
+        "user_id": "user_d",
+        "user_email": "user_d@example.com",
+        "created_at": (now - datetime.timedelta(hours=1, minutes=56)).isoformat(),
+        "expires_at": (now + datetime.timedelta(minutes=4)).isoformat(),
+        "prefix": "ci_keyd",
+        "expiry_notification_sent": 0,
+    }
+
+    # 5. Expires in 2.5 minutes, TTL 8 minutes, but no email address configured (Should NOT be notified)
+    key_e = {
+        "id": "key_e_jti",
+        "name": "Key E",
+        "backend": "Z1_SANDBOX",
+        "user_id": "user_e",
+        "user_email": None,
+        "created_at": (now - datetime.timedelta(minutes=5.5)).isoformat(),
+        "expires_at": (now + datetime.timedelta(minutes=2.5)).isoformat(),
+        "prefix": "ci_keye",
+        "expiry_notification_sent": 0,
+    }
+
+    # 6. Expires in 2.5 minutes, TTL 8 minutes, but already notified (Should NOT be notified)
+    key_f = {
+        "id": "key_f_jti",
+        "name": "Key F",
+        "backend": "Z1_SANDBOX",
+        "user_id": "user_f",
+        "user_email": "user_f@example.com",
+        "created_at": (now - datetime.timedelta(minutes=5.5)).isoformat(),
+        "expires_at": (now + datetime.timedelta(minutes=2.5)).isoformat(),
+        "prefix": "ci_keyf",
+        "expiry_notification_sent": 1,
+    }
+
+    conn = state.get_db_conn()
+    cursor = conn.cursor()
+    query = (
+        "INSERT INTO api_keys (id, name, backend, user_id, user_email, created_at, expires_at, prefix, expiry_notification_sent) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
+        if state.use_postgres
+        else "INSERT INTO api_keys (id, name, backend, user_id, user_email, created_at, expires_at, prefix, expiry_notification_sent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    for key in [key_a, key_b, key_c, key_d, key_e, key_f]:
+        cursor.execute(
+            query,
+            (
+                key["id"],
+                key["name"],
+                key["backend"],
+                key["user_id"],
+                key["user_email"],
+                key["created_at"],
+                key["expires_at"],
+                key["prefix"],
+                key["expiry_notification_sent"],
+            ),
+        )
+    conn.commit()
+    conn.close()
+
+    published_messages = []
+
+    async def mock_publish(routing_key, payload):
+        published_messages.append((routing_key, payload))
+
+    # Mock asyncio.sleep to bypass startup delay (5s) but break the infinite loop on the second sleep call
+    sleep_count = 0
+
+    async def mock_sleep(seconds):
+        nonlocal sleep_count
+        sleep_count += 1
+        if sleep_count > 1:
+            raise asyncio.CancelledError()
+
+    # Override environments to test checker behavior quickly
+    os.environ["KEY_EXPIRATION_CHECK_INTERVAL_SECONDS"] = "0.1"
+
+    with patch("core.queue.publisher.publish", side_effect=mock_publish):
+        with patch("asyncio.sleep", side_effect=mock_sleep):
+            try:
+                await check_expiring_keys_task(state)
+            except asyncio.CancelledError:
+                pass
+
+    # Verify enqueued jobs
+    assert len(published_messages) == 2
+
+    # Sort messages by key ID for deterministic assertion
+    published_messages.sort(key=lambda x: x[1]["key_id"])
+
+    routing_key_1, payload_1 = published_messages[0]
+    assert routing_key_1 == "notification.email"
+    assert payload_1["key_id"] == "key_a_jti"
+    assert payload_1["recipient"] == "user_a@example.com"
+    assert payload_1["key_name"] == "Key A"
+    assert payload_1["prefix"] == "ci_keya"
+
+    routing_key_2, payload_2 = published_messages[1]
+    assert routing_key_2 == "notification.email"
+    assert payload_2["key_id"] == "key_d_jti"
+    assert payload_2["recipient"] == "user_d@example.com"
+    assert payload_2["key_name"] == "Key D"
+    assert payload_2["prefix"] == "ci_keyd"
+
+    # Verify database was updated
+    conn = state.get_db_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, expiry_notification_sent FROM api_keys ORDER BY id")
+    rows = cursor.fetchall()
+    conn.close()
+
+    db_notified = {row[0]: row[1] for row in rows}
+    assert db_notified["key_a_jti"] == 1
+    assert db_notified["key_b_jti"] == 0
+    assert db_notified["key_c_jti"] == 0
+    assert db_notified["key_d_jti"] == 1
+    assert db_notified["key_e_jti"] == 0
+    assert db_notified["key_f_jti"] == 1
+
+
+@pytest.mark.asyncio
+async def test_send_expiry_email_mock_mode():
+    """Verify email sending in Mock Mode (no SendGrid key set) logs output and succeeds."""
+    payload = {
+        "job_id": "email_job_123",
+        "recipient": "user@example.com",
+        "key_id": "some-jti",
+        "key_name": "Test Key",
+        "expires_at": "2026-06-16T12:00:00Z",
+        "prefix": "ci_test",
+    }
+
+    with patch.dict(os.environ, {}, clear=True):
+        # Should complete without error
+        await send_expiry_email(payload)
+
+
+@pytest.mark.asyncio
+async def test_send_expiry_email_sendgrid_success():
+    """Verify SendGrid HTTP API integration handles success response."""
+    payload = {
+        "job_id": "email_job_success",
+        "recipient": "user@example.com",
+        "key_id": "some-jti",
+        "key_name": "Test Key",
+        "expires_at": "2026-06-16T12:00:00Z",
+        "prefix": "ci_test",
+    }
+
+    mock_response = MagicMock()
+    mock_response.status_code = 202
+    mock_response.text = "Accepted"
+
+    env_vars = {
+        "SENDGRID_API_KEY": "",
+        "SENDGRID_FROM_EMAIL": "test-sender@01sandbox.com",
+    }
+
+    with patch.dict(os.environ, env_vars):
+        with patch("httpx.AsyncClient.post", return_value=mock_response) as mock_post:
+            await send_expiry_email(payload)
+
+            mock_post.assert_called_once()
+            args, kwargs = mock_post.call_args
+            assert args[0] == "https://api.sendgrid.com/v3/mail/send"
+            assert kwargs["headers"]["Authorization"] == "Bearer SG.test-key-1234"
+            assert (
+                kwargs["json"]["personalizations"][0]["to"][0]["email"]
+                == "user@example.com"
+            )
+            assert kwargs["json"]["from"]["email"] == "test-sender@01sandbox.com"
+
+
+@pytest.mark.asyncio
+async def test_send_expiry_email_sendgrid_failure():
+    """Verify SendGrid HTTP API failure raises a RuntimeError to prompt RabbitMQ retry."""
+    payload = {
+        "job_id": "email_job_fail",
+        "recipient": "user@example.com",
+        "key_id": "some-jti",
+        "key_name": "Test Key",
+        "expires_at": "2026-06-16T12:00:00Z",
+        "prefix": "ci_test",
+    }
+
+    mock_response = MagicMock()
+    mock_response.status_code = 401
+    mock_response.text = "Unauthorized API key"
+
+    env_vars = {
+        "SENDGRID_API_KEY": "",
+        "SENDGRID_FROM_EMAIL": "test-sender@01sandbox.com",
+    }
+
+    with patch.dict(os.environ, env_vars):
+        with patch("httpx.AsyncClient.post", return_value=mock_response):
+            with pytest.raises(RuntimeError) as exc_info:
+                await send_expiry_email(payload)
+
+            assert "SendGrid API failed with status 401" in str(exc_info.value)

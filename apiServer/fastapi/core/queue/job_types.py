@@ -26,5 +26,12 @@ REPO_SCAN = ScanJobType(
     3,
     ("scan.repo.5s", "scan.repo.30s", "scan.repo.2m"),
 )
+EMAIL_NOTIFICATION = ScanJobType(
+    "email-notification",
+    "notification.email",
+    "notification.email",
+    5,
+    ("notification.email.5s", "notification.email.30s", "notification.email.2m"),
+)
 
-ALL_SCAN_JOB_TYPES = [QUICK_SCAN, REPO_SCAN]
+ALL_SCAN_JOB_TYPES = [QUICK_SCAN, REPO_SCAN, EMAIL_NOTIFICATION]
