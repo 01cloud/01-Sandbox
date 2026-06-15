@@ -83,6 +83,13 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
                 await _run_scan_pipeline(
                     job_id, p["repo_url"], p["owner"], p["repo"], app_state
                 )
+            elif jt.job_type == "email-notification":
+                print(
+                    f"[RabbitMQ][email-notification] job={job_id[:8]} recipient={p.get('recipient')}"
+                )
+                from services.email import send_expiry_email
+
+                await send_expiry_email(p)
 
             await msg.ack()
 

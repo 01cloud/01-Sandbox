@@ -19,9 +19,21 @@ async def declare_retry_topology(channel: aio_pika.Channel) -> None:
 
     # 2. Define delay queues with TTL and DLX parameters
     delays = [
-        ("scan.retry.5s", 5000, ["scan.quick.5s", "scan.repo.5s"]),
-        ("scan.retry.30s", 30000, ["scan.quick.30s", "scan.repo.30s"]),
-        ("scan.retry.2m", 120000, ["scan.quick.2m", "scan.repo.2m"]),
+        (
+            "scan.retry.5s",
+            5000,
+            ["scan.quick.5s", "scan.repo.5s", "notification.email.5s"],
+        ),
+        (
+            "scan.retry.30s",
+            30000,
+            ["scan.quick.30s", "scan.repo.30s", "notification.email.30s"],
+        ),
+        (
+            "scan.retry.2m",
+            120000,
+            ["scan.quick.2m", "scan.repo.2m", "notification.email.2m"],
+        ),
     ]
 
     for q_name, ttl_ms, binding_keys in delays:

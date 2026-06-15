@@ -14,11 +14,13 @@ configMap:
   JWT_ALGORITHM: "RS256"
   JWT_EXPIRATION_MINUTES: "60"
   JWT_ISSUER: "code-inspector"
+  SENDGRID_FROM_EMAIL: "no-reply@01sandbox.com"
 
 secret:
   E2B_API_KEY: ""
   JWT_PRIVATE_KEY: ""   # Injected via: kubectl patch secret sandbox-api-secret -n sandbox
   JWT_PUBLIC_JWKS: ""   # Auto-derived from JWT_PRIVATE_KEY if left empty
+  SENDGRID_API_KEY: ""
 
 deployment:
   replicaCount: 1
