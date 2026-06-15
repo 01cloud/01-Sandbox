@@ -19,8 +19,8 @@ agentgateway:
       port: 80
   gateway:
     gatewayClassName: agentgateway
-    addresses:
-      - value: 10.0.10.9
+    # addresses:
+    #   - value: 10.0.10.9
     listeners:
       - protocol: HTTP
         port: 80
