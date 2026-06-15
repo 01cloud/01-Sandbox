@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.70](https://github.com/01cloud/01-Sandbox/compare/v0.5.69...v0.5.70) (2026-06-15)
+
+
+### 🐛 Bug Fixes
+
+* remove apikey dummy form test ([d7cccfe](https://github.com/01cloud/01-Sandbox/commit/d7cccfe5e42d342e64ae4d6343dec2b2ff85cd9a))
+* remove apikey dummy form test ([dd60b84](https://github.com/01cloud/01-Sandbox/commit/dd60b843cbadf979630acd030f51d0759658e65b))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.69 [skip ci] ([4380f23](https://github.com/01cloud/01-Sandbox/commit/4380f238e4673588240966152e5ae98b9a887673))
+* **readme:** update readme file ([e459bf2](https://github.com/01cloud/01-Sandbox/commit/e459bf2ade14f92f4da382bf96027bcbee2ea705))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.69 [skip ci] ([564ea76](https://github.com/01cloud/01-Sandbox/commit/564ea76791e94883b509f00a39732e05abfac06c))
+
 ## [0.5.69](https://github.com/01cloud/01-Sandbox/compare/v0.5.68...v0.5.69) (2026-06-12)
 
 
