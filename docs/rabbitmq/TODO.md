@@ -62,6 +62,7 @@
 - [ ] **Structured JSON Logging** — Replace all `print()` statements across the codebase with structured JSON logs `{"level": "INFO", "component": "RabbitMQ", "job_id": "..."}` — makes logs searchable in Grafana Loki or similar tools.
 - [ ] **OpenTelemetry Tracing** — Add distributed tracing to track the full lifecycle of a scan (HTTP submit → RabbitMQ publish → consumer pickup → sandbox → result) as a single trace in Jaeger or Tempo.
 - [/] **Admin Dashboard API** — Add operator-only endpoints: force-drain a queue, inspect raw job state, manually re-queue a failed job [x], view per-user submission stats.
+- [ ] **Prometheus Metrics & Grafana** — Instrument the FastAPI app and RabbitMQ consumers using `prometheus-client` to expose custom metrics (queue depth, consumers, job status counters, scan durations, and API request latency) via a `/metrics` endpoint, allowing historical dashboarding and alerting.
 
 ---
 
