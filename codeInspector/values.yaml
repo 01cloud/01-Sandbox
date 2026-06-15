@@ -19,8 +19,8 @@ agentgateway:
       port: 80
   gateway:
     gatewayClassName: agentgateway
-    addresses:
-      - value: 148.113.4.247
+    # addresses:
+    #   - value: 10.0.10.9
     listeners:
       - protocol: HTTP
         port: 80
@@ -134,7 +134,7 @@ metallb:
   ipAddressPool:
     addresses:
       # - 172.18.0.200-172.18.0.250
-      - 148.113.4.247/32
+      - 10.0.10.100-10.0.10.110
   l2Advertisement:
     enabled: true
 ################################################################
