@@ -94,7 +94,7 @@ export default function QueueMonitorWidget({ apiBaseUrl, activeTab }: QueueMonit
             <p className="text-sm text-muted-foreground mt-1">
               {queueStats?.available
                 ? "The RabbitMQ message broker is responsive and actively dispatching tasks to parallel workers."
-                : "Could not connect to RabbitMQ broker. Make sure RABBITMQ_URL is configured correctly."}
+                : "Unable to connect to the RabbitMQ broker. Please check that the RABBITMQ_URL is correctly configured and confirm that the required API key has been updated in the API Management"}
             </p>
           </div>
           {lastUpdated && (
