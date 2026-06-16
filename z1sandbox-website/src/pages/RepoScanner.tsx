@@ -186,9 +186,6 @@ export default function RepoScanner() {
   const resetScan = () => {
     setCurrentStep(""); setStepMessage(""); setProgress(0); setResult(null); setExpandedLang(null);
     setActiveJobId(null);
-    setRequiresAuth(false);
-    setGitToken("");
-    setSshKey("");
     esRef.current?.close(); esRef.current = null;
   };
 
@@ -356,6 +353,9 @@ export default function RepoScanner() {
       if (successCount > 0) {
         toast.success(`Successfully started ${successCount} repository scan(s)! You can track all of them on the Dashboard.`);
         setRepoUrl(""); // Clear input on success
+        setRequiresAuth(false);
+        setGitToken("");
+        setSshKey("");
         if (firstJobId) {
           connectStream(firstJobId, apiKey, 0);
         }
