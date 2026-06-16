@@ -19,17 +19,48 @@ from pydantic import BaseModel, Field, validator
 
 
 class RepoScanRequest(BaseModel):
-    """Payload to submit a new GitHub repository scan job."""
+    """Payload to submit a new repository scan job (supports public & private)."""
 
     repo_url: str = Field(
         ...,
         example="https://github.com/owner/repo",
-        description="Full public GitHub repository URL",
+        description="Full repository URL",
+    )
+    git_token: Optional[str] = Field(
+        None,
+        description="Optional Personal Access Token (PAT) for private HTTPS repositories",
+    )
+    ssh_key: Optional[str] = Field(
+        None,
+        description="Optional SSH Private Key (deploy key) for private SSH repositories",
     )
 
     @validator("repo_url")
     def strip_whitespace(cls, v: str) -> str:
         return v.strip()
+
+
+class RepoScanPrecheckRequest(BaseModel):
+    """Payload to check access and auth requirements of a repository before scanning."""
+
+    repo_url: str = Field(
+        ...,
+        example="https://github.com/owner/repo",
+        description="GitHub, GitLab, or Bitbucket repository URL",
+    )
+
+    @validator("repo_url")
+    def strip_whitespace(cls, v: str) -> str:
+        return v.strip()
+
+
+class RepoScanPrecheckResponse(BaseModel):
+    """Response of the repository accessibility and precheck validation."""
+
+    accessible: bool
+    requires_auth: bool
+    provider: str  # "github", "gitlab", "bitbucket", or "unknown"
+    error: Optional[str] = None
 
 
 # ─────────────────────────────────────────────

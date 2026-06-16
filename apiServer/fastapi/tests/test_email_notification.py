@@ -234,7 +234,7 @@ async def test_send_expiry_email_sendgrid_success():
     """Verify SendGrid HTTP API integration handles success response."""
     payload = {
         "job_id": "email_job_success",
-        "recipient": "user@example.com",
+        "recipient": "lamakamal89@gmail.com",
         "key_id": "some-jti",
         "key_name": "Test Key",
         "expires_at": "2026-06-16T12:00:00Z",
@@ -257,10 +257,10 @@ async def test_send_expiry_email_sendgrid_success():
             mock_post.assert_called_once()
             args, kwargs = mock_post.call_args
             assert args[0] == "https://api.sendgrid.com/v3/mail/send"
-            assert kwargs["headers"]["Authorization"] == "Bearer SG.test-key-1234"
+            assert kwargs["headers"]["Authorization"] == "Bearer "
             assert (
                 kwargs["json"]["personalizations"][0]["to"][0]["email"]
-                == "user@example.com"
+                == "lamakamal89@gmail.com"
             )
             assert kwargs["json"]["from"]["email"] == "test-sender@01sandbox.com"
 
@@ -270,7 +270,7 @@ async def test_send_expiry_email_sendgrid_failure():
     """Verify SendGrid HTTP API failure raises a RuntimeError to prompt RabbitMQ retry."""
     payload = {
         "job_id": "email_job_fail",
-        "recipient": "user@example.com",
+        "recipient": "lamakamal89@gmail.com",
         "key_id": "some-jti",
         "key_name": "Test Key",
         "expires_at": "2026-06-16T12:00:00Z",
@@ -292,3 +292,37 @@ async def test_send_expiry_email_sendgrid_failure():
                 await send_expiry_email(payload)
 
             assert "SendGrid API failed with status 401" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_send_real_expiry_email():
+    """
+    Actually sends a real email to lamakamal89@gmail.com using SendGrid Web API (no mock).
+    Use this to verify your API key and sender identity verification.
+    """
+    payload = {
+        "job_id": "email_real_test",
+        "recipient": "lamakamal89@gmail.com",
+        "key_id": "real-test-jti",
+        "key_name": "Real Test Key",
+        "expires_at": "2026-06-16T12:00:00Z",
+        "prefix": "ci_real",
+    }
+
+    env_vars = {
+        "SENDGRID_API_KEY": "",
+        # NOTE: Make sure this email is verified in your SendGrid dashboard as a Sender Identity
+        "SENDGRID_FROM_EMAIL": "kamal.tamang@berrybytes.com",
+    }
+
+    with patch.dict(os.environ, env_vars):
+        # We run the real send_expiry_email call here without patching the HTTP request.
+        # If the sender identity isn't verified in SendGrid, this will raise a 403 / 400 error.
+        try:
+            await send_expiry_email(payload)
+            print(
+                "\n[SUCCESS] Real test email successfully sent to lamakamal89@gmail.com!"
+            )
+        except Exception as e:
+            print(f"\n[FAILURE] Failed to send real test email: {e}")
+            raise e

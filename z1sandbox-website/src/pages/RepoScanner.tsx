@@ -54,7 +54,7 @@ interface ScanResult {
   error?: string;
 }
 
-const GITHUB_PATTERN = /^https:\/\/github\.com\/[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+\/?$/;
+const GIT_URL_PATTERN = /^(https?:\/\/|git@|ssh:\/\/)([a-zA-Z0-9\-.]+)(:|\/)([A-Za-z0-9_.\-]+)\/([A-Za-z0-9_.\-]+?)(\.git)?\/?$/;
 
 const STEPS = ["QUEUED", "PROVISIONING", "CLONING", "DETECTING", "SCANNING", "DONE"];
 const STEP_LABELS: Record<string, string> = {
@@ -114,6 +114,13 @@ export default function RepoScanner() {
   // ID of the job currently streamed on this page (UI-submitted or CLI-detected)
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
 
+  // Private repository scan states
+  const [requiresAuth, setRequiresAuth] = useState(false);
+  const [authMethod, setAuthMethod] = useState<"token" | "ssh">("token");
+  const [gitToken, setGitToken] = useState("");
+  const [sshKey, setSshKey] = useState("");
+  const [isValidating, setIsValidating] = useState(false);
+
   const esRef = useRef<EventSource | null>(null);
 
   useEffect(() => () => { esRef.current?.close(); }, []);
@@ -121,7 +128,7 @@ export default function RepoScanner() {
   const validateUrl = (url: string) => {
     if (!url) { setUrlError(""); return; }
     const urls = url.split(/[\s,;\n]+/).map(u => u.trim()).filter(Boolean);
-    const invalid = urls.filter(u => !GITHUB_PATTERN.test(u));
+    const invalid = urls.filter(u => !GIT_URL_PATTERN.test(u));
     if (invalid.length > 0) {
       setUrlError(`Invalid URL(s): ${invalid.slice(0, 2).join(", ")}${invalid.length > 2 ? "..." : ""}`);
     } else {
@@ -129,9 +136,59 @@ export default function RepoScanner() {
     }
   };
 
+  const checkPrivateRepo = async (url: string) => {
+    const trimmed = url.trim();
+    if (!trimmed || !GIT_URL_PATTERN.test(trimmed)) {
+      setRequiresAuth(false);
+      return;
+    }
+
+    const apiKey = getApiKey();
+    if (!apiKey) return;
+
+    setIsValidating(true);
+    try {
+      const resp = await fetch(`${API_BASE}/v1/repo-scan/precheck`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({ repo_url: trimmed }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        if (data.requires_auth) {
+          setRequiresAuth(true);
+          if (trimmed.startsWith("git@") || trimmed.startsWith("ssh://")) {
+            setAuthMethod("ssh");
+          } else {
+            setAuthMethod("token");
+          }
+        } else {
+          setRequiresAuth(false);
+        }
+      }
+    } catch (err) {
+      console.error("Precheck failed:", err);
+    } finally {
+      setIsValidating(false);
+    }
+  };
+
+  const handleUrlBlur = () => {
+    validateUrl(repoUrl);
+    if (!urlError && repoUrl.trim()) {
+      checkPrivateRepo(repoUrl);
+    }
+  };
+
   const resetScan = () => {
     setCurrentStep(""); setStepMessage(""); setProgress(0); setResult(null); setExpandedLang(null);
     setActiveJobId(null);
+    setRequiresAuth(false);
+    setGitToken("");
+    setSshKey("");
     esRef.current?.close(); esRef.current = null;
   };
 
@@ -245,13 +302,13 @@ export default function RepoScanner() {
       .filter((u) => u.length > 0);
 
     if (urls.length === 0) {
-      setUrlError("Enter a valid public GitHub URL");
+      setUrlError("Enter a valid repository URL");
       return;
     }
 
-    const invalidUrls = urls.filter(u => !GITHUB_PATTERN.test(u));
+    const invalidUrls = urls.filter(u => !GIT_URL_PATTERN.test(u));
     if (invalidUrls.length > 0) {
-      setUrlError(`Invalid GitHub URL(s): ${invalidUrls.join(", ")}`);
+      setUrlError(`Invalid repository URL(s): ${invalidUrls.join(", ")}`);
       return;
     }
 
@@ -270,10 +327,19 @@ export default function RepoScanner() {
 
       for (const url of urls) {
         try {
+          const bodyPayload: any = { repo_url: url };
+          if (requiresAuth) {
+            if (authMethod === "token" && gitToken.trim()) {
+              bodyPayload.git_token = gitToken.trim();
+            } else if (authMethod === "ssh" && sshKey.trim()) {
+              bodyPayload.ssh_key = sshKey.trim();
+            }
+          }
+
           const resp = await fetch(`${API_BASE}/v1/repo-scan`, {
             method: "POST",
             headers: { "Content-Type": "application/json", Authorization: `Bearer ${apiKey}` },
-            body: JSON.stringify({ repo_url: url }),
+            body: JSON.stringify(bodyPayload),
           });
           const data = await resp.json();
           if (!resp.ok) throw new Error(data.detail || `Failed to start scan for ${url}`);
@@ -340,14 +406,25 @@ export default function RepoScanner() {
         <div className="sticky top-28 flex flex-col gap-6">
           <div className="rounded-[2rem] border border-border/50 bg-background/50 backdrop-blur-sm p-8 flex flex-col gap-5 shadow-xl shadow-primary/5">
             <div>
-              <label htmlFor="repo-url-input" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground block mb-2">
-                Repository URL
-              </label>
+              <div className="flex items-center justify-between mb-2">
+                <label htmlFor="repo-url-input" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground block">
+                  Repository URL
+                </label>
+                {isValidating && <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-500" />}
+              </div>
               <Input
                 id="repo-url-input"
                 value={repoUrl}
-                onChange={(e) => { setRepoUrl(e.target.value); validateUrl(e.target.value); }}
-                onBlur={() => validateUrl(repoUrl)}
+                onChange={(e) => {
+                  setRepoUrl(e.target.value);
+                  validateUrl(e.target.value);
+                  if (!e.target.value) {
+                    setRequiresAuth(false);
+                    setGitToken("");
+                    setSshKey("");
+                  }
+                }}
+                onBlur={handleUrlBlur}
                 placeholder="https://github.com/owner/repo1, repo2..."
                 className={cn("rounded-xl h-12 font-mono text-sm border-2 transition-colors",
                   urlError ? "border-destructive" : "border-border/50 focus:border-violet-500/50")}
@@ -359,6 +436,78 @@ export default function RepoScanner() {
                 </p>
               )}
             </div>
+
+            {requiresAuth && (
+              <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-5 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-violet-500 font-bold text-xs uppercase tracking-wider">
+                    <Shield className="w-4 h-4" />
+                    Private Repo Detected
+                  </div>
+                  <div className="flex bg-muted/40 rounded-lg p-0.5 border border-border/50">
+                    <button
+                      type="button"
+                      onClick={() => setAuthMethod("token")}
+                      className={cn(
+                        "px-3 py-1 text-[10px] font-black uppercase rounded-md transition-all",
+                        authMethod === "token"
+                          ? "bg-violet-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Token
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthMethod("ssh")}
+                      className={cn(
+                        "px-3 py-1 text-[10px] font-black uppercase rounded-md transition-all",
+                        authMethod === "ssh"
+                          ? "bg-violet-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      SSH Key
+                    </button>
+                  </div>
+                </div>
+
+                {authMethod === "token" ? (
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="git-token-input" className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+                      Personal Access Token (PAT)
+                    </label>
+                    <Input
+                      id="git-token-input"
+                      type="password"
+                      value={gitToken}
+                      onChange={(e) => setGitToken(e.target.value)}
+                      placeholder="ghp_xxxxxxxxxxxx or GitLab/Bitbucket token"
+                      className="rounded-xl h-10 font-mono text-xs border-border/50 bg-background/50 focus:border-violet-500/50"
+                    />
+                    <p className="text-[10px] text-muted-foreground/60 leading-normal">
+                      Token is not stored. It will be used ephemerally to authenticate the clone process and then discarded.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="ssh-key-input" className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+                      SSH Private Key
+                    </label>
+                    <textarea
+                      id="ssh-key-input"
+                      value={sshKey}
+                      onChange={(e) => setSshKey(e.target.value)}
+                      placeholder="Paste your SSH Private Key here..."
+                      className="rounded-xl min-h-[120px] p-3 font-mono text-xs border border-border/50 bg-background/50 focus:border-violet-500/50 focus:outline-none focus:ring-1 focus:ring-violet-500/50 resize-y"
+                    />
+                    <p className="text-[10px] text-muted-foreground/60 leading-normal">
+                      Paste the private deploy key with read permissions. This is processed entirely in memory and never stored in the database.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
 
             <Button
               id="scan-repo-btn"
