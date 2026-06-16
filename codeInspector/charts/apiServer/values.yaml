@@ -41,7 +41,7 @@ deployment:
     fsGroup: 1000
 
 service:
-  type: ClusterIP
+  type: NodePort
   port: 80
   targetPort: 8000
 
