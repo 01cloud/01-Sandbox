@@ -1,3 +1,44 @@
+## Release v0.5.72 — 01-Sandbox
+**Release Date:** June 16, 2026
+
+---
+
+### Summary
+v0.5.72 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* dockerfile dependencies missing ([1bc4daa](https://github.com/01cloud/01-Sandbox/commit/1bc4daae7eb5d06113e52b59572e09abf150dc15))
+* dockerfile dependencies missing ([f3e29f8](https://github.com/01cloud/01-Sandbox/commit/f3e29f8ca876f25d419545a8a6aab4d80f69efcd))
+* generate RELEASE.md for v0.5.71 [skip ci] ([65ea4d7](https://github.com/01cloud/01-Sandbox/commit/65ea4d7d20507cb3f9563b8dccb83f9dcac50517))
+* bump versions to v0.5.71 [skip ci] ([f502d73](https://github.com/01cloud/01-Sandbox/commit/f502d7333e7b7eb7710bbe98488cc5854681bc6f))
+
+### Changes
+## [0.5.72](https://github.com/01cloud/01-Sandbox/compare/v0.5.71...v0.5.72) (2026-06-16)
+
+
+### 🐛 Bug Fixes
+
+* dockerfile dependencies missing ([1bc4daa](https://github.com/01cloud/01-Sandbox/commit/1bc4daae7eb5d06113e52b59572e09abf150dc15))
+* dockerfile dependencies missing ([f3e29f8](https://github.com/01cloud/01-Sandbox/commit/f3e29f8ca876f25d419545a8a6aab4d80f69efcd))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.71 [skip ci] ([65ea4d7](https://github.com/01cloud/01-Sandbox/commit/65ea4d7d20507cb3f9563b8dccb83f9dcac50517))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.71 [skip ci] ([f502d73](https://github.com/01cloud/01-Sandbox/commit/f502d7333e7b7eb7710bbe98488cc5854681bc6f))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.72)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.71 — 01-Sandbox
 **Release Date:** June 16, 2026
 
