@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field
 
 
 class GenerateAPIResponse(BaseModel):
-    """Response returned upon successfully generating a new API keys."""
+    """Response returned upon successfully generating a new API key."""
 
     api_key: str
     api_key_id: str
