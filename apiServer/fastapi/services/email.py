@@ -31,7 +31,7 @@ async def send_expiry_email(payload: dict) -> None:
         f"(prefix: {prefix}) is approaching expiration and will expire on {expires_at}.\n\n"
         f"To prevent any service interruption, please generate a new API key as soon as possible "
         f"and update your client configuration.\n\n"
-        f"Best regards,\n"
+        f"Best Regards,\n"
         f"01 Sandbox Security Team"
     )
 
