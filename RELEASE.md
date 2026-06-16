@@ -1,3 +1,44 @@
+## Release v0.5.77 — 01-Sandbox
+**Release Date:** June 16, 2026
+
+---
+
+### Summary
+v0.5.77 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* **scan:** run inline precheck and fix HTTPS private detection ([adfa1b7](https://github.com/01cloud/01-Sandbox/commit/adfa1b7ba23d15caa283f9c2ca552e772f61f1b1))
+* **scan:** run inline precheck and fix HTTPS private detection ([bf7beca](https://github.com/01cloud/01-Sandbox/commit/bf7beca551da9f9a7268623cec1e632536af1afa))
+* generate RELEASE.md for v0.5.76 [skip ci] ([f36052f](https://github.com/01cloud/01-Sandbox/commit/f36052f0b4b9e8b9341b0d62d16c5b5d0f58205e))
+* bump versions to v0.5.76 [skip ci] ([5dad537](https://github.com/01cloud/01-Sandbox/commit/5dad537b36bcbb2e13f317637e7fda10d8074b62))
+
+### Changes
+## [0.5.77](https://github.com/01cloud/01-Sandbox/compare/v0.5.76...v0.5.77) (2026-06-16)
+
+
+### 🐛 Bug Fixes
+
+* **scan:** run inline precheck and fix HTTPS private detection ([adfa1b7](https://github.com/01cloud/01-Sandbox/commit/adfa1b7ba23d15caa283f9c2ca552e772f61f1b1))
+* **scan:** run inline precheck and fix HTTPS private detection ([bf7beca](https://github.com/01cloud/01-Sandbox/commit/bf7beca551da9f9a7268623cec1e632536af1afa))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.76 [skip ci] ([f36052f](https://github.com/01cloud/01-Sandbox/commit/f36052f0b4b9e8b9341b0d62d16c5b5d0f58205e))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.76 [skip ci] ([5dad537](https://github.com/01cloud/01-Sandbox/commit/5dad537b36bcbb2e13f317637e7fda10d8074b62))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.77)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.76 — 01-Sandbox
 **Release Date:** June 16, 2026
 
