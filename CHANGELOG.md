@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.73](https://github.com/01cloud/01-Sandbox/compare/v0.5.72...v0.5.73) (2026-06-16)
+
+
+### 🐛 Bug Fixes
+
+* change from clusterIP to nodeport ([894babc](https://github.com/01cloud/01-Sandbox/commit/894babcf87bc69dc379e1ad394d968be3e31b28c))
+* change from clusterIP to nodeport ([53a6ecb](https://github.com/01cloud/01-Sandbox/commit/53a6ecb7537daa37fa784fa7fe6c0234eb29c721))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.72 [skip ci] ([e76e5a9](https://github.com/01cloud/01-Sandbox/commit/e76e5a9d369b646b2bc371be1f5c43f92e9ce72d))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.72 [skip ci] ([9c971de](https://github.com/01cloud/01-Sandbox/commit/9c971de807f86398c177d04c4e0730bbd967648e))
+
 ## [0.5.72](https://github.com/01cloud/01-Sandbox/compare/v0.5.71...v0.5.72) (2026-06-16)
 
 
