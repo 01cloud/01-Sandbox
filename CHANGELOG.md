@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.5.75](https://github.com/01cloud/01-Sandbox/compare/v0.5.74...v0.5.75) (2026-06-16)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.74 [skip ci] ([5462290](https://github.com/01cloud/01-Sandbox/commit/5462290776a0ec86e997b69bc5b929e6e82b9a5c))
+
 ## [0.5.74](https://github.com/01cloud/01-Sandbox/compare/v0.5.73...v0.5.74) (2026-06-16)
 
 
