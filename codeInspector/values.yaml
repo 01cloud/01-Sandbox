@@ -86,7 +86,7 @@ apiServer:
       runAsUser: 1000
       fsGroup: 1000
   service:
-    type: ClusterIP
+    type: NodePort
     port: 80
     targetPort: 8000
   ingress:
