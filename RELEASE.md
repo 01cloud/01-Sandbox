@@ -1,3 +1,44 @@
+## Release v0.5.76 — 01-Sandbox
+**Release Date:** June 16, 2026
+
+---
+
+### Summary
+v0.5.76 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* resolve credentials clear before repository scan triggers ([97ae910](https://github.com/01cloud/01-Sandbox/commit/97ae91046217fa121affdb638bcd34102bf5b33e))
+* resolve credentials clear before repository scan triggers ([7c54b26](https://github.com/01cloud/01-Sandbox/commit/7c54b26a4e78333429204a391a81340327df972e))
+* generate RELEASE.md for v0.5.75 [skip ci] ([7b7a9b3](https://github.com/01cloud/01-Sandbox/commit/7b7a9b3dd7052e1d64e5d732b18a12454f29ec80))
+* bump versions to v0.5.75 [skip ci] ([012707e](https://github.com/01cloud/01-Sandbox/commit/012707ea3c733460b9f1b283847542e0d3b5859b))
+
+### Changes
+## [0.5.76](https://github.com/01cloud/01-Sandbox/compare/v0.5.75...v0.5.76) (2026-06-16)
+
+
+### 🐛 Bug Fixes
+
+* resolve credentials clear before repository scan triggers ([97ae910](https://github.com/01cloud/01-Sandbox/commit/97ae91046217fa121affdb638bcd34102bf5b33e))
+* resolve credentials clear before repository scan triggers ([7c54b26](https://github.com/01cloud/01-Sandbox/commit/7c54b26a4e78333429204a391a81340327df972e))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.75 [skip ci] ([7b7a9b3](https://github.com/01cloud/01-Sandbox/commit/7b7a9b3dd7052e1d64e5d732b18a12454f29ec80))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.75 [skip ci] ([012707e](https://github.com/01cloud/01-Sandbox/commit/012707ea3c733460b9f1b283847542e0d3b5859b))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.76)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.75 — 01-Sandbox
 **Release Date:** June 16, 2026
 
