@@ -1,3 +1,44 @@
+## Release v0.5.73 — 01-Sandbox
+**Release Date:** June 16, 2026
+
+---
+
+### Summary
+v0.5.73 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* change from clusterIP to nodeport ([894babc](https://github.com/01cloud/01-Sandbox/commit/894babcf87bc69dc379e1ad394d968be3e31b28c))
+* change from clusterIP to nodeport ([53a6ecb](https://github.com/01cloud/01-Sandbox/commit/53a6ecb7537daa37fa784fa7fe6c0234eb29c721))
+* generate RELEASE.md for v0.5.72 [skip ci] ([e76e5a9](https://github.com/01cloud/01-Sandbox/commit/e76e5a9d369b646b2bc371be1f5c43f92e9ce72d))
+* bump versions to v0.5.72 [skip ci] ([9c971de](https://github.com/01cloud/01-Sandbox/commit/9c971de807f86398c177d04c4e0730bbd967648e))
+
+### Changes
+## [0.5.73](https://github.com/01cloud/01-Sandbox/compare/v0.5.72...v0.5.73) (2026-06-16)
+
+
+### 🐛 Bug Fixes
+
+* change from clusterIP to nodeport ([894babc](https://github.com/01cloud/01-Sandbox/commit/894babcf87bc69dc379e1ad394d968be3e31b28c))
+* change from clusterIP to nodeport ([53a6ecb](https://github.com/01cloud/01-Sandbox/commit/53a6ecb7537daa37fa784fa7fe6c0234eb29c721))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.72 [skip ci] ([e76e5a9](https://github.com/01cloud/01-Sandbox/commit/e76e5a9d369b646b2bc371be1f5c43f92e9ce72d))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.72 [skip ci] ([9c971de](https://github.com/01cloud/01-Sandbox/commit/9c971de807f86398c177d04c4e0730bbd967648e))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.73)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.72 — 01-Sandbox
 **Release Date:** June 16, 2026
 
