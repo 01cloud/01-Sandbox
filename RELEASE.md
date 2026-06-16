@@ -1,3 +1,30 @@
+## Release v0.5.75 — 01-Sandbox
+**Release Date:** June 16, 2026
+
+---
+
+### Summary
+v0.5.75 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* generate RELEASE.md for v0.5.74 [skip ci] ([5462290](https://github.com/01cloud/01-Sandbox/commit/5462290776a0ec86e997b69bc5b929e6e82b9a5c))
+
+### Changes
+## [0.5.75](https://github.com/01cloud/01-Sandbox/compare/v0.5.74...v0.5.75) (2026-06-16)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.74 [skip ci] ([5462290](https://github.com/01cloud/01-Sandbox/commit/5462290776a0ec86e997b69bc5b929e6e82b9a5c))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.75)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.74 — 01-Sandbox
 **Release Date:** June 16, 2026
 
