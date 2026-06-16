@@ -69,6 +69,7 @@ COPY sandboxes/ ./sandboxes/
 COPY proxy/ ./proxy/
 COPY health/ ./health/
 COPY ratelimit/ ./ratelimit/
+COPY services/ ./services/
 
 # Switch to non-root user
 USER appuser
