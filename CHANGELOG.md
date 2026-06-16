@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.72](https://github.com/01cloud/01-Sandbox/compare/v0.5.71...v0.5.72) (2026-06-16)
+
+
+### 🐛 Bug Fixes
+
+* dockerfile dependencies missing ([1bc4daa](https://github.com/01cloud/01-Sandbox/commit/1bc4daae7eb5d06113e52b59572e09abf150dc15))
+* dockerfile dependencies missing ([f3e29f8](https://github.com/01cloud/01-Sandbox/commit/f3e29f8ca876f25d419545a8a6aab4d80f69efcd))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.71 [skip ci] ([65ea4d7](https://github.com/01cloud/01-Sandbox/commit/65ea4d7d20507cb3f9563b8dccb83f9dcac50517))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.71 [skip ci] ([f502d73](https://github.com/01cloud/01-Sandbox/commit/f502d7333e7b7eb7710bbe98488cc5854681bc6f))
+
 ## [0.5.71](https://github.com/01cloud/01-Sandbox/compare/v0.5.70...v0.5.71) (2026-06-16)
 
 
