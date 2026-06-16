@@ -184,6 +184,7 @@ async def check_repo_access(
         "login",
         "password",
         "credentials",
+        "not found",
     ]
     is_auth_error = any(ind in stderr_lower for ind in auth_indicators)
 

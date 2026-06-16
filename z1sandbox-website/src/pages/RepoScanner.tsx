@@ -315,6 +315,38 @@ export default function RepoScanner() {
       return;
     }
 
+    if (!requiresAuth) {
+      setIsValidating(true);
+      try {
+        const resp = await fetch(`${API_BASE}/v1/repo-scan/precheck`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify({ repo_url: urls[0] }),
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          if (data.requires_auth) {
+            setRequiresAuth(true);
+            if (urls[0].startsWith("git@") || urls[0].startsWith("ssh://")) {
+              setAuthMethod("ssh");
+            } else {
+              setAuthMethod("token");
+            }
+            toast.error("This repository requires authentication. Please provide a Personal Access Token or SSH Deploy Key below.");
+            setIsValidating(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.error("Precheck failed during submission:", err);
+      } finally {
+        setIsValidating(false);
+      }
+    }
+
     resetScan();
     setIsScanning(true);
 
