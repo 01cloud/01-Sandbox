@@ -27,7 +27,14 @@ from .file_scanner import (
 )
 from .github_validator import parse_github_url, validate_github_repo
 from .language_detector import detect_languages
-from .models import RepoScanRequest, RepoScanResult, RepoScanSubmitResponse, ScanStep
+from .models import (
+    RepoScanPrecheckRequest,
+    RepoScanPrecheckResponse,
+    RepoScanRequest,
+    RepoScanResult,
+    RepoScanSubmitResponse,
+    ScanStep,
+)
 from .sandbox_provisioner import clone_repo, destroy_sandbox, provision_sandbox
 
 # ─────────────────────────────────────────────
@@ -41,6 +48,8 @@ async def _run_scan_pipeline(
     owner: str,
     repo: str,
     app_state,
+    git_token: Optional[str] = None,
+    ssh_key: Optional[str] = None,
 ) -> None:
     """
     Full scan pipeline executed as a background task.
@@ -95,7 +104,7 @@ async def _run_scan_pipeline(
             5,
         )
         try:
-            await validate_github_repo(repo_url)
+            await validate_github_repo(repo_url, git_token=git_token, ssh_key=ssh_key)
         except HTTPException as he:
             raise RuntimeError(he.detail)
 
@@ -117,7 +126,8 @@ async def _run_scan_pipeline(
             ScanStep.CLONING, f"Cloning {owner}/{repo} with --depth=1...", 25
         )
         success, error = await asyncio.wait_for(
-            clone_repo(sandbox_id, clone_url), timeout=180.0
+            clone_repo(sandbox_id, clone_url, git_token=git_token, ssh_key=ssh_key),
+            timeout=180.0,
         )
         if not success:
             log("CLONING", f"git clone FAILED: {error}")
@@ -490,12 +500,44 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
     """
     router = APIRouter()
 
+    # ── POST /v1/repo-scan/precheck ─────────────────────────────────────
+    @router.post(
+        "/v1/repo-scan/precheck",
+        response_model=RepoScanPrecheckResponse,
+        tags=["Repo Scanner"],
+        summary="Auto-detect access and credential requirements for a repository URL",
+        dependencies=[Depends(validate_token)],
+    )
+    async def precheck_repo_access_endpoint(
+        req: RepoScanPrecheckRequest,
+    ) -> RepoScanPrecheckResponse:
+        """
+        Precheck if a repo is accessible and if it requires authentication credentials.
+        """
+        from .private_clone import check_repo_access
+
+        try:
+            res = await check_repo_access(req.repo_url)
+            return RepoScanPrecheckResponse(
+                accessible=res["accessible"],
+                requires_auth=res["requires_auth"],
+                provider=res["provider"],
+                error=res["error"] if not res["accessible"] else None,
+            )
+        except Exception as e:
+            return RepoScanPrecheckResponse(
+                accessible=False,
+                requires_auth=False,
+                provider="unknown",
+                error=str(e),
+            )
+
     # ── POST /v1/repo-scan ──────────────────────────────────────────────
     @router.post(
         "/v1/repo-scan",
         response_model=RepoScanSubmitResponse,
         tags=["Repo Scanner"],
-        summary="Submit a public GitHub repository for language detection and scanning",
+        summary="Submit a repository for language detection and scanning (supports public & private)",
         dependencies=[Depends(validate_token)],
     )
     async def submit_repo_scan(
@@ -503,7 +545,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         background_tasks: BackgroundTasks,
     ) -> RepoScanSubmitResponse:
         """
-        Validates a public GitHub repository URL and enqueues a full scan job.
+        Validates a repository URL and enqueues a full scan job.
         """
         owner, repo = parse_github_url(req.repo_url)
 
@@ -533,6 +575,8 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                     "repo_url": req.repo_url,
                     "owner": owner,
                     "repo": repo,
+                    "git_token": req.git_token,
+                    "ssh_key": req.ssh_key,
                 },
             )
         else:
@@ -543,6 +587,8 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 owner,
                 repo,
                 app_state,
+                req.git_token,
+                req.ssh_key,
             )
         return RepoScanSubmitResponse(
             job_id=job_id,

@@ -198,12 +198,15 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
             )
 
         # Persist metadata with User identity
-        # Priority: Explicit request field -> Token claim -> Namespaced claim
-        user_email = (
-            req.user_email
-            or payload.get("email")
-            or payload.get("https://code-inspector.com/email")
-        )
+        # Priority: Explicit request field -> Token claim -> Dynamic Namespaced/Custom claims containing email
+        auth0_email = None
+        if isinstance(payload, dict):
+            for k, v in payload.items():
+                if k == "email" or k.endswith("/email"):
+                    auth0_email = v
+                    break
+
+        user_email = req.user_email or auth0_email
 
         conn = state.get_db_conn()
         cursor = conn.cursor()

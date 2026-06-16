@@ -80,8 +80,16 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
                 )
                 from scan_repository.scan_repository import _run_scan_pipeline
 
+                git_token = p.get("git_token")
+                ssh_key = p.get("ssh_key")
                 await _run_scan_pipeline(
-                    job_id, p["repo_url"], p["owner"], p["repo"], app_state
+                    job_id,
+                    p["repo_url"],
+                    p["owner"],
+                    p["repo"],
+                    app_state,
+                    git_token=git_token,
+                    ssh_key=ssh_key,
                 )
             elif jt.job_type == "email-notification":
                 print(

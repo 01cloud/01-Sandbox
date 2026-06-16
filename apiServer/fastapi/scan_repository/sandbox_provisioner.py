@@ -92,29 +92,38 @@ async def exec_in_sandbox(
         return ("", f"exec failed: {exc}", 1)
 
 
-async def clone_repo(sandbox_id: str, repo_url: str) -> Tuple[bool, str]:
+async def clone_repo(
+    sandbox_id: str,
+    repo_url: str,
+    git_token: Optional[str] = None,
+    ssh_key: Optional[str] = None,
+) -> Tuple[bool, str]:
     """
     Clone the repository into REPO_DIR inside the sandbox using --depth=1.
     sandbox_id is the temp directory path.
     Returns (success, error_message).
-    Test
     """
+    from .private_clone import clone_private_repo
+
     target = os.path.join(sandbox_id, REPO_DIR)
-    print(f"{_TAG} git clone --depth=1 {repo_url}")
+    print(
+        f"{_TAG} git clone --depth=1 {repo_url} (auth provided: {bool(git_token or ssh_key)})"
+    )
     print(f"{_TAG} Clone target directory: {target}")
     t0 = time.monotonic()
 
-    stdout, stderr, exit_code = await exec_in_sandbox(
+    success, err_msg = await clone_private_repo(
         sandbox_id=sandbox_id,
-        command=["git", "clone", "--depth=1", repo_url, target],
-        timeout=180.0,
+        repo_url=repo_url,
+        git_token=git_token,
+        ssh_key=ssh_key,
     )
     elapsed = time.monotonic() - t0
 
-    if exit_code != 0:
-        print(f"{_TAG} git clone FAILED (exit={exit_code}, elapsed={elapsed:.1f}s)")
-        print(f"{_TAG} git stderr: {(stderr or stdout)[:500]}")
-        return False, stderr or stdout
+    if not success:
+        print(f"{_TAG} git clone FAILED (elapsed={elapsed:.1f}s)")
+        print(f"{_TAG} git stderr: {err_msg[:500]}")
+        return False, err_msg
 
     # Log size of cloned repo
     try:
