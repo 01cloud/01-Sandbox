@@ -55,15 +55,32 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
     print(f"[RabbitMQ] Consumer ready: queue={jt.queue_name} prefetch={prefetch}")
 
     async def on_message(msg: aio_pika.IncomingMessage):
+        import time
+
+        from observability import set_correlation_id
+        from observability.metrics import (
+            job_execution_duration_seconds,
+            job_execution_total,
+        )
+
+        corr_id = msg.headers.get("correlation_id")
+        set_correlation_id(corr_id)
+
+        start_time = time.time()
+        status = "success"
+        job_id = "?"
+        p = {}
+
         try:
             p = json.loads(msg.body)
-            job_id = p.get("job_id")
+            job_id = p.get("job_id", "?")
 
             if is_job_cancelled(app_state, job_id):
                 print(
                     f"[Cancellation] Job {job_id[:8]} was cancelled before execution. Discarding message."
                 )
                 await msg.ack()
+                status = "cancelled"
                 return
 
             current_task = asyncio.current_task()
@@ -103,6 +120,7 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
 
         except asyncio.CancelledError:
             print(f"[Cancellation] Message processing cancelled for job {job_id[:8]}")
+            status = "cancelled"
             try:
                 await msg.ack()
             except Exception:
@@ -110,6 +128,7 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
 
         except Exception as e:
             print(f"[RabbitMQ] Worker execution failure: {e}")
+            status = "failure"
             try:
                 await handle_worker_failure(msg, p, e, jt.routing_key, app_state)
             except Exception as retry_err:
@@ -118,9 +137,19 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
                 app_state.queue_stats.record_processed("scan.failed")
 
         finally:
-            if "job_id" in locals():
+            if "job_id" in locals() and job_id != "?":
                 app_state.active_tasks.pop(job_id, None)
             app_state.queue_stats.record_processed(jt.queue_name)
+
+            duration = time.time() - start_time
+            # Record Prometheus metrics
+            job_execution_duration_seconds.labels(job_type=jt.job_type).observe(
+                duration
+            )
+            job_execution_total.labels(job_type=jt.job_type, status=status).inc()
+
+            # Clean context correlation ID
+            set_correlation_id(None)
 
     await q.consume(on_message)
 

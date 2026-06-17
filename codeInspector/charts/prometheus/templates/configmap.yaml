@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: {{ .Values.namespace }}
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    scrape_configs:
+      - job_name: 'prometheus'
+        static_configs:
+          - targets: ['localhost:9090']
+
+      - job_name: 'fastapi-api-server'
+        static_configs:
+          - targets: ['{{ .Values.apiServerServiceName }}.{{ .Values.apiServerNamespace }}.svc.cluster.local:{{ .Values.apiServerPort }}']
+        metrics_path: '/metrics'
+
+      - job_name: 'agentgateway-proxy'
+        static_configs:
+          - targets: [
+              '{{ .Values.agentgatewayServiceName }}.{{ .Values.agentgatewayNamespace }}.svc.cluster.local:{{ .Values.agentgatewayPort }}',
+              '{{ .Values.agentgatewayServiceName }}.{{ .Values.agentgatewayNamespace }}.svc.cluster.local:7472'
+            ]
+        metrics_path: '/metrics'
+        # Ignore errors if the metrics port is not active yet
+        honor_labels: true

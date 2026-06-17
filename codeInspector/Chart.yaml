@@ -18,6 +18,13 @@ dependencies:
   - name: apiServer
     version: 0.1.0
     condition: apiServer.enabled
+  - name: prometheus
+    version: 0.1.0
+    condition: prometheus.enabled
+  - name: grafana
+    version: 0.1.0
+    condition: grafana.enabled
+
 #   - name: z1sandbox-website
 #     version: 2.0.0
 #     condition: z1sandbox-website.enabled

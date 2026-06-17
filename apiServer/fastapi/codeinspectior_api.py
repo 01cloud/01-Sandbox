@@ -29,6 +29,16 @@ from scan_repository import get_repo_scan_router
 # Initialize central database
 state.init_db()
 
+# Initialize structured JSON logging
+from observability import (
+    CorrelationIDMiddleware,
+    MetricsMiddleware,
+    metrics_router,
+    setup_logging,
+)
+
+setup_logging()
+
 app = FastAPI(
     title="CodeInspector API Manager",
     description="A centralized proxy relaying connections mapping standard interaction seamlessly to the underlying actual code-evaluation clusters locally natively successfully.",
@@ -47,6 +57,8 @@ app.add_middleware(
 )
 
 # Custom Http middlewares
+app.add_middleware(CorrelationIDMiddleware)
+app.add_middleware(MetricsMiddleware)
 app.middleware("http")(log_headers)
 app.middleware("http")(cookie_auth_redirect_middleware)
 
@@ -72,6 +84,8 @@ from core.queue.router import router as queue_router
 
 app.include_router(queue_router)
 app.include_router(public_queue_router)
+app.include_router(metrics_router)
+
 
 if __name__ == "__main__":
     import uvicorn
