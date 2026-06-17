@@ -17,6 +17,11 @@ redis==5.2.0
 aio-pika==9.4.3
 bleach==6.3.0
 
+# Monitoring & Logging
+prometheus-client==0.21.0
+python-json-logger==2.0.7
+
+
 
 # ── Optional backends ────────────────────────
 

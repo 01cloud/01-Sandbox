@@ -35,6 +35,12 @@ async def provision_sandbox(backend) -> str:
     tmpdir = await loop.run_in_executor(None, tempfile.mkdtemp, None, "reposcanner_")
     elapsed = time.monotonic() - t0
     print(f"{_TAG} Provisioned local sandbox in {elapsed:.3f}s: {tmpdir}")
+    try:
+        from observability.metrics import sandbox_provision_duration_seconds
+
+        sandbox_provision_duration_seconds.observe(elapsed)
+    except Exception:
+        pass
     return tmpdir
 
 
@@ -119,6 +125,16 @@ async def clone_repo(
         ssh_key=ssh_key,
     )
     elapsed = time.monotonic() - t0
+
+    try:
+        from urllib.parse import urlparse
+
+        from observability.metrics import repo_clone_duration_seconds
+
+        host = urlparse(repo_url).hostname or "unknown"
+        repo_clone_duration_seconds.labels(repo_host=host).observe(elapsed)
+    except Exception:
+        pass
 
     if not success:
         print(f"{_TAG} git clone FAILED (elapsed={elapsed:.1f}s)")
