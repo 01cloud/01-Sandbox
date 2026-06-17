@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.80](https://github.com/01cloud/01-Sandbox/compare/v0.5.79...v0.5.80) (2026-06-17)
+
+
+### 🚀 New Features
+
+* expose grafana dashboard on sandbox.01security.com/metrics ([303ac5e](https://github.com/01cloud/01-Sandbox/commit/303ac5e63461dc29876b9fd22b6e3d3e7063c908))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.79 [skip ci] ([3bcd5cd](https://github.com/01cloud/01-Sandbox/commit/3bcd5cd8e7965ae9fd18b70b68c0f4b9f8c33f63))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.79 [skip ci] ([867289c](https://github.com/01cloud/01-Sandbox/commit/867289c400e69d246c1a56a5c9de042d84a69346))
+
 ## [0.5.79](https://github.com/01cloud/01-Sandbox/compare/v0.5.78...v0.5.79) (2026-06-17)
 
 
