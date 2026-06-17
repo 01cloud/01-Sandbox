@@ -7,6 +7,12 @@ prometheusPort: 9090
 
 replicaCount: 1
 
+ingressRoute:
+  enabled: true
+ingressHost: "sandbox.01security.com"
+ingressPath: "/metrics"
+
+
 image:
   repository: grafana/grafana
   tag: "11.1.0"
