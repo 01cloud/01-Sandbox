@@ -16,6 +16,7 @@ import Dashboard from "./pages/Dashboard.tsx";
 import Health from "./pages/Health.tsx";
 import RepoScanner from "./pages/RepoScanner.tsx";
 import QueueStatsPage from "./pages/QueueStatsPage.tsx";
+import Metrics from "./pages/Metrics.tsx";
 
 
 import CookieBanner from "./components/CookieBanner.tsx";
@@ -79,6 +80,7 @@ const App = () => (
                 <Route path="/health" element={<Health />} />
                 <Route path="/repo-scanner" element={<RepoScanner />} />
                 <Route path="/queue-stats" element={<QueueStatsPage />} />
+                <Route path="/metrics" element={<Metrics />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </main>

@@ -19,6 +19,15 @@ data:
           - targets: ['{{ .Values.apiServerServiceName }}.{{ .Values.apiServerNamespace }}.svc.cluster.local:{{ .Values.apiServerPort }}']
         metrics_path: '/metrics'
 
+      - job_name: 'sandbox-api'
+        scheme: https
+        static_configs:
+          - targets:
+              - 'api-sandbox.01security.com'
+        metrics_path: '/metrics'
+        tls_config:
+          insecure_skip_verify: true
+
       - job_name: 'agentgateway-proxy'
         static_configs:
           - targets: [

@@ -9,7 +9,7 @@ replicaCount: 1
 
 ingressRoute:
   enabled: true
-ingressHost: "sandbox.01security.com"
+ingressHost: "api-sandbox.01security.com"
 ingressPath: "/metrics"
 
 
