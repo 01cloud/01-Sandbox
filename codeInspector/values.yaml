@@ -73,7 +73,7 @@ apiServer:
     replicaCount: 2
     image:
       repository: 01community/01sandbox-api
-      tag: "v0.5.77"
+      tag: "v0.5.78"
       pullPolicy: Always
     resources:
       requests:
@@ -206,7 +206,6 @@ opensandboxResourcePool:
       bufferMax: 10
       poolMin: 1
       poolMax: 50
-
 ###############################################################
 # Prometheus component values
 ###############################################################
@@ -237,7 +236,6 @@ prometheus:
     limits:
       cpu: "500m"
       memory: "512Mi"
-
 ###############################################################
 # Grafana component values
 ###############################################################
