@@ -1,3 +1,38 @@
+## Release v0.5.81 — 01-Sandbox
+**Release Date:** June 17, 2026
+
+---
+
+### Summary
+v0.5.81 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* prometheus metrics ([ec11c05](https://github.com/01cloud/01-Sandbox/commit/ec11c05295bb05a2d6a01cf616db6639ebd4cc55))
+* prometheus metrics ([732286e](https://github.com/01cloud/01-Sandbox/commit/732286e358f9961d2e80fcb80809bf00b015d5ac))
+* generate RELEASE.md for v0.5.80 [skip ci] ([0aea412](https://github.com/01cloud/01-Sandbox/commit/0aea412449902fff8c79073eb5c5b2d071c5e5f8))
+
+### Changes
+## [0.5.81](https://github.com/01cloud/01-Sandbox/compare/v0.5.80...v0.5.81) (2026-06-17)
+
+
+### 🐛 Bug Fixes
+
+* prometheus metrics ([ec11c05](https://github.com/01cloud/01-Sandbox/commit/ec11c05295bb05a2d6a01cf616db6639ebd4cc55))
+* prometheus metrics ([732286e](https://github.com/01cloud/01-Sandbox/commit/732286e358f9961d2e80fcb80809bf00b015d5ac))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.80 [skip ci] ([0aea412](https://github.com/01cloud/01-Sandbox/commit/0aea412449902fff8c79073eb5c5b2d071c5e5f8))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.81)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.80 — 01-Sandbox
 **Release Date:** June 17, 2026
 
