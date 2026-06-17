@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.82](https://github.com/01cloud/01-Sandbox/compare/v0.5.81...v0.5.82) (2026-06-17)
+
+
+### 🚀 New Features
+
+* make Grafana subpath vars conditional on ingressRoute ([7e39838](https://github.com/01cloud/01-Sandbox/commit/7e398386064ee8c56945d4c83d6339f10517b94a))
+* make Grafana subpath vars conditional on ingressRoute ([45d9e3d](https://github.com/01cloud/01-Sandbox/commit/45d9e3d2f6a8c7d259566f421dbee68b45fbfb55))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.81 [skip ci] ([27949fa](https://github.com/01cloud/01-Sandbox/commit/27949fa7ed76fda4c6b7235c8d49e6813bdfb160))
+
 ## [0.5.81](https://github.com/01cloud/01-Sandbox/compare/v0.5.80...v0.5.81) (2026-06-17)
 
 
