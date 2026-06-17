@@ -1,3 +1,50 @@
+## Release v0.5.78 — 01-Sandbox
+**Release Date:** June 17, 2026
+
+---
+
+### Summary
+v0.5.78 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement prometheus and grafana ([41ad300](https://github.com/01cloud/01-Sandbox/commit/41ad3007e8c1d2d2f38fe8cae1706d0e641423c4))
+* implement prometheus and grafana ([aaba7f0](https://github.com/01cloud/01-Sandbox/commit/aaba7f05d9bb40428d9f8b5cf9f6e38bb01b0fc0))
+* private github repo scan usig credentials ([906fb7e](https://github.com/01cloud/01-Sandbox/commit/906fb7e863ee0ee9928106c5c97ad5ffe16bca9b))
+* private github repo scan usig credentials ([5b6b86a](https://github.com/01cloud/01-Sandbox/commit/5b6b86af18725bbe0399aa09524f557d41ca2ed1))
+
+### Changes
+## [0.5.78](https://github.com/01cloud/01-Sandbox/compare/v0.5.77...v0.5.78) (2026-06-17)
+
+
+### 🚀 New Features
+
+* implement prometheus and grafana ([41ad300](https://github.com/01cloud/01-Sandbox/commit/41ad3007e8c1d2d2f38fe8cae1706d0e641423c4))
+* implement prometheus and grafana ([aaba7f0](https://github.com/01cloud/01-Sandbox/commit/aaba7f05d9bb40428d9f8b5cf9f6e38bb01b0fc0))
+
+
+### 🐛 Bug Fixes
+
+* private github repo scan usig credentials ([906fb7e](https://github.com/01cloud/01-Sandbox/commit/906fb7e863ee0ee9928106c5c97ad5ffe16bca9b))
+* private github repo scan usig credentials ([5b6b86a](https://github.com/01cloud/01-Sandbox/commit/5b6b86af18725bbe0399aa09524f557d41ca2ed1))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.77 [skip ci] ([50c89d6](https://github.com/01cloud/01-Sandbox/commit/50c89d6e1f781cec98e59b671fa863490ac0ccfa))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.77 [skip ci] ([686d14c](https://github.com/01cloud/01-Sandbox/commit/686d14c07adc639f2ebbfa7e6732dc207e00aae9))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.78)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.77 — 01-Sandbox
 **Release Date:** June 16, 2026
 
