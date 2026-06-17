@@ -13,8 +13,8 @@ export default function Metrics() {
     cleanBase = API_BASE_URL.replace(/\/api\/z1sandbox\/?$/, "").replace(/\/v1\/?$/, "");
   }
 
-  // The Grafana subpath is /metrics, and the dashboard UID is codeinspector-main
-  const grafanaDashboardUrl = `${cleanBase}/metrics/d/codeinspector-main/codeinspector-system-dashboard?orgId=1&kiosk`;
+  // The Grafana subpath is /grafana, and the dashboard UID is codeinspector-main
+  const grafanaDashboardUrl = `${cleanBase}/grafana/d/codeinspector-main/codeinspector-system-dashboard?orgId=1&kiosk`;
 
   const handleRefresh = () => {
     setIsRefreshing(true);

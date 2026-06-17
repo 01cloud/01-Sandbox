@@ -10,7 +10,7 @@ replicaCount: 1
 ingressRoute:
   enabled: true
 ingressHost: "api-sandbox.01security.com"
-ingressPath: "/metrics"
+ingressPath: "/grafana"
 
 
 image:
