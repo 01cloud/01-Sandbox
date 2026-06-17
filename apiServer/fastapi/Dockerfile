@@ -60,6 +60,7 @@ RUN tokei --version && enry --version && github-linguist --version && linguist -
 # Copy application code
 
 COPY *.py ./
+COPY observability/ ./observability/
 COPY scan_repository/ ./scan_repository/
 COPY scan_jobs/ ./scan_jobs/
 COPY core/ ./core/
