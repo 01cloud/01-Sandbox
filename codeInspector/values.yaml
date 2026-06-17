@@ -249,7 +249,7 @@ grafana:
   ingressRoute:
     enabled: true
   ingressHost: "api-sandbox.01security.com"
-  ingressPath: "/metrics"
+  ingressPath: "/grafana"
   image:
     repository: grafana/grafana
     tag: "11.1.0"
