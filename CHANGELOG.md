@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.5.79](https://github.com/01cloud/01-Sandbox/compare/v0.5.78...v0.5.79) (2026-06-17)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.78 [skip ci] ([e81601f](https://github.com/01cloud/01-Sandbox/commit/e81601fe90d23b9fbe8183d2100aea465503c82d))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.78 [skip ci] ([40703a8](https://github.com/01cloud/01-Sandbox/commit/40703a8be38bb0e7ebf43e641ab8e5ba176a269b))
+* copy observability package in Dockerfile ([5e4b240](https://github.com/01cloud/01-Sandbox/commit/5e4b240b64178a10068ff761faa8da781ae1ad9b))
+* copy observability package in Dockerfile ([6ef822b](https://github.com/01cloud/01-Sandbox/commit/6ef822b82bd398ac1d996e5178256ca04c5b9c5c))
+
 ## [0.5.78](https://github.com/01cloud/01-Sandbox/compare/v0.5.77...v0.5.78) (2026-06-17)
 
 
