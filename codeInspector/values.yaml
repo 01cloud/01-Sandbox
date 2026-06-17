@@ -249,6 +249,9 @@ grafana:
   ingressRoute:
     enabled: true
   ingressHost: "api-sandbox.01security.com"
+  ingressHostnames:
+    - api-sandbox.01security.com
+    - 10.0.10.100
   ingressPath: "/grafana"
   image:
     repository: grafana/grafana
