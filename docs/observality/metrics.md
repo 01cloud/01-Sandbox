@@ -90,3 +90,30 @@ prometheus.io/scrape: "true"
 prometheus.io/port: "8000"
 ```
 The Kubernetes service discovery relabeling logic automatically translates these annotations to direct pod IP scraping at route `/metrics`.
+
+---
+
+## 5. Security & Access Control
+
+To protect telemetry endpoints, access to Grafana (`/grafana`), Prometheus (`/prometheus`), and the API metrics route (`/metrics` or `/api/v1/01sbx/metrics`) is restricted at the API gateway layer using `AgentgatewayPolicy` rules.
+
+By default, these endpoints block all public traffic and only allow requests originating from allowed IP addresses or subnets (like the local VPN).
+
+### Dynamic Configuration
+
+You can dynamically manage the allowed IP addresses and subnets directly from the main `values.yaml` file under the `global.allowedIps` section:
+
+```yaml
+global:
+  allowedIps:
+    - "103.129.134.139" # Public IP
+    - "10."             # VPN subnet (allows all VPN clients in the 10.x.x.x range)
+    - "127.0.0.1"       # Localhost loopback IPv4
+    - "::1"             # Localhost loopback IPv6
+```
+
+### Applied Gatekeeper Policies
+
+1. **Grafana Ingress Route Protection (`grafana-private-policy`):** Restricts access to the `/grafana` subpath on HTTPRoute hostnames.
+2. **Prometheus Ingress Route Protection (`prometheus-private-policy`):** Restricts access to the `/prometheus` subpath on HTTPRoute hostnames.
+3. **API Metrics Path Protection (`api-metrics-private-policy`):** Intercepts requests targeting `/metrics` or `/api/v1/01sbx/metrics` on the API routing paths.
