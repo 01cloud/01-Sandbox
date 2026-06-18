@@ -1,3 +1,37 @@
+## Release v0.5.87 — 01-Sandbox
+**Release Date:** June 18, 2026
+
+---
+
+### Summary
+v0.5.87 focuses on new functionality and platform enhancements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* generate RELEASE.md for v0.5.86 [skip ci] ([682479b](https://github.com/01cloud/01-Sandbox/commit/682479b5737c5abf27360ff54807d9bbd1b9f0b8))
+* **readme:** update readmefiles ([22bcdfb](https://github.com/01cloud/01-Sandbox/commit/22bcdfbd37c43a00b16358a5d2a3e9da52f39c51))
+* **readme:** update readmefiles ([19d95ac](https://github.com/01cloud/01-Sandbox/commit/19d95acda5e63c9c1998c5b0554e701541e32ba4))
+* **readme:** update readmefiles ([2fdac7c](https://github.com/01cloud/01-Sandbox/commit/2fdac7cbf565bd4febe30225dd6445b05ef09907))
+
+### Changes
+## [0.5.87](https://github.com/01cloud/01-Sandbox/compare/v0.5.86...v0.5.87) (2026-06-18)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.86 [skip ci] ([682479b](https://github.com/01cloud/01-Sandbox/commit/682479b5737c5abf27360ff54807d9bbd1b9f0b8))
+* **readme:** update readmefiles ([22bcdfb](https://github.com/01cloud/01-Sandbox/commit/22bcdfbd37c43a00b16358a5d2a3e9da52f39c51))
+* **readme:** update readmefiles ([19d95ac](https://github.com/01cloud/01-Sandbox/commit/19d95acda5e63c9c1998c5b0554e701541e32ba4))
+* **readme:** update readmefiles ([2fdac7c](https://github.com/01cloud/01-Sandbox/commit/2fdac7cbf565bd4febe30225dd6445b05ef09907))
+* **readme:** update readmefiles ([06c4ec3](https://github.com/01cloud/01-Sandbox/commit/06c4ec3dcc8316b9dfeeeef430735c71eafefe1f))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.87)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.86 — 01-Sandbox
 **Release Date:** June 18, 2026
 
