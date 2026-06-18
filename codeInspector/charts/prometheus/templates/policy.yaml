@@ -1,0 +1,18 @@
+{{- if and .Values.ingressRoute .Values.ingressRoute.enabled }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: prometheus-private-policy
+  namespace: {{ .Values.agentgatewayNamespace | default "agentgateway-system" }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: prometheus-route
+  traffic:
+    authorization:
+      action: Deny
+      policy:
+        matchExpressions:
+          - '{{- range $i, $ip := .Values.global.allowedIps }}{{ if $i }} && {{ end }}!source.address.startsWith("{{ $ip }}"){{- end }}'
+{{- end }}

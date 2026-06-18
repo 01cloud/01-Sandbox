@@ -1,0 +1,16 @@
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: api-metrics-private-policy
+  namespace: {{ .Values.namespace }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: agentgateway-api-route
+  traffic:
+    authorization:
+      action: Deny
+      policy:
+        matchExpressions:
+          - '(request.path == "/metrics" || request.path == "/api/v1/01sbx/metrics") && ({{- range $i, $ip := .Values.global.allowedIps }}{{ if $i }} && {{ end }}!source.address.startsWith("{{ $ip }}"){{- end }})'
