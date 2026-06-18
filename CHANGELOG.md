@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.84](https://github.com/01cloud/01-Sandbox/compare/v0.5.83...v0.5.84) (2026-06-18)
+
+
+### 🐛 Bug Fixes
+
+* implement grafana dashboard ([05f5134](https://github.com/01cloud/01-Sandbox/commit/05f5134e8b54f7bd602a71017084608b33c00b7d))
+* implement grafana dashboard ([786b40c](https://github.com/01cloud/01-Sandbox/commit/786b40c48f8f726b95281f569d1d77ac4e6ecd79))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.83 [skip ci] ([636178e](https://github.com/01cloud/01-Sandbox/commit/636178ecd22f7c75a380bad52dbb755891fa0d50))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.83 [skip ci] ([7906a74](https://github.com/01cloud/01-Sandbox/commit/7906a74a01de06fc01e2dd27c27e7ea3574cf47d))
+
 ## [0.5.83](https://github.com/01cloud/01-Sandbox/compare/v0.5.82...v0.5.83) (2026-06-18)
 
 
