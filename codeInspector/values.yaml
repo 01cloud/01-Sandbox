@@ -6,7 +6,6 @@ global:
   apiRoutePrefix: "/api/v1/01sbx"
   JWT_PUBLIC_JWKS: ""
   allowedIps:
-    - "103.129.134.139"
     - "10."
     - "127.0.0.1"
     - "::1"
