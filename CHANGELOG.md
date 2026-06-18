@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.5.87](https://github.com/01cloud/01-Sandbox/compare/v0.5.86...v0.5.87) (2026-06-18)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.86 [skip ci] ([682479b](https://github.com/01cloud/01-Sandbox/commit/682479b5737c5abf27360ff54807d9bbd1b9f0b8))
+* **readme:** update readmefiles ([22bcdfb](https://github.com/01cloud/01-Sandbox/commit/22bcdfbd37c43a00b16358a5d2a3e9da52f39c51))
+* **readme:** update readmefiles ([19d95ac](https://github.com/01cloud/01-Sandbox/commit/19d95acda5e63c9c1998c5b0554e701541e32ba4))
+* **readme:** update readmefiles ([2fdac7c](https://github.com/01cloud/01-Sandbox/commit/2fdac7cbf565bd4febe30225dd6445b05ef09907))
+* **readme:** update readmefiles ([06c4ec3](https://github.com/01cloud/01-Sandbox/commit/06c4ec3dcc8316b9dfeeeef430735c71eafefe1f))
+
 ## [0.5.86](https://github.com/01cloud/01-Sandbox/compare/v0.5.85...v0.5.86) (2026-06-18)
 
 
