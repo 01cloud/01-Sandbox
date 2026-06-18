@@ -6,9 +6,7 @@ global:
   apiRoutePrefix: "/api/v1/01sbx"
   JWT_PUBLIC_JWKS: ""
   allowedIps:
-    - "[IP_ADDRESS]"
-    - "[IP_ADDRESS]"
-    - "[IP_ADDRESS]"
+    - "103.129.134.139"
 ################################################################
 # Agent Gateway  values
 ################################################################
