@@ -1,16 +1,16 @@
 apiVersion: gateway.networking.k8s.io/v1beta1
 kind: ReferenceGrant
 metadata:
-  name: allow-agentgateway-to-grafana
+  name: allow-agentgateway-to-prometheus
   namespace: {{ .Values.namespace }}
 spec:
   from:
     - group: gateway.networking.k8s.io
       kind: HTTPRoute
-      namespace: agentgateway-system
+      namespace: {{ .Values.agentgatewayNamespace | default "agentgateway-system" }}
     - group: gateway.networking.k8s.io
       kind: TCPRoute
-      namespace: agentgateway-system
+      namespace: {{ .Values.agentgatewayNamespace | default "agentgateway-system" }}
   to:
     - group: ""
       kind: Service
