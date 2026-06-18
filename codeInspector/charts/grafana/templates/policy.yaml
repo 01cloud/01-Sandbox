@@ -14,5 +14,5 @@ spec:
       action: Deny
       policy:
         matchExpressions:
-          - 'has(request.headers["x-forwarded-for"]) || has(request.headers["x-envoy-external-address"])'
+          - '!source.address.startsWith("10.") && !source.address.startsWith("192.168.") && !source.address.startsWith("172.") && !source.address.startsWith("127.") && !source.address.startsWith("::1")'
 {{- end }}
