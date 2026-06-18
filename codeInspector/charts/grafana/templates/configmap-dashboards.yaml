@@ -63,7 +63,7 @@ data:
           "targets": [
             {
               "expr": "sum(rate(http_requests_total[2m])) by (path, method)",
-              "legendFormat": "\{\{method\}\} \{\{path\}\}",
+              "legendFormat": "{{ "{{" }}method{{ "}}" }} {{ "{{" }}path{{ "}}" }}",
               "refId": "A"
             }
           ]
@@ -86,7 +86,7 @@ data:
           "targets": [
             {
               "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, path))",
-              "legendFormat": "\{\{path\}\} (P95)",
+              "legendFormat": "{{ "{{" }}path{{ "}}" }} (P95)",
               "refId": "A"
             }
           ]
@@ -109,7 +109,7 @@ data:
           "targets": [
             {
               "expr": "rabbitmq_queue_messages_ready{queue=~\"scan.*\"}",
-              "legendFormat": "\{\{queue\}\} depth",
+              "legendFormat": "{{ "{{" }}queue{{ "}}" }} depth",
               "refId": "A"
             }
           ]
@@ -132,7 +132,7 @@ data:
           "targets": [
             {
               "expr": "histogram_quantile(0.90, sum(rate(job_execution_duration_seconds_bucket[5m])) by (le, job_type))",
-              "legendFormat": "\{\{job_type\}\} P90 time",
+              "legendFormat": "{{ "{{" }}job_type{{ "}}" }} P90 time",
               "refId": "A"
             }
           ]
@@ -155,7 +155,104 @@ data:
           "targets": [
             {
               "expr": "sum(rate(job_execution_total[5m])) by (job_type, status)",
-              "legendFormat": "\{\{job_type\}\} - \{\{status\}\}",
+              "legendFormat": "{{ "{{" }}job_type{{ "}}" }} - {{ "{{" }}status{{ "}}" }}",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 24
+          },
+          "id": 6,
+          "title": "Active Database Connections",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(db_connections_active)",
+              "legendFormat": "Active Connections",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 24
+          },
+          "id": 7,
+          "title": "Queue Depths (API Injected)",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(queue_depth_jobs) by (queue_name)",
+              "legendFormat": "{{ "{{" }}queue_name{{ "}}" }} depth",
+              "refId": "A"
+            }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 32
+          },
+          "id": 8,
+          "title": "API Authentication Success vs Failures",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(api_key_requests_total[5m]))",
+              "legendFormat": "Total Key Requests",
+              "refId": "A"
+            },
+            {
+              "expr": "sum(rate(auth_failures_total[5m])) by (reason)",
+              "legendFormat": "Auth Failures ({{ "{{" }}reason{{ "}}" }})",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "collapsed": false,
+          "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 32
+          },
+          "id": 9,
+          "title": "Application Errors & Exceptions",
+          "type": "timeseries",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "Prometheus"
+          },
+          "targets": [
+            {
+              "expr": "sum(rate(application_errors_total[5m])) by (status_code, path)",
+              "legendFormat": "HTTP {{ "{{" }}status_code{{ "}}" }} - {{ "{{" }}path{{ "}}" }}",
               "refId": "A"
             }
           ]
