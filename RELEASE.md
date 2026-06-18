@@ -1,3 +1,53 @@
+## Release v0.5.83 — 01-Sandbox
+**Release Date:** June 18, 2026
+
+---
+
+### Summary
+v0.5.83 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* align Grafana HTTPRoute hostnames ([28713f4](https://github.com/01cloud/01-Sandbox/commit/28713f4659ceb94bfade03d48579cc9ba5f37f8a))
+* align Grafana HTTPRoute hostnames ([acf2e34](https://github.com/01cloud/01-Sandbox/commit/acf2e34f977ee923909c4196c5c3cce43b845b13))
+* change Grafana subpath to /grafana and configure GF_SERVER_DOMAIN ([250a2ee](https://github.com/01cloud/01-Sandbox/commit/250a2ee22a417785f53402ea85400d4f033dba6d))
+* change Grafana subpath to /grafana and configure GF_SERVER_DOMAIN ([b24698d](https://github.com/01cloud/01-Sandbox/commit/b24698db7f566eeb3046b0db4da63d8b53630a14))
+
+### Changes
+## [0.5.83](https://github.com/01cloud/01-Sandbox/compare/v0.5.82...v0.5.83) (2026-06-18)
+
+
+### 🚀 New Features
+
+* align Grafana HTTPRoute hostnames ([28713f4](https://github.com/01cloud/01-Sandbox/commit/28713f4659ceb94bfade03d48579cc9ba5f37f8a))
+* align Grafana HTTPRoute hostnames ([acf2e34](https://github.com/01cloud/01-Sandbox/commit/acf2e34f977ee923909c4196c5c3cce43b845b13))
+* change Grafana subpath to /grafana and configure GF_SERVER_DOMAIN ([250a2ee](https://github.com/01cloud/01-Sandbox/commit/250a2ee22a417785f53402ea85400d4f033dba6d))
+* change Grafana subpath to /grafana and configure GF_SERVER_DOMAIN ([b24698d](https://github.com/01cloud/01-Sandbox/commit/b24698db7f566eeb3046b0db4da63d8b53630a14))
+
+
+### 🐛 Bug Fixes
+
+* domain issues ([0c6687a](https://github.com/01cloud/01-Sandbox/commit/0c6687aef1d5823a9c4b8bc69d88d1820050e126))
+* domain issues ([eca7026](https://github.com/01cloud/01-Sandbox/commit/eca70263833b5f53db96bf9e45e6f1aaa83ca1ad))
+* domain issues ([6bffd53](https://github.com/01cloud/01-Sandbox/commit/6bffd5329d4b46566d2206fac7c529c82dec02fd))
+* implement prometheus metrics ([ece6664](https://github.com/01cloud/01-Sandbox/commit/ece6664d912f697c0c1c31c58087fd22190a7d4a))
+* prometheus configmap ([6aed7ae](https://github.com/01cloud/01-Sandbox/commit/6aed7ae9f5e61b134fcaef2acfebb904f8f1ebd0))
+* prometheus template quoting syntax error ([997df2f](https://github.com/01cloud/01-Sandbox/commit/997df2f67be70385649ba8063a34fa01d91e5ed4))
+* prometheus template quoting syntax error ([ee3038f](https://github.com/01cloud/01-Sandbox/commit/ee3038f56c3a9dacf8646e0ef7524d1e175c4ae3))
+
+
+### 📖 Documentation
+
+* document prometheus metrics structure and telemetry design ([62529dd](https://github.com/01cloud/01-Sandbox/commit/62529dd43ed26c5cbafcf05d7f0e5edb794fd580))
+* generate RELEASE.md for v0.5.82 [skip ci] ([66c137a](https://github.com/01cloud/01-Sandbox/commit/66c137aa39fd6d0b7494a62e95968fae08d7d998))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.83)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.82 — 01-Sandbox
 **Release Date:** June 17, 2026
 
