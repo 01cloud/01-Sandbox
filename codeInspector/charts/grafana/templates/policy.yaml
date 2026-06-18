@@ -1,0 +1,18 @@
+{{- if and .Values.ingressRoute .Values.ingressRoute.enabled }}
+apiVersion: agentgateway.dev/v1alpha1
+kind: AgentgatewayPolicy
+metadata:
+  name: grafana-private-policy
+  namespace: {{ .Values.agentgatewayNamespace | default "agentgateway-system" }}
+spec:
+  targetRefs:
+    - group: gateway.networking.k8s.io
+      kind: HTTPRoute
+      name: grafana-route
+  traffic:
+    authorization:
+      action: Deny
+      policy:
+        matchExpressions:
+          - 'has(request.headers["x-forwarded-for"]) || has(request.headers["x-envoy-external-address"])'
+{{- end }}
