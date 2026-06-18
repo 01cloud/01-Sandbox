@@ -1,3 +1,36 @@
+## Release v0.5.85 — 01-Sandbox
+**Release Date:** June 18, 2026
+
+---
+
+### Summary
+v0.5.85 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement grafana dashboard ([a3d2e11](https://github.com/01cloud/01-Sandbox/commit/a3d2e110e83f3157cd7bc3775c41304e3fc0715c))
+* generate RELEASE.md for v0.5.84 [skip ci] ([e616eca](https://github.com/01cloud/01-Sandbox/commit/e616eca9a4a5cf08f966e3f5761157cdf1c42eb9))
+
+### Changes
+## [0.5.85](https://github.com/01cloud/01-Sandbox/compare/v0.5.84...v0.5.85) (2026-06-18)
+
+
+### 🐛 Bug Fixes
+
+* implement grafana dashboard ([a3d2e11](https://github.com/01cloud/01-Sandbox/commit/a3d2e110e83f3157cd7bc3775c41304e3fc0715c))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.84 [skip ci] ([e616eca](https://github.com/01cloud/01-Sandbox/commit/e616eca9a4a5cf08f966e3f5761157cdf1c42eb9))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.85)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.84 — 01-Sandbox
 **Release Date:** June 18, 2026
 
