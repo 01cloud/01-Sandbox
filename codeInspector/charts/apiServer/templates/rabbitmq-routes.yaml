@@ -1,0 +1,49 @@
+{{- if .Values.rabbitmq.enabled }}
+apiVersion: gateway.networking.k8s.io/v1alpha2
+kind: TCPRoute
+metadata:
+  name: rabbitmq-amqp-route
+  namespace: {{ .Values.configMap.GATEWAY_SECRET_NAMESPACE | default "agentgateway-system" }}
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-proxy
+      namespace: {{ .Values.configMap.GATEWAY_SECRET_NAMESPACE | default "agentgateway-system" }}
+      sectionName: rabbitmq-amqp
+  rules:
+    - backendRefs:
+        - name: {{ .Values.rabbitmq.host }}
+          namespace: {{ .Values.namespace }}
+          port: 5672
+---
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: rabbitmq-mgmt-route
+  namespace: {{ .Values.configMap.GATEWAY_SECRET_NAMESPACE | default "agentgateway-system" }}
+spec:
+  hostnames:
+    - api-sandbox.01security.com
+    - 10.0.10.100
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-proxy
+      namespace: {{ .Values.configMap.GATEWAY_SECRET_NAMESPACE | default "agentgateway-system" }}
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /rabbitmq
+      filters:
+        - type: URLRewrite
+          urlRewrite:
+            path:
+              type: ReplacePrefixMatch
+              replacePrefixMatch: /
+      backendRefs:
+        - name: {{ .Values.rabbitmq.host }}
+          namespace: {{ .Values.namespace }}
+          port: 15672
+{{- end }}

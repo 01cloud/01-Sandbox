@@ -441,6 +441,7 @@ import jwt
 from config import jwt_config
 from core import state
 from fastapi import HTTPException, Request, status
+from observability.metrics import api_key_requests_total, auth_failures_total
 from ratelimit import check_rate_limit, is_key_rate_limited
 
 # Cache for remote JWKS (Auth0)
@@ -619,6 +620,7 @@ async def validate_token(request: Request):
         print(
             f"[DEBUG SECURITY] REJECTION: No credentials found for {path} (Is Execution: {is_execution_route})"
         )
+        auth_failures_total.labels(reason="missing_token").inc()
         raise HTTPException(status_code=401, detail=error_msg)
 
     token = raw_token
@@ -633,6 +635,7 @@ async def validate_token(request: Request):
         kid = header.get("kid")
 
         if not kid:
+            auth_failures_total.labels(reason="missing_kid").inc()
             raise HTTPException(status_code=401, detail="Missing 'kid' in token header")
 
         # Determine which JWKS to use
@@ -673,6 +676,7 @@ async def validate_token(request: Request):
             )
         except Exception as e:
             print(f"[DEBUG SECURITY] JWT Decode ERROR: {str(e)}")
+            auth_failures_total.labels(reason="invalid_token_format").inc()
             raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 
         # --- IDENTITY BRIDGE & ACTIVE KEY ROTATION ---
@@ -764,12 +768,14 @@ async def validate_token(request: Request):
                 print(
                     f"[Identity Bridge] WARNING: No active/non-expired Developer Key found for {user_id}"
                 )
+                auth_failures_total.labels(reason="no_active_developer_keys").inc()
                 raise HTTPException(
                     status_code=403,
                     detail="No active or non-expired Developer API Key found. Please create a NEW API Key to enable sandbox operations.",
                 )
 
         if not jti:
+            auth_failures_total.labels(reason="missing_jti").inc()
             raise HTTPException(
                 status_code=401, detail="Invalid token: Missing JTI/Key ID"
             )
@@ -794,22 +800,27 @@ async def validate_token(request: Request):
             conn.close()
 
             if not row:
+                auth_failures_total.labels(reason="deactivated_key").inc()
                 raise HTTPException(
                     status_code=401, detail="API Key has been deactivated or deleted"
                 )
 
             if row[0] == 1:
+                auth_failures_total.labels(reason="revoked_key").inc()
                 raise HTTPException(status_code=401, detail="API Key has been revoked")
 
             if row[1] < now_iso:
                 if state.use_redis:
                     state.redis_client.srem("active_api_keys", jti)
+                auth_failures_total.labels(reason="expired_key").inc()
                 raise HTTPException(status_code=401, detail="API Key has expired")
 
             if state.use_redis:
                 state.redis_client.sadd("active_api_keys", jti)
             is_valid = True
 
+        # SUCCESS CASE: Record API key invocation rate
+        api_key_requests_total.labels(api_key_id=jti).inc()
         print(f"[DEBUG SECURITY] SUCCESS: Session Verified (Key ID: {jti})")
 
         # Enforce click-triggered rate limiting on monitored actions
@@ -843,6 +854,7 @@ async def validate_token(request: Request):
                     print(
                         f"[SECURITY ALERT] IDENTITY MISMATCH: User {cookie_sub} attempted to use API Key belonging to User {apikey_sub}"
                     )
+                    auth_failures_total.labels(reason="identity_mismatch").inc()
                     raise HTTPException(
                         status_code=403,
                         detail="Identity Lockdown: You cannot use an API key that belongs to another user.",
@@ -855,8 +867,10 @@ async def validate_token(request: Request):
         return payload
 
     except jwt.ExpiredSignatureError:
+        auth_failures_total.labels(reason="token_expired_signature").inc()
         raise HTTPException(status_code=401, detail="Token has expired")
     except jwt.InvalidTokenError as e:
+        auth_failures_total.labels(reason="invalid_token_signature").inc()
         hint = "Ensure Auth0 is returning an RS256 JWT, not an opaque token. Check that the API Audience is registered."
         if token == "undefined" or not token:
             hint = "Token was passed as empty or undefined. Please re-login on the dashboard."
@@ -871,6 +885,7 @@ async def validate_token(request: Request):
     except Exception as e:
         if isinstance(e, HTTPException):
             raise e
+        auth_failures_total.labels(reason="unknown_auth_error").inc()
         raise HTTPException(status_code=401, detail=f"Authorization failed: {str(e)}")
 
 

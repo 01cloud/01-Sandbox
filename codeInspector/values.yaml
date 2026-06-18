@@ -20,8 +20,9 @@ agentgateway:
       port: 80
   gateway:
     gatewayClassName: agentgateway
-    # addresses:
-    #   - value: 10.0.10.9
+    addresses:
+      - value: 10.0.10.100
+
     listeners:
       - protocol: HTTP
         port: 80
@@ -32,6 +33,15 @@ agentgateway:
         tls:
           certificateRefs:
             - name: agentgateway-tls
+      - protocol: TCP
+        port: 5432
+        name: postgresql
+      - protocol: TCP
+        port: 6379
+        name: redis
+      - protocol: TCP
+        port: 5672
+        name: rabbitmq-amqp
   policy:
     authenticationType: "jwt"
     jwtMode: "Strict"
@@ -219,6 +229,12 @@ prometheus:
   agentgatewayServiceName: agentgateway-proxy
   agentgatewayPort: 80
   replicaCount: 1
+  ingressRoute:
+    enabled: true
+  ingressHostnames:
+    - api-sandbox.01security.com
+    - 10.0.10.100
+  ingressPath: "/prometheus"
   image:
     repository: prom/prometheus
     tag: "v2.54.1"
@@ -249,6 +265,9 @@ grafana:
   ingressRoute:
     enabled: true
   ingressHost: "api-sandbox.01security.com"
+  ingressHostnames:
+    - api-sandbox.01security.com
+    - 10.0.10.100
   ingressPath: "/grafana"
   image:
     repository: grafana/grafana

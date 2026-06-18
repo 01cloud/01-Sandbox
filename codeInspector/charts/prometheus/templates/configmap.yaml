@@ -11,6 +11,7 @@ data:
 
     scrape_configs:
       - job_name: 'prometheus'
+        metrics_path: '/prometheus/metrics'
         static_configs:
           - targets: ['localhost:9090']
 
@@ -19,21 +20,27 @@ data:
           - targets: ['{{ .Values.apiServerServiceName }}.{{ .Values.apiServerNamespace }}.svc.cluster.local:{{ .Values.apiServerPort }}']
         metrics_path: '/metrics'
 
-      - job_name: 'sandbox-api'
-        scheme: https
-        static_configs:
-          - targets:
-              - 'api-sandbox.01security.com'
-        metrics_path: '/metrics'
-        tls_config:
-          insecure_skip_verify: true
-
-      - job_name: 'agentgateway-proxy'
-        static_configs:
-          - targets: [
-              '{{ .Values.agentgatewayServiceName }}.{{ .Values.agentgatewayNamespace }}.svc.cluster.local:{{ .Values.agentgatewayPort }}',
-              '{{ .Values.agentgatewayServiceName }}.{{ .Values.agentgatewayNamespace }}.svc.cluster.local:7472'
-            ]
-        metrics_path: '/metrics'
-        # Ignore errors if the metrics port is not active yet
-        honor_labels: true
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: $1:$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_pod_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name

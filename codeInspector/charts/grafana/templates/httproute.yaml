@@ -6,7 +6,13 @@ metadata:
   namespace: agentgateway-system
 spec:
   hostnames:
+    {{- if .Values.ingressHostnames }}
+    {{- range .Values.ingressHostnames }}
+    - {{ . | quote }}
+    {{- end }}
+    {{- else }}
     - {{ .Values.ingressHost | quote }}
+    {{- end }}
   parentRefs:
     - group: gateway.networking.k8s.io
       kind: Gateway
