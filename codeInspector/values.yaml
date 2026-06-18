@@ -22,7 +22,6 @@ agentgateway:
     gatewayClassName: agentgateway
     addresses:
       - value: 10.0.10.100
-
     listeners:
       - protocol: HTTP
         port: 80
@@ -83,7 +82,7 @@ apiServer:
     replicaCount: 2
     image:
       repository: 01community/01sandbox-api
-      tag: "v0.5.79"
+      tag: "v0.5.83"
       pullPolicy: Always
     resources:
       requests:
