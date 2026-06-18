@@ -1,13 +1,14 @@
 ################################################################
-# This chart aggregates values from all sub-charts.
+# This chart aggregates values from all sub-chart
 ################################################################
 
 global:
   apiRoutePrefix: "/api/v1/01sbx"
   JWT_PUBLIC_JWKS: ""
   allowedIps:
-    - "10."
-    - "192.168."
+    - "[IP_ADDRESS]"
+    - "[IP_ADDRESS]"
+    - "[IP_ADDRESS]"
 ################################################################
 # Agent Gateway  values
 ################################################################
