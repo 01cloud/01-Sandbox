@@ -3,7 +3,11 @@ import uuid
 
 from fastapi import Request
 from observability.logging import set_correlation_id
-from observability.metrics import http_request_duration_seconds, http_requests_total
+from observability.metrics import (
+    application_errors_total,
+    http_request_duration_seconds,
+    http_requests_total,
+)
 from starlette.middleware.base import BaseHTTPMiddleware
 
 
@@ -58,3 +62,7 @@ class MetricsMiddleware(BaseHTTPMiddleware):
             http_request_duration_seconds.labels(
                 method=request.method, path=path
             ).observe(duration)
+            if status_code >= 500:
+                application_errors_total.labels(
+                    status_code=str(status_code), path=path
+                ).inc()

@@ -11,6 +11,36 @@ from backends import GenericHTTPBackend, SandboxBackend
 from config import opensandbox_base_url
 
 
+class InstrumentedConnection:
+    """Wrapper that increments/decrements active DB connection count gauge."""
+
+    def __init__(self, conn):
+        self._conn = conn
+        self._closed = False
+        from observability.metrics import db_connections_active
+
+        db_connections_active.inc()
+
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+
+    def close(self):
+        if not self._closed:
+            self._closed = True
+            try:
+                self._conn.close()
+            finally:
+                from observability.metrics import db_connections_active
+
+                db_connections_active.dec()
+
+
 class AppState:
     """Manages active proxy mapping configurations and centralized high-scale persistence."""
 
@@ -53,14 +83,16 @@ class AppState:
 
     def get_db_conn(self):
         if self.use_postgres:
-            return psycopg2.connect(
+            conn = psycopg2.connect(
                 host=os.environ.get("PG_HOST"),
                 port=os.environ.get("PG_PORT"),
                 user=os.environ.get("PG_USER"),
                 password=os.environ.get("PG_PASSWORD"),
                 dbname=os.environ.get("PG_DATABASE"),
             )
-        return sqlite3.connect(self.db_path)
+        else:
+            conn = sqlite3.connect(self.db_path)
+        return InstrumentedConnection(conn)
 
     def init_db(self):
         conn = self.get_db_conn()
