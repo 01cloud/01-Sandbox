@@ -1,3 +1,50 @@
+## Release v0.5.86 — 01-Sandbox
+**Release Date:** June 18, 2026
+
+---
+
+### Summary
+v0.5.86 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* **observability:** restrict metrics access using source IP filtering ([2781024](https://github.com/01cloud/01-Sandbox/commit/27810246040ee7c3500f9c906652b98ad0eba411))
+* **observability:** restrict metrics endpoints to private access ([45da402](https://github.com/01cloud/01-Sandbox/commit/45da402e9182741547905d5790c3557a94233776))
+* **observability:** support dynamic allowed IPs from values.yaml ([e220412](https://github.com/01cloud/01-Sandbox/commit/e220412b10f62528985d6010fb685343420f6486))
+* generate RELEASE.md for v0.5.85 [skip ci] ([c16e67b](https://github.com/01cloud/01-Sandbox/commit/c16e67b028c63ff23fd5e4acb4be793c4893daff))
+
+### Changes
+## [0.5.86](https://github.com/01cloud/01-Sandbox/compare/v0.5.85...v0.5.86) (2026-06-18)
+
+
+### 🚀 New Features
+
+* **observability:** restrict metrics access using source IP filtering ([2781024](https://github.com/01cloud/01-Sandbox/commit/27810246040ee7c3500f9c906652b98ad0eba411))
+* **observability:** restrict metrics endpoints to private access ([45da402](https://github.com/01cloud/01-Sandbox/commit/45da402e9182741547905d5790c3557a94233776))
+* **observability:** support dynamic allowed IPs from values.yaml ([e220412](https://github.com/01cloud/01-Sandbox/commit/e220412b10f62528985d6010fb685343420f6486))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.85 [skip ci] ([c16e67b](https://github.com/01cloud/01-Sandbox/commit/c16e67b028c63ff23fd5e4acb4be793c4893daff))
+* **readme:** update readmefiles ([6b2a527](https://github.com/01cloud/01-Sandbox/commit/6b2a527c17f7b626265a28a28968ea5900466017))
+
+
+### 🧹 Miscellaneous
+
+* **add:** add ip address ([1af93ac](https://github.com/01cloud/01-Sandbox/commit/1af93ac603431ac5d0749ec2ea509db7dfae292e))
+* **remove:** ip address to test ([b887286](https://github.com/01cloud/01-Sandbox/commit/b887286653f6ef2828cd96079607186ea8da3085))
+* **remove:** ip address to test ([3bf6c0f](https://github.com/01cloud/01-Sandbox/commit/3bf6c0f27bd2c5bdc6dffb1ba3d21982036d6e1e))
+* **remove:** ip address to test ([325a947](https://github.com/01cloud/01-Sandbox/commit/325a94768f948640da013b3af5ab1b278563ee7b))
+* **security:** whitelist user public IP ([bcaac4b](https://github.com/01cloud/01-Sandbox/commit/bcaac4b30458657749156ea4bec768aa00928abb))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.86)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.85 — 01-Sandbox
 **Release Date:** June 18, 2026
 
