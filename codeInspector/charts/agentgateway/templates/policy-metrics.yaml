@@ -13,4 +13,4 @@ spec:
       action: Deny
       policy:
         matchExpressions:
-          - '(request.path == "/metrics" || request.path == "/api/v1/01sbx/metrics") && (!source.address.startsWith("10.") && !source.address.startsWith("192.168.") && !source.address.startsWith("172.") && !source.address.startsWith("127.") && !source.address.startsWith("::1"))'
+          - '(request.path == "/metrics" || request.path == "/api/v1/01sbx/metrics") && ({{- range $i, $ip := .Values.global.allowedIps }}{{ if $i }} && {{ end }}!source.address.startsWith("{{ $ip }}"){{- end }})'
