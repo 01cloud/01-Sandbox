@@ -58,8 +58,12 @@ export function useJobStore(
 
     if (!apiKey) return null;
 
+    const url = jobType === "repo-scan"
+      ? `${apiBase}/v1/repo-scan/${jobId}/result`
+      : `${apiBase}/v1/jobs/${jobId}/result`;
+
     try {
-      const resp = await fetch(`${apiBase}/v1/jobs/${jobId}/result`, {
+      const resp = await fetch(url, {
         headers: {
           Authorization: `Bearer ${apiKey}`
         }
@@ -78,7 +82,7 @@ export function useJobStore(
       return null;
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, apiKey]);
+  }, [apiBase, apiKey, jobType]);
 
   const openStream = useCallback((jobId: string, since = 0) => {
     if (esRefs.current[jobId]) {
@@ -87,7 +91,9 @@ export function useJobStore(
 
     if (!apiKey) return;
 
-    const url = `${apiBase}/v1/jobs/${jobId}/status?since=${since}&token=${encodeURIComponent(apiKey)}`;
+    const url = jobType === "repo-scan"
+      ? `${apiBase}/v1/repo-scan/${jobId}/status?since=${since}&token=${encodeURIComponent(apiKey)}`
+      : `${apiBase}/v1/jobs/${jobId}/status?since=${since}&token=${encodeURIComponent(apiKey)}`;
     const es = new EventSource(url);
     esRefs.current[jobId] = es;
 
