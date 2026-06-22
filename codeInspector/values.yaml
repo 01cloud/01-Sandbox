@@ -77,7 +77,7 @@ apiServer:
     OPENSANDBOX_ROUTE_PREFIX: "{{ .Values.global.apiRoutePrefix }}"
     DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}","documentationUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}/docs"}]'
     JWT_PUBLIC_JWKS: ""
-    SENDGRID_FROM_EMAIL: "kamal.tamang@berrybytes.com"
+    SENDGRID_FROM_EMAIL: "sandbox@01security.com"
   secret:
     E2B_API_KEY: ""
     JWT_PRIVATE_KEY: ""

@@ -1,3 +1,4 @@
+exclude: "^codeInspector/charts/sealed-secrets/"
 repos:
   # ==========================================
   # Pre-commit default hooks
