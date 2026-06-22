@@ -19,14 +19,14 @@ agentgateway:
   httproute:
     hostnames:
       - api-sandbox.01security.com
-      - 10.0.10.100
+      - 10.0.10.9
     backendService:
       name: sandbox-api-service
       port: 80
   gateway:
     gatewayClassName: agentgateway
     addresses:
-      - value: 10.0.10.100
+      - value: 10.0.10.9
     listeners:
       - protocol: HTTP
         port: 80
@@ -150,7 +150,7 @@ metallb:
   ipAddressPool:
     addresses:
       # - 172.18.0.200-172.18.0.250
-      - 10.0.10.100-10.0.10.110
+      - 10.0.10.9-10.0.10.9
   l2Advertisement:
     enabled: true
 ################################################################
@@ -237,7 +237,7 @@ prometheus:
     enabled: true
   ingressHostnames:
     - api-sandbox.01security.com
-    - 10.0.10.100
+    - 10.0.10.9
   ingressPath: "/prometheus"
   image:
     repository: prom/prometheus
@@ -271,7 +271,7 @@ grafana:
   ingressHost: "api-sandbox.01security.com"
   ingressHostnames:
     - api-sandbox.01security.com
-    - 10.0.10.100
+    - 10.0.10.9
   ingressPath: "/grafana"
   image:
     repository: grafana/grafana
