@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.88](https://github.com/01cloud/01-Sandbox/compare/v0.5.87...v0.5.88) (2026-06-22)
+
+
+### 🐛 Bug Fixes
+
+* agentgateway fixes ([4151ccb](https://github.com/01cloud/01-Sandbox/commit/4151ccbf903e370d63dd327a1a3da9724205c807))
+* scan jobs and remove queue-stat page ([6f288e2](https://github.com/01cloud/01-Sandbox/commit/6f288e256c1a6d7e357ec19ec3db8ac6bf8e8e86))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.87 [skip ci] ([324c872](https://github.com/01cloud/01-Sandbox/commit/324c8723424c91409bd584ea56b3579fe3d1a327))
+
 ## [0.5.87](https://github.com/01cloud/01-Sandbox/compare/v0.5.86...v0.5.87) (2026-06-18)
 
 
