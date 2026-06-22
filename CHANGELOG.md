@@ -1,5 +1,27 @@
 # Changelog
 
+## [0.5.90](https://github.com/01cloud/01-Sandbox/compare/v0.5.89...v0.5.90) (2026-06-22)
+
+
+### 🐛 Bug Fixes
+
+* cors issues ([98e5aa3](https://github.com/01cloud/01-Sandbox/commit/98e5aa36340411a667301bd2d30aa7cb174f0902))
+
+
+### ⚡️ Performance Improvements
+
+* cache active developer keys and pipeline redis job listing ([b93537a](https://github.com/01cloud/01-Sandbox/commit/b93537a5a5ea3d02f4a27f3744f771158713e360))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.89 [skip ci] ([7aeef4c](https://github.com/01cloud/01-Sandbox/commit/7aeef4c2206a8631c63aac810e90a32b5d7fbc28))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.89 [skip ci] ([b187fe0](https://github.com/01cloud/01-Sandbox/commit/b187fe02ecc7a1ae6c157aeb3936ad6e2126a298))
+
 ## [0.5.89](https://github.com/01cloud/01-Sandbox/compare/v0.5.88...v0.5.89) (2026-06-22)
 
 
