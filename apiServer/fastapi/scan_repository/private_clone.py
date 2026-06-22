@@ -80,7 +80,9 @@ async def run_git_command(
 ) -> Tuple[str, str, int]:
     """Execute a git command with optional credentials in an isolated env."""
     env = {**os.environ}
+    env["GIT_TERMINAL_PROMPT"] = "0"
     temp_key_file = None
+    proc = None
 
     try:
         # Write SSH key ephemerally if provided
@@ -113,6 +115,7 @@ async def run_git_command(
                 *rewritten_command,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                stdin=asyncio.subprocess.DEVNULL,
                 cwd=cwd,
                 env=env,
             ),
@@ -134,8 +137,20 @@ async def run_git_command(
         return stdout, stderr, rc
 
     except asyncio.TimeoutError:
+        if proc:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
         return "", "Git command timed out", 1
     except Exception as exc:
+        if proc:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
         err_msg = sanitize_credentials(str(exc), git_token, ssh_key)
         return "", f"Git command failed: {err_msg}", 1
     finally:

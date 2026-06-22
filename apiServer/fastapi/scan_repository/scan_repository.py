@@ -708,49 +708,65 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
             r = app_state.redis_client
             try:
                 status_keys = r.keys("job:*:status")
+                jids = []
                 for key in status_keys:
                     parts = key.split(":")
                     if len(parts) < 3:
                         continue
                     jid = parts[1]
-                    if jid in seen_ids:
-                        continue
+                    if jid not in seen_ids:
+                        jids.append(jid)
 
-                    metadata_str = r.get(f"job:{jid}:metadata")
-                    if not metadata_str:
-                        continue
+                if jids:
+                    # Batch fetch metadata, status, events length, and last event in a single round-trip pipeline
+                    pipe = r.pipeline()
+                    for jid in jids:
+                        pipe.get(f"job:{jid}:metadata")
+                        pipe.get(f"job:{jid}:status")
+                        pipe.llen(f"job:{jid}:events")
+                        pipe.lindex(f"job:{jid}:events", -1)
 
-                    metadata = _json.loads(metadata_str)
-                    if metadata.get("job_type") != "repo-scan":
-                        continue
+                    results = pipe.execute()
 
-                    status = r.get(key)
-                    events_len = r.llen(f"job:{jid}:events")
+                    for idx, jid in enumerate(jids):
+                        meta_str = results[idx * 4]
+                        status = results[idx * 4 + 1]
+                        events_len = results[idx * 4 + 2]
+                        last_ev_str = results[idx * 4 + 3]
 
-                    last_msg = ""
-                    last_ev_str = r.lindex(f"job:{jid}:events", -1)
-                    if last_ev_str:
+                        if not meta_str:
+                            continue
                         try:
-                            last_msg = _json.loads(last_ev_str).get("message", "")
+                            metadata = _json.loads(meta_str)
                         except Exception:
-                            pass
+                            continue
 
-                    jobs.append(
-                        {
-                            "job_id": jid,
-                            "job_type": "repo-scan",
-                            "status": status,
-                            "progress": 100 if status in ("DONE", "ERROR") else 10,
-                            "stepMessage": last_msg,
-                            "eventIndex": events_len,
-                            "metadata": metadata,
-                            "summary": metadata.get("summary"),
-                            "result": None,
-                            "submittedAt": metadata.get("submitted_at", ""),
-                            "completedAt": metadata.get("completed_at", ""),
-                        }
-                    )
-                    seen_ids.add(jid)
+                        if metadata.get("job_type") != "repo-scan":
+                            continue
+
+                        last_msg = ""
+                        if last_ev_str:
+                            try:
+                                last_msg = _json.loads(last_ev_str).get("message", "")
+                            except Exception:
+                                pass
+
+                        jobs.append(
+                            {
+                                "job_id": jid,
+                                "job_type": "repo-scan",
+                                "status": status,
+                                "progress": 100 if status in ("DONE", "ERROR") else 10,
+                                "stepMessage": last_msg,
+                                "eventIndex": events_len,
+                                "metadata": metadata,
+                                "summary": metadata.get("summary"),
+                                "result": None,
+                                "submittedAt": metadata.get("submitted_at", ""),
+                                "completedAt": metadata.get("completed_at", ""),
+                            }
+                        )
+                        seen_ids.add(jid)
             except Exception as exc:
                 print(f"[RepoScanner] list_repo_scan_jobs Redis error: {exc}")
 
