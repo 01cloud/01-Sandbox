@@ -3,6 +3,8 @@ import { useAuth0 } from "@auth0/auth0-react";
 import { Zap, Code, AlertTriangle, CheckCircle2, Layers, RefreshCw } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 
 interface QueueStat {
   depth: number;
@@ -25,6 +27,39 @@ export default function QueueMonitorWidget({ apiBaseUrl, activeTab }: QueueMonit
   const [queueStats, setQueueStats] = useState<QueueStatsResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [isRequeueing, setIsRequeueing] = useState(false);
+
+  const handleRequeueFailed = async () => {
+    if (!isAuthenticated) {
+      toast.error("You must be logged in to requeue failed jobs.");
+      return;
+    }
+    setIsRequeueing(true);
+    try {
+      const token = await getAccessTokenSilently();
+      const response = await fetch(`${apiBaseUrl}/v1/queue/requeue-failed`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Authorization": `Bearer ${token}`
+        },
+        body: JSON.stringify({})
+      });
+
+      const data = await response.json();
+      if (response.ok) {
+        toast.success(`Successfully re-queued ${data.requeued || 0} failed job(s)!`);
+        fetchQueueStats();
+      } else {
+        toast.error(data.detail || "Failed to re-queue jobs.");
+      }
+    } catch (err: any) {
+      console.error("Error re-queueing jobs:", err);
+      toast.error(err.message || "An unexpected error occurred.");
+    } finally {
+      setIsRequeueing(false);
+    }
+  };
 
   const fetchQueueStats = async () => {
     try {
@@ -187,6 +222,30 @@ export default function QueueMonitorWidget({ apiBaseUrl, activeTab }: QueueMonit
                       }}
                     />
                   </div>
+
+                  {name === "scan.failed" && (
+                    <Button
+                      onClick={handleRequeueFailed}
+                      disabled={isRequeueing || stat.depth === 0}
+                      variant="outline"
+                      className={cn(
+                        "w-full rounded-2xl h-11 font-bold mt-4 border-rose-500/20 hover:border-rose-500/50 hover:bg-rose-500/10 text-rose-500 transition-all flex items-center justify-center gap-2",
+                        stat.depth === 0 && "opacity-50 cursor-not-allowed border-muted hover:bg-transparent text-muted-foreground"
+                      )}
+                    >
+                      {isRequeueing ? (
+                        <>
+                          <RefreshCw className="w-4 h-4 animate-spin" />
+                          Requeueing...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="w-4 h-4" />
+                          Requeue Failed Jobs
+                        </>
+                      )}
+                    </Button>
+                  )}
                 </CardContent>
               </Card>
             );
