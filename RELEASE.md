@@ -1,3 +1,44 @@
+## Release v0.5.89 — 01-Sandbox
+**Release Date:** June 22, 2026
+
+---
+
+### Summary
+v0.5.89 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* cors issues ([47496d2](https://github.com/01cloud/01-Sandbox/commit/47496d2d63dfff564878163e9a8b451a3765ee01))
+* cors issues ([3af7acf](https://github.com/01cloud/01-Sandbox/commit/3af7acf2dd14faef4d775d68cbe7365dbe31e2ad))
+* generate RELEASE.md for v0.5.88 [skip ci] ([c399552](https://github.com/01cloud/01-Sandbox/commit/c399552cc96f6f442349a5ba07ee01f02d1fbe68))
+* bump versions to v0.5.88 [skip ci] ([b5a6809](https://github.com/01cloud/01-Sandbox/commit/b5a6809a3743c21d9507c4f35663cd4083de5403))
+
+### Changes
+## [0.5.89](https://github.com/01cloud/01-Sandbox/compare/v0.5.88...v0.5.89) (2026-06-22)
+
+
+### 🐛 Bug Fixes
+
+* cors issues ([47496d2](https://github.com/01cloud/01-Sandbox/commit/47496d2d63dfff564878163e9a8b451a3765ee01))
+* cors issues ([3af7acf](https://github.com/01cloud/01-Sandbox/commit/3af7acf2dd14faef4d775d68cbe7365dbe31e2ad))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.88 [skip ci] ([c399552](https://github.com/01cloud/01-Sandbox/commit/c399552cc96f6f442349a5ba07ee01f02d1fbe68))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.88 [skip ci] ([b5a6809](https://github.com/01cloud/01-Sandbox/commit/b5a6809a3743c21d9507c4f35663cd4083de5403))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.89)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.88 — 01-Sandbox
 **Release Date:** June 22, 2026
 
