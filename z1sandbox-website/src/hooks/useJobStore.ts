@@ -12,6 +12,7 @@ export function useJobStore(
   const [volatileResults, setVolatileResults] = useState<Record<string, any>>({});
 
   const esRefs = useRef<Record<string, EventSource>>({});
+  const streamErrors = useRef<Record<string, number>>({});
 
   const refresh = () => {
     setJobs(jobStore.getAll(jobType));
@@ -102,6 +103,9 @@ export function useJobStore(
         const ev = JSON.parse(e.data);
         const stored = jobStore.get(jobId);
 
+        // Reset error count on successful message receipt
+        streamErrors.current[jobId] = 0;
+
         if (!stored) {
           // If the job was deleted or not in storage, close stream
           es.close();
@@ -151,6 +155,9 @@ export function useJobStore(
     es.onerror = () => {
       es.close();
       delete esRefs.current[jobId];
+
+      // Increment consecutive error count
+      streamErrors.current[jobId] = (streamErrors.current[jobId] || 0) + 1;
 
       // Fallback: poll for result if SSE drops mid-scan
       setTimeout(() => {
@@ -219,12 +226,40 @@ export function useJobStore(
             // Completed job: eagerly fetch result so the report renders immediately
             lazyFetchResult(sj.job_id);
           }
-        } else if (
-          // Reconnect lost SSE stream for an active known job (e.g. after page reload)
-          !["DONE", "ERROR"].includes(existing.status) &&
-          !esRefs.current[sj.job_id]
-        ) {
-          openStream(sj.job_id, existing.eventIndex ?? 0);
+        } else {
+          // ── Existing job: Sync state if the SSE stream is not active ────────
+          if (!esRefs.current[sj.job_id]) {
+            // If the server state is different, update local state
+            if (
+              existing.status !== sj.status ||
+              existing.progress !== sj.progress ||
+              existing.stepMessage !== sj.stepMessage
+            ) {
+              const updatedJob: GenericJob = {
+                ...existing,
+                status: sj.status,
+                progress: sj.progress,
+                stepMessage: sj.stepMessage,
+                eventIndex: sj.eventIndex ?? existing.eventIndex,
+                summary: sj.summary ?? existing.summary,
+                completedAt: sj.completedAt ?? existing.completedAt
+              };
+              jobStore.upsert(updatedJob);
+              didUpdate = true;
+
+              if (sj.status === "DONE") {
+                lazyFetchResult(sj.job_id);
+              }
+            }
+
+            // Attempt to reconnect SSE if it's still active on the server and we haven't hit the error limit
+            if (
+              !["DONE", "ERROR"].includes(sj.status) &&
+              (streamErrors.current[sj.job_id] || 0) < 3
+            ) {
+              openStream(sj.job_id, existing.eventIndex ?? 0);
+            }
+          }
         }
       }
 
