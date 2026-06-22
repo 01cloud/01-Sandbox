@@ -1,3 +1,38 @@
+## Release v0.5.88 — 01-Sandbox
+**Release Date:** June 22, 2026
+
+---
+
+### Summary
+v0.5.88 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* agentgateway fixes ([4151ccb](https://github.com/01cloud/01-Sandbox/commit/4151ccbf903e370d63dd327a1a3da9724205c807))
+* scan jobs and remove queue-stat page ([6f288e2](https://github.com/01cloud/01-Sandbox/commit/6f288e256c1a6d7e357ec19ec3db8ac6bf8e8e86))
+* generate RELEASE.md for v0.5.87 [skip ci] ([324c872](https://github.com/01cloud/01-Sandbox/commit/324c8723424c91409bd584ea56b3579fe3d1a327))
+
+### Changes
+## [0.5.88](https://github.com/01cloud/01-Sandbox/compare/v0.5.87...v0.5.88) (2026-06-22)
+
+
+### 🐛 Bug Fixes
+
+* agentgateway fixes ([4151ccb](https://github.com/01cloud/01-Sandbox/commit/4151ccbf903e370d63dd327a1a3da9724205c807))
+* scan jobs and remove queue-stat page ([6f288e2](https://github.com/01cloud/01-Sandbox/commit/6f288e256c1a6d7e357ec19ec3db8ac6bf8e8e86))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.87 [skip ci] ([324c872](https://github.com/01cloud/01-Sandbox/commit/324c8723424c91409bd584ea56b3579fe3d1a327))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.88)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.87 — 01-Sandbox
 **Release Date:** June 18, 2026
 
