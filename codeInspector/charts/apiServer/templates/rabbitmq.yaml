@@ -24,7 +24,10 @@ spec:
         - name: RABBITMQ_DEFAULT_USER
           value: {{ .Values.rabbitmq.user | quote }}
         - name: RABBITMQ_DEFAULT_PASS
-          value: {{ .Values.rabbitmq.password | quote }}
+          valueFrom:
+            secretKeyRef:
+              name: sandbox-api-secret
+              key: RABBITMQ_PASSWORD
         resources:
           requests:
             cpu: "100m"

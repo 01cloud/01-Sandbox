@@ -43,3 +43,6 @@ dependencies:
   - name: opensandbox
     version: 0.1.0
     condition: opensandbox.enabled
+  - name: sealed-secrets
+    version: 2.5.19
+    condition: sealed-secrets.enabled
