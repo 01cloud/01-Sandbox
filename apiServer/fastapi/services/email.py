@@ -14,8 +14,6 @@ async def send_expiry_email(payload: dict) -> None:
     """
     recipient = payload.get("recipient")
     key_name = payload.get("key_name")
-    expires_at = payload.get("expires_at")
-    prefix = payload.get("prefix")
     job_id = payload.get("job_id", "unknown")
 
     if not recipient:
@@ -28,7 +26,7 @@ async def send_expiry_email(payload: dict) -> None:
     body = (
         f"Hello,\n\n"
         f"This is an automated notification that your API key '{key_name}' "
-        f"(prefix: {prefix}) is approaching expiration and will expire on {expires_at}.\n\n"
+        f"is approaching expiration.\n\n"
         f"To prevent any service interruption, please generate a new API key as soon as possible "
         f"and update your client configuration.\n\n"
         f"Best Regards,\n"

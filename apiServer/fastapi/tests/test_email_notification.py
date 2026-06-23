@@ -246,7 +246,7 @@ async def test_send_expiry_email_sendgrid_success():
     mock_response.text = "Accepted"
 
     env_vars = {
-        "SENDGRID_API_KEY": "",
+        "SENDGRID_API_KEY": "dummy-sendgrid-key-for-testing",
         "SENDGRID_FROM_EMAIL": "test-sender@01sandbox.com",
     }
 
@@ -257,7 +257,10 @@ async def test_send_expiry_email_sendgrid_success():
             mock_post.assert_called_once()
             args, kwargs = mock_post.call_args
             assert args[0] == "https://api.sendgrid.com/v3/mail/send"
-            assert kwargs["headers"]["Authorization"] == "Bearer "
+            assert (
+                kwargs["headers"]["Authorization"]
+                == "Bearer dummy-sendgrid-key-for-testing"
+            )
             assert (
                 kwargs["json"]["personalizations"][0]["to"][0]["email"]
                 == "lamakamal89@gmail.com"
@@ -282,7 +285,7 @@ async def test_send_expiry_email_sendgrid_failure():
     mock_response.text = "Unauthorized API key"
 
     env_vars = {
-        "SENDGRID_API_KEY": "",
+        "SENDGRID_API_KEY": "dummy-sendgrid-key-for-testing",
         "SENDGRID_FROM_EMAIL": "test-sender@01sandbox.com",
     }
 
