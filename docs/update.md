@@ -1,3 +1,31 @@
+# Daily Update: Sandbox Queue & Scanning Reliability Fixes (date: June 23 2026)
+
+Here is the summary of the key issues resolved and tasks completed today:
+
+### 1. Fixed Private Repository Scanning Prompt Failure
+* **Issue**:
+  - Checking a private repository (e.g. `enzokamal/kamalopensandbox`) returned `remote: Write access to repository not granted. fatal: unable to access ... returned error: 403` when run unauthenticated.
+  - This 403 error did not match the existing list of auth-related keywords in the backend. As a result, the backend returned `requires_auth: false`, the frontend did not display the PAT/SSH key inputs, and scans were submitted unauthenticated and failed.
+* **Fix**:
+  - Expanded `auth_indicators` in `private_clone.py` to match `"403"`, `"forbidden"`, `"write access"`, and `"unauthorized"` errors.
+  - The UI now correctly prompts for credentials, allowing successful scans of private repositories using Personal Access Tokens (PATs) or SSH Deploy Keys.
+
+### 2. Implemented Dynamic Warning Lead Times for API Key Expiration
+* **Issue**:
+  - The email notification system used a static warning threshold, which failed to adapt to very short test keys (e.g., a 4-minute key TTL) or very long production keys.
+* **Fix**:
+  - Replaced the static threshold with a dynamic, tiered warning logic in `expiry_checker.py`. Short-lived test keys (TTL <= 10m) trigger alerts with a 3-minute warning lead time, scaling up to 24 hours for keys with a TTL greater than 7 days.
+  - Added timezone parsing typeguards to safely support both string and datetime formats containing timezone offsets (`Z`, `+00:00`).
+
+### 3. Diagnosed "Broker Offline" Dashboard Alert
+* **Issue**:
+  - The developer dashboard displayed a generic `Broker Offline` message on the Queue Monitor tab.
+* **Diagnosis**:
+  - The RabbitMQ broker was fully functional, but the API endpoint `/v1/queue/stats` returned a `403 Forbidden` error because the logged-in Auth0 user had zero active API keys registered in the database, triggering the Identity Bridge's security validation.
+  - Generating an API key in the **API Management** tab resolves the error and restores stats visibility.
+
+---
+
 # Daily Update: Sandbox Queue & Scanning Reliability Fixes (date: June 22 2026)
 
 Here is the summary of the key issues resolved and tasks completed today:
