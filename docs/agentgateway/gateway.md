@@ -6,11 +6,11 @@ This document describes the design, routing architecture, installation process, 
 
 ## 1. Routing Architecture
 
-The `agentgateway` acts as the single entry point (API Gateway) for all traffic coming from the VM node (`10.0.10.9`) or other external clients. It binds to the static IP address **`10.0.10.100`** managed by MetalLB.
+The `agentgateway` acts as the single entry point (API Gateway) for all traffic coming from the VM node (`10.0.10.9`) or other external clients. It binds to the static IP address **`10.0.10.9`** managed by MetalLB.
 
 ```mermaid
 graph TD
-    Client["VM Client / External (10.0.10.9)"] -->|Requests 10.0.10.100| Proxy["agentgateway-proxy (10.0.10.100)"]
+    Client["VM Client / External (10.0.10.9)"] -->|Requests 10.0.10.9| Proxy["agentgateway-proxy (10.0.10.9)"]
 
     Proxy -->|HTTP/S /api/v1/01sbx| APIServer["sandbox-api-service:80"]
     Proxy -->|HTTP/S /grafana| Grafana["grafana-service:80"]
@@ -39,35 +39,16 @@ graph TD
 
 ## 2. Installation & Setup Process
 
-Follow these steps to perform a clean installation or recovery of the gateway components in the cluster.
+The installation process has been simplified so that all required CustomResourceDefinitions (CRDs) and the Agent Gateway Controller are bundled directly into the `codeInspector` Helm chart.
 
-### Step 1: Install Kubernetes Gateway API CRDs
-The `agentgateway` controller relies on the Gateway API resources. Since the controller (`v1.0.1`) runs against a specific schema version, the **`v1.0.0` Experimental** CRD bundle is required to enable both HTTP and TCP route support.
-
-```bash
-kubectl apply --server-side -f https://github.com/kubernetes-sigs/gateway-api/releases/download/v1.0.0/experimental-install.yaml
-```
-
-### Step 2: Install the agentgateway Controller
-The controller is distributed as an OCI artifact. Install it into the `agentgateway-system` namespace:
+### Step 1: Deploy the codeInspector Umbrella Chart
+All required components—including the Gateway API CRDs, the Agent Gateway helper CRDs, and the Agent Gateway Controller—are fully bundled as part of the `codeInspector` Helm chart. You can install everything in one go:
 
 ```bash
-# Install the custom agentgateway helper CRDs
-helm upgrade --install agentgateway-crds oci://cr.agentgateway.dev/agentgateway/charts/agentgateway-crds \
-  --version v1.0.1 \
-  --namespace agentgateway-system \
-  --create-namespace
-
-# Install the agentgateway controller
-helm upgrade --install agentgateway oci://cr.agentgateway.dev/agentgateway/charts/agentgateway \
-  --version v1.0.1 \
-  --namespace agentgateway-system \
-  --create-namespace \
-  --set controller.extraEnv.KGW_ENABLE_GATEWAY_API_EXPERIMENTAL_FEATURES=true \
-  --set controller.image.pullPolicy=Always
+helm upgrade --install codeinspector ./codeInspector -f ./codeInspector/values.yaml -n default
 ```
 
-### Step 3: Apply GatewayClass Schema Validation Patch
+### Step 2: Apply GatewayClass Schema Validation Patch
 To prevent validation conflicts between the API Server and the controller regarding `status.supportedFeatures`, patch the `gatewayclasses` CRD to strip the strict schema constraint:
 
 ```bash
@@ -82,13 +63,13 @@ subprocess.Popen(["kubectl", "apply", "-f", "-"], stdin=subprocess.PIPE).communi
 '
 ```
 
-After applying the patch, restart the controller deployment to ensure a clean sync state:
+After applying the patch, restart the controller deployment to ensure it registers the gateway class correctly:
 
 ```bash
-kubectl rollout restart deployment agentgateway -n agentgateway-system
+kubectl rollout restart deployment codeinspector-agentgateway-controller -n default
 ```
 
-### Step 4: Configure Gateway Bindings in Helm
+### Step 3: Configure Gateway Bindings in Helm
 In your main `values.yaml` file, define the Gateway configuration to request the static IP address:
 
 ```yaml
@@ -98,7 +79,7 @@ agentgateway:
   gateway:
     gatewayClassName: agentgateway
     addresses:
-      - value: 10.0.10.100  # Requests this IP from MetalLB
+      - value: 10.0.10.9  # Requests this IP from MetalLB
     listeners:
       - protocol: HTTP
         port: 80
@@ -118,13 +99,6 @@ agentgateway:
       - protocol: TCP
         port: 5672
         name: rabbitmq-amqp
-```
-
-### Step 5: Deploy Gateway Resources and Routes
-Deploy the Helm charts containing the Gateway, HTTPRoute, TCPRoute, and ReferenceGrant manifests:
-
-```bash
-helm upgrade --install codeinspector ./codeInspector -f ./codeInspector/values.yaml -n default
 ```
 
 ---
@@ -160,7 +134,7 @@ spec:
 ## 4. Troubleshooting & Verification
 
 ### Verify Services and IP Allocation
-Confirm that the proxy service has successfully bound to the external IP `10.0.10.100`:
+Confirm that the proxy service has successfully bound to the external IP `10.0.10.9`:
 
 ```bash
 kubectl get svc -n agentgateway-system
@@ -170,5 +144,5 @@ kubectl get svc -n agentgateway-system
 If the proxy service is not created or updated, check the controller logs for validation issues:
 
 ```bash
-kubectl logs -n agentgateway-system deployment/agentgateway
+kubectl logs -n default deployment/codeinspector-agentgateway-controller
 ```

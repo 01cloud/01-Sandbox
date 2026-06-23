@@ -15,6 +15,9 @@ dependencies:
   - name: agentgateway
     version: 0.1.0
     condition: agentgateway.enabled
+  - name: agentgateway-controller
+    version: v1.0.1
+    condition: agentgateway-controller.enabled
   - name: apiServer
     version: 0.1.0
     condition: apiServer.enabled
