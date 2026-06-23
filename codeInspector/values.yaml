@@ -6,7 +6,7 @@ global:
   apiRoutePrefix: "/api/v1/01sbx"
   JWT_PUBLIC_JWKS: ""
   allowedIps:
-    - "103.129.134.139"
+    - "110.44.123.206"
     - "10."
     - "127.0.0.1"
     - "::1"
@@ -224,7 +224,7 @@ opensandboxResourcePool:
 # Prometheus component values
 ###############################################################
 prometheus:
-  enabled: true
+  enabled: false
   namespace: monitoring
   apiServerNamespace: opensandbox-system
   apiServerServiceName: sandbox-api-service
@@ -260,7 +260,7 @@ prometheus:
 # Grafana component values
 ###############################################################
 grafana:
-  enabled: true
+  enabled: false
   namespace: monitoring
   prometheusNamespace: monitoring
   prometheusServiceName: prometheus-service
