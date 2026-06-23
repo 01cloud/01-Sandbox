@@ -17,7 +17,14 @@ spec:
       containers:
       - name: redis
         image: redis:7-alpine
-        command: ["redis-server", "--requirepass", {{ .Values.redis.password | quote | default "\"\"" }}]
+        env:
+        - name: REDIS_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sandbox-api-secret
+              key: REDIS_PASSWORD
+              optional: true
+        command: ["sh", "-c", "if [ -z \"$REDIS_PASSWORD\" ]; then redis-server; else redis-server --requirepass \"$REDIS_PASSWORD\"; fi"]
         ports:
         - containerPort: 6379
 ---

@@ -93,6 +93,16 @@ apiServer:
     JWT_PRIVATE_KEY: ""
     JWT_PUBLIC_JWKS: ""
     SENDGRID_API_KEY: ""
+  sealedSecrets:
+    enabled: false
+    encryptedData:
+      E2B_API_KEY: ""
+      JWT_PRIVATE_KEY: ""
+      JWT_PUBLIC_JWKS: ""
+      SENDGRID_API_KEY: ""
+      PG_PASSWORD: ""
+      REDIS_PASSWORD: ""
+      RABBITMQ_PASSWORD: ""
   deployment:
     replicaCount: 2
     image:
@@ -302,3 +312,9 @@ grafana:
     limits:
       cpu: "500m"
       memory: "256Mi"
+
+###############################################################
+# Sealed Secrets subchart controller values
+###############################################################
+sealed-secrets:
+  enabled: true

@@ -22,6 +22,17 @@ secret:
   JWT_PUBLIC_JWKS: ""   # Auto-derived from JWT_PRIVATE_KEY if left empty
   SENDGRID_API_KEY: ""
 
+sealedSecrets:
+  enabled: false
+  encryptedData:
+    E2B_API_KEY: ""
+    JWT_PRIVATE_KEY: ""
+    JWT_PUBLIC_JWKS: ""
+    SENDGRID_API_KEY: ""
+    PG_PASSWORD: ""
+    REDIS_PASSWORD: ""
+    RABBITMQ_PASSWORD: ""
+
 deployment:
   replicaCount: 1
   image:
