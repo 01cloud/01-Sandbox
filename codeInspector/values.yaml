@@ -54,6 +54,16 @@ agentgateway:
       requests: 7
       unit: "Minutes"
 ################################################################
+# Agent Gateway Controller values
+################################################################
+agentgateway-controller:
+  enabled: true
+  controller:
+    extraEnv:
+      KGW_ENABLE_GATEWAY_API_EXPERIMENTAL_FEATURES: "true"
+    image:
+      pullPolicy: Always
+################################################################
 # API Server component values
 ################################################################
 apiServer:
