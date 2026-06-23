@@ -10,7 +10,7 @@ async def check_expiring_keys_task(app_state) -> None:
     Background loop that periodically checks the database for API keys approaching expiration,
     enqueues an email notification job to RabbitMQ for each key, and updates the database.
     """
-    # Wait for a brief moment at startup to ensure dependencies (like database, rabbitmq) are ready
+    # Wait for a brief moment at startup to ensure dependencies (like database, rabbitmq/ redis) are ready
     await asyncio.sleep(5)
 
     print("[Notifier] Expiration notifier background task started.")
