@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.92](https://github.com/01cloud/01-Sandbox/compare/v0.5.91...v0.5.92) (2026-06-23)
+
+
+### 🚀 New Features
+
+* add sealed secrets support for api server keys ([2ee7bbb](https://github.com/01cloud/01-Sandbox/commit/2ee7bbb159ce7e08075caa60a07ecc70cfa4fa0e))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.91 [skip ci] ([574aa8b](https://github.com/01cloud/01-Sandbox/commit/574aa8b8c527a43a2089f544ceff9b958ff03bb6))
+
 ## [0.5.91](https://github.com/01cloud/01-Sandbox/compare/v0.5.90...v0.5.91) (2026-06-23)
 
 
