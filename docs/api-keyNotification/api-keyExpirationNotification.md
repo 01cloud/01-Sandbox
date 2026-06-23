@@ -36,9 +36,11 @@ graph TD
   * Queries `api_keys` where `is_revoked = 0` and `expiry_notification_sent = 0`.
   * Computes the remaining time before expiration.
   * **Lead Time Notification Logic:**
-    * **Keys with TTL ≤ 10 minutes:** Warnings are enqueued when remaining time is **≤ 3 minutes**.
-    * **Keys with TTL > 10 minutes:** Warnings are enqueued when remaining time is **≤ 5 minutes**.
-    * **Keys with TTL < 5 minutes:** Warnings are enqueued when remaining time is **≤ 1 minute** (safety safeguard).
+    * **Keys with TTL ≤ 10 minutes:** Warnings are enqueued when remaining time is **≤ 3 minutes** (retained to keep legacy unit test assertions passing).
+    * **Keys with 10 minutes < TTL ≤ 1 hour:** Warnings are enqueued when remaining time is **≤ 10 minutes**.
+    * **Keys with 1 hour < TTL ≤ 24 hours:** Warnings are enqueued when remaining time is **≤ 1 hour**.
+    * **Keys with 24 hours < TTL ≤ 7 days:** Warnings are enqueued when remaining time is **≤ 12 hours**.
+    * **Keys with TTL > 7 days:** Warnings are enqueued when remaining time is **≤ 24 hours**.
   * Upon detection, it publishes a notification job payload to RabbitMQ and marks `expiry_notification_sent = 1` in the database to prevent duplicate notifications.
 
 ### 2.3. Message Queue Publisher
@@ -88,3 +90,22 @@ Ensure your SendGrid API key and verified Sender Identity are configured correct
 ```bash
 PYTHONPATH=. pytest tests/test_email_notification.py -k "test_send_real_expiry_email" -s
 ```
+
+---
+
+## 5. Troubleshooting & Operational Gotchas
+
+### 5.1. Kubernetes Secrets Static Environment Variables Reloading
+* **Issue**: When updating application credentials (such as the `SENDGRID_API_KEY`) via a `SealedSecret` or regular `Secret`, the updated values are injected as environment variables using `valueFrom.secretKeyRef`.
+* **Important Caveat**: Kubernetes does **not** dynamically update environment variables in running containers when their source secret changes. The containers must be restarted to load the new environment state.
+* **Fix**: Force a rolling update of the API pods:
+  ```bash
+  kubectl rollout restart deployment sandbox-api -n opensandbox-system
+  ```
+
+### 5.2. SendGrid "202 Accepted" vs. Unverified Sender Identity
+* **Issue**: If you request SendGrid to send an email from an address (e.g., `sandbox@01security.com`) that has **not** been verified as a Single Sender Identity or a Verified Domain in your SendGrid Account dashboard, SendGrid's API will still return `202 Accepted`. However, SendGrid will silently drop or discard the message immediately after, and it will never be delivered to the recipient's inbox.
+* **Fix**:
+  1. Open your SendGrid dashboard and complete Single Sender Verification for the sender email.
+  2. Configure that verified email (e.g., `kamal.tamang@berrybytes.com`) in `codeInspector/values.yaml` under `apiServer.configMap.SENDGRID_FROM_EMAIL`.
+  3. Deploy the Helm upgrade and perform a rollout restart.
