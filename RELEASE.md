@@ -1,3 +1,38 @@
+## Release v0.5.95 — 01-Sandbox
+**Release Date:** June 23, 2026
+
+---
+
+### Summary
+v0.5.95 focuses on new functionality and platform enhancements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* use conditional fields and prod certificate encryption ([80104bd](https://github.com/01cloud/01-Sandbox/commit/80104bd0909a1466aa14b6bf1a7540ecb711eeeb))
+* use conditional fields and prod certificate encryption ([34dd627](https://github.com/01cloud/01-Sandbox/commit/34dd627b1b285f3bf4e1ae8e22480cb9af21748c))
+* generate RELEASE.md for v0.5.94 [skip ci] ([0518dd4](https://github.com/01cloud/01-Sandbox/commit/0518dd420f3a48ebaee08e45d65d871eb916014b))
+
+### Changes
+## [0.5.95](https://github.com/01cloud/01-Sandbox/compare/v0.5.94...v0.5.95) (2026-06-23)
+
+
+### 🚀 New Features
+
+* use conditional fields and prod certificate encryption ([80104bd](https://github.com/01cloud/01-Sandbox/commit/80104bd0909a1466aa14b6bf1a7540ecb711eeeb))
+* use conditional fields and prod certificate encryption ([34dd627](https://github.com/01cloud/01-Sandbox/commit/34dd627b1b285f3bf4e1ae8e22480cb9af21748c))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.94 [skip ci] ([0518dd4](https://github.com/01cloud/01-Sandbox/commit/0518dd420f3a48ebaee08e45d65d871eb916014b))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.95)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.94 — 01-Sandbox
 **Release Date:** June 23, 2026
 
