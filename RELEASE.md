@@ -1,3 +1,44 @@
+## Release v0.5.98 — 01-Sandbox
+**Release Date:** June 23, 2026
+
+---
+
+### Summary
+v0.5.98 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* private repos write access ([22da830](https://github.com/01cloud/01-Sandbox/commit/22da830b709279c24f6eaacdbe5e4b6620128c33))
+* private repos write access ([9198025](https://github.com/01cloud/01-Sandbox/commit/9198025d11fb386e44cfd537ad6985b64aaa5eb1))
+* generate RELEASE.md for v0.5.97 [skip ci] ([6952dfc](https://github.com/01cloud/01-Sandbox/commit/6952dfc3f9c90602ab055cbca0ad557bcd73cdce))
+* bump versions to v0.5.97 [skip ci] ([e487330](https://github.com/01cloud/01-Sandbox/commit/e48733080f444e040347dd99885150df1f908fec))
+
+### Changes
+## [0.5.98](https://github.com/01cloud/01-Sandbox/compare/v0.5.97...v0.5.98) (2026-06-23)
+
+
+### 🐛 Bug Fixes
+
+* private repos write access ([22da830](https://github.com/01cloud/01-Sandbox/commit/22da830b709279c24f6eaacdbe5e4b6620128c33))
+* private repos write access ([9198025](https://github.com/01cloud/01-Sandbox/commit/9198025d11fb386e44cfd537ad6985b64aaa5eb1))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.97 [skip ci] ([6952dfc](https://github.com/01cloud/01-Sandbox/commit/6952dfc3f9c90602ab055cbca0ad557bcd73cdce))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.97 [skip ci] ([e487330](https://github.com/01cloud/01-Sandbox/commit/e48733080f444e040347dd99885150df1f908fec))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.98)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.97 — 01-Sandbox
 **Release Date:** June 23, 2026
 
