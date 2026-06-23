@@ -1,3 +1,44 @@
+## Release v0.5.93 — 01-Sandbox
+**Release Date:** June 23, 2026
+
+---
+
+### Summary
+v0.5.93 introduces new features along with important stability improvements. Under-the-hood code refactoring improves overall system maintainability. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement sealsecret ([eb00696](https://github.com/01cloud/01-Sandbox/commit/eb00696f1ee1b63f933a9fdf1fad0f6c0520dce9))
+* implement sealsecret ([410e1ac](https://github.com/01cloud/01-Sandbox/commit/410e1ac13769c25b300b6b2fc381857fbeb24aa4))
+* generate RELEASE.md for v0.5.92 [skip ci] ([0316caf](https://github.com/01cloud/01-Sandbox/commit/0316caf3a442203ef5a3cbd56d52e45f2628d495))
+* bump versions to v0.5.92 [skip ci] ([5a4609a](https://github.com/01cloud/01-Sandbox/commit/5a4609a33759ab9dde8beaf5138b65b2a823766e))
+
+### Changes
+## [0.5.93](https://github.com/01cloud/01-Sandbox/compare/v0.5.92...v0.5.93) (2026-06-23)
+
+
+### 🚀 New Features
+
+* implement sealsecret ([eb00696](https://github.com/01cloud/01-Sandbox/commit/eb00696f1ee1b63f933a9fdf1fad0f6c0520dce9))
+* implement sealsecret ([410e1ac](https://github.com/01cloud/01-Sandbox/commit/410e1ac13769c25b300b6b2fc381857fbeb24aa4))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.92 [skip ci] ([0316caf](https://github.com/01cloud/01-Sandbox/commit/0316caf3a442203ef5a3cbd56d52e45f2628d495))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.92 [skip ci] ([5a4609a](https://github.com/01cloud/01-Sandbox/commit/5a4609a33759ab9dde8beaf5138b65b2a823766e))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.93)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.92 — 01-Sandbox
 **Release Date:** June 23, 2026
 
