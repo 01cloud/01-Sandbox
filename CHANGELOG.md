@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.5.91](https://github.com/01cloud/01-Sandbox/compare/v0.5.90...v0.5.91) (2026-06-23)
+
+
+### 🚀 New Features
+
+* agentgateway controller ([f15fb9c](https://github.com/01cloud/01-Sandbox/commit/f15fb9c0933d27aefdd11111c5d69cf6b84b8f0f))
+* implement sendgrid configuration ([4c76e3d](https://github.com/01cloud/01-Sandbox/commit/4c76e3d4f682c6d5291ac744d1105ef2faaedfcb))
+
+
+### 🐛 Bug Fixes
+
+* middleware cors isseus ([4d3e740](https://github.com/01cloud/01-Sandbox/commit/4d3e74060b8e1a0b2c3644d1d5ffd41bcdef3eb4))
+* values.yaml file to disable montoring ([ecd2bea](https://github.com/01cloud/01-Sandbox/commit/ecd2beaf3b472854d1b712fa84c01ed4496e5cd1))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.90 [skip ci] ([50e2b3d](https://github.com/01cloud/01-Sandbox/commit/50e2b3d6e27aef0d297b455c6e7bed18c38841fb))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.90 [skip ci] ([0efcdc7](https://github.com/01cloud/01-Sandbox/commit/0efcdc74dc3fd9d0bd3ce6588e1c12b66ce1b2c4))
+* **readme:** readme update ([ff3558f](https://github.com/01cloud/01-Sandbox/commit/ff3558f20bb9c6da78ff5cc75e29d487f9ddb4bc))
+* **readme:** readme update ([e010f8e](https://github.com/01cloud/01-Sandbox/commit/e010f8e86c819e0bab749ad8aecbf07742f1220d))
+
 ## [0.5.90](https://github.com/01cloud/01-Sandbox/compare/v0.5.89...v0.5.90) (2026-06-22)
 
 
