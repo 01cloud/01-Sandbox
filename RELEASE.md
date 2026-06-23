@@ -1,3 +1,36 @@
+## Release v0.5.92 — 01-Sandbox
+**Release Date:** June 23, 2026
+
+---
+
+### Summary
+v0.5.92 introduces new features along with important stability improvements. Under-the-hood code refactoring improves overall system maintainability. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* add sealed secrets support for api server keys ([2ee7bbb](https://github.com/01cloud/01-Sandbox/commit/2ee7bbb159ce7e08075caa60a07ecc70cfa4fa0e))
+* generate RELEASE.md for v0.5.91 [skip ci] ([574aa8b](https://github.com/01cloud/01-Sandbox/commit/574aa8b8c527a43a2089f544ceff9b958ff03bb6))
+
+### Changes
+## [0.5.92](https://github.com/01cloud/01-Sandbox/compare/v0.5.91...v0.5.92) (2026-06-23)
+
+
+### 🚀 New Features
+
+* add sealed secrets support for api server keys ([2ee7bbb](https://github.com/01cloud/01-Sandbox/commit/2ee7bbb159ce7e08075caa60a07ecc70cfa4fa0e))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.91 [skip ci] ([574aa8b](https://github.com/01cloud/01-Sandbox/commit/574aa8b8c527a43a2089f544ceff9b958ff03bb6))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.92)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.91 — 01-Sandbox
 **Release Date:** June 23, 2026
 
