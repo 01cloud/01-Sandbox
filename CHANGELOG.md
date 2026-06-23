@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.5.94](https://github.com/01cloud/01-Sandbox/compare/v0.5.93...v0.5.94) (2026-06-23)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.93 [skip ci] ([3ce58b3](https://github.com/01cloud/01-Sandbox/commit/3ce58b3b220a17bc5eac50ea042767a188b3efa8))
+
+
+### 🧹 Miscellaneous
+
+* add sealed-secrets CRD to top-level crds folder ([cd0df33](https://github.com/01cloud/01-Sandbox/commit/cd0df33b89f59c5bbef773a74b7f933b9510ea7b))
+* add sealed-secrets CRD to top-level crds folder ([64355cf](https://github.com/01cloud/01-Sandbox/commit/64355cf8eb0fb44ecb64ac2e0a186188b841d277))
+
 ## [0.5.93](https://github.com/01cloud/01-Sandbox/compare/v0.5.92...v0.5.93) (2026-06-23)
 
 
