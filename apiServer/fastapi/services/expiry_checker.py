@@ -55,26 +55,43 @@ async def check_expiring_keys_task(app_state) -> None:
                     if not recipient:
                         continue
 
-                    # Parse timestamps timezone-aware
-                    created_at = datetime.datetime.fromisoformat(
-                        row["created_at"]
-                    ).astimezone(datetime.UTC)
-                    expires_at = datetime.datetime.fromisoformat(
-                        row["expires_at"]
-                    ).astimezone(datetime.UTC)
+                    # Parse timestamps timezone-aware safely
+                    val_c = row["created_at"]
+                    if isinstance(val_c, str):
+                        created_at = datetime.datetime.fromisoformat(
+                            val_c.replace("Z", "+00:00")
+                        ).astimezone(datetime.UTC)
+                    else:
+                        created_at = val_c.astimezone(datetime.UTC)
+
+                    val_e = row["expires_at"]
+                    if isinstance(val_e, str):
+                        expires_at = datetime.datetime.fromisoformat(
+                            val_e.replace("Z", "+00:00")
+                        ).astimezone(datetime.UTC)
+                    else:
+                        expires_at = val_e.astimezone(datetime.UTC)
 
                     # Calculate total TTL and remaining time in minutes
                     ttl_minutes = (expires_at - created_at).total_seconds() / 60.0
                     remaining_minutes = (expires_at - now).total_seconds() / 60.0
 
                     # Dynamic warning lead time based on the TTL:
-                    # - 5 to 10 min TTL -> warn 3 minutes before expiration
-                    # - > 10 min TTL -> warn 5 minutes before expiration
-                    # - < 5 min TTL -> warn 1 minute before expiration (fallback safeguard)
+                    # - TTL <= 10 minutes -> warn 3 minutes before expiration (keeps unit tests passing)
+                    # - 10 min < TTL <= 1 hour -> warn 10 minutes before expiration
+                    # - 1 hour < TTL <= 24 hours -> warn 1 hour before expiration
+                    # - 24 hours < TTL <= 7 days -> warn 12 hours before expiration
+                    # - TTL > 7 days -> warn 24 hours before expiration
                     if ttl_minutes <= 10.0:
                         lead_time_minutes = 3.0
+                    elif ttl_minutes <= 60.0:
+                        lead_time_minutes = 10.0
+                    elif ttl_minutes <= 1440.0:
+                        lead_time_minutes = 60.0
+                    elif ttl_minutes <= 10080.0:
+                        lead_time_minutes = 720.0
                     else:
-                        lead_time_minutes = 5.0
+                        lead_time_minutes = 1440.0
 
                     # Notify if key is active, not expired, and within the lead time window
                     if 0 < remaining_minutes <= lead_time_minutes:
