@@ -107,7 +107,7 @@ apiServer:
     replicaCount: 2
     image:
       repository: 01community/01sandbox-api
-      tag: "v0.5.90"
+      tag: "v0.5.92"
       pullPolicy: Always
     resources:
       requests:
@@ -312,7 +312,6 @@ grafana:
     limits:
       cpu: "500m"
       memory: "256Mi"
-
 ###############################################################
 # Sealed Secrets subchart controller values
 ###############################################################
