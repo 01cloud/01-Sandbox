@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.5.96](https://github.com/01cloud/01-Sandbox/compare/v0.5.95...v0.5.96) (2026-06-23)
+
+
+### 🚀 New Features
+
+* implement sealsecret ([198a839](https://github.com/01cloud/01-Sandbox/commit/198a839ae68580073004c85f7f25ebcbcd7f68c4))
+
+
+### 🐛 Bug Fixes
+
+* **notify:** adjust warning lead times dynamically and fix env restart ([c5a1230](https://github.com/01cloud/01-Sandbox/commit/c5a1230f2dbf2e574fb13f0fa9913d74e9abdc05))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.95 [skip ci] ([78f4aeb](https://github.com/01cloud/01-Sandbox/commit/78f4aeb9f9a225c22bfe61327252d1ee8a23fe87))
+* update sealed secrets deployment guide ([d59cde5](https://github.com/01cloud/01-Sandbox/commit/d59cde5bb3c11529dec2cc73bf5e6bf307ceb6f5))
+* update sealed secrets deployment guide ([e57911d](https://github.com/01cloud/01-Sandbox/commit/e57911d7c2b637047c3091c6c7a8cdf448ecffec))
+
 ## [0.5.95](https://github.com/01cloud/01-Sandbox/compare/v0.5.94...v0.5.95) (2026-06-23)
 
 
