@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.98](https://github.com/01cloud/01-Sandbox/compare/v0.5.97...v0.5.98) (2026-06-23)
+
+
+### 🐛 Bug Fixes
+
+* private repos write access ([22da830](https://github.com/01cloud/01-Sandbox/commit/22da830b709279c24f6eaacdbe5e4b6620128c33))
+* private repos write access ([9198025](https://github.com/01cloud/01-Sandbox/commit/9198025d11fb386e44cfd537ad6985b64aaa5eb1))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.97 [skip ci] ([6952dfc](https://github.com/01cloud/01-Sandbox/commit/6952dfc3f9c90602ab055cbca0ad557bcd73cdce))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.97 [skip ci] ([e487330](https://github.com/01cloud/01-Sandbox/commit/e48733080f444e040347dd99885150df1f908fec))
+
 ## [0.5.97](https://github.com/01cloud/01-Sandbox/compare/v0.5.96...v0.5.97) (2026-06-23)
 
 
