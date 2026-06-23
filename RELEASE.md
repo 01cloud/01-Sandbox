@@ -1,3 +1,38 @@
+## Release v0.5.94 — 01-Sandbox
+**Release Date:** June 23, 2026
+
+---
+
+### Summary
+v0.5.94 focuses on new functionality and platform enhancements. Under-the-hood code refactoring improves overall system maintainability. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* generate RELEASE.md for v0.5.93 [skip ci] ([3ce58b3](https://github.com/01cloud/01-Sandbox/commit/3ce58b3b220a17bc5eac50ea042767a188b3efa8))
+* add sealed-secrets CRD to top-level crds folder ([cd0df33](https://github.com/01cloud/01-Sandbox/commit/cd0df33b89f59c5bbef773a74b7f933b9510ea7b))
+* add sealed-secrets CRD to top-level crds folder ([64355cf](https://github.com/01cloud/01-Sandbox/commit/64355cf8eb0fb44ecb64ac2e0a186188b841d277))
+
+### Changes
+## [0.5.94](https://github.com/01cloud/01-Sandbox/compare/v0.5.93...v0.5.94) (2026-06-23)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.93 [skip ci] ([3ce58b3](https://github.com/01cloud/01-Sandbox/commit/3ce58b3b220a17bc5eac50ea042767a188b3efa8))
+
+
+### 🧹 Miscellaneous
+
+* add sealed-secrets CRD to top-level crds folder ([cd0df33](https://github.com/01cloud/01-Sandbox/commit/cd0df33b89f59c5bbef773a74b7f933b9510ea7b))
+* add sealed-secrets CRD to top-level crds folder ([64355cf](https://github.com/01cloud/01-Sandbox/commit/64355cf8eb0fb44ecb64ac2e0a186188b841d277))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.94)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.93 — 01-Sandbox
 **Release Date:** June 23, 2026
 
