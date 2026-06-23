@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.5.90](https://github.com/01cloud/01-Sandbox/compare/v0.5.89...v0.5.90) (2026-06-22)
+
+
+### 🐛 Bug Fixes
+
+* cors issues ([98e5aa3](https://github.com/01cloud/01-Sandbox/commit/98e5aa36340411a667301bd2d30aa7cb174f0902))
+
+
+### ⚡️ Performance Improvements
+
+* cache active developer keys and pipeline redis job listing ([b93537a](https://github.com/01cloud/01-Sandbox/commit/b93537a5a5ea3d02f4a27f3744f771158713e360))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.89 [skip ci] ([7aeef4c](https://github.com/01cloud/01-Sandbox/commit/7aeef4c2206a8631c63aac810e90a32b5d7fbc28))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.89 [skip ci] ([b187fe0](https://github.com/01cloud/01-Sandbox/commit/b187fe02ecc7a1ae6c157aeb3936ad6e2126a298))
+
+## [0.5.89](https://github.com/01cloud/01-Sandbox/compare/v0.5.88...v0.5.89) (2026-06-22)
+
+
+### 🐛 Bug Fixes
+
+* cors issues ([47496d2](https://github.com/01cloud/01-Sandbox/commit/47496d2d63dfff564878163e9a8b451a3765ee01))
+* cors issues ([3af7acf](https://github.com/01cloud/01-Sandbox/commit/3af7acf2dd14faef4d775d68cbe7365dbe31e2ad))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.88 [skip ci] ([c399552](https://github.com/01cloud/01-Sandbox/commit/c399552cc96f6f442349a5ba07ee01f02d1fbe68))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.88 [skip ci] ([b5a6809](https://github.com/01cloud/01-Sandbox/commit/b5a6809a3743c21d9507c4f35663cd4083de5403))
+
 ## [0.5.88](https://github.com/01cloud/01-Sandbox/compare/v0.5.87...v0.5.88) (2026-06-22)
 
 

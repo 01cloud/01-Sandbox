@@ -51,11 +51,11 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origin_regex=r"https?://(localhost|sandbox\.01security\.com|.*\.01security\.com)(:\d+)?",
-    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
 
 # Custom Http middlewares
 app.add_middleware(CorrelationIDMiddleware)

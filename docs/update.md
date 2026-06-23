@@ -1,6 +1,23 @@
-# Daily Update: Sandbox Queue & Scanning Reliability Fixes (date: June 11 2026)
+# Daily Update: Sandbox Queue & Scanning Reliability Fixes (date: June 22 2026)
 
 Here is the summary of the key issues resolved and tasks completed today:
+
+### 1. Resolved Stuck Scan Queues, Pod Restarts, and CORS Errors
+* **Issue**:
+  - The RabbitMQ consumer crashed instantly on startup with an `ImportError` due to a missing import reference in `observability/__init__.py`. This caused all newly submitted scan jobs to get stuck in the `QUEUED` state indefinitely.
+  - The API's single-threaded FastAPI event loop was blocked by synchronous PostgreSQL connection calls on every authenticated request and by sequential, synchronous Redis scans (`keys("job:*:status")` and 4 individual calls per job) when listing jobs.
+  - Due to these blockages, pods failed Kubernetes liveness probes (timing out after 5 seconds), leading to continuous container restarts and resulting in `503 Service Unavailable` CORS policy failures in the UI.
+* **Fix**:
+  - Fixed the missing import in the `observability` package to restore the queue consumer.
+  - Implemented a 60-second Redis cache (`user_keys:{user_id}`) for developer key queries to bypass PostgreSQL lookup overhead.
+  - Refactored `list_repo_scan_jobs` using a Redis Pipeline to retrieve all job details in a single batch round-trip instead of serial requests.
+  - Added unit tests to verify the cache and DB fallback behaviors.
+
+---
+
+## Daily Update: Sandbox Queue & Scanning Reliability Fixes (date: June 11 2026)
+
+Here is the summary of the key issues resolved and tasks completed on June 11:
 
 ### 1. Fixed "Broker Offline" Bug (Startup Race Condition)
 * **Issue**: During Helm upgrades and restarts, the `sandbox-api` container starts in parallel with the `rabbitmq` container. Since RabbitMQ takes ~15 seconds to fully boot and listen on port `5672`, the API's initial connection attempt failed. The API server caught the exception and locked itself into a fallback offline mode permanently, causing the UI dashboard to display `Broker Offline`.
