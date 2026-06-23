@@ -103,6 +103,19 @@ async def _run_scan_pipeline(
             f"Verifying accessibility of {owner}/{repo} via GitHub API...",
             5,
         )
+        if git_token:
+            token_prefix = git_token[:10]
+            log(
+                "VALIDATING",
+                f"Using git_token: length={len(git_token)}, prefix={token_prefix}...",
+            )
+        if ssh_key:
+            key_prefix = ssh_key[:30].replace("\n", " ")
+            log(
+                "VALIDATING",
+                f"Using ssh_key: length={len(ssh_key)}, prefix={key_prefix}...",
+            )
+
         try:
             await validate_github_repo(repo_url, git_token=git_token, ssh_key=ssh_key)
         except HTTPException as he:
