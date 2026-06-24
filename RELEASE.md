@@ -1,3 +1,44 @@
+## Release v0.5.102 — 01-Sandbox
+**Release Date:** June 24, 2026
+
+---
+
+### Summary
+v0.5.102 focuses on reliability, bug resolution, and maintenance. Under-the-hood code refactoring improves overall system maintainability. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* delete pods jobid ([9437004](https://github.com/01cloud/01-Sandbox/commit/9437004022d49b159607fc4069b1a20544c7786a))
+* delete pods jobid ([ba1db60](https://github.com/01cloud/01-Sandbox/commit/ba1db6079204d254359e2b68e4f1adbbeae25880))
+* generate RELEASE.md for v0.5.101 [skip ci] ([08bdb14](https://github.com/01cloud/01-Sandbox/commit/08bdb1448e1df912136eb87db4b1bd03504d6f43))
+* bump versions to v0.5.101 [skip ci] ([e1a6c44](https://github.com/01cloud/01-Sandbox/commit/e1a6c448bf83d3b4fa8c45eab25eb311ea78b96f))
+
+### Changes
+## [0.5.102](https://github.com/01cloud/01-Sandbox/compare/v0.5.101...v0.5.102) (2026-06-24)
+
+
+### 🐛 Bug Fixes
+
+* delete pods jobid ([9437004](https://github.com/01cloud/01-Sandbox/commit/9437004022d49b159607fc4069b1a20544c7786a))
+* delete pods jobid ([ba1db60](https://github.com/01cloud/01-Sandbox/commit/ba1db6079204d254359e2b68e4f1adbbeae25880))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.101 [skip ci] ([08bdb14](https://github.com/01cloud/01-Sandbox/commit/08bdb1448e1df912136eb87db4b1bd03504d6f43))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.101 [skip ci] ([e1a6c44](https://github.com/01cloud/01-Sandbox/commit/e1a6c448bf83d3b4fa8c45eab25eb311ea78b96f))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.102)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.101 — 01-Sandbox
 **Release Date:** June 24, 2026
 
