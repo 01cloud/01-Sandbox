@@ -1,3 +1,44 @@
+## Release v0.5.99 — 01-Sandbox
+**Release Date:** June 24, 2026
+
+---
+
+### Summary
+v0.5.99 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* remove the sqlite ([8292a8f](https://github.com/01cloud/01-Sandbox/commit/8292a8f36a75bfaee1f10ec32d3be3fc9e473337))
+* remove the sqlite ([7100514](https://github.com/01cloud/01-Sandbox/commit/71005143d7836d52f61d4077c26f54f383dd84b8))
+* generate RELEASE.md for v0.5.98 [skip ci] ([aab1019](https://github.com/01cloud/01-Sandbox/commit/aab1019af0776e5ee1b217e717dfc1e6d183eebf))
+* bump versions to v0.5.98 [skip ci] ([4203828](https://github.com/01cloud/01-Sandbox/commit/420382857c4accc4db358fa978619f1f89d86ba9))
+
+### Changes
+## [0.5.99](https://github.com/01cloud/01-Sandbox/compare/v0.5.98...v0.5.99) (2026-06-24)
+
+
+### 🐛 Bug Fixes
+
+* remove the sqlite ([8292a8f](https://github.com/01cloud/01-Sandbox/commit/8292a8f36a75bfaee1f10ec32d3be3fc9e473337))
+* remove the sqlite ([7100514](https://github.com/01cloud/01-Sandbox/commit/71005143d7836d52f61d4077c26f54f383dd84b8))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.98 [skip ci] ([aab1019](https://github.com/01cloud/01-Sandbox/commit/aab1019af0776e5ee1b217e717dfc1e6d183eebf))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.98 [skip ci] ([4203828](https://github.com/01cloud/01-Sandbox/commit/420382857c4accc4db358fa978619f1f89d86ba9))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.99)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.98 — 01-Sandbox
 **Release Date:** June 23, 2026
 
