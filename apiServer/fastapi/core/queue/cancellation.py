@@ -43,20 +43,36 @@ async def setup_cancellation_listener(app_state) -> None:
 
 async def cancel_active_task(app_state, job_id: str) -> None:
     """Cancels a running asyncio task for a given job ID if it exists on this pod."""
+    current_progress = 0
+    job = app_state.job_tracker.get_job(job_id)
+    if job and job.event_log:
+        current_progress = job.event_log[-1].progress
+    elif app_state.use_redis and app_state.redis_client:
+        try:
+            import json as _json
+
+            last_ev_str = app_state.redis_client.lindex(f"job:{job_id}:events", -1)
+            if last_ev_str:
+                last_ev = _json.loads(last_ev_str)
+                current_progress = last_ev.get("progress", 0)
+        except Exception:
+            pass
+
     task = app_state.active_tasks.get(job_id)
     if task:
-        print(f"[Cancellation] Cancelling running task for job {job_id}")
+        print(
+            f"[Cancellation] Cancelling running task for job {job_id} at {current_progress}% progress"
+        )
         task.cancel()
         await app_state.job_tracker.push_event(
-            job_id, "CANCELLED", "Job was cancelled by the user.", 0
+            job_id, "CANCELLED", "Job was cancelled by the user.", current_progress
         )
     else:
         # If it is not running on this pod, it might be in the queue or on another pod.
         # We update the tracker's status just in case we own the tracker.
-        job = app_state.job_tracker.get_job(job_id)
         if job and job.step != "CANCELLED":
             await app_state.job_tracker.push_event(
-                job_id, "CANCELLED", "Job was cancelled by the user.", 0
+                job_id, "CANCELLED", "Job was cancelled by the user.", current_progress
             )
 
 
