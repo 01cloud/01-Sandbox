@@ -279,6 +279,8 @@ async def _submit_scan_job(
                 print(
                     f"{_TAG}   ← cleaned up temporary child job {child_job_id} from PVC"
                 )
+                if parent_id:
+                    active_child_jobs_by_parent[parent_id].discard(child_job_id)
             except Exception as clean_err:
                 print(
                     f"{_TAG}   WARNING: failed to clean up child job {child_job_id}: {clean_err}"
@@ -295,9 +297,6 @@ async def _submit_scan_job(
         elapsed = time.monotonic() - t0
         print(f"{_TAG}   ✗ scan-jobs submission error after {elapsed:.2f}s: {exc}")
         return {}
-    finally:
-        if parent_id:
-            active_child_jobs_by_parent[parent_id].discard(child_job_id)
 
 
 def _log_tool_execution(

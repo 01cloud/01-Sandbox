@@ -81,6 +81,27 @@ DELETE_SCAN = ScanJobType(
 
 ---
 
+## Scaling & High-Concurrency Behavior (100+ Requests)
+
+When a burst of 100+ concurrent deletion or cancellation requests occurs, the system maintains reliability and responsiveness through the following mechanisms:
+
+1. **API Ingestion (High Throughput & Non-blocking):**
+   * The API router verifies RabbitMQ connection status in a lightweight check and immediately publishes the message to RabbitMQ's `scan.delete` queue.
+   * Because it returns `DELETE_QUEUED` with a `200 OK` status immediately, the HTTP request completes in a fraction of a millisecond, leaving the API Gateway server highly responsive to incoming traffic.
+
+2. **RabbitMQ Flow Control (QoS Prefetch Limits):**
+   * The `delete-scan` worker configures a prefetch count of `5` (`prefetch_count=5` by default, or configured via `MAX_DELETE_SCAN_WORKERS` environment variable).
+   * Even if 100+ tasks are sent to `scan.delete` concurrently, each consumer instance only pulls a maximum of 5 messages at a time. The remaining requests reside safely in RabbitMQ, avoiding CPU/Memory thrashing on worker pods.
+
+3. **Background Worker Concurrency:**
+   * The local active task is cancelled asynchronously. If the task is running on a different pod, Redis Pub/Sub acts as a cross-pod broadcast notification system.
+   * Long-running operations like deleting PVC storage workspaces and destroying remote sandboxes are offloaded to an internal thread pool executor using `asyncio.to_thread()`, keeping the worker's primary asyncio event loop free to run other tasks.
+
+4. **Horizontal Scaling:**
+   * Since RabbitMQ distributes messages in a round-robin/competing-consumer fashion, scaling worker pods increases queue throughput linearly, handling large bursts of cancellations efficiently.
+
+---
+
 ## Verification & Tests
 
 ### Automated Unit Tests
