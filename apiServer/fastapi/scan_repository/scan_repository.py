@@ -703,7 +703,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                     "progress": (
                         100
                         if job.step in ("DONE", "ERROR")
-                        else (len(job.event_log) * 10 if job.event_log else 10)
+                        else (job.event_log[-1].progress if job.event_log else 10)
                     ),
                     "stepMessage": job.event_log[-1].message if job.event_log else "",
                     "eventIndex": len(job.event_log),
@@ -758,9 +758,12 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                             continue
 
                         last_msg = ""
+                        last_progress = 10
                         if last_ev_str:
                             try:
-                                last_msg = _json.loads(last_ev_str).get("message", "")
+                                last_ev = _json.loads(last_ev_str)
+                                last_msg = last_ev.get("message", "")
+                                last_progress = last_ev.get("progress", 10)
                             except Exception:
                                 pass
 
@@ -769,7 +772,9 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                                 "job_id": jid,
                                 "job_type": "repo-scan",
                                 "status": status,
-                                "progress": 100 if status in ("DONE", "ERROR") else 10,
+                                "progress": 100
+                                if status in ("DONE", "ERROR")
+                                else last_progress,
                                 "stepMessage": last_msg,
                                 "eventIndex": events_len,
                                 "metadata": metadata,
