@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.5.100](https://github.com/01cloud/01-Sandbox/compare/v0.5.99...v0.5.100) (2026-06-24)
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.99 [skip ci] ([7be28c0](https://github.com/01cloud/01-Sandbox/commit/7be28c00713f3dc478b6d7055ee5fd7ad1ae54d4))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.99 [skip ci] ([1240c5c](https://github.com/01cloud/01-Sandbox/commit/1240c5cde6a771004a4687e39eb10596faaa7fab))
+
 ## [0.5.99](https://github.com/01cloud/01-Sandbox/compare/v0.5.98...v0.5.99) (2026-06-24)
 
 
