@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import os
-import sqlite3
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -129,11 +128,7 @@ async def test_expiry_checker_detection():
 
     conn = state.get_db_conn()
     cursor = conn.cursor()
-    query = (
-        "INSERT INTO api_keys (id, name, backend, user_id, user_email, created_at, expires_at, prefix, expiry_notification_sent) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
-        if state.use_postgres
-        else "INSERT INTO api_keys (id, name, backend, user_id, user_email, created_at, expires_at, prefix, expiry_notification_sent) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
-    )
+    query = "INSERT INTO api_keys (id, name, backend, user_id, user_email, created_at, expires_at, prefix, expiry_notification_sent) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)"
     for key in [key_a, key_b, key_c, key_d, key_e, key_f]:
         cursor.execute(
             query,

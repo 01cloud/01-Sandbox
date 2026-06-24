@@ -27,7 +27,7 @@ async def test_get_active_developer_keys_db_fallback():
     mock_state.use_redis = True
     mock_state.redis_client = MagicMock()
     mock_state.redis_client.get.return_value = None
-    mock_state.use_postgres = False
+    mock_state.use_postgres = True
 
     # Mock DB Connection
     mock_conn = MagicMock()

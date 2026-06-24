@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import os
-import sqlite3
 import uuid
 
 
@@ -23,25 +22,15 @@ async def check_expiring_keys_task(app_state) -> None:
             now = datetime.datetime.now(datetime.UTC)
 
             conn = app_state.get_db_conn()
-            if app_state.use_postgres:
-                from psycopg2.extras import RealDictCursor
+            from psycopg2.extras import RealDictCursor
 
-                cursor = conn.cursor(cursor_factory=RealDictCursor)
-                query = """
-                    SELECT id, name, user_id, user_email, created_at, expires_at, prefix
-                    FROM api_keys
-                    WHERE is_revoked = 0
-                      AND expiry_notification_sent = 0
-                """
-            else:
-                conn.row_factory = sqlite3.Row
-                cursor = conn.cursor()
-                query = """
-                    SELECT id, name, user_id, user_email, created_at, expires_at, prefix
-                    FROM api_keys
-                    WHERE is_revoked = 0
-                      AND expiry_notification_sent = 0
-                """
+            cursor = conn.cursor(cursor_factory=RealDictCursor)
+            query = """
+                SELECT id, name, user_id, user_email, created_at, expires_at, prefix
+                FROM api_keys
+                WHERE is_revoked = 0
+                  AND expiry_notification_sent = 0
+            """
 
             cursor.execute(query)
             rows = cursor.fetchall()
@@ -111,11 +100,7 @@ async def check_expiring_keys_task(app_state) -> None:
                             await publish("notification.email", payload)
 
                             # Update database that notification is enqueued/sent
-                            update_query = (
-                                "UPDATE api_keys SET expiry_notification_sent = 1 WHERE id = %s"
-                                if app_state.use_postgres
-                                else "UPDATE api_keys SET expiry_notification_sent = 1 WHERE id = ?"
-                            )
+                            update_query = "UPDATE api_keys SET expiry_notification_sent = 1 WHERE id = %s"
                             cursor.execute(update_query, (key_id,))
                             conn.commit()
                             print(
