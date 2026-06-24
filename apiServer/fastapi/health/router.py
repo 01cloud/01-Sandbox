@@ -7,7 +7,7 @@ from .models import DependencyStatus, HealthResponse
 
 
 def check_postgresql_health(state) -> tuple[bool, str]:
-    """Lightweight and production-safe health check for the PostgreSQL/SQLite database."""
+    """Lightweight and production-safe health check for the PostgreSQL database."""
     try:
         conn = state.get_db_conn()
         cursor = conn.cursor()
@@ -16,7 +16,7 @@ def check_postgresql_health(state) -> tuple[bool, str]:
         conn.close()
         return (
             True,
-            "PostgreSQL Connected" if state.use_postgres else "SQLite Connected",
+            "PostgreSQL Connected",
         )
     except Exception as e:
         return False, f"Database error: {str(e)}"
@@ -144,7 +144,7 @@ def get_health_router(state, validate_token) -> APIRouter:
         return {
             "status_code": status_code,
             "status": "healthy" if healthy else "unhealthy",
-            "dependency": "postgresql" if state.use_postgres else "sqlite",
+            "dependency": "postgresql",
             "healthy": healthy,
             "details": details,
         }

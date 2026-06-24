@@ -52,14 +52,10 @@ async def get_active_developer_keys(state, user_id: str) -> list[str]:
     try:
         conn = state.get_db_conn()
         cursor = conn.cursor()
-        query = (
-            """
+        query = """
             SELECT id, expires_at FROM api_keys
             WHERE LOWER(user_id) = LOWER(%s) AND is_revoked = 0
         """
-            if state.use_postgres
-            else "SELECT id, expires_at FROM api_keys WHERE LOWER(user_id) = LOWER(?) AND is_revoked = 0"
-        )
         cursor.execute(query, (user_id,))
         rows = cursor.fetchall()
         conn.close()
@@ -350,11 +346,7 @@ async def validate_token(request: Request):
             now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             conn = state.get_db_conn()
             cursor = conn.cursor()
-            query = (
-                "SELECT is_revoked, expires_at FROM api_keys WHERE id = %s"
-                if state.use_postgres
-                else "SELECT is_revoked, expires_at FROM api_keys WHERE id = ?"
-            )
+            query = "SELECT is_revoked, expires_at FROM api_keys WHERE id = %s"
             cursor.execute(query, (jti,))
             row = cursor.fetchone()
             conn.close()
@@ -455,11 +447,7 @@ async def update_last_used(jti: str):
         conn = state.get_db_conn()
         cursor = conn.cursor()
         now = datetime.datetime.now(datetime.UTC).isoformat()
-        query = (
-            "UPDATE api_keys SET last_used_at = %s WHERE id = %s"
-            if state.use_postgres
-            else "UPDATE api_keys SET last_used_at = ? WHERE id = ?"
-        )
+        query = "UPDATE api_keys SET last_used_at = %s WHERE id = %s"
         cursor.execute(query, (now, jti))
         conn.commit()
         conn.close()

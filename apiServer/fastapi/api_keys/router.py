@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime
 import re
-import sqlite3
 import uuid
 from typing import Callable
 
@@ -82,15 +81,9 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
 
         # Handle dict behavior difference between sqlite3 and psycopg2
         now_iso = datetime.datetime.now(datetime.UTC).isoformat()
-        if state.use_postgres:
-            cursor = conn.cursor(cursor_factory=RealDictCursor)
-            query = "SELECT * FROM api_keys WHERE LOWER(user_id) = LOWER(%s) AND expires_at > %s"
-            cursor.execute(query, (user_id, now_iso))
-        else:
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            query = "SELECT * FROM api_keys WHERE LOWER(user_id) = LOWER(?) AND expires_at > ?"
-            cursor.execute(query, (user_id, now_iso))
+        cursor = conn.cursor(cursor_factory=RealDictCursor)
+        query = "SELECT * FROM api_keys WHERE LOWER(user_id) = LOWER(%s) AND expires_at > %s"
+        cursor.execute(query, (user_id, now_iso))
         rows = cursor.fetchall()
         conn.close()
 
@@ -139,11 +132,7 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
         # Check quota (Max 5 keys per user)
         conn = state.get_db_conn()
         cursor = conn.cursor()
-        query_count = (
-            "SELECT COUNT(*) FROM api_keys WHERE LOWER(user_id) = LOWER(%s)"
-            if state.use_postgres
-            else "SELECT COUNT(*) FROM api_keys WHERE LOWER(user_id) = LOWER(?)"
-        )
+        query_count = "SELECT COUNT(*) FROM api_keys WHERE LOWER(user_id) = LOWER(%s)"
         cursor.execute(query_count, (user_id,))
         count = cursor.fetchone()[0]
         conn.close()
@@ -210,14 +199,10 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
 
         conn = state.get_db_conn()
         cursor = conn.cursor()
-        query = (
-            """
+        query = """
             INSERT INTO api_keys (id, name, backend, user_id, user_email, created_at, expires_at, prefix)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
         """
-            if state.use_postgres
-            else "INSERT INTO api_keys (id, name, backend, user_id, user_email, created_at, expires_at, prefix) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
-        )
 
         cursor.execute(
             query,
@@ -252,11 +237,7 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
         conn = state.get_db_conn()
         cursor = conn.cursor()
 
-        query = (
-            "DELETE FROM api_keys WHERE id = %s AND user_id = %s"
-            if state.use_postgres
-            else "DELETE FROM api_keys WHERE id = ? AND user_id = ?"
-        )
+        query = "DELETE FROM api_keys WHERE id = %s AND user_id = %s"
         cursor.execute(query, (jti, user_id))
         rows_deleted = cursor.rowcount
         conn.commit()
