@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.101](https://github.com/01cloud/01-Sandbox/compare/v0.5.100...v0.5.101) (2026-06-24)
+
+
+### 🐛 Bug Fixes
+
+* delete pods jobid ([e21f294](https://github.com/01cloud/01-Sandbox/commit/e21f29462f75059d8d57fcd5c957b52ca52a0969))
+* delete pods jobid ([1b669eb](https://github.com/01cloud/01-Sandbox/commit/1b669ebc9f4fd1537ac6d67fda14bf416849a93f))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.100 [skip ci] ([a0944bb](https://github.com/01cloud/01-Sandbox/commit/a0944bba59a3d7a91f15b5efd1cddaf5841fe255))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.100 [skip ci] ([2e49f40](https://github.com/01cloud/01-Sandbox/commit/2e49f404f8b4140475e99170a75dc189cabce928))
+
 ## [0.5.100](https://github.com/01cloud/01-Sandbox/compare/v0.5.99...v0.5.100) (2026-06-24)
 
 
