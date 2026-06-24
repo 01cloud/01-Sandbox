@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.99](https://github.com/01cloud/01-Sandbox/compare/v0.5.98...v0.5.99) (2026-06-24)
+
+
+### 🐛 Bug Fixes
+
+* remove the sqlite ([8292a8f](https://github.com/01cloud/01-Sandbox/commit/8292a8f36a75bfaee1f10ec32d3be3fc9e473337))
+* remove the sqlite ([7100514](https://github.com/01cloud/01-Sandbox/commit/71005143d7836d52f61d4077c26f54f383dd84b8))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.98 [skip ci] ([aab1019](https://github.com/01cloud/01-Sandbox/commit/aab1019af0776e5ee1b217e717dfc1e6d183eebf))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.98 [skip ci] ([4203828](https://github.com/01cloud/01-Sandbox/commit/420382857c4accc4db358fa978619f1f89d86ba9))
+
 ## [0.5.98](https://github.com/01cloud/01-Sandbox/compare/v0.5.97...v0.5.98) (2026-06-23)
 
 
