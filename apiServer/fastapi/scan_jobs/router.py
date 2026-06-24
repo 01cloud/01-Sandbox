@@ -277,40 +277,17 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
         Flags a scan job as cancelled. If purge=True, permanently deletes the job records
         from memory/Redis and purges all reports and source files from the PVC.
         """
-        # 1. Trigger cancellation
-        if state.use_redis and state.redis_client:
-            try:
-                # Set cancellation flag in Redis
-                state.redis_client.set(f"job:{job_id}:cancelled", "true", ex=86400)
-                # Broadcast cancellation event
-                state.redis_client.publish("job:cancellations", job_id)
-                print(f"[Cancellation] Published cancellation event for job {job_id}")
-            except Exception as e:
-                print(f"[Cancellation] Redis cancel error: {e}")
-        else:
-            try:
-                # Fallback to local cancellation if Redis not active
-                from core.queue.cancellation import cancel_active_task
+        from core.queue import is_available, publish
 
-                await cancel_active_task(state, job_id)
-            except Exception as e:
-                print(f"[Cancellation] Local cancel error: {e}")
-
-        # Always trigger backend sandbox/PVC cleanup on cancellation or deletion
-        try:
-            state.backend.delete_scan_job(job_id, terminate=True)
-            print(
-                f"[Cleanup] Deleted report and workspace from PVC and terminated sandboxes for job {job_id}"
+        if not is_available():
+            raise HTTPException(
+                status_code=503,
+                detail="RabbitMQ service is unavailable. Cannot process job deletion.",
             )
-        except Exception as e:
-            print(f"[Cleanup] Remote PVC/sandbox deletion failed for job {job_id}: {e}")
 
-        # 2. If purge=True, delete metadata, status, events from Redis and memory
-        if purge:
-            # Delete from in-memory tracker and Redis
-            state.job_tracker.delete_job(job_id)
-            return {"job_id": job_id, "status": "DELETED"}
+        payload = {"job_id": job_id, "purge": purge}
+        await publish("scan.delete", payload)
 
-        return {"job_id": job_id, "status": "CANCEL_REQUESTED"}
+        return {"job_id": job_id, "status": "DELETE_QUEUED"}
 
     return router

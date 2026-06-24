@@ -115,6 +115,13 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
                 from services.email import send_expiry_email
 
                 await send_expiry_email(p)
+            elif jt.job_type == "delete-scan":
+                print(
+                    f"[RabbitMQ][delete-scan] job={job_id[:8]} purge={p.get('purge')}"
+                )
+                from core.queue.delete_handler import handle_delete_job
+
+                await handle_delete_job(app_state, job_id, p.get("purge", False))
 
             await msg.ack()
 

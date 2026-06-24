@@ -63,7 +63,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import SecurityScanner from "@/components/dashboard/SecurityScanner";
 import RepoScannerWidget from "@/components/dashboard/RepoScannerWidget";
-import QueueMonitorWidget from "@/components/dashboard/QueueMonitorWidget";
+// import QueueMonitorWidget from "@/components/dashboard/QueueMonitorWidget";
 
 interface APIKey {
   id: string;
@@ -630,10 +630,6 @@ const Dashboard = () => {
           <TabsTrigger value="apis" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
             <Key className="w-4 h-4" />
             API Management
-          </TabsTrigger>
-          <TabsTrigger value="queues" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
-            <Activity className="w-4 h-4" />
-            Queue Monitor
           </TabsTrigger>
         </TabsList>
 
@@ -1216,10 +1212,6 @@ const Dashboard = () => {
               </p> */}
             </CardFooter>
           </Card>
-        </TabsContent>
-
-        <TabsContent value="queues" className="animate-in fade-in-50 slide-in-from-bottom-5 duration-500">
-          <QueueMonitorWidget apiBaseUrl={API_BASE_URL} activeTab={activeTab} />
         </TabsContent>
       </Tabs>
 
