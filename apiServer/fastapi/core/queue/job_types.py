@@ -33,5 +33,12 @@ EMAIL_NOTIFICATION = ScanJobType(
     5,
     ("notification.email.5s", "notification.email.30s", "notification.email.2m"),
 )
+DELETE_SCAN = ScanJobType(
+    "delete-scan",
+    "scan.delete",
+    "scan.delete",
+    5,
+    ("scan.delete.5s", "scan.delete.30s", "scan.delete.2m"),
+)
 
-ALL_SCAN_JOB_TYPES = [QUICK_SCAN, REPO_SCAN, EMAIL_NOTIFICATION]
+ALL_SCAN_JOB_TYPES = [QUICK_SCAN, REPO_SCAN, EMAIL_NOTIFICATION, DELETE_SCAN]

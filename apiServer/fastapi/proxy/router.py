@@ -348,43 +348,18 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
     async def proxy_cancel_or_delete_job(
         version: str, backend_id: str, job_id: str, purge: bool = Query(False)
     ):
-        """
-        Intercepts DELETE requests for jobs to cancel or permanently delete them
-        from the gateway tracker, Redis, and remote PVC.
-        """
-        # 1. Trigger cancellation
-        if state.use_redis and state.redis_client:
-            try:
-                state.redis_client.set(f"job:{job_id}:cancelled", "true", ex=86400)
-                state.redis_client.publish("job:cancellations", job_id)
-                print(f"[Proxy Cancellation] Published cancellation for job {job_id}")
-            except Exception as e:
-                print(f"[Proxy Cancellation] Redis cancel error: {e}")
-        else:
-            try:
-                from core.queue.cancellation import cancel_active_task
+        from core.queue import is_available, publish
 
-                await cancel_active_task(state, job_id)
-            except Exception as e:
-                print(f"[Proxy Cancellation] Local cancel error: {e}")
-
-        # Always trigger backend sandbox/PVC cleanup on cancellation or deletion
-        try:
-            state.backend.delete_scan_job(job_id, terminate=True)
-            print(
-                f"[Proxy Cleanup] Deleted report and workspace from PVC and terminated sandboxes for job {job_id}"
-            )
-        except Exception as e:
-            print(
-                f"[Proxy Cleanup] Remote PVC/sandbox deletion failed for job {job_id}: {e}"
+        if not is_available():
+            raise HTTPException(
+                status_code=503,
+                detail="RabbitMQ service is unavailable. Cannot process job deletion.",
             )
 
-        # 2. If purge=True, delete from memory, Redis and PVC
-        if purge:
-            state.job_tracker.delete_job(job_id)
-            return {"job_id": job_id, "status": "DELETED"}
+        payload = {"job_id": job_id, "purge": purge}
+        await publish("scan.delete", payload)
 
-        return {"job_id": job_id, "status": "CANCEL_REQUESTED"}
+        return {"job_id": job_id, "status": "DELETE_QUEUED"}
 
     @router.get(
         "/api/{version}/{backend_id}/jobs",
