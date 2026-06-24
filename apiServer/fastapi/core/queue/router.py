@@ -23,7 +23,13 @@ async def get_queue_stats(user_data: dict = Depends(validate_token)):
             "queues": {},
         }
 
-    queues_to_query = ["scan.quick", "scan.repo", "scan.failed"]
+    queues_to_query = [
+        "scan.quick",
+        "scan.repo",
+        "scan.failed",
+        "scan.delete",
+        "notification.email",
+    ]
     stats = {}
 
     for q_name in queues_to_query:
@@ -92,7 +98,13 @@ async def get_public_queue_stats():
             "queues": {},
         }
 
-    queues_to_query = ["scan.quick", "scan.repo", "scan.failed"]
+    queues_to_query = [
+        "scan.quick",
+        "scan.repo",
+        "scan.failed",
+        "scan.delete",
+        "notification.email",
+    ]
     stats = {}
 
     for q_name in queues_to_query:
