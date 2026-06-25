@@ -1,3 +1,44 @@
+## Release v0.5.107 — 01-Sandbox
+**Release Date:** June 25, 2026
+
+---
+
+### Summary
+v0.5.107 focuses on reliability, bug resolution, and maintenance. Test coverage has been expanded to ensure higher code quality. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* parallel jobs scans implementation ([5a2338c](https://github.com/01cloud/01-Sandbox/commit/5a2338cf55c8611b304c1c17fba129e08b94094c))
+* parallel jobs scans implementation ([348cda0](https://github.com/01cloud/01-Sandbox/commit/348cda07f1c31284af22608eb465b6eadee03a78))
+* generate RELEASE.md for v0.5.106 [skip ci] ([d9ed57d](https://github.com/01cloud/01-Sandbox/commit/d9ed57d90707a38c960737473fc901ceadcbe58d))
+* bump versions to v0.5.106 [skip ci] ([01a8653](https://github.com/01cloud/01-Sandbox/commit/01a8653a1f5542c3b63f7f01c11500fb77fba279))
+
+### Changes
+## [0.5.107](https://github.com/01cloud/01-Sandbox/compare/v0.5.106...v0.5.107) (2026-06-25)
+
+
+### 🐛 Bug Fixes
+
+* parallel jobs scans implementation ([5a2338c](https://github.com/01cloud/01-Sandbox/commit/5a2338cf55c8611b304c1c17fba129e08b94094c))
+* parallel jobs scans implementation ([348cda0](https://github.com/01cloud/01-Sandbox/commit/348cda07f1c31284af22608eb465b6eadee03a78))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.106 [skip ci] ([d9ed57d](https://github.com/01cloud/01-Sandbox/commit/d9ed57d90707a38c960737473fc901ceadcbe58d))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.106 [skip ci] ([01a8653](https://github.com/01cloud/01-Sandbox/commit/01a8653a1f5542c3b63f7f01c11500fb77fba279))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.107)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.106 — 01-Sandbox
 **Release Date:** June 25, 2026
 
