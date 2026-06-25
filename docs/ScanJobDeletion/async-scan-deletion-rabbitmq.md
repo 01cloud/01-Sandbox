@@ -63,6 +63,21 @@ sequenceDiagram
 
 ---
 
+## Why Redis is Used in `delete_handler.py` (Cross-Pod Coordination)
+
+In a Kubernetes deployment, the `sandbox-api` service scales horizontally with multiple active pod replicas (e.g., 5 replicas running concurrently).
+
+Because **RabbitMQ distributes queue messages using a round-robin competing consumer pattern**, a deletion request from the `scan.delete` queue will only be delivered to **exactly one** worker replica.
+
+This creates a distributed synchronization challenge:
+* **The Problem:** The replica that consumes the `scan.delete` message from RabbitMQ is almost never the same replica that is currently executing the active scanning task (which runs as a local `asyncio.Task` on the Python event loop).
+* **The Solution (Redis Pub/Sub):** To coordinate cancellation across all replicas:
+  1. The consuming replica writes a persistent cancellation flag (`job:{job_id}:cancelled`) to **Redis key-value storage**. This ensures that even if a scanning task hasn't started yet, it will see the flag and abort immediately upon starting.
+  2. The consuming replica publishes the `job_id` to a shared **Redis Pub/Sub channel** (`job:deletions` or `job:cancellations`).
+  3. Every running replica pod runs a background listener subscribing to these channels. When they receive the message, the specific replica pod holding the active `asyncio.Task` cancels it immediately, ensuring the running scan is stopped instantly regardless of where it was running.
+
+---
+
 ## Key Functions Reference (Deletion & Cleanup Flow)
 
 Below is the functional map of the exact Python routines that implement the RabbitMQ-based deletion and Kubernetes sandbox pod cleanup pipeline:
