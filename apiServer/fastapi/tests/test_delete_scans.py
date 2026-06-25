@@ -37,7 +37,7 @@ if not JWT_TOKEN:
 
 API_BASE_URL = os.environ.get("API_URL", "https://api-sandbox.01security.com")
 DELETE_DELAY_SECS = int(os.environ.get("DELETE_DELAY_SECS", "5"))
-PURGE = os.environ.get("PURGE", "false").lower() == "true"
+PURGE = os.environ.get("PURGE", "true").lower() == "true"
 
 URLS = [
     "https://github.com/tiangolo/fastapi",
