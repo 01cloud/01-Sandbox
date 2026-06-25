@@ -732,14 +732,33 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 continue
             if job.job_type != "repo-scan":
                 continue
+
+            # Sync with Redis if it has completed elsewhere
+            redis_status = None
+            if app_state.use_redis and app_state.redis_client:
+                try:
+                    r_val = app_state.redis_client.get(f"job:{jid}:status")
+                    if r_val:
+                        redis_status = (
+                            r_val.decode() if isinstance(r_val, bytes) else r_val
+                        )
+                except Exception:
+                    pass
+
+            if redis_status in ("DONE", "ERROR"):
+                stale_ids.append(jid)
+                continue
+
+            job_status = redis_status if redis_status else job.step
+
             jobs.append(
                 {
                     "job_id": job.job_id,
                     "job_type": job.job_type,
-                    "status": job.step,
+                    "status": job_status,
                     "progress": (
                         100
-                        if job.step in ("DONE", "ERROR")
+                        if job_status in ("DONE", "ERROR")
                         else (job.event_log[-1].progress if job.event_log else 10)
                     ),
                     "stepMessage": job.event_log[-1].message if job.event_log else "",
