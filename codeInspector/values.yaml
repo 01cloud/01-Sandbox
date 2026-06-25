@@ -107,7 +107,7 @@ apiServer:
     replicaCount: 2
     image:
       repository: 01community/01sandbox-api
-      tag: "v0.5.105"
+      tag: "v0.5.106"
       pullPolicy: Always
     resources:
       requests:
@@ -208,7 +208,7 @@ opensandbox:
     sandboxMemory: "512Mi"
     image:
       repository: 01community/01sandbox-opensandbox-server
-      tag: "v0.5.105"
+      tag: "v0.5.106"
       pullPolicy: Always
     resources:
       requests:
