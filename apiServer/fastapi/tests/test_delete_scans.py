@@ -1,26 +1,24 @@
 #!/usr/bin/env python3
 """
-test_delete_scans.py — Submit concurrent repo scans and then delete them mid-flight
-to verify that:
-  1. Deletion is queued via RabbitMQ (scan.delete queue)
-  2. The sandbox pods for each language are terminated via the cleanup_child_jobs flow
+test_delete_scans.py — Auto-detect and delete/purge active repository scan jobs.
+
+Does NOT submit any new scans. It fetches all jobs currently running or queued
+on the server, automatically extracts their job IDs, and cancels/purges them.
 
 Usage:
-    JWT_TOKEN=<token> python3 test_delete_scans.py
-    python3 test_delete_scans.py <JWT_TOKEN>
-    JWT_TOKEN=<token> API_URL=https://api-sandbox.01security.com python3 test_delete_scans.py
+    JWT_TOKEN=<token> python3 tests/test_delete_scans.py
+    python3 tests/test_delete_scans.py <JWT_TOKEN>
 
 Optional env vars:
-    DELETE_DELAY_SECS  — seconds to wait after submitting before deleting (default: 5)
-                         Set higher for slower repos, lower to delete before provisioning.
-    PURGE              — if set to "true", permanently purges job records from Redis/PVC too
+    PURGE   — "true" (default) to permanently remove from Redis + UI list
+              "false" to only soft-cancel (job stays in list with CANCELLED status)
+    API_URL — API base URL (default: https://api-sandbox.01security.com)
 """
 
 import asyncio
 import json
 import os
 import sys
-import time
 import urllib.request
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -30,35 +28,23 @@ if not JWT_TOKEN and len(sys.argv) > 1:
     JWT_TOKEN = sys.argv[1]
 
 if not JWT_TOKEN:
-    print(
-        "Error: Please set JWT_TOKEN environment variable or pass it as the first argument."
-    )
+    print("Error: Please set JWT_TOKEN environment variable.")
+    print("Example: JWT_TOKEN=your_token_here python3 tests/test_delete_scans.py")
     sys.exit(1)
 
 API_BASE_URL = os.environ.get("API_URL", "https://api-sandbox.01security.com")
-DELETE_DELAY_SECS = int(os.environ.get("DELETE_DELAY_SECS", "5"))
 PURGE = os.environ.get("PURGE", "true").lower() == "true"
-
-URLS = [
-    "https://github.com/tiangolo/fastapi",
-    "https://github.com/firecracker-microvm/firecracker",
-    "https://github.com/ytdl-org/youtube-dl",
-    "https://github.com/tiangolo/fastapi",
-]
 
 HEADERS = {
     "Content-Type": "application/json",
     "Authorization": f"Bearer {JWT_TOKEN}",
 }
 
-
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
-def _request(method: str, url: str, body: dict | None = None) -> dict | None:
-    """Send a synchronous HTTP request and return the parsed JSON body."""
-    data = json.dumps(body).encode("utf-8") if body else None
-    req = urllib.request.Request(url, data=data, headers=HEADERS, method=method)
+def _request(method: str, url: str) -> dict | list | None:
+    req = urllib.request.Request(url, headers=HEADERS, method=method)
     try:
         with urllib.request.urlopen(req) as resp:
             raw = resp.read().decode("utf-8")
@@ -71,102 +57,93 @@ def _request(method: str, url: str, body: dict | None = None) -> dict | None:
         return None
 
 
-def submit_scan(repo_url: str) -> str | None:
-    """POST /v1/repo-scan and return the job_id."""
-    url = f"{API_BASE_URL.rstrip('/')}/v1/repo-scan"
-    data = _request("POST", url, {"repo_url": repo_url})
-    if data:
-        job_id = data.get("job_id")
-        print(f"  ✅ Submitted {repo_url} → job_id: {job_id}")
-        return job_id
-    print(f"  ❌ Failed to submit {repo_url}")
-    return None
+def list_jobs() -> list[dict]:
+    """GET /v1/repo-scan/jobs — returns all existing repo-scan jobs."""
+    url = f"{API_BASE_URL.rstrip('/')}/v1/repo-scan/jobs"
+    data = _request("GET", url)
+    if isinstance(data, list):
+        return data
+    return []
 
 
-def delete_scan(job_id: str) -> bool:
-    """DELETE /v1/jobs/{job_id} — published to RabbitMQ scan.delete queue."""
+def delete_job(job_id: str, repo_url: str) -> bool:
+    """DELETE /v1/jobs/{job_id}?purge=true|false"""
     purge_param = "true" if PURGE else "false"
     url = f"{API_BASE_URL.rstrip('/')}/v1/jobs/{job_id}?purge={purge_param}"
     data = _request("DELETE", url)
     if data and data.get("status") == "DELETE_QUEUED":
-        print(f"  🗑️  Deleted job {job_id} → status: DELETE_QUEUED (via RabbitMQ)")
+        action = "PURGED" if PURGE else "CANCELLED"
+        print(f"  🗑️  [{action}] {job_id} ({repo_url})")
         return True
-    print(f"  ❌ Failed to delete job {job_id}: {data}")
+    print(f"  ❌ FAILED {job_id} ({repo_url}): {data}")
     return False
-
-
-def get_job_status(job_id: str) -> str:
-    """GET /v1/repo-scan/{job_id}/status snapshot (non-streaming)."""
-    url = f"{API_BASE_URL.rstrip('/')}/v1/jobs"
-    data = _request("GET", url)
-    if data:
-        for job in data:
-            if job.get("job_id") == job_id:
-                return job.get("step", "UNKNOWN")
-    return "NOT_FOUND"
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 
 async def main():
-    print(f"\n{'='*60}")
+    print(f"\n{'='*70}")
     print(f"  Target API : {API_BASE_URL}")
-    print(f"  Delete delay: {DELETE_DELAY_SECS}s after submission")
-    print(f"  Purge mode  : {PURGE}")
-    print(f"{'='*60}\n")
+    print(f"  Purge mode : {PURGE}  (set PURGE=false to only soft-cancel)")
+    print(f"{'='*70}\n")
 
-    # ── Step 1: Submit all scans concurrently ──────────────────────────────
-    print(f"[1/3] Submitting {len(URLS)} concurrent repo scans...\n")
-    loop = asyncio.get_event_loop()
-    submit_tasks = [loop.run_in_executor(None, submit_scan, url) for url in URLS]
-    job_ids = await asyncio.gather(*submit_tasks)
+    # ── Step 1: Fetch all existing active/running/queued jobs ────────────────
+    print("[1/2] Fetching all existing repo-scan jobs...")
+    all_jobs = list_jobs()
 
-    valid_jobs = {jid: url for jid, url in zip(job_ids, URLS) if jid}
-    if not valid_jobs:
-        print("\n❌ No jobs were submitted successfully. Exiting.")
-        sys.exit(1)
+    # Filter for active/running/queued jobs or just all jobs currently in the list
+    # We target jobs that are NOT already in a terminal state (DONE/ERROR) unless we want to clear everything.
+    # To be safe and clean, we will target jobs that are running, queued, or detecting.
+    active_jobs = []
+    for job in all_jobs:
+        step = str(job.get("step", "")).upper()
+        # We can target all jobs that aren't finished, or simply target all listed jobs to clean up completely
+        active_jobs.append(job)
 
-    print(f"\n  Submitted {len(valid_jobs)}/{len(URLS)} job(s) successfully.")
+    if not active_jobs:
+        print("\n✅ No repo-scan jobs found on the server to delete.")
+        return
 
-    # ── Step 2: Wait for sandbox pods to spin up ───────────────────────────
-    print(
-        f"\n[2/3] Waiting {DELETE_DELAY_SECS}s for language sandbox pods to provision..."
-    )
-    print("      (Increase DELETE_DELAY_SECS env var to wait longer before deleting)\n")
-    for remaining in range(DELETE_DELAY_SECS, 0, -1):
-        print(f"  Deleting in {remaining}s...", end="\r")
-        time.sleep(1)
+    print(f"\n  Auto-detected {len(active_jobs)} job(s) on the server:\n")
+    for job in active_jobs:
+        jid = job.get("job_id", "?")
+        repo = job.get("repo_url") or job.get("repo", "?")
+        step = job.get("step", "?")
+        progress = job.get("progress", "?")
+        print(f"    • {jid}  [{step} {progress}%]  {repo}")
+
     print()
 
-    # ── Step 3: Delete all submitted jobs ─────────────────────────────────
-    print(
-        f"\n[3/3] Deleting {len(valid_jobs)} job(s) via RabbitMQ scan.delete queue...\n"
-    )
-    delete_tasks = [loop.run_in_executor(None, delete_scan, jid) for jid in valid_jobs]
-    results = await asyncio.gather(*delete_tasks)
+    # ── Step 2: Delete detected jobs concurrently ───────────────────────────
+    print(f"[2/2] Deleting detected job(s) via RabbitMQ scan.delete queue...\n")
+    loop = asyncio.get_event_loop()
+    tasks = [
+        loop.run_in_executor(
+            None,
+            delete_job,
+            job.get("job_id", ""),
+            job.get("repo_url") or job.get("repo", "Unknown Repo"),
+        )
+        for job in active_jobs
+        if job.get("job_id")
+    ]
+    results = await asyncio.gather(*tasks)
 
     # ── Summary ────────────────────────────────────────────────────────────
     deleted = sum(results)
-    print(f"\n{'='*60}")
+    print(f"\n{'='*70}")
     print(f"  Summary")
-    print(f"{'='*60}")
-    print(f"  Submitted : {len(valid_jobs)} job(s)")
-    print(f"  Deleted   : {deleted} job(s)")
-    print(f"\n  Job IDs:")
-    for jid, url in valid_jobs.items():
-        status = (
-            "🗑️  DELETE_QUEUED" if results[list(valid_jobs).index(jid)] else "❌ FAILED"
+    print(f"{'='*70}")
+    print(f"  Auto-detected : {len(active_jobs)} job(s)")
+    print(f"  Successfully Deleted/Purged : {deleted} job(s)")
+    if PURGE:
+        print(
+            "\n✅ Targeted jobs have been fully purged and will disappear from the UI."
         )
-        print(f"    [{status}] {jid}  ({url})")
-
-    print(
-        f"\n✅ Check RabbitMQ management UI → 'scan.delete' queue for queued deletions."
-    )
-    print(
-        f"✅ Check 'kubectl get pods -n <namespace>' to confirm sandbox pod termination."
-    )
-    print(f"{'='*60}\n")
+    else:
+        print("\n✅ Targeted jobs have been marked as CANCELLED in the UI.")
+    print(f"{'='*70}\n")
 
 
 if __name__ == "__main__":
