@@ -1,3 +1,44 @@
+## Release v0.5.105 — 01-Sandbox
+**Release Date:** June 25, 2026
+
+---
+
+### Summary
+v0.5.105 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* parallel jobs scans implementation ([a7b1c09](https://github.com/01cloud/01-Sandbox/commit/a7b1c09ad66191ae4d2c0801f25a32d81b26f88c))
+* parallel jobs scans implementation ([7201ab2](https://github.com/01cloud/01-Sandbox/commit/7201ab2057af47a18c2c33fa73054d08530bec7e))
+* generate RELEASE.md for v0.5.104 [skip ci] ([7e4a9ca](https://github.com/01cloud/01-Sandbox/commit/7e4a9ca5313005b48a81a3288d6e8527a0abdc82))
+* bump versions to v0.5.104 [skip ci] ([3d0f0ea](https://github.com/01cloud/01-Sandbox/commit/3d0f0ea0b88d00dd384e838198ad8e732422c7c1))
+
+### Changes
+## [0.5.105](https://github.com/01cloud/01-Sandbox/compare/v0.5.104...v0.5.105) (2026-06-25)
+
+
+### 🐛 Bug Fixes
+
+* parallel jobs scans implementation ([a7b1c09](https://github.com/01cloud/01-Sandbox/commit/a7b1c09ad66191ae4d2c0801f25a32d81b26f88c))
+* parallel jobs scans implementation ([7201ab2](https://github.com/01cloud/01-Sandbox/commit/7201ab2057af47a18c2c33fa73054d08530bec7e))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.104 [skip ci] ([7e4a9ca](https://github.com/01cloud/01-Sandbox/commit/7e4a9ca5313005b48a81a3288d6e8527a0abdc82))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.104 [skip ci] ([3d0f0ea](https://github.com/01cloud/01-Sandbox/commit/3d0f0ea0b88d00dd384e838198ad8e732422c7c1))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.105)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.104 — 01-Sandbox
 **Release Date:** June 25, 2026
 
