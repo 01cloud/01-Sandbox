@@ -25,7 +25,7 @@ async def handle_delete_job(state, job_id: str, purge: bool = False) -> None:
             )
 
     # 2. Trigger local active task cancellation
-    await cancel_active_task(state, job_id)
+    await cancel_active_task(state, job_id, purge=purge)
 
     # 3. Trigger backend PVC/sandbox deletion in a thread executor
     try:

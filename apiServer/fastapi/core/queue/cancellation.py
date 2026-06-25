@@ -32,7 +32,7 @@ async def setup_cancellation_listener(app_state) -> None:
                 elif channel == "job:deletions":
                     print(f"[Deletion] Received deletion request for job: {job_id}")
                     # 1. Cancel task first
-                    await cancel_active_task(app_state, job_id)
+                    await cancel_active_task(app_state, job_id, purge=True)
                     # 2. Purge from in-memory tracker
                     if job_id in app_state.job_tracker._jobs:
                         del app_state.job_tracker._jobs[job_id]
@@ -41,7 +41,7 @@ async def setup_cancellation_listener(app_state) -> None:
         await asyncio.sleep(0.5)
 
 
-async def cancel_active_task(app_state, job_id: str) -> None:
+async def cancel_active_task(app_state, job_id: str, purge: bool = False) -> None:
     """Cancels a running asyncio task for a given job ID if it exists on this pod."""
     current_progress = 0
     job = app_state.job_tracker.get_job(job_id)
@@ -64,13 +64,14 @@ async def cancel_active_task(app_state, job_id: str) -> None:
             f"[Cancellation] Cancelling running task for job {job_id} at {current_progress}% progress"
         )
         task.cancel()
-        await app_state.job_tracker.push_event(
-            job_id, "CANCELLED", "Job was cancelled by the user.", current_progress
-        )
+        if not purge:
+            await app_state.job_tracker.push_event(
+                job_id, "CANCELLED", "Job was cancelled by the user.", current_progress
+            )
     else:
         # If it is not running on this pod, it might be in the queue or on another pod.
         # We update the tracker's status just in case we own the tracker.
-        if job and job.step != "CANCELLED":
+        if not purge and job and job.step != "CANCELLED":
             await app_state.job_tracker.push_event(
                 job_id, "CANCELLED", "Job was cancelled by the user.", current_progress
             )

@@ -221,6 +221,15 @@ async def cleanup_child_jobs(job_ids: set[str]) -> None:
                     url, params={"terminate": "true"}, headers=opensandbox_headers()
                 )
                 print(f"{_TAG} [CLEANUP] Deleted dangling child job {jid}")
+                # Purge child job from Redis/job_tracker
+                try:
+                    from core import state
+
+                    state.job_tracker.delete_job(jid)
+                except Exception as tracker_err:
+                    print(
+                        f"{_TAG} [CLEANUP] Failed to purge child job {jid} from tracker: {tracker_err}"
+                    )
             except Exception as e:
                 print(f"{_TAG} [CLEANUP] Failed to delete child job {jid}: {e}")
 
@@ -270,15 +279,25 @@ async def _submit_scan_job(
             raw_count = len(report.get("findings", []))
             print(f"{_TAG}   ← report received: {raw_count} raw finding(s)")
 
-            # Immediately clean up the temporary child scan job from PVC
+            # Immediately clean up the temporary child scan job from PVC and terminate sandbox pod
             try:
                 await client.delete(
                     f"{base_url.rstrip('/')}{prefix}/scan-jobs/{child_job_id}",
+                    params={"terminate": "true"},
                     headers=opensandbox_headers(),
                 )
                 print(
-                    f"{_TAG}   ← cleaned up temporary child job {child_job_id} from PVC"
+                    f"{_TAG}   ← cleaned up temporary child job {child_job_id} from PVC and terminated sandbox pod"
                 )
+                # Purge child job from Redis/job_tracker
+                try:
+                    from core import state
+
+                    state.job_tracker.delete_job(child_job_id)
+                except Exception as tracker_err:
+                    print(
+                        f"{_TAG}   WARNING: failed to purge child job {child_job_id} from tracker: {tracker_err}"
+                    )
                 if parent_id:
                     active_child_jobs_by_parent[parent_id].discard(child_job_id)
             except Exception as clean_err:
