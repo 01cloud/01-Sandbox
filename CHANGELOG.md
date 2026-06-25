@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.5.106](https://github.com/01cloud/01-Sandbox/compare/v0.5.105...v0.5.106) (2026-06-25)
+
+
+### 🐛 Bug Fixes
+
+* parallel jobs scans implementation ([3caeedc](https://github.com/01cloud/01-Sandbox/commit/3caeedcbf604dd44a4759d6f7da24ebf8ddb9efe))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.105 [skip ci] ([604e6e7](https://github.com/01cloud/01-Sandbox/commit/604e6e7c15cca97b5180a97f61851eab1f3118b2))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.105 [skip ci] ([a36bad4](https://github.com/01cloud/01-Sandbox/commit/a36bad41378b758b61dd7c9c5b9ed1f67091ae09))
+
 ## [0.5.105](https://github.com/01cloud/01-Sandbox/compare/v0.5.104...v0.5.105) (2026-06-25)
 
 
