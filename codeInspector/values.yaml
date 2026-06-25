@@ -160,7 +160,7 @@ apiServer:
     user: "admin"
     password: "changeme"
     maxQuickScanWorkers: "2"
-    maxRepoScanWorkers: "2"
+    maxRepoScanWorkers: "5"
 ################################################################
 # MetalLB component values
 ################################################################
