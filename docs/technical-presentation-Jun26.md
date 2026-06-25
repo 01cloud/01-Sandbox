@@ -26,7 +26,7 @@ This guide outlines the six foundational pillars implemented to elevate the **Co
 ## 1. Asynchronous Scan Execution Pipeline (RabbitMQ & Server-Sent Events)
 
 ### 💡 The Problem
-Scanning a repository involves resource-intensive tasks (cloning Git repositories, provisioning isolated containers, running AST parsers, and processing static analysis). If these operations run synchronously within the web request context, HTTP clients will time out, server threads will be exhausted, and the gateway will crash under load.
+Scanning a repository involves resource-intensive tasks: cloning Git repositories, provisioning isolated containers, running AST parsers, and processing static analysis. If these operations run synchronously within the web request context, HTTP clients will time out, server threads will be exhausted, and the gateway will crash under load.
 
 ### ⚙️ How It Works (The Core Principle)
 We built an event-driven, decoupled scan execution pipeline. When a user requests a repository scan, the request is validated, enqueued onto a durable message broker, and processed asynchronously by background worker pods. Real-time feedback is streamed back to the client via Server-Sent Events (SSE).
@@ -43,10 +43,35 @@ graph TD
     SSE -->|8. Streams live status| Client
 ```
 
-### 🛠️ Key Architectural Details
-* **Immediate Response:** The gateway validates the schema, generates a job ID, publishes the task to `scan.repo` (for full repository scans) or `scan.quick` (for single files), and returns a `200 OK` response with `status: "QUEUED"` in less than 1 millisecond.
-* **Concurrent Language Scans:** Once a worker pod consumes a job, it parses the repo's structure and detects active languages. It utilizes Python's `asyncio.gather` to concurrently execute AST static analysis tools (e.g. bandit, semgrep, eslint) in parallel sandboxes rather than executing them sequentially, slashing total run times.
-* **Server-Sent Events (SSE):** Throughout the execution lifecycle, workers push granular updates (e.g., `CLONING`, `SCANNING_PYTHON`, `COMPLETED`) to the global `SSEManager`. The frontend dashboard subscribes to `/v1/repo-scan/events/{job_id}` to render progress bars and findings in real time.
+### 🛠️ Detailed Scan Flow for GitHub Repositories
+Here is the step-by-step breakdown of how a repository (such as a private or public GitHub repo) is scanned asynchronously:
+
+1. **Ingestion & Validation:**
+   * The client submits a `POST /v1/repo-scan` request with the target `repo_url` (and optional credentials like `git_token` or `ssh_key`).
+   * The API router parses the URL to extract the `owner` and `repo` names.
+   * A unique UUID `job_id` is generated, and a job record is created in the global `job_tracker`.
+
+2. **Durable RabbitMQ Queuing & Resilience Fallback:**
+   * The gateway checks broker availability using `is_available()`.
+   * **RabbitMQ Online (Primary):** The gateway publishes a message to the `scan.repo` queue containing the job metadata and ephemeral credentials. It immediately returns a `200 OK` response with `status: "QUEUED"` in less than 1 millisecond.
+   * **RabbitMQ Offline (Resilient Fallback):** If RabbitMQ is down, the system automatically falls back to registering the job as a FastAPI local `BackgroundTasks` thread, ensuring the system remains functional.
+
+3. **Background Consumption & Execution:**
+   * A background consumer worker pod pulls the message from the `scan.repo` queue.
+   * The worker first triggers **repository accessibility prechecks** using `validate_github_repo()`.
+   * The worker invokes the remote `opensandbox-server` to provision a clean, isolated **workspace directory (sandbox)** with a Persistent Volume Claim (PVC).
+
+4. **Secure In-Memory Cloning:**
+   * The worker runs `clone_repo()`. If a private key or token is supplied, it writes the SSH key to a temporary file (restricted with `0600` permissions) or rewrites the git target URL with the PAT token in-memory.
+   * It performs a shallow git clone (`--depth=1`) of the GitHub repository directly into the sandbox workspace and deletes all temporary credential files immediately in an unconditional `finally` block.
+
+5. **Parallel Component Scanning:**
+   * The worker detects the languages present in the repository.
+   * Using Python's `asyncio.gather`, it concurrently triggers language-specific AST tools (e.g. bandit, semgrep, eslint) in separate code-interpreter sandbox pods, processing scans in parallel rather than sequentially.
+
+6. **Progress Streaming (SSE):**
+   * Throughout the scan, the worker updates the `job_tracker` with progress increments (`CLONING`, `SCANNING_PYTHON`, `COMPLETED`).
+   * The frontend client subscribes to the `/v1/repo-scan/{job_id}/status` endpoint, which streams these progress events live.
 
 ---
 
