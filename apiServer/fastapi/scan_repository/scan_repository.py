@@ -206,28 +206,28 @@ async def _run_scan_pipeline(
         )
 
         language_results = {}
-        for idx, (language, files) in enumerate(lang_map.items()):
-            # Defensive guard: abort if the parent job has been cancelled or deleted
+        completed_langs = 0
+        progress_lock = asyncio.Lock()
+
+        async def scan_single_language(
+            language: str, files: list[str], idx: int
+        ) -> None:
+            nonlocal completed_langs
             from core.queue.cancellation import is_job_cancelled_or_deleted
 
             if is_job_cancelled_or_deleted(app_state, job_id):
                 log(
                     "CANCELLED",
-                    f"Job {job_id} has been cancelled/deleted. Aborting remaining language scans.",
+                    f"Job {job_id} has been cancelled/deleted. Aborting scan for {language}.",
                 )
                 raise asyncio.CancelledError()
 
             file_count = min(len(files), 100)
-            progress = 60 + int(((idx + 1) / total_langs) * 30)
             log(
                 "SCANNING",
-                f"[{idx+1}/{total_langs}] Scanning {language} — {file_count} file(s) submitted to scan-jobs pipeline...",
+                f"[{idx+1}/{total_langs}] Starting {language} scan — {file_count} file(s) submitted to scan-jobs pipeline...",
             )
-            await push_event(
-                ScanStep.SCANNING,
-                f"Scanning {language} ({file_count} files)...",
-                progress,
-            )
+
             scan_output = await asyncio.wait_for(
                 scan_language(
                     sandbox_id=sandbox_id,
@@ -238,43 +238,64 @@ async def _run_scan_pipeline(
                 timeout=600.0,
             )
 
-            # YAML returns a tuple (plain_result, optional k8s_result)
-            # All other languages return a single LanguageScanResult
-            if isinstance(scan_output, tuple):
-                yaml_result, k8s_result = scan_output
-                language_results["YAML"] = yaml_result
-                log(
-                    "SCANNING",
-                    f"[{idx+1}/{total_langs}] YAML (plain) complete — {yaml_result.file_count} file(s), "
-                    f"{yaml_result.lines_of_code} LoC, {len(yaml_result.findings)} finding(s)",
-                )
-                if k8s_result is not None:
-                    language_results["Kubernetes YAML"] = k8s_result
+            async with progress_lock:
+                completed_langs += 1
+                progress = 60 + int((completed_langs / total_langs) * 30)
+
+                # YAML returns a tuple (plain_result, optional k8s_result)
+                # All other languages return a single LanguageScanResult
+                if isinstance(scan_output, tuple):
+                    yaml_result, k8s_result = scan_output
+                    language_results["YAML"] = yaml_result
                     log(
                         "SCANNING",
-                        f"[{idx+1}/{total_langs}] Kubernetes YAML complete — {k8s_result.file_count} manifest(s), "
-                        f"{k8s_result.lines_of_code} LoC, {len(k8s_result.findings)} finding(s)",
+                        f"[{idx+1}/{total_langs}] YAML (plain) complete — {yaml_result.file_count} file(s), "
+                        f"{yaml_result.lines_of_code} LoC, {len(yaml_result.findings)} finding(s)",
                     )
+                    if k8s_result is not None:
+                        language_results["Kubernetes YAML"] = k8s_result
+                        log(
+                            "SCANNING",
+                            f"[{idx+1}/{total_langs}] Kubernetes YAML complete — {k8s_result.file_count} manifest(s), "
+                            f"{k8s_result.lines_of_code} LoC, {len(k8s_result.findings)} finding(s)",
+                        )
+                    else:
+                        log(
+                            "SCANNING",
+                            f"[{idx+1}/{total_langs}] No K8s manifests found — Kubernetes YAML section skipped",
+                        )
                 else:
+                    result = scan_output
+                    language_results[language] = result
+                    lang_findings = len(result.findings)
                     log(
                         "SCANNING",
-                        f"[{idx+1}/{total_langs}] No K8s manifests found — Kubernetes YAML section skipped",
+                        f"[{idx+1}/{total_langs}] {language} complete — {result.lines_of_code} LoC, {lang_findings} finding(s)",
                     )
-            else:
-                result = scan_output
-                language_results[language] = result
-                lang_findings = len(result.findings)
-                log(
-                    "SCANNING",
-                    f"[{idx+1}/{total_langs}] {language} complete — {result.lines_of_code} LoC, {lang_findings} finding(s)",
+                    for f in result.findings[:5]:
+                        log(
+                            "SCANNING",
+                            f"  [{f.severity}] {f.file}:{f.line or '?'} — {f.issue[:80]} (tool={f.tool})",
+                        )
+                    if lang_findings > 5:
+                        log(
+                            "SCANNING", f"  ... and {lang_findings - 5} more finding(s)"
+                        )
+
+                await push_event(
+                    ScanStep.SCANNING,
+                    f"Scanned {completed_langs}/{total_langs} language(s) (completed: {language})...",
+                    progress,
                 )
-                for f in result.findings[:5]:
-                    log(
-                        "SCANNING",
-                        f"  [{f.severity}] {f.file}:{f.line or '?'} — {f.issue[:80]} (tool={f.tool})",
-                    )
-                if lang_findings > 5:
-                    log("SCANNING", f"  ... and {lang_findings - 5} more finding(s)")
+
+        # Create tasks for all detected languages and run them concurrently
+        tasks = [
+            scan_single_language(language, files, idx)
+            for idx, (language, files) in enumerate(lang_map.items())
+        ]
+
+        if tasks:
+            await asyncio.gather(*tasks)
 
         # ── Step 4.5: Redistribute and Deduplicate Findings ──────────
         # Gather all raw (unfiltered) findings from all language scans
