@@ -104,7 +104,7 @@ apiServer:
       REDIS_PASSWORD: ""
       RABBITMQ_PASSWORD: "AgBCGYmrzqlxeKj4B8k+13sEvWCPLy/51/nbn98+DTNJVp4LR7zIbEqrBdLRapZKIwrJ9o+StK0Vjg41uZTwYVJwWsggzrrobGZkyh3nAX6553HnsECq2GbFYOiIJkSuScJx3zaZFIiuAud9u/SC+ZWoAGtzyTq5EQrAL2tWDwFMSKcYxbx5hgwkycYpBgG4vnpcdukZLO2Yvw4GJEFvhFekRPxhHVX7Bsbe2z3UlGkGi1MUQfl1AvA//yXFYUqnCTmjiRKxqmOO8j55gKkaVh9hgIO6HHKkqcOpyTdjKmyF6KCIpDP77Nwt1dEF1+gXRWeS+8DVmU3KGJKAydz8wAl6trwVQY/5VwhHJ2Xq8Dngr5TEOAju+z/rie6gRohAl26naR5zRbcOMQPD5vffzt8xCwE6uUbWrE/28vwScF6zanH7jZYfc4bZeXD2qjgtBJeZaoIDZ8E0TJNJxui4DRDepsqk2gA1XLKH2Nf0rlzB+6RXkx1WaRy8cIMUiXMBnXow+OWTDzIM6BoCTJIu6hZo8bUxYxA0hVdGVLAy4e3i2hkR9vVgteRovPWhMMnfPMfwzLuapLhaVfHyymTxfKnJtrxpKFhvWF+B8KHtT0zUWACTn3zB81tgjaUr1/iF25R55nEHUR74oxU+b3o5fEk2npoSp26iZ7tSRk7kXXDl75y4WWIV4K0qr0bEpRYXesaaz0AOeecJeQ=="
   deployment:
-    replicaCount: 2
+    replicaCount: 3
     image:
       repository: 01community/01sandbox-api
       tag: "v0.5.108"
@@ -134,9 +134,9 @@ apiServer:
       nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
       nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
   hpa:
-    enabled: false
-    minReplicas: 1
-    maxReplicas: 2
+    enabled: true
+    minReplicas: 2
+    maxReplicas: 5
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
   postgresql:
