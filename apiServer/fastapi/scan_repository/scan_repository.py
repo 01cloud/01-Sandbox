@@ -235,7 +235,7 @@ async def _run_scan_pipeline(
                     files=files,
                     percentage=pct(len(files)),
                 ),
-                timeout=300.0,
+                timeout=600.0,
             )
 
             # YAML returns a tuple (plain_result, optional k8s_result)
@@ -479,7 +479,7 @@ async def _run_scan_pipeline(
         raise
 
     except asyncio.TimeoutError as exc:
-        msg = "Scan timed out (5-minute limit exceeded)"
+        msg = "Scan timed out (10-minute limit exceeded)"
         log("ERROR", msg)
         result = RepoScanResult(
             job_id=job_id,
