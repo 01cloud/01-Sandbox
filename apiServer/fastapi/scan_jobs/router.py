@@ -48,12 +48,13 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                     low_count += 1
 
             job_record = state.job_tracker.get_job(job_id)
+            summary_data = {
+                "high": high_count,
+                "medium": medium_count,
+                "low": low_count,
+            }
             if job_record:
-                job_record.metadata["summary"] = {
-                    "high": high_count,
-                    "medium": medium_count,
-                    "low": low_count,
-                }
+                job_record.metadata["summary"] = summary_data
                 if state.use_redis and state.redis_client:
                     try:
                         metadata_copy = dict(job_record.metadata)
@@ -65,6 +66,19 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                         )
                     except Exception:
                         pass
+            elif state.use_redis and state.redis_client:
+                try:
+                    meta_str = state.redis_client.get(f"job:{job_id}:metadata")
+                    if meta_str:
+                        metadata_copy = json.loads(meta_str)
+                        metadata_copy["summary"] = summary_data
+                        state.redis_client.set(
+                            f"job:{job_id}:metadata",
+                            json.dumps(metadata_copy),
+                            ex=86400,
+                        )
+                except Exception:
+                    pass
 
             detail_dict = dict(data)
             detail_dict["high_count"] = high_count
@@ -284,10 +298,6 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                 status_code=503,
                 detail="RabbitMQ service is unavailable. Cannot process job deletion.",
             )
-
-        if purge:
-            # Synchronously delete from local job tracker and Redis to avoid GET race conditions on UI refresh
-            state.job_tracker.delete_job(job_id)
 
         payload = {"job_id": job_id, "purge": purge}
         await publish("scan.delete", payload)

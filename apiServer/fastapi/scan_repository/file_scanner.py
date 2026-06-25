@@ -280,15 +280,8 @@ async def _submit_scan_job(
             print(f"{_TAG}   ← report received: {raw_count} raw finding(s)")
 
             # Immediately clean up the temporary child scan job from PVC and terminate sandbox pod
+            # Note: Disabled immediate deletion so that the report and workspace persist on the PVC until the parent scan job is deleted.
             try:
-                await client.delete(
-                    f"{base_url.rstrip('/')}{prefix}/scan-jobs/{child_job_id}",
-                    params={"terminate": "true"},
-                    headers=opensandbox_headers(),
-                )
-                print(
-                    f"{_TAG}   ← cleaned up temporary child job {child_job_id} from PVC and terminated sandbox pod"
-                )
                 # Purge child job from Redis/job_tracker
                 try:
                     from core import state

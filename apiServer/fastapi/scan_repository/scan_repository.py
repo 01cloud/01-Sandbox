@@ -208,14 +208,9 @@ async def _run_scan_pipeline(
         language_results = {}
         for idx, (language, files) in enumerate(lang_map.items()):
             # Defensive guard: abort if the parent job has been cancelled or deleted
-            from core.queue.cancellation import is_job_cancelled
+            from core.queue.cancellation import is_job_cancelled_or_deleted
 
-            job_record = app_state.job_tracker.get_job(job_id)
-            if (
-                not job_record
-                or job_record.step == "CANCELLED"
-                or is_job_cancelled(app_state, job_id)
-            ):
+            if is_job_cancelled_or_deleted(app_state, job_id):
                 log(
                     "CANCELLED",
                     f"Job {job_id} has been cancelled/deleted. Aborting remaining language scans.",
@@ -430,12 +425,13 @@ async def _run_scan_pipeline(
 
         # Save summary count to job tracker metadata
         job_record = app_state.job_tracker.get_job(job_id)
+        summary_data = {
+            "high": high_count,
+            "medium": medium_count,
+            "low": low_count,
+        }
         if job_record:
-            job_record.metadata["summary"] = {
-                "high": high_count,
-                "medium": medium_count,
-                "low": low_count,
-            }
+            job_record.metadata["summary"] = summary_data
             if app_state.use_redis and app_state.redis_client:
                 try:
                     metadata_copy = dict(job_record.metadata)
@@ -445,6 +441,17 @@ async def _run_scan_pipeline(
                     )
                 except Exception as e:
                     print(f"[RepoScanner] Redis metadata update error: {e}")
+        elif app_state.use_redis and app_state.redis_client:
+            try:
+                meta_str = app_state.redis_client.get(f"job:{job_id}:metadata")
+                if meta_str:
+                    metadata_copy = json.loads(meta_str)
+                    metadata_copy["summary"] = summary_data
+                    app_state.redis_client.set(
+                        f"job:{job_id}:metadata", json.dumps(metadata_copy), ex=86400
+                    )
+            except Exception as e:
+                print(f"[RepoScanner] Redis metadata update error (no job_record): {e}")
 
         log("DONE", "=" * 60)
         log("DONE", f"Scan finished for {owner}/{repo}")
