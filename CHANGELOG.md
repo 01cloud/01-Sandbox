@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.103](https://github.com/01cloud/01-Sandbox/compare/v0.5.102...v0.5.103) (2026-06-25)
+
+
+### 🐛 Bug Fixes
+
+* cancellation of jobs ([a1c9911](https://github.com/01cloud/01-Sandbox/commit/a1c99119a84bbc698c95e217dc6f99b26041fa0c))
+* cancellation of jobs ([ad6cc25](https://github.com/01cloud/01-Sandbox/commit/ad6cc252d7ddd3d070c9066e407108d56378abaf))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.102 [skip ci] ([22ed177](https://github.com/01cloud/01-Sandbox/commit/22ed1774a2659eb7f0d5431c3eba008643bdf294))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.102 [skip ci] ([48bba1c](https://github.com/01cloud/01-Sandbox/commit/48bba1c726d797e2dcedbf374236be42db056921))
+
 ## [0.5.102](https://github.com/01cloud/01-Sandbox/compare/v0.5.101...v0.5.102) (2026-06-24)
 
 
