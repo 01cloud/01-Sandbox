@@ -36,7 +36,7 @@ graph TD
     Client[Web Client] -->|1. POST /v1/repo-scan| API[FastAPI Gateway]
     API -->|2. Writes initial state| DB[(PostgreSQL / SQLite)]
     API -->|3. Publishes scan job| RMQ[RabbitMQ Exchange: scan_jobs]
-    API -->>|"4. Returns 200 OK (job_id, status: QUEUED)"| Client
+    API -.->|"4. Returns 200 OK (job_id, status: QUEUED)"| Client
     RMQ -->|5. Delivers message| Worker[Background Worker Pod]
     Worker -->|6. Performs Git clone & AST scans| Sandbox[K8s Sandbox Pod]
     Worker -->|7. Pushes progress updates| SSE[SSE Manager]
