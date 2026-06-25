@@ -207,6 +207,21 @@ async def _run_scan_pipeline(
 
         language_results = {}
         for idx, (language, files) in enumerate(lang_map.items()):
+            # Defensive guard: abort if the parent job has been cancelled or deleted
+            from core.queue.cancellation import is_job_cancelled
+
+            job_record = app_state.job_tracker.get_job(job_id)
+            if (
+                not job_record
+                or job_record.step == "CANCELLED"
+                or is_job_cancelled(app_state, job_id)
+            ):
+                log(
+                    "CANCELLED",
+                    f"Job {job_id} has been cancelled/deleted. Aborting remaining language scans.",
+                )
+                raise asyncio.CancelledError()
+
             file_count = min(len(files), 100)
             progress = 60 + int(((idx + 1) / total_langs) * 30)
             log(
@@ -691,8 +706,23 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         jobs = []
         seen_ids: set = set()
 
+        # Pre-fetch existing job IDs from Redis to filter out stale/deleted in-memory references
+        existing_redis_ids = None
+        if app_state.use_redis and app_state.redis_client:
+            try:
+                status_keys = app_state.redis_client.keys("job:*:status")
+                existing_redis_ids = {
+                    key.split(":")[1] for key in status_keys if len(key.split(":")) >= 3
+                }
+            except Exception as e:
+                print(f"[RepoScanner] Redis error fetching existing keys: {e}")
+
         # ── 1. In-memory active jobs ───────────────────────────────────────
+        stale_ids = []
         for jid, job in app_state.job_tracker._jobs.items():
+            if existing_redis_ids is not None and jid not in existing_redis_ids:
+                stale_ids.append(jid)
+                continue
             if job.job_type != "repo-scan":
                 continue
             jobs.append(
@@ -715,6 +745,11 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 }
             )
             seen_ids.add(jid)
+
+        # Clean up stale local references
+        for jid in stale_ids:
+            if jid in app_state.job_tracker._jobs:
+                del app_state.job_tracker._jobs[jid]
 
         # ── 2. Redis historical jobs (multi-pod / crash recovery) ──────────
         if app_state.use_redis and app_state.redis_client:
@@ -772,9 +807,11 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                                 "job_id": jid,
                                 "job_type": "repo-scan",
                                 "status": status,
-                                "progress": 100
-                                if status in ("DONE", "ERROR")
-                                else last_progress,
+                                "progress": (
+                                    100
+                                    if status in ("DONE", "ERROR")
+                                    else last_progress
+                                ),
                                 "stepMessage": last_msg,
                                 "eventIndex": events_len,
                                 "metadata": metadata,

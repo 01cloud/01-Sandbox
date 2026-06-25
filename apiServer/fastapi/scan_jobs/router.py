@@ -285,6 +285,10 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                 detail="RabbitMQ service is unavailable. Cannot process job deletion.",
             )
 
+        if purge:
+            # Synchronously delete from local job tracker and Redis to avoid GET race conditions on UI refresh
+            state.job_tracker.delete_job(job_id)
+
         payload = {"job_id": job_id, "purge": purge}
         await publish("scan.delete", payload)
 

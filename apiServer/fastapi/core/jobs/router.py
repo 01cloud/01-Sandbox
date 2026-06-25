@@ -17,8 +17,23 @@ async def list_jobs(job_type: str, user_data: dict = Depends(validate_token)):
     jobs = []
     seen_ids = set()
 
+    # Pre-fetch existing job IDs from Redis to filter out stale/deleted in-memory references
+    existing_redis_ids = None
+    if state.use_redis and state.redis_client:
+        try:
+            status_keys = state.redis_client.keys("job:*:status")
+            existing_redis_ids = {
+                key.split(":")[1] for key in status_keys if len(key.split(":")) >= 3
+            }
+        except Exception as e:
+            print(f"[router] Redis error fetching existing keys: {e}")
+
     # 1. Gather in-memory active jobs
+    stale_ids = []
     for job_id, job in state.job_tracker._jobs.items():
+        if existing_redis_ids is not None and job_id not in existing_redis_ids:
+            stale_ids.append(job_id)
+            continue
         if job.job_type == job_type:
             # Strip result and build response skeleton
             jobs.append(
@@ -26,9 +41,11 @@ async def list_jobs(job_type: str, user_data: dict = Depends(validate_token)):
                     "job_id": job.job_id,
                     "job_type": job.job_type,
                     "status": job.step,
-                    "progress": 100
-                    if job.step in ("DONE", "ERROR")
-                    else (len(job.event_log) * 10 if job.event_log else 10),
+                    "progress": (
+                        100
+                        if job.step in ("DONE", "ERROR")
+                        else (len(job.event_log) * 10 if job.event_log else 10)
+                    ),
                     "stepMessage": job.event_log[-1].message if job.event_log else "",
                     "eventIndex": len(job.event_log),
                     "metadata": job.metadata,
@@ -39,6 +56,11 @@ async def list_jobs(job_type: str, user_data: dict = Depends(validate_token)):
                 }
             )
             seen_ids.add(job_id)
+
+    # Clean up stale local references
+    for job_id in stale_ids:
+        if job_id in state.job_tracker._jobs:
+            del state.job_tracker._jobs[job_id]
 
     # 2. Gather from Redis if enabled (Crash recovery/history)
     if state.use_redis and state.redis_client:
