@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.109](https://github.com/01cloud/01-Sandbox/compare/v0.5.108...v0.5.109) (2026-06-25)
+
+
+### 🐛 Bug Fixes
+
+* lanugate scan concurrency ([57d2024](https://github.com/01cloud/01-Sandbox/commit/57d20249cc8355fdd638c45df70c2f0f153415ed))
+* lanugate scan concurrency ([91b65fd](https://github.com/01cloud/01-Sandbox/commit/91b65fd9337e69a7174e94ac69a556d41561005f))
+* parallel jobs scans implementation ([beba812](https://github.com/01cloud/01-Sandbox/commit/beba8121670383eb47bbcb5280d86e2a79f71a43))
+* parallel jobs scans implementation ([0c3fe7a](https://github.com/01cloud/01-Sandbox/commit/0c3fe7aed154f3eabd80bf64c1446a156d09d856))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.108 [skip ci] ([d8d4256](https://github.com/01cloud/01-Sandbox/commit/d8d4256405cd3fccc6eb0d2b53d9b95e56e2184d))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.108 [skip ci] ([2fed416](https://github.com/01cloud/01-Sandbox/commit/2fed416cd8bbd34a3b424a7e87e9536f52e75103))
+
 ## [0.5.108](https://github.com/01cloud/01-Sandbox/compare/v0.5.107...v0.5.108) (2026-06-25)
 
 
