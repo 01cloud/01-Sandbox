@@ -235,7 +235,7 @@ async def _run_scan_pipeline(
                     files=files,
                     percentage=pct(len(files)),
                 ),
-                timeout=180.0,
+                timeout=300.0,
             )
 
             # YAML returns a tuple (plain_result, optional k8s_result)
