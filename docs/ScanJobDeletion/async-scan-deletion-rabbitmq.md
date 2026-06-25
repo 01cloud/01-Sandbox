@@ -78,6 +78,25 @@ This creates a distributed synchronization challenge:
 
 ---
 
+### Simple Analogy: The "Megaphone" and the "Whiteboard"
+
+To understand how Redis solves this in simple terms, imagine you have **5 security guards (API pods)** guarding a building:
+
+1. **RabbitMQ Whispers to One Guard:**
+   * RabbitMQ is a dispatcher who whispers to **Guard A** only: *"Cancel and delete Job #123."*
+   * But **Guard A** is not the one running Job #123. **Guard B** is the one running it. Guard A cannot directly touch Guard B's hands or memory.
+2. **The Megaphone (Redis Pub/Sub):**
+   * Guard A picks up a **megaphone (Redis Pub/Sub)** and shouts: **"Attention all guards! Cancel and delete Job #123!"**
+   * Every guard in the building has a walkie-talkie tuned to this channel.
+   * Guard B hears this shout, realizes they are running Job #123, and stops it immediately.
+3. **The Whiteboard (Redis Key-Value):**
+   * At the same time, Guard A writes *"Job #123 is cancelled"* on a **central whiteboard (Redis Key-Value store)**.
+   * If any other guard is about to start Job #123 in the future, they check the whiteboard first. If they see the cancellation note, they abort immediately.
+
+**Yes, Redis absolutely carries the `job_id` information!** The megaphone broadcast contains the `job_id`, and the whiteboard note is indexed by the `job_id`, ensuring the correct job is targeted across the entire cluster.
+
+---
+
 ## Key Functions Reference (Deletion & Cleanup Flow)
 
 Below is the functional map of the exact Python routines that implement the RabbitMQ-based deletion and Kubernetes sandbox pod cleanup pipeline:
@@ -177,7 +196,7 @@ When a burst of 100+ concurrent deletion or cancellation requests occurs, the sy
    * The API router verifies RabbitMQ connection status in a lightweight check and immediately publishes the message to RabbitMQ's `scan.delete` queue.
    * Because it returns `DELETE_QUEUED` with a `200 OK` status immediately, the HTTP request completes in a fraction of a millisecond, leaving the API Gateway server highly responsive to incoming traffic.
 
-2. **RabbitMQ Flow Control (QoS Prefetch Limits):**
+2. **RabbitMQ Flow Flow Control (QoS Prefetch Limits):**
    * The `delete-scan` worker configures a prefetch count of `5` (`prefetch_count=5` by default, or configured via `MAX_DELETE_SCAN_WORKERS` environment variable).
    * Even if 100+ tasks are sent to `scan.delete` concurrently, each consumer instance only pulls a maximum of 5 messages at a time. The remaining requests reside safely in RabbitMQ, avoiding CPU/Memory thrashing on worker pods.
 
