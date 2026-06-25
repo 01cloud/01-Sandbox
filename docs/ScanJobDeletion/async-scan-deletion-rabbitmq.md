@@ -63,6 +63,36 @@ sequenceDiagram
 
 ---
 
+## Key Functions Reference (Deletion & Cleanup Flow)
+
+Below is the functional map of the exact Python routines that implement the RabbitMQ-based deletion and Kubernetes sandbox pod cleanup pipeline:
+
+### 1. API Entry & Queueing (Publisher)
+* **`cancel_or_delete_job(job_id, purge)`** in [`scan_jobs/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_jobs/router.py)
+  * **Role:** Serves the `DELETE /v1/jobs/{job_id}` endpoint. It performs a lightweight health check on RabbitMQ, publishes the delete request message to the `scan.delete` queue, and immediately returns a `200 OK` response with `DELETE_QUEUED` to the client.
+* **`proxy_cancel_or_delete_job(...)`** in [`proxy/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/proxy/router.py)
+  * **Role:** Intercepts proxied deletion requests and publishes them to the RabbitMQ `scan.delete` queue.
+
+### 2. Queue Consumer & Coordination
+* **`handle_delete_job(state, job_id, purge)`** in [`core/queue/delete_handler.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/delete_handler.py)
+  * **Role:** The primary asynchronous orchestration function triggered by the RabbitMQ consumer. It sets the Redis cancellation flag, publishes cross-pod notifications, terminates the parent sandbox/PVC on `opensandbox-server`, cleans up the child language pods, and purges metadata records.
+
+### 3. Cross-Pod Coordination (Redis Pub/Sub)
+* **`setup_cancellation_listener(app_state)`** in [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)
+  * **Role:** Runs on every pod replica to listen to the Redis Pub/Sub channels `job:cancellations` and `job:deletions`. Decodes the bytes message payload and routes it for task cancellation.
+* **`cancel_active_task(app_state, job_id, purge)`** in [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)
+  * **Role:** Aborts the running Python `asyncio.Task` on the current pod replica and pushes a `CANCELLED` status event.
+* **`is_job_cancelled_or_deleted(app_state, job_id)`** in [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)
+  * **Role:** Checked periodically by active scan steps (cloning, language analysis) to abort execution mid-flight if a delete event is received.
+
+### 4. Kubernetes Sandbox Pod Cleanup
+* **`cleanup_child_jobs(state, parent_job_id)`** in [`scan_repository/file_scanner.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/file_scanner.py)
+  * **Role:** Extracts the child language job IDs from the parent's metadata and sends concurrent `DELETE` requests to `opensandbox-server` to terminate all active child language pods on the cluster.
+* **`delete_scan_job(job_id, terminate)`** in [`backends.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/backends.py)
+  * **Role:** Dispatches HTTP delete requests directly to the remote `opensandbox-server` API to terminate running sandboxes and clear PVC storage workspaces.
+
+---
+
 ## Code Base Changes
 
 ### 1. Queue Configuration
@@ -108,7 +138,7 @@ DELETE_SCAN = ScanJobType(
 
 #### **[apiServer/fastapi/scan_repository/file_scanner.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/file_scanner.py)**
 * Implemented `cleanup_child_jobs(state, parent_job_id)`:
-  * Extracts child job IDs (the separate language scans running in parallel) from the parent job's metadata.
+  * Extracts child job IDs (the separate language scans running in parallel) from the parent's metadata.
   * Dispatches parallel `DELETE /api/v1/01sbx/scan-jobs/{child_job_id}?terminate=true` requests to `opensandbox-server` to terminate all active child language pods.
 
 ---
