@@ -267,7 +267,7 @@ async def _submit_scan_job(
     t0 = time.monotonic()
 
     try:
-        async with httpx.AsyncClient(timeout=300.0) as client:
+        async with httpx.AsyncClient(timeout=600.0) as client:
             resp = await client.post(url, json=payload, headers=opensandbox_headers())
             elapsed = time.monotonic() - t0
             print(
