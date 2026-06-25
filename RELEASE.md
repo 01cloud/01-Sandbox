@@ -1,3 +1,44 @@
+## Release v0.5.104 — 01-Sandbox
+**Release Date:** June 25, 2026
+
+---
+
+### Summary
+v0.5.104 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* deleted jobs from displaying ([77ea56c](https://github.com/01cloud/01-Sandbox/commit/77ea56cc95c0fb7783a88f319e12d8dda497f8b9))
+* deleted jobs from displaying ([a1479ab](https://github.com/01cloud/01-Sandbox/commit/a1479abf91909f8e636dff93b8db3a9cea7387d7))
+* generate RELEASE.md for v0.5.103 [skip ci] ([d3acb51](https://github.com/01cloud/01-Sandbox/commit/d3acb51e70338ec508adb5811eb65031947c13e2))
+* bump versions to v0.5.103 [skip ci] ([f73de49](https://github.com/01cloud/01-Sandbox/commit/f73de49161b93e377e31b656a4437a84aff17989))
+
+### Changes
+## [0.5.104](https://github.com/01cloud/01-Sandbox/compare/v0.5.103...v0.5.104) (2026-06-25)
+
+
+### 🐛 Bug Fixes
+
+* deleted jobs from displaying ([77ea56c](https://github.com/01cloud/01-Sandbox/commit/77ea56cc95c0fb7783a88f319e12d8dda497f8b9))
+* deleted jobs from displaying ([a1479ab](https://github.com/01cloud/01-Sandbox/commit/a1479abf91909f8e636dff93b8db3a9cea7387d7))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.103 [skip ci] ([d3acb51](https://github.com/01cloud/01-Sandbox/commit/d3acb51e70338ec508adb5811eb65031947c13e2))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.103 [skip ci] ([f73de49](https://github.com/01cloud/01-Sandbox/commit/f73de49161b93e377e31b656a4437a84aff17989))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.104)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.103 — 01-Sandbox
 **Release Date:** June 25, 2026
 
