@@ -14,6 +14,8 @@ if not JWT_TOKEN:
     )
     sys.exit(1)
 
+API_BASE_URL = os.environ.get("API_URL", "https://api-sandbox.01security.com")
+
 URLS = [
     "https://github.com/agentgateway/agentgateway",
     "https://github.com/firecracker-microvm/firecracker",
@@ -23,7 +25,7 @@ URLS = [
 
 
 def submit_scan(repo_url):
-    url = "http://localhost:30080/v1/repo-scan"
+    url = f"{API_BASE_URL.rstrip('/')}/v1/repo-scan"
     payload = {"repo_url": repo_url}
     req = urllib.request.Request(
         url,
@@ -37,7 +39,7 @@ def submit_scan(repo_url):
     try:
         with urllib.request.urlopen(req) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            print(f'Submitted {repo_url} -> job_id: {data.get("job_id")}')
+            print(f"Submitted {repo_url} -> job_id: {data.get('job_id')}")
             return data.get("job_id")
     except Exception as e:
         print(f"Failed {repo_url}: {e}")
@@ -45,6 +47,7 @@ def submit_scan(repo_url):
 
 
 async def main():
+    print(f"Submitting concurrent scans to {API_BASE_URL}...")
     loop = asyncio.get_event_loop()
     tasks = [loop.run_in_executor(None, submit_scan, url) for url in URLS]
     job_ids = await asyncio.gather(*tasks)
