@@ -13,6 +13,7 @@ export function useJobStore(
 
   const esRefs = useRef<Record<string, EventSource>>({});
   const streamErrors = useRef<Record<string, number>>({});
+  const deletedJobIds = useRef<Set<string>>(new Set());
 
   const refresh = () => {
     setJobs(jobStore.getAll(jobType));
@@ -25,6 +26,7 @@ export function useJobStore(
 
   const removeJob = async (jobId: string) => {
     // 1. Remove from local store immediately
+    deletedJobIds.current.add(jobId);
     jobStore.remove(jobId);
     if (esRefs.current[jobId]) {
       esRefs.current[jobId].close();
@@ -212,6 +214,9 @@ export function useJobStore(
       let didUpdate = false;
 
       for (const sj of serverJobs) {
+        if (deletedJobIds.current.has(sj.job_id)) {
+          continue;
+        }
         const existing = jobStore.get(sj.job_id);
 
         if (!existing) {
