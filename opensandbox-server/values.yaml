@@ -81,3 +81,8 @@ storage:
   size: "10Gi"
   accessMode: "ReadWriteOnce"
   mountPath: "/data"
+
+# Sandbox pod resource configuration
+sandbox:
+  cpu: "200m"
+  memory: "512Mi"

@@ -73,6 +73,10 @@ spec:
               value: {{ .Values.global.apiRoutePrefix | default "/api/v1/01sbx" | quote }}
             - name: SANDBOX_IMAGE
               value: {{ .Values.server.sandboxImage | quote }}
+            - name: SANDBOX_CPU
+              value: {{ .Values.server.sandboxCpu | default "200m" | quote }}
+            - name: SANDBOX_MEMORY
+              value: {{ .Values.server.sandboxMemory | default "512Mi" | quote }}
           volumeMounts:
             - name: server-config
               mountPath: /etc/opensandbox/config.toml

@@ -387,18 +387,37 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
         jobs = []
         seen_ids: set = set()
 
-        # ── 1. In-memory active jobs ────────────────────────────────────────
+        stale_ids = []
         for jid, job in state.job_tracker._jobs.items():
             if job.job_type != job_type:
                 continue
+
+            # Sync with Redis if it has completed elsewhere
+            redis_status = None
+            if state.use_redis and state.redis_client:
+                try:
+                    r_val = state.redis_client.get(f"job:{jid}:status")
+                    if r_val:
+                        redis_status = (
+                            r_val.decode() if isinstance(r_val, bytes) else r_val
+                        )
+                except Exception:
+                    pass
+
+            if redis_status in ("DONE", "ERROR"):
+                stale_ids.append(jid)
+                continue
+
+            job_status = redis_status if redis_status else job.step
+
             jobs.append(
                 {
                     "job_id": job.job_id,
                     "job_type": job.job_type,
-                    "status": job.step,
+                    "status": job_status,
                     "progress": (
                         100
-                        if job.step in ("DONE", "ERROR")
+                        if job_status in ("DONE", "ERROR")
                         else (len(job.event_log) * 10 if job.event_log else 10)
                     ),
                     "stepMessage": job.event_log[-1].message if job.event_log else "",
@@ -411,6 +430,11 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
                 }
             )
             seen_ids.add(jid)
+
+        # Clean up stale local references
+        for jid in stale_ids:
+            if jid in state.job_tracker._jobs:
+                del state.job_tracker._jobs[jid]
 
         # ── 2. Redis historical jobs (crash recovery / multi-pod) ───────────
         if state.use_redis and state.redis_client:

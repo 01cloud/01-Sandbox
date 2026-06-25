@@ -92,6 +92,10 @@ spec:
           env:
             - name: SANDBOX_CONFIG_PATH
               value: "/etc/opensandbox/config.toml"
+            - name: SANDBOX_CPU
+              value: {{ .Values.sandbox.cpu | default "200m" | quote }}
+            - name: SANDBOX_MEMORY
+              value: {{ .Values.sandbox.memory | default "512Mi" | quote }}
           volumeMounts:
             - name: config
               mountPath: /etc/opensandbox/config.toml
