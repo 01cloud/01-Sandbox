@@ -34,7 +34,7 @@ We built an event-driven, decoupled scan execution pipeline. When a user request
 ```mermaid
 graph TD
     Client[Web Client] -->|1. POST /v1/repo-scan| API[FastAPI Gateway]
-    API -->|2. Writes initial state| DB[(PostgreSQL / SQLite)]
+    API -->|2. Writes initial state| DB[(PostgreSQL)]
     API -->|3. Publishes scan job| RMQ[RabbitMQ Exchange: scan_jobs]
     API -.->|"4. Returns 200 OK (job_id, status: QUEUED)"| Client
     RMQ -->|5. Delivers message| Worker[Background Worker Pod]
