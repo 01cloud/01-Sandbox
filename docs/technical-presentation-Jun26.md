@@ -43,6 +43,21 @@ graph TD
     SSE -->|8. Streams live status| Client
 ```
 
+### 👥 Roles in the Pipeline: Who does what?
+
+To clarify the decoupled nature of the queue architecture, here are the defined roles:
+
+* **The Publisher (FastAPI Gateway Router):**
+  * **File Reference:** [`apiServer/fastapi/scan_repository/scan_repository.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/scan_repository.py#L599) (`submit_repo_scan()`)
+  * **Role:** Acts as the **Sender**. When a client triggers `POST /v1/repo-scan`, this router generates the `job_id`, builds the JSON payload, and publishes it to the exchange.
+* **The Message Broker (RabbitMQ):**
+  * **Role:** Acts as the **Post Office**. It does not run or parse the scan. It safely stores the task payload in the `scan.repo` queue, routes it based on binding keys, and handles delivery limits (prefetch QoS) and failures (retries/DLQ).
+* **The Consumer (Background Worker Process):**
+  * **File Reference:** [`apiServer/fastapi/core/queue/consumer.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/consumer.py#L95) (`on_message()`)
+  * **Role:** Acts as the **Recipient**. A background loop in the `sandbox-api` service pulls the task from RabbitMQ, calls `_run_scan_pipeline` to run the scans inside sandbox pods, and sends a final acknowledgment (`msg.ack()`) back to the broker once complete.
+
+---
+
 ### 🛠️ Detailed Scan Flow for GitHub Repositories
 Here is the step-by-step breakdown of how a repository (such as a private or public GitHub repo) is scanned asynchronously:
 
