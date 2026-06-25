@@ -249,6 +249,9 @@ export default function RepoScanner() {
 
         if (!serverJobs.length) return;
 
+        // If we are currently scanning, viewing a result, or have an active job, do not auto-switch
+        if (activeJobId || result || isScanning) return;
+
         // 1. Prefer an active job — stream live events
         const active = serverJobs.find(
           j => !["DONE", "ERROR"].includes(j.status)
@@ -289,7 +292,7 @@ export default function RepoScanner() {
     poll(); // immediate on mount
     const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [API_BASE, activeJobId, result]);
 
   const handleScan = async () => {

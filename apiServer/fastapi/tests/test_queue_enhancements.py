@@ -33,7 +33,7 @@ async def run_scan_in_background_mock(job_id: str, req_dict: dict):
         await asyncio.sleep(10.0)
 
 
-async def test_retry_and_dlq(conn, app_state):
+async def run_test_retry_and_dlq(conn, app_state):
     print("\n--- Test 1: Testing Retry with Backoff and DLQ routing ---")
     job_id_retry = str(uuid.uuid4())
     payload_retry = {"job_id": job_id_retry, "req_dict": {"simulate_error": True}}
@@ -85,7 +85,7 @@ async def test_retry_and_dlq(conn, app_state):
         )
 
 
-async def test_cancellation(conn, app_state):
+async def run_test_cancellation(conn, app_state):
     print("\n--- Test 2: Testing Job Cancellation ---")
     job_id = str(uuid.uuid4())
     payload = {"job_id": job_id, "req_dict": {"simulate_cancel": True}}
@@ -139,8 +139,8 @@ async def main():
 
     # Run tests
     try:
-        await test_retry_and_dlq(conn, state)
-        await test_cancellation(conn, state)
+        await run_test_retry_and_dlq(conn, state)
+        await run_test_cancellation(conn, state)
     finally:
         await close_rabbitmq()
         print("Closed connection.")

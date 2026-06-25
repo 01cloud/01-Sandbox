@@ -91,7 +91,7 @@ async def test_delete_handler():
     ) as mock_to_thread:
         await handle_delete_job(mock_state, "test-job-xxx", purge=True)
 
-        mock_cancel.assert_called_once_with(mock_state, "test-job-xxx")
+        mock_cancel.assert_called_once_with(mock_state, "test-job-xxx", purge=True)
         mock_to_thread.assert_called_once_with(
             mock_state.backend.delete_scan_job, "test-job-xxx", terminate=True
         )

@@ -6,7 +6,7 @@ import os
 
 import aio_pika
 
-from .cancellation import is_job_cancelled
+from .cancellation import is_job_cancelled_or_deleted
 from .connection import get_connection
 from .dlq import DLQ_ROUTING_KEY, DLX_EXCHANGE_NAME, declare_dlq
 from .job_types import ALL_SCAN_JOB_TYPES, EXCHANGE_NAME, ScanJobType
@@ -75,16 +75,17 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
             p = json.loads(msg.body)
             job_id = p.get("job_id", "?")
 
-            if is_job_cancelled(app_state, job_id):
+            if is_job_cancelled_or_deleted(app_state, job_id):
                 print(
-                    f"[Cancellation] Job {job_id[:8]} was cancelled before execution. Discarding message."
+                    f"[Cancellation] Job {job_id[:8]} was cancelled or deleted before execution. Discarding message."
                 )
                 await msg.ack()
                 status = "cancelled"
                 return
 
-            current_task = asyncio.current_task()
-            app_state.active_tasks[job_id] = current_task
+            if jt.job_type in ("quick-scan", "repo-scan"):
+                current_task = asyncio.current_task()
+                app_state.active_tasks[job_id] = current_task
 
             if jt.job_type == "quick-scan":
                 print(f"[RabbitMQ][quick-scan] job={job_id[:8]}")

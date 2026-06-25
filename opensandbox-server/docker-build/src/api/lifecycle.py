@@ -271,10 +271,13 @@ async def create_scan_job(
 
     log_job_event(job_id, f"[SERVER] Starting security scan job: {job_id}")
 
+    parent_job_id = metadata.get("parent_job_id")
+    subpath_prefix = f"{parent_job_id}/{job_id}" if parent_job_id else job_id
+
     # Base path for shared storage (mounted via PVC in Helm)
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
-    job_dir = os.path.join(data_root, job_id, "workspace")
-    reports_dir = os.path.join(data_root, job_id, "reports")
+    job_dir = os.path.join(data_root, subpath_prefix, "workspace")
+    reports_dir = os.path.join(data_root, subpath_prefix, "reports")
 
     # Logic for auto-detecting language if using the simplified 'code' field
     # or if a generic filename like 'code' or 'main' is provided.
@@ -359,13 +362,13 @@ async def create_scan_job(
                 name="workspace",
                 pvc=PVC(claimName="scan-pvc"),
                 mountPath="/workspace",
-                subPath=f"{job_id}/workspace",
+                subPath=f"{subpath_prefix}/workspace",
             ),
             Volume(
                 name="reports",
                 pvc=PVC(claimName="scan-pvc"),
                 mountPath="/reports",
-                subPath=f"{job_id}/reports",
+                subPath=f"{subpath_prefix}/reports",
             ),
         ],
         metadata=metadata,
@@ -444,6 +447,7 @@ async def get_scan_report(job_id: str):
     Retrieves the persistent security scan report for a specific job ID.
     This report is stored on the PVC and lives beyond the sandbox lifecycle.
     """
+    import glob
     import json
     import os
 
@@ -451,6 +455,15 @@ async def get_scan_report(job_id: str):
     report_path = os.path.join(
         data_root, job_id, "reports", "security_scan_report.json"
     )
+
+    if not os.path.exists(report_path):
+        # Try searching in child directories under parent jobs
+        pattern = os.path.join(
+            data_root, "*", job_id, "reports", "security_scan_report.json"
+        )
+        matches = glob.glob(pattern)
+        if matches:
+            report_path = matches[0]
 
     if not os.path.exists(report_path):
         raise HTTPException(
@@ -482,6 +495,7 @@ async def delete_scan_job(job_id: str, terminate: bool = Query(False)):
     Deletes the persistent scan reports and workspace files for a job ID from the PVC,
     and terminates associated sandboxes if terminate parameter is True.
     """
+    import glob
     import os
     import shutil
 
@@ -510,6 +524,13 @@ async def delete_scan_job(job_id: str, terminate: bool = Query(False)):
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
     job_dir = os.path.join(data_root, job_id)
 
+    if not os.path.exists(job_dir):
+        # Try searching in child directories under parent jobs
+        pattern = os.path.join(data_root, "*", job_id)
+        matches = glob.glob(pattern)
+        if matches:
+            job_dir = matches[0]
+
     if os.path.exists(job_dir):
         try:
             shutil.rmtree(job_dir)
@@ -532,11 +553,19 @@ async def get_scan_source(job_id: str, file_path: str):
     """
     Retrieves a specific source file uploaded during a scan job.
     """
+    import glob
     import os
 
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
     safe_file = os.path.basename(file_path)  # Basic safety
     full_path = os.path.join(data_root, job_id, "workspace", safe_file)
+
+    if not os.path.exists(full_path):
+        # Try searching in child directories under parent jobs
+        pattern = os.path.join(data_root, "*", job_id, "workspace", safe_file)
+        matches = glob.glob(pattern)
+        if matches:
+            full_path = matches[0]
 
     if not os.path.exists(full_path):
         raise HTTPException(

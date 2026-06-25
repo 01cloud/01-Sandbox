@@ -85,3 +85,29 @@ def is_job_cancelled(app_state, job_id: str) -> bool:
         except Exception as e:
             print(f"[Cancellation] Failed to check status in Redis: {e}")
     return False
+
+
+def is_job_cancelled_or_deleted(app_state, job_id: str) -> bool:
+    """Checks if a job has been cancelled or deleted/purged."""
+    if app_state.use_redis and app_state.redis_client:
+        try:
+            r = app_state.redis_client
+            # If status is None, it means the job has been deleted/purged from Redis
+            status = r.get(f"job:{job_id}:status")
+            if status is None:
+                return True
+            if isinstance(status, bytes):
+                status = status.decode("utf-8")
+            if status == "CANCELLED":
+                return True
+            cancelled = r.get(f"job:{job_id}:cancelled")
+            if cancelled == "true" or cancelled == b"true":
+                return True
+        except Exception as e:
+            print(f"[Cancellation] Failed to check status/cancellation in Redis: {e}")
+    else:
+        # InMemory fallback
+        job = app_state.job_tracker.get_job(job_id)
+        if not job or job.step == "CANCELLED":
+            return True
+    return False

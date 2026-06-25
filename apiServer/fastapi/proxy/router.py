@@ -356,10 +356,6 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
                 detail="RabbitMQ service is unavailable. Cannot process job deletion.",
             )
 
-        if purge:
-            # Synchronously delete from local job tracker and Redis to avoid GET race conditions on UI refresh
-            state.job_tracker.delete_job(job_id)
-
         payload = {"job_id": job_id, "purge": purge}
         await publish("scan.delete", payload)
 
@@ -391,23 +387,8 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
         jobs = []
         seen_ids: set = set()
 
-        # Pre-fetch existing job IDs from Redis to filter out stale/deleted in-memory references
-        existing_redis_ids = None
-        if state.use_redis and state.redis_client:
-            try:
-                status_keys = state.redis_client.keys("job:*:status")
-                existing_redis_ids = {
-                    key.split(":")[1] for key in status_keys if len(key.split(":")) >= 3
-                }
-            except Exception as e:
-                print(f"[proxy] Redis error fetching existing keys: {e}")
-
         # ── 1. In-memory active jobs ────────────────────────────────────────
-        stale_ids = []
         for jid, job in state.job_tracker._jobs.items():
-            if existing_redis_ids is not None and jid not in existing_redis_ids:
-                stale_ids.append(jid)
-                continue
             if job.job_type != job_type:
                 continue
             jobs.append(
@@ -430,11 +411,6 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
                 }
             )
             seen_ids.add(jid)
-
-        # Clean up stale local references
-        for jid in stale_ids:
-            if jid in state.job_tracker._jobs:
-                del state.job_tracker._jobs[jid]
 
         # ── 2. Redis historical jobs (crash recovery / multi-pod) ───────────
         if state.use_redis and state.redis_client:
