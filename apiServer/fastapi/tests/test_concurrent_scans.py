@@ -17,7 +17,7 @@ if not JWT_TOKEN:
 API_BASE_URL = os.environ.get("API_URL", "https://api-sandbox.01security.com")
 
 URLS = [
-    "https://github.com/agentgateway/agentgateway",
+    "https://github.com/tiangolo/fastapi",
     "https://github.com/firecracker-microvm/firecracker",
     "https://github.com/ytdl-org/youtube-dl",
     "https://github.com/tiangolo/fastapi",
