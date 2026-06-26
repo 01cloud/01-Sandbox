@@ -139,16 +139,41 @@ sequenceDiagram
     end
 ```
 
-### ⚙️ Step-by-Step Deletion Working Principle (The Worker's Role)
+### ⚙️ End-to-End Deletion Working Principle (Flow)
 
-1. **Client-Side Trigger:** The user clicks "Delete" in the UI. The frontend evicts the cached job from browser `localStorage` and submits a `DELETE /v1/jobs/{job_id}?purge=true` API request.
-2. **Gateway Enqueueing:** The API router publishes the deletion task `{"job_id": job_id, "purge": true}` to RabbitMQ's `scan.delete` queue and returns `DELETE_QUEUED` to the client in <1ms.
-3. **Worker Consumption:** The background **worker consumer** (Python daemon loop running `core/queue/consumer.py`) consumes the delete message from the queue and delegates the workflow to the **worker handler** (`handle_delete_job` in `delete_handler.py`).
-4. **Worker Redis Coordination:**
-   * **Write Flag (Whiteboard):** The worker writes `job:{job_id}:cancelled` = `"true"` to the **Redis Key-Value store**. If another worker is about to start this job, it checks this key first and aborts.
-   * **Broadcast Shout (Megaphone):** The worker publishes the `job_id` to the `job:deletions` channel over **Redis Pub/Sub**. All replica worker pods hear this broadcast; the pod currently running the active scan stops its local Python execution task immediately.
-5. **Worker Infrastructure Cleanup:** The worker issues a `DELETE` request to `opensandbox-server` to terminate sandbox pods and wipe the Persistent Volume Claim (PVC) workspace on Kubernetes. It concurrently runs `cleanup_child_jobs()` to delete child language sandbox pods.
-6. **Worker State Purging:** The worker deletes all cached metadata, progress logs, and events from the memory-based job tracker and clears remaining Redis state keys, before acknowledging the message (`msg.ack()`) to RabbitMQ.
+Here is the complete, end-to-end working principle of the scan job deletion pipeline, detailing how the frontend UI, API gateway, RabbitMQ, Redis, and Kubernetes collaborate to perform a clean deletion:
+
+* **Step 1: The User Interface (Client-Side Eviction)**
+  * The user clicks the **Delete** button next to a scan job on the frontend dashboard.
+  * The frontend immediately updates optimistically:
+    * It deletes the job ID from the browser's local cache (`localStorage` key `unified_jobs_v1`).
+    * It immediately closes any open EventSource (SSE) streaming connections for that job ID.
+    * The UI re-renders, and the job disappears from the dashboard view instantly.
+  * The frontend then sends a `DELETE /v1/jobs/{job_id}?purge=true` HTTP request to the API Gateway.
+* **Step 2: The Gateway Router (Decoupling)**
+  * The FastAPI Gateway router (`apiServer/fastapi/scan_jobs/router.py`) receives the request.
+  * It validates the user's authorization token and checks if the RabbitMQ broker is reachable.
+  * It publishes a JSON delete task `{"job_id": job_id, "purge": true}` to the RabbitMQ exchange under the routing key `scan.delete`.
+  * The router immediately returns a `200 OK` response with `{"status": "DELETE_QUEUED"}` to the client (taking less than 1 millisecond, freeing the HTTP thread).
+* **Step 3: RabbitMQ Queue & Consumer Delivery**
+  * The delete message sits in the durable RabbitMQ queue (`scan.delete`).
+  * The background worker consumer loop (running on an API replica pod) receives the message and triggers `handle_delete_job()` in `delete_handler.py`.
+* **Step 4: Redis Cross-Pod Coordination (Phase 1)**
+  * To stop any active Python scan task executing anywhere in the cluster, the worker utilizes Redis:
+    * **The Whiteboard (Redis Key-Value):** The worker sets a key in Redis (`job:{job_id}:cancelled` = `"true"`). If a replica pod is about to start this job, it checks this key first and aborts immediately.
+    * **The Megaphone (Redis Pub/Sub):** The worker publishes the `job_id` to the `job:deletions` channel. All replica pods listen to this channel; the pod currently running the scan hears this broadcast, locates its active Python asyncio Task for that job ID, and cancels it (`task.cancel()`) immediately.
+* **Step 5: Kubernetes Pod & Workspace Cleanup (Phase 2)**
+  * Once the running Python code is stopped, the consumer worker cleans up the physical cluster resources:
+    * **Primary Pod & Workspace Cleanup:**
+      * The worker makes an HTTP DELETE call to the internal OpenSandbox Server (`opensandbox-server`).
+      * The `opensandbox-server` talks to the Kubernetes API server to delete all sandbox containers and persistent workspace volumes (PVC) associated with that `job_id`.
+    * **Child Pod Cleanup:**
+      * The worker runs `cleanup_child_jobs()` which scans the job metadata to find all child language scan IDs.
+      * It fires concurrent HTTP DELETE calls to the `opensandbox-server` to terminate all spawned child language sandbox pods in parallel.
+* **Step 6: Final Memory State Purging (Phase 3)**
+  * If `purge=true` is requested, the worker calls the local `job_tracker` to erase all in-memory events, logs, and status records for that `job_id`.
+  * The worker deletes the job status keys from the Redis Key-Value cache database.
+  * The consumer sends a success acknowledgment (`msg.ack()`) back to RabbitMQ to remove the deletion message from the queue, completing the lifecycle.
 
 ---
 
