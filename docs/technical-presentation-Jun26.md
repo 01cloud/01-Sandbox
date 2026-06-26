@@ -139,6 +139,19 @@ sequenceDiagram
     end
 ```
 
+### ⚙️ Step-by-Step Deletion Working Principle (The Worker's Role)
+
+1. **Client-Side Trigger:** The user clicks "Delete" in the UI. The frontend evicts the cached job from browser `localStorage` and submits a `DELETE /v1/jobs/{job_id}?purge=true` API request.
+2. **Gateway Enqueueing:** The API router publishes the deletion task `{"job_id": job_id, "purge": true}` to RabbitMQ's `scan.delete` queue and returns `DELETE_QUEUED` to the client in <1ms.
+3. **Worker Consumption:** The background **worker consumer** (Python daemon loop running `core/queue/consumer.py`) consumes the delete message from the queue and delegates the workflow to the **worker handler** (`handle_delete_job` in `delete_handler.py`).
+4. **Worker Redis Coordination:**
+   * **Write Flag (Whiteboard):** The worker writes `job:{job_id}:cancelled` = `"true"` to the **Redis Key-Value store**. If another worker is about to start this job, it checks this key first and aborts.
+   * **Broadcast Shout (Megaphone):** The worker publishes the `job_id` to the `job:deletions` channel over **Redis Pub/Sub**. All replica worker pods hear this broadcast; the pod currently running the active scan stops its local Python execution task immediately.
+5. **Worker Infrastructure Cleanup:** The worker issues a `DELETE` request to `opensandbox-server` to terminate sandbox pods and wipe the Persistent Volume Claim (PVC) workspace on Kubernetes. It concurrently runs `cleanup_child_jobs()` to delete child language sandbox pods.
+6. **Worker State Purging:** The worker deletes all cached metadata, progress logs, and events from the memory-based job tracker and clears remaining Redis state keys, before acknowledging the message (`msg.ack()`) to RabbitMQ.
+
+---
+
 ### 📢 Simple Analogy: The "Megaphone" & "Whiteboard"
 * **RabbitMQ Whispers to One Guard:** RabbitMQ is a dispatcher who whispers to **Guard A** (Pod A) only: *"Cancel and delete Job #123."* But **Guard B** (Pod B) is the one actually running it.
 * **The Megaphone (Redis Pub/Sub):** Guard A picks up a **megaphone (Redis Pub/Sub)** and shouts: **"Attention all guards! Cancel and delete Job #123!"** Guard B hears this shout and terminates the scan immediately.
