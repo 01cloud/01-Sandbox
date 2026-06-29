@@ -85,8 +85,8 @@ sequenceDiagram
     else RabbitMQ Online
         alt purge=true — Eager synchronous purge
             API->>API: state.job_tracker.delete_job(job_id)
-            API->>Redis: DEL job:{job_id}:status, :metadata, :events, :result, :cancelled, :child_jobs
-            Note over API,Redis: Job is invisible to GET /v1/repo-scan/jobs immediately
+            API->>Redis: DEL job:{job_id}:status, :metadata, :events, :result, :cancelled
+            Note over API,Redis: Job is invisible to GET /v1/repo-scan/jobs immediately. The :child_jobs key is preserved for the worker.
         end
 
         API->>RMQ: publish("scan.delete", {job_id, purge})
@@ -219,10 +219,11 @@ When `purge=true`, the HTTP handler now wipes all Redis keys and the in-memory t
 if purge:
     # Wipe immediately so the next UI poll finds nothing
     state.job_tracker.delete_job(job_id)
+    # We preserve the child_jobs key so the background consumer can read it to cascade deletions
     state.redis_client.delete(
         f"job:{job_id}:status",    f"job:{job_id}:metadata",
         f"job:{job_id}:events",    f"job:{job_id}:result",
-        f"job:{job_id}:cancelled", f"job:{job_id}:child_jobs",
+        f"job:{job_id}:cancelled",
     )
 
 # Queue the RabbitMQ worker for PVC/sandbox teardown (still async)
@@ -403,7 +404,8 @@ const removeJob = async (jobId: string) => {
             # 1. Remove from in-memory job tracker (this pod)
             state.job_tracker.delete_job(job_id)
 
-            # 2. Delete all Redis keys for this job
+            # 2. Delete all Redis keys for this job except child_jobs
+            # We preserve child_jobs key so the async background consumer can read it to cascade deletions.
             if state.use_redis and state.redis_client:
                 try:
                     state.redis_client.delete(
@@ -412,7 +414,6 @@ const removeJob = async (jobId: string) => {
                         f"job:{job_id}:events",
                         f"job:{job_id}:result",
                         f"job:{job_id}:cancelled",
-                        f"job:{job_id}:child_jobs",
                     )
                 except Exception as redis_err:
                     print(f"[DeleteJob] Warning: eager Redis purge failed: {redis_err}")
