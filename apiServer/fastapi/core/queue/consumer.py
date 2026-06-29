@@ -14,8 +14,22 @@ from .retry import declare_retry_topology, handle_worker_failure
 
 
 async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
-    env_key = f"MAX_{jt.job_type.upper().replace('-', '_')}_WORKERS"
-    prefetch = int(os.environ.get(env_key, str(jt.prefetch_count)))
+    # Look for PREFETCH_<JOB_TYPE> first, then fall back to MAX_<JOB_TYPE>_WORKERS for backward compatibility
+    prefetch_env_key = f"PREFETCH_{jt.job_type.upper().replace('-', '_')}"
+    legacy_env_key = f"MAX_{jt.job_type.upper().replace('-', '_')}_WORKERS"
+    prefetch_val = os.environ.get(prefetch_env_key) or os.environ.get(legacy_env_key)
+
+    if prefetch_val is not None:
+        try:
+            prefetch = int(prefetch_val)
+        except ValueError:
+            print(
+                f"[RabbitMQ] Invalid prefetch value {prefetch_val!r} for {jt.job_type}, using default."
+            )
+            prefetch = jt.prefetch_count
+    else:
+        prefetch = jt.prefetch_count
+
     conn = get_connection()
     if not conn:
         return

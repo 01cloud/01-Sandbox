@@ -31,7 +31,7 @@ def test_queue_stats_tracker():
 def test_queue_stats_endpoint_unavailable():
     # Test endpoint when rabbitmq is unavailable
     from auth import validate_token
-    from codeinspectior_api import app
+    from main import app
 
     app.dependency_overrides[validate_token] = lambda: {"sub": "test_user"}
     try:
@@ -51,7 +51,7 @@ def test_queue_stats_endpoint_unavailable():
 @pytest.mark.asyncio
 async def test_queue_stats_endpoint_available():
     from auth import validate_token
-    from codeinspectior_api import app
+    from main import app
 
     # Mock connection and channel
     mock_conn = MagicMock()
@@ -91,7 +91,7 @@ async def test_queue_stats_endpoint_available():
 
 
 def test_public_queue_stats_endpoint_unavailable():
-    from codeinspectior_api import app
+    from main import app
 
     with patch("core.queue.router.get_connection", return_value=None):
         client = TestClient(app)

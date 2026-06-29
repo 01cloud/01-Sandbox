@@ -343,7 +343,7 @@ Every item in this list is guaranteed identical to before this implementation:
 - `scan_repository/sandbox_provisioner.py` — Local sandbox provisioning
 - `proxy/router.py` — Transparent HTTP proxy
 - `health/` — Health check endpoints
-- `codeinspectior_api.py` — Main application entrypoint
+- `main.py` — Main application entrypoint
 - `config.py` — Configuration helpers
 - `backends.py` — HTTP backend abstraction
 
@@ -365,7 +365,7 @@ export RABBITMQ_URL=amqp://admin:changeme@localhost:5672/
 export MAX_QUICK_SCAN_WORKERS=2
 export MAX_REPO_SCAN_WORKERS=2
 cd apiServer/fastapi
-uvicorn codeinspectior_api:app --reload --port 8000
+uvicorn main:app --reload --port 8000
 
 # 3. Expected startup logs
 # [RabbitMQ] Connected: localhost:5672/
@@ -381,7 +381,7 @@ uvicorn codeinspectior_api:app --reload --port 8000
 ```bash
 # Unset RABBITMQ_URL — server must start and behave identically to before
 unset RABBITMQ_URL
-uvicorn codeinspectior_api:app --reload --port 8000
+uvicorn main:app --reload --port 8000
 
 # Expected startup log:
 # [RabbitMQ] RABBITMQ_URL not set — fallback mode active.
