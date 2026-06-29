@@ -177,18 +177,106 @@ Here is the complete, end-to-end working principle of the scan job deletion pipe
 
 ---
 
+### 🏗️ Two-Tier Job Hierarchy: Parent & Child Artifacts
+
+A single repo scan spawns a **two-tier hierarchy** of jobs. Understanding this is essential to understanding why deletion must cascade.
+
+| Layer | Job ID | Where It Lives | Artifact on PVC |
+|---|---|---|---|
+| **Parent** | UUID assigned at `POST /v1/repo-scan` | `app_state.active_tasks` + Redis | Cloned repo under `reposcanner_<rand>/repo/` (local temp dir) |
+| **Child** (one per language) | UUID assigned inside `_submit_scan_job()` | opensandbox-server `/scan-jobs` pipeline | Language workspace + scan report in opensandbox pod PVC |
+
+**Child job tracking — three sources (merged at deletion time):**
+
+- `active_child_jobs_by_parent[parent_id]` — in-memory set, tracks only in-flight children (discarded when a child scan completes).
+- `all_child_jobs_by_parent[parent_id]` — in-memory set, retains all children ever registered, including completed ones.
+- Redis `SMEMBERS job:{parent_id}:child_jobs` — persisted for 24 hours, the critical source for multi-pod deployments where the parent ran on a different replica than the one processing the delete.
+
+At deletion time, `perform_job_deletion()` (`core/delete_job.py`) merges all three into a single set and issues an individual `DELETE /scan-jobs/{child_id}?terminate=true` to the `opensandbox-server` for every child — regardless of whether the child is still running or already completed. This guarantees every language-specific workspace is wiped from the PVC.
+
+---
+
+### 🐛 Bug Fix: Ghost Job After Cancel → Delete
+
+#### The Problem
+
+When a user **cancelled** a running scan and then **deleted** the same cancelled job via the trash icon, the job reappeared in the UI within 5 seconds. Two bugs were conspiring:
+
+**Bug 1 — Backend race window (primary cause)**
+
+The original `cancel_or_delete_job` HTTP handler only published a message to RabbitMQ and returned immediately. The actual Redis key deletion happened asynchronously inside the queue worker — potentially seconds later. During that window, the UI's 5-second poll (`GET /v1/repo-scan/jobs`) still found `job:{id}:status = "CANCELLED"` in Redis and returned the job to the frontend, causing `syncFromServer` to re-insert it, overriding the local removal.
+
+**Bug 2 — Frontend misclassified CANCELLED as active**
+
+The mount-time SSE reconnect logic and both `syncFromServer` branches only treated `["DONE", "ERROR"]` as terminal states. A `CANCELLED` job was treated as still-active, causing the frontend to attempt re-subscribing to a dead SSE stream — and meaning a cancelled job loaded from `localStorage` on page refresh would unnecessarily reconnect.
+
+#### The Fix
+
+**Fix 1 — Eager synchronous Redis purge in the HTTP handler** (`scan_jobs/router.py`)
+
+When `purge=true`, the router now deletes all Redis keys and the in-memory tracker entry **synchronously before** publishing to the queue or returning the response:
+
+```python
+if purge:
+    state.job_tracker.delete_job(job_id)           # remove from _jobs dict
+    state.redis_client.delete(                     # wipe all 6 Redis keys at once
+        f"job:{job_id}:status",   f"job:{job_id}:metadata",
+        f"job:{job_id}:events",   f"job:{job_id}:result",
+        f"job:{job_id}:cancelled", f"job:{job_id}:child_jobs",
+    )
+# Only then queue the RabbitMQ message for async PVC teardown
+await publish("scan.delete", {"job_id": job_id, "purge": purge})
+```
+
+The RabbitMQ worker still runs to tear down PVC/sandbox artifacts — but it no longer races with the UI poll for the Redis job record. The next 5-second sync returns zero results for that job.
+
+**Fix 2 — CANCELLED added to terminal-state sets in the frontend** (`hooks/useJobStore.ts`)
+
+Added `"CANCELLED"` to all three terminal-status exclusion checks so the frontend treats cancelled jobs the same way it treats completed ones:
+
+```typescript
+// Prevents reconnecting SSE streams for cancelled jobs on page refresh
+const activeJobs = jobStore.getAll(jobType).filter(
+  j => !["DONE", "ERROR", "CANCELLED"].includes(j.status)
+);
+
+// Prevents opening a new SSE stream for any cancelled job discovered via sync
+if (!["DONE", "ERROR", "CANCELLED"].includes(sj.status) && !esRefs.current[sj.job_id]) {
+  openStream(sj.job_id, sj.eventIndex ?? 0);
+}
+```
+
+#### Updated Cancel vs. Delete Behaviour
+
+| Behaviour | Cancel (`purge=false`) | Delete (`purge=true`) |
+|---|---|---|
+| Redis cancelled flag set | ✅ (24h TTL) | ✅ |
+| Redis Pub/Sub channel | `job:cancellations` | `job:deletions` |
+| asyncio task cancelled | ✅ | ✅ |
+| Status pushed to CANCELLED | ✅ | ❌ (records wiped) |
+| PVC artifacts removed | ✅ (parent + all children) | ✅ (parent + all children) |
+| Redis keys deleted immediately | ❌ (natural TTL expiry) | ✅ **in HTTP handler, before queue** |
+| In-memory tracker cleared immediately | ❌ | ✅ **in HTTP handler, before queue** |
+| Child tracking maps cleared | ❌ | ✅ (async, in queue worker) |
+| Job visible in UI after action | ✅ (shown as CANCELLED) | ❌ (gone immediately) |
+
+---
+
 ### 📢 Simple Analogy: The "Megaphone" & "Whiteboard"
 * **RabbitMQ Whispers to One Guard:** RabbitMQ is a dispatcher who whispers to **Guard A** (Pod A) only: *"Cancel and delete Job #123."* But **Guard B** (Pod B) is the one actually running it.
 * **The Megaphone (Redis Pub/Sub):** Guard A picks up a **megaphone (Redis Pub/Sub)** and shouts: **"Attention all guards! Cancel and delete Job #123!"** Guard B hears this shout and terminates the scan immediately.
 * **The Whiteboard (Redis Key-Value):** Simultaneously, Guard A writes *"Job #123 is cancelled"* on a **central whiteboard (Redis Key-Value store)**. If any guard is about to start Job #123 in the future, they check the whiteboard first and abort.
 
 ### 📁 Key Code References
-* **Publisher:** [`scan_jobs/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_jobs/router.py) -> `cancel_or_delete_job()` (Queues deletions and returns `DELETE_QUEUED` in <1ms).
-* **Consumer Handler:** [`core/queue/delete_handler.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/delete_handler.py) -> `handle_delete_job()` (Coordinates Redis cancellation, schedules Kubernetes teardown in thread pools via `asyncio.to_thread`, and cleans up child language sandbox pods).
-* **Cross-Pod Thread Listener:** [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py) -> `setup_cancellation_listener()` & `cancel_active_task()` (Subscribes to channels, receives the broadcasted `job_id`, and stops the local asyncio Task).
-* **Child Pod Cleanup:** [`scan_repository/file_scanner.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/file_scanner.py) -> `cleanup_child_jobs()` (Collects all spawned child language scan job IDs and terminates them concurrently on Kubernetes).
+* **Publisher & Eager Purge:** [`scan_jobs/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_jobs/router.py) → `cancel_or_delete_job()` — on `purge=true`, immediately wipes Redis keys and in-memory tracker before queuing deletion via RabbitMQ.
+* **Consumer Handler:** [`core/queue/delete_handler.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/delete_handler.py) → `handle_delete_job()` — coordinates Redis cancellation, schedules Kubernetes teardown via `asyncio.to_thread`, and cleans up child language sandbox pods.
+* **Core Deletion Orchestrator:** [`core/delete_job.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/delete_job.py) → `perform_job_deletion()` — merges child job IDs from in-memory maps and Redis, broadcasts cancellation, and cascades PVC deletion to all children.
+* **Cross-Pod Thread Listener:** [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py) → `setup_cancellation_listener()` & `cancel_active_task()` — subscribes to channels, receives the broadcasted `job_id`, and stops the local asyncio Task.
+* **Child Pod Cleanup:** [`scan_repository/file_scanner.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/file_scanner.py) → `cleanup_child_jobs()` — collects all spawned child language scan job IDs and terminates them concurrently on Kubernetes.
+* **Frontend Job Store:** [`z1sandbox-website/src/hooks/useJobStore.ts`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/z1sandbox-website/src/hooks/useJobStore.ts) → `removeJob()` calls `purge=true`; `CANCELLED` is now treated as a terminal state alongside `DONE` and `ERROR`.
 
 ---
+
 
 ## 3. Prometheus Telemetry & Observability Engine
 

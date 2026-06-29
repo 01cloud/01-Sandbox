@@ -314,7 +314,8 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
             # 1. Remove from in-memory job tracker (this pod)
             state.job_tracker.delete_job(job_id)
 
-            # 2. Delete all Redis keys for this job
+            # 2. Delete all Redis keys for this job except child_jobs
+            # We preserve child_jobs key so the async background consumer can read it to cascade deletions.
             if state.use_redis and state.redis_client:
                 try:
                     state.redis_client.delete(
@@ -323,7 +324,6 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                         f"job:{job_id}:events",
                         f"job:{job_id}:result",
                         f"job:{job_id}:cancelled",
-                        f"job:{job_id}:child_jobs",
                     )
                     print(
                         f"[DeleteJob] Eagerly purged Redis keys for job {job_id} before queuing worker"
