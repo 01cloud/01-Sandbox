@@ -89,7 +89,12 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
             p = json.loads(msg.body)
             job_id = p.get("job_id", "?")
 
-            if is_job_cancelled_or_deleted(app_state, job_id):
+            # Only check for cancellation/deletion on execution tasks (quick-scan, repo-scan).
+            # Checking this on delete-scan would cause the deletion task itself to be discarded.
+            if jt.job_type in (
+                "quick-scan",
+                "repo-scan",
+            ) and is_job_cancelled_or_deleted(app_state, job_id):
                 print(
                     f"[Cancellation] Job {job_id[:8]} was cancelled or deleted before execution. Discarding message."
                 )
