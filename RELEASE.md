@@ -1,3 +1,44 @@
+## Release v0.5.115 — 01-Sandbox
+**Release Date:** June 29, 2026
+
+---
+
+### Summary
+v0.5.115 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* permanent purge flow ([ff9c567](https://github.com/01cloud/01-Sandbox/commit/ff9c567ce3c7a7e0f38c71875a64b6dc01d1e8eb))
+* permanent purge flow ([b336b02](https://github.com/01cloud/01-Sandbox/commit/b336b02ee9231271e82fae95a78b77dc90651fa4))
+* generate RELEASE.md for v0.5.114 [skip ci] ([9b9fb7f](https://github.com/01cloud/01-Sandbox/commit/9b9fb7f2cba93ca294a2622859f0ef78d7cc9910))
+* bump versions to v0.5.114 [skip ci] ([9a9c440](https://github.com/01cloud/01-Sandbox/commit/9a9c4407c6aca549809ea59d44e8f1c7fc34fa30))
+
+### Changes
+## [0.5.115](https://github.com/01cloud/01-Sandbox/compare/v0.5.114...v0.5.115) (2026-06-29)
+
+
+### 🐛 Bug Fixes
+
+* permanent purge flow ([ff9c567](https://github.com/01cloud/01-Sandbox/commit/ff9c567ce3c7a7e0f38c71875a64b6dc01d1e8eb))
+* permanent purge flow ([b336b02](https://github.com/01cloud/01-Sandbox/commit/b336b02ee9231271e82fae95a78b77dc90651fa4))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.114 [skip ci] ([9b9fb7f](https://github.com/01cloud/01-Sandbox/commit/9b9fb7f2cba93ca294a2622859f0ef78d7cc9910))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.114 [skip ci] ([9a9c440](https://github.com/01cloud/01-Sandbox/commit/9a9c4407c6aca549809ea59d44e8f1c7fc34fa30))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.115)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.114 — 01-Sandbox
 **Release Date:** June 29, 2026
 
