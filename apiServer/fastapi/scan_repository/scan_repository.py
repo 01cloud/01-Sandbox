@@ -236,6 +236,7 @@ async def _run_scan_pipeline(
                     language=language,
                     files=files,
                     percentage=pct(len(files)),
+                    parent_job_id=job_id,
                 ),
                 timeout=600.0,
             )
