@@ -27,6 +27,7 @@ from .file_scanner import (
 )
 from .github_validator import parse_github_url, validate_github_repo
 from .language_detector import detect_languages
+from .lifecycle_tracker import register_pipeline_task, unregister_pipeline_task
 from .models import (
     RepoScanPrecheckRequest,
     RepoScanPrecheckResponse,
@@ -55,7 +56,8 @@ async def _run_scan_pipeline(
     Full scan pipeline executed as a background task.
     Pushes SSE events locally and broadcasts them via Redis Pub/Sub.
     """
-    token = current_parent_job_id.set(job_id)
+    token = register_pipeline_task(job_id, app_state)
+
     sandbox_id: Optional[str] = None
     start_time = time.monotonic()
     backend = app_state.backend
@@ -540,7 +542,7 @@ async def _run_scan_pipeline(
             log("CLEANUP", f"Cleaning up dangling child jobs on server: {child_jobs}")
             await asyncio.shield(cleanup_child_jobs(child_jobs))
 
-        current_parent_job_id.reset(token)
+        unregister_pipeline_task(job_id, app_state, token)
         log("CLEANUP", "Pipeline teardown complete")
 
 

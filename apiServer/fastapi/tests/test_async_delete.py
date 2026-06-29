@@ -85,14 +85,38 @@ async def test_delete_handler():
     mock_state.active_tasks["test-job-xxx"] = mock_task
 
     with patch(
-        "core.queue.delete_handler.cancel_active_task", new_callable=AsyncMock
+        "core.queue.delete_handler.perform_job_deletion", new_callable=AsyncMock
+    ) as mock_perform:
+        await handle_delete_job(mock_state, "test-job-xxx", purge=True)
+
+        mock_perform.assert_called_once_with(mock_state, "test-job-xxx", purge=True)
+
+
+@pytest.mark.asyncio
+async def test_perform_job_deletion():
+    from core.delete_job import perform_job_deletion
+
+    mock_state = MagicMock()
+    mock_state.use_redis = True
+    mock_state.redis_client = MagicMock()
+    mock_state.job_tracker = MagicMock()
+    mock_state.active_tasks = {}
+
+    with patch(
+        "core.delete_job.cancel_active_task", new_callable=AsyncMock
     ) as mock_cancel, patch(
         "asyncio.to_thread", new_callable=AsyncMock
     ) as mock_to_thread:
-        await handle_delete_job(mock_state, "test-job-xxx", purge=True)
+        await perform_job_deletion(mock_state, "test-job-yyy", purge=True)
 
-        mock_cancel.assert_called_once_with(mock_state, "test-job-xxx", purge=True)
-        mock_to_thread.assert_called_once_with(
-            mock_state.backend.delete_scan_job, "test-job-xxx", terminate=True
+        mock_state.redis_client.set.assert_called_once_with(
+            "job:test-job-yyy:cancelled", "true", ex=86400
         )
-        mock_state.job_tracker.delete_job.assert_called_once_with("test-job-xxx")
+        mock_state.redis_client.publish.assert_called_once_with(
+            "job:deletions", "test-job-yyy"
+        )
+        mock_cancel.assert_called_once_with(mock_state, "test-job-yyy", purge=True)
+        mock_to_thread.assert_called_once_with(
+            mock_state.backend.delete_scan_job, "test-job-yyy", terminate=True
+        )
+        mock_state.job_tracker.delete_job.assert_called_once_with("test-job-yyy")

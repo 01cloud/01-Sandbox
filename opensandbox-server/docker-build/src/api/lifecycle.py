@@ -537,17 +537,56 @@ async def delete_scan_job(job_id: str, terminate: bool = Query(False)):
             job_dir = matches[0]
 
     if os.path.exists(job_dir):
-        try:
-            shutil.rmtree(job_dir)
-            print(f"[SERVER] Deleted scan job directory from PVC: {job_dir}")
-        except Exception as e:
+        import asyncio
+        import time
+
+        # Retry loop to allow active volume mounts to release as pods terminate
+        max_retries = 10
+        delay = 1.0
+        success = False
+        last_err = None
+
+        for attempt in range(max_retries):
+            try:
+                if os.path.exists(job_dir):
+                    shutil.rmtree(job_dir)
+                success = True
+                print(
+                    f"[SERVER] Deleted scan job directory from PVC on attempt {attempt + 1}: {job_dir}"
+                )
+                break
+            except Exception as e:
+                last_err = e
+                print(
+                    f"[SERVER] Attempt {attempt + 1} to delete directory {job_dir} failed: {e}. Retrying in {delay}s..."
+                )
+                await asyncio.sleep(delay)
+                delay = min(delay * 1.5, 5.0)
+
+        if not success:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 detail={
                     "code": "FILE_SYSTEM_ERROR",
-                    "message": f"Failed to delete scan job directory from PVC: {str(e)}",
+                    "message": f"Failed to delete scan job directory from PVC after {max_retries} attempts: {str(last_err)}",
                 },
             )
+
+        # Check if the parent directory (parent_job_id) is empty, and if so, delete it
+        parent_dir = os.path.dirname(job_dir)
+        if parent_dir != data_root and os.path.exists(parent_dir):
+            try:
+                # Remove any empty subdirectories if present (e.g. if deletion left them empty)
+                if os.path.isdir(parent_dir) and not os.listdir(parent_dir):
+                    os.rmdir(parent_dir)
+                    print(
+                        f"[SERVER] Deleted empty parent directory from PVC: {parent_dir}"
+                    )
+            except Exception as e:
+                print(
+                    f"[SERVER] Failed to check/delete parent directory {parent_dir}: {e}"
+                )
+
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
