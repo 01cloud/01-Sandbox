@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.113](https://github.com/01cloud/01-Sandbox/compare/v0.5.112...v0.5.113) (2026-06-29)
+
+
+### 🐛 Bug Fixes
+
+* correct UI display when scan cancelled ([c88d51d](https://github.com/01cloud/01-Sandbox/commit/c88d51d473ed0f069354ea35942cd9724ec5a1b1))
+* correct UI display when scan cancelled ([4fe74fb](https://github.com/01cloud/01-Sandbox/commit/4fe74fb2c26ed68f12c2f14e867558887029a817))
+* correct UI display when scan cancelled ([892694a](https://github.com/01cloud/01-Sandbox/commit/892694aa334ae585147ef2a498c0e51f573116a3))
+* correct UI display when scan cancelled ([6ddd736](https://github.com/01cloud/01-Sandbox/commit/6ddd736136e6b22dfb6f73426e7f7b5020a78d2c))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.112 [skip ci] ([8dbb842](https://github.com/01cloud/01-Sandbox/commit/8dbb842a8498a4698594e74698391dddbe1beb70))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.112 [skip ci] ([da69944](https://github.com/01cloud/01-Sandbox/commit/da69944ef2ab306930549f68dce28c4d2f238afd))
+
 ## [0.5.112](https://github.com/01cloud/01-Sandbox/compare/v0.5.111...v0.5.112) (2026-06-29)
 
 
