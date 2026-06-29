@@ -1,6 +1,6 @@
 import React from "react";
 import { GenericJob } from "@/lib/jobStore";
-import { Github, FileText, CheckCircle2, AlertCircle, Loader2, Trash2 } from "lucide-react";
+import { Github, FileText, CheckCircle2, AlertCircle, Loader2, Trash2, StopCircle } from "lucide-react";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -54,6 +54,7 @@ export function JobsPanel({
               const isActive = !["DONE", "ERROR"].includes(job.status);
               const isDone = job.status === "DONE";
               const isError = job.status === "ERROR";
+              const isCancelled = job.status === "CANCELLED";
 
               // Metadata displays
               const repoUrl = job.metadata?.repo_url || "";
@@ -114,6 +115,8 @@ export function JobsPanel({
                       <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
                     ) : isError ? (
                       <AlertCircle className="w-3 h-3 text-destructive shrink-0" />
+                    ) : isCancelled ? (
+                      <StopCircle className="w-3 h-3 text-orange-500 shrink-0" />
                     ) : (
                       <Loader2 className="w-3 h-3 text-violet-500 animate-spin shrink-0" />
                     )}
@@ -123,7 +126,8 @@ export function JobsPanel({
                         "text-[9px] font-bold uppercase tracking-wider truncate flex-1",
                         isDone && "text-emerald-500",
                         isError && "text-destructive",
-                        isActive && "text-violet-400"
+                        isCancelled && "text-orange-500",
+                        isActive && !isCancelled && "text-violet-400"
                       )}
                     >
                       {isActive ? `${job.status} (${job.progress}%)` : job.status}
