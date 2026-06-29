@@ -224,7 +224,7 @@ export function useJobStore(
           jobStore.upsert({ ...sj, result: null });
           didUpdate = true;
 
-          if (!["DONE", "ERROR"].includes(sj.status) && !esRefs.current[sj.job_id]) {
+          if (!["DONE", "ERROR", "CANCELLED"].includes(sj.status) && !esRefs.current[sj.job_id]) {
             // Active job: open SSE stream to receive live events
             openStream(sj.job_id, sj.eventIndex ?? 0);
           } else if (sj.status === "DONE") {
@@ -259,7 +259,7 @@ export function useJobStore(
 
             // Attempt to reconnect SSE if it's still active on the server and we haven't hit the error limit
             if (
-              !["DONE", "ERROR"].includes(sj.status) &&
+              !["DONE", "ERROR", "CANCELLED"].includes(sj.status) &&
               (streamErrors.current[sj.job_id] || 0) < 3
             ) {
               openStream(sj.job_id, existing.eventIndex ?? 0);
@@ -280,7 +280,7 @@ export function useJobStore(
   // Reconnect active streams on mount (handles page refresh mid-scan)
   useEffect(() => {
     const activeJobs = jobStore.getAll(jobType).filter(
-      j => !["DONE", "ERROR"].includes(j.status)
+      j => !["DONE", "ERROR", "CANCELLED"].includes(j.status)
     );
     activeJobs.forEach(j => {
       openStream(j.job_id, j.eventIndex);

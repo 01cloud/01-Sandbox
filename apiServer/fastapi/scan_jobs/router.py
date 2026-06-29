@@ -290,6 +290,13 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
         """
         Flags a scan job as cancelled. If purge=True, permanently deletes the job records
         from memory/Redis and purges all reports and source files from the PVC.
+
+        When purge=True the Redis keys and in-memory tracker entry are wiped **immediately**
+        in this HTTP handler (synchronously) before the RabbitMQ delete message is queued.
+        This guarantees that GET /v1/repo-scan/jobs (polled every 5 s by the UI) stops
+        returning the job at once, regardless of queue processing latency — so a job that
+        was previously cancelled and is then explicitly deleted disappears from the UI
+        immediately without waiting for the async worker to finish.
         """
         from core.queue import is_available, publish
 
@@ -298,6 +305,33 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                 status_code=503,
                 detail="RabbitMQ service is unavailable. Cannot process job deletion.",
             )
+
+        # ── Eager purge: wipe Redis + in-memory tracker synchronously ──────────
+        # When purge=True we remove the job from all storage layers right now so
+        # that any concurrent poll (GET /v1/repo-scan/jobs) cannot surface it again.
+        # The RabbitMQ worker will still run to clean up PVC/sandbox artifacts.
+        if purge:
+            # 1. Remove from in-memory job tracker (this pod)
+            state.job_tracker.delete_job(job_id)
+
+            # 2. Delete all Redis keys for this job
+            if state.use_redis and state.redis_client:
+                try:
+                    state.redis_client.delete(
+                        f"job:{job_id}:status",
+                        f"job:{job_id}:metadata",
+                        f"job:{job_id}:events",
+                        f"job:{job_id}:result",
+                        f"job:{job_id}:cancelled",
+                        f"job:{job_id}:child_jobs",
+                    )
+                    print(
+                        f"[DeleteJob] Eagerly purged Redis keys for job {job_id} before queuing worker"
+                    )
+                except Exception as redis_err:
+                    print(
+                        f"[DeleteJob] Warning: eager Redis purge failed for job {job_id}: {redis_err}"
+                    )
 
         payload = {"job_id": job_id, "purge": purge}
         await publish("scan.delete", payload)
