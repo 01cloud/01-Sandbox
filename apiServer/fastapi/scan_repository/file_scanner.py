@@ -206,6 +206,8 @@ def _filter_findings_to_submitted_files(
 
 # Map parent_job_id -> set of active child_job_ids
 active_child_jobs_by_parent = collections.defaultdict(set)
+# Map parent_job_id -> set of all associated child_job_ids (both active and completed)
+all_child_jobs_by_parent = collections.defaultdict(set)
 current_parent_job_id = contextvars.ContextVar("current_parent_job_id", default=None)
 
 
@@ -235,16 +237,28 @@ async def cleanup_child_jobs(job_ids: set[str]) -> None:
 
 
 async def _submit_scan_job(
-    files_dict: dict[str, str], tools: Optional[list[str]] = None
+    files_dict: dict[str, str],
+    tools: Optional[list[str]] = None,
+    parent_job_id: Optional[str] = None,
 ) -> dict:
     """
     Submit files to POST /scan-jobs and wait for the result.
     Returns the parsed report dict, or {} on failure.
     """
-    parent_id = current_parent_job_id.get()
+    parent_id = parent_job_id or current_parent_job_id.get()
     child_job_id = str(uuid4())
     if parent_id:
         active_child_jobs_by_parent[parent_id].add(child_job_id)
+        all_child_jobs_by_parent[parent_id].add(child_job_id)
+        # If Redis is enabled, store child job mapping for cascading deletion
+        try:
+            from core import state
+
+            if state.use_redis and state.redis_client:
+                state.redis_client.sadd(f"job:{parent_id}:child_jobs", child_job_id)
+                state.redis_client.expire(f"job:{parent_id}:child_jobs", 86400)
+        except Exception as redis_err:
+            print(f"{_TAG}   WARNING: Failed to save child job to Redis: {redis_err}")
 
     base_url = opensandbox_base_url()
     prefix = opensandbox_route_prefix()
@@ -452,6 +466,7 @@ async def scan_language(
     language: str,
     files: list[str],
     percentage: float,
+    parent_job_id: Optional[str] = None,
 ) -> LanguageScanResult:
     """
     Run security analysis for a detected language by submitting
@@ -519,6 +534,7 @@ async def scan_language(
             sandbox_id=sandbox_id,
             files=files_capped,
             total_percentage=round(percentage, 2),
+            parent_job_id=parent_job_id,
         )
 
     # Select tool hints for the scan-jobs orchestrator
@@ -539,7 +555,9 @@ async def scan_language(
     print(
         f"{_TAG} [{language}] Submitting {len(files_dict)} file(s) to scan-jobs (tools: {tool_hints or 'auto'})"
     )
-    report = await _submit_scan_job(files_dict, tools=tool_hints)
+    report = await _submit_scan_job(
+        files_dict, tools=tool_hints, parent_job_id=parent_job_id
+    )
 
     elapsed = time.monotonic() - t0
 
@@ -622,6 +640,7 @@ async def scan_yaml_files(
     sandbox_id: str,
     files: list[str],
     total_percentage: float,
+    parent_job_id: Optional[str] = None,
 ) -> Tuple[LanguageScanResult, Optional[LanguageScanResult]]:
     """
     Split YAML files into:
@@ -664,7 +683,9 @@ async def scan_yaml_files(
                 f"{_TAG} [YAML] Submitting {len(plain_dict)} plain YAML file(s) to scan-jobs (tools: yamllint)"
             )
             t_yaml0 = time.monotonic()
-            report = await _submit_scan_job(plain_dict, tools=["yamllint"])
+            report = await _submit_scan_job(
+                plain_dict, tools=["yamllint"], parent_job_id=parent_job_id
+            )
             elapsed_yaml = time.monotonic() - t_yaml0
             if report:
                 plain_raw_findings = _parse_scan_report(report, "yaml")
@@ -728,7 +749,9 @@ async def scan_yaml_files(
                 f"{_TAG} [K8sYAML] Submitting {len(k8s_dict)} K8s manifest(s) to scan-jobs (tools: {k8s_tools})"
             )
             t_k8s0 = time.monotonic()
-            report = await _submit_scan_job(k8s_dict, tools=k8s_tools)
+            report = await _submit_scan_job(
+                k8s_dict, tools=k8s_tools, parent_job_id=parent_job_id
+            )
             elapsed_k8s = time.monotonic() - t_k8s0
             if report:
                 k8s_raw_findings = _parse_scan_report(report, "yaml")

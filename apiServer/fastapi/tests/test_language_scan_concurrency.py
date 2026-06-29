@@ -39,7 +39,7 @@ async def test_language_scan_concurrency():
             "Shell": ["/tmp/c.sh"],
         }, DetectionTool.TOKEI
 
-    async def mock_scan(sandbox_id, language, files, percentage):
+    async def mock_scan(sandbox_id, language, files, percentage, *args, **kwargs):
         await asyncio.sleep(0.2)
         return LanguageScanResult(
             language=language,
