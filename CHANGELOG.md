@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.112](https://github.com/01cloud/01-Sandbox/compare/v0.5.111...v0.5.112) (2026-06-29)
+
+
+### 🐛 Bug Fixes
+
+* configure to delete orphaned scan artifacts ([54019ca](https://github.com/01cloud/01-Sandbox/commit/54019cab5085d046f3fcee613d0323a80c450f6c))
+* configure to delete orphaned scan artifacts ([2438b85](https://github.com/01cloud/01-Sandbox/commit/2438b8570078ea4bfb8b3a6379b37739e0476bc1))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.111 [skip ci] ([3517e2c](https://github.com/01cloud/01-Sandbox/commit/3517e2c6cde983122ae3a1a850ea21ef1786aee7))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.111 [skip ci] ([7fab2cf](https://github.com/01cloud/01-Sandbox/commit/7fab2cf91673ef91adbec0d4ab31ad7fd72e0ac6))
+
 ## [0.5.111](https://github.com/01cloud/01-Sandbox/compare/v0.5.110...v0.5.111) (2026-06-29)
 
 
