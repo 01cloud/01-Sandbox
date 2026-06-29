@@ -1,8 +1,8 @@
 import logging
 
 import pytest
-from codeinspectior_api import app
 from fastapi.testclient import TestClient
+from main import app
 
 
 def test_metrics_endpoint():

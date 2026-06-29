@@ -180,7 +180,7 @@ Retrieve the final aggregated scan result after the job reaches `DONE` or `ERROR
 
 ## Authentication
 
-All three endpoints use the same `validate_token` FastAPI dependency defined in `codeinspectior_api.py`. Token resolution order:
+All three endpoints use the same `validate_token` FastAPI dependency defined in `main.py`. Token resolution order:
 
 1. `Authorization: Bearer <token>` header (all methods)
 2. `?token=<value>` query parameter (SSE/EventSource-specific)

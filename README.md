@@ -61,7 +61,7 @@ The platform includes a sleek, developer-first dashboard (found in `dashboard/in
 
 ### 2. API Key Generation & Verification (Identity Bridge)
 
-Managing long-lived API keys is handled by a sophisticated API server subsystem (`codeinspectior_api.py`):
+Managing long-lived API keys is handled by a sophisticated API server subsystem (`main.py`):
 - **Generation Logic**: A user posts to `/v1/api-keys`. The system relies on its internal private RSA key to generate a proprietary RS256 JWT representing their new Developer API Key.
 - **Persistent Storage**:
   - **PostgreSQL**: Stores robust metadata (`jti`, `name`, `backend`, `user_email`, `expires_at`, `is_revoked`, and `last_used_at`).

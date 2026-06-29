@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auth import validate_token
-from codeinspectior_api import app
 from core.queue.delete_handler import handle_delete_job
+from main import app
 
 
 @pytest.mark.asyncio

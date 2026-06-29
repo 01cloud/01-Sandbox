@@ -78,7 +78,7 @@ async def test_requeue_failed_jobs_service():
 @pytest.mark.asyncio
 async def test_requeue_failed_jobs_router():
     from auth import validate_token
-    from codeinspectior_api import app
+    from main import app
 
     app.dependency_overrides[validate_token] = lambda: {"sub": "test_user"}
     try:

@@ -2,7 +2,7 @@
 scan_repository.py — FastAPI APIRouter factory for GitHub Repository Scanner.
 
 Pattern mirrors health.py → get_health_router(state, validate_token).
-Call get_repo_scan_router(state, validate_token) from codeinspectior_api.py.
+Call get_repo_scan_router(state, validate_token) from main.py.
 
 This implementation is fully cluster-aware (multi-pod safe) using the shared
 Redis instance for job statuses, Pub/Sub event broadcasting, and cached results.
