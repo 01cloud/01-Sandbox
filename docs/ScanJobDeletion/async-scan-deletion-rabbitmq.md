@@ -1,237 +1,426 @@
-# Asynchronous Scan Deletion using RabbitMQ & Redis
+# Asynchronous Scan Deletion & Cancellation Reference Guide
 
-This document details the architecture, implementation steps, and verification details of the asynchronous scan deletion and cancellation feature using RabbitMQ and Redis.
+This document provides a comprehensive technical overview of how scan job cancellation and deletion is implemented across the **CodeInspector & OpenSandbox** platform — covering the two-tier job hierarchy, cross-pod coordination via Redis, Kubernetes PVC teardown, and the frontend behaviour.
 
 ---
 
-## Overview & Architecture
+## 1. Architecture Overview
 
-To improve response times, scalability, and system decoupling, scan job cancellation and deletion requests are processed asynchronously.
-* When a deletion/cancellation request is made via the REST API, the API server publishes a message containing the `job_id` and `purge` flag to the RabbitMQ exchange.
-* The API returns a `200 OK` status with `"status": "DELETE_QUEUED"` immediately to the client.
-* RabbitMQ routes the message to the `scan.delete` queue.
-* A background consumer worker receives the message, flags the job as cancelled in Redis, and publishes a deletion/cancellation event to Redis Pub/Sub.
-* All scaling replicas of the `sandbox-api` pod receive the Redis Pub/Sub message, cancel their active local python scanning tasks, and purge the job from their in-memory trackers.
-* The consumer worker then communicates with the `opensandbox-server` to terminate the parent sandbox pod, delete the PVC workspaces, and concurrently terminate all spawned child language sandbox pods.
+Scan job cancellation and deletion requests are processed **asynchronously** to keep HTTP response times in the sub-millisecond range and avoid blocking the event loop during potentially slow Kubernetes or PVC teardown operations.
 
-If RabbitMQ is down, the deletion request fails immediately with a `503 Service Unavailable` error, ensuring predictability.
+**High-level flow:**
+
+1. The client sends `DELETE /v1/jobs/{job_id}?purge=true` to the API Gateway.
+2. When `purge=true`, the API **immediately and synchronously** wipes all Redis keys and the in-memory tracker entry for that job.
+3. The API then publishes a delete task to the durable `scan.delete` RabbitMQ queue and returns `200 OK` to the client (< 1 ms).
+4. A background consumer worker picks up the message, coordinates cross-pod cancellation via Redis Pub/Sub, and tears down Kubernetes sandbox pods and PVC workspaces.
+
+If RabbitMQ is unavailable, the endpoint fails fast with `503 Service Unavailable`.
+
+---
+
+## 2. Two-Tier Job Hierarchy: Parent & Child Artifacts
+
+A single repo scan creates a **two-tier hierarchy** of jobs. Understanding this is essential to understanding why deletion must cascade.
+
+| Layer | Job ID | Where It Lives | Artifact on PVC |
+|---|---|---|---|
+| **Parent** | UUID assigned at `POST /v1/repo-scan` | `app_state.active_tasks` + Redis | Cloned repo under `reposcanner_<rand>/repo/` (local temp dir on API pod) |
+| **Child** (one per detected language) | UUID assigned inside `_submit_scan_job()` | opensandbox-server `/scan-jobs` pipeline | Language-specific workspace + scan report in opensandbox pod PVC |
+
+### Child Job Registration
+
+Each child job is registered in **three places** before the language scan is submitted:
+
+```python
+# scan_repository/file_scanner.py — _submit_scan_job()
+child_job_id = str(uuid4())
+if parent_id:
+    active_child_jobs_by_parent[parent_id].add(child_job_id)   # in-flight only
+    all_child_jobs_by_parent[parent_id].add(child_job_id)       # full history
+    state.redis_client.sadd(f"job:{parent_id}:child_jobs", child_job_id)
+    state.redis_client.expire(f"job:{parent_id}:child_jobs", 86400)
+```
+
+When a child scan **completes**, it is removed from `active_child_jobs_by_parent` only — `all_child_jobs_by_parent` and Redis retain the full history so deletion can cascade to already-completed children whose PVC artifacts still need to be purged.
+
+### Child ID Collection at Deletion Time
+
+`perform_job_deletion()` (`core/delete_job.py`) merges **three sources** into a single set:
+
+```python
+child_job_ids = set()
+# Source 1: in-flight children on this pod
+child_job_ids.update(active_child_jobs_by_parent.get(job_id, set()))
+# Source 2: all-time children on this pod
+child_job_ids.update(all_child_jobs_by_parent.get(job_id, set()))
+# Source 3: Redis — critical for multi-pod deployments
+redis_children = state.redis_client.smembers(f"job:{job_id}:child_jobs")
+child_job_ids.update(c.decode("utf-8") for c in redis_children)
+```
+
+The Redis set is the critical fallback: if the parent ran on a different replica pod than the one processing the deletion, in-memory maps are empty on that pod, but Redis still has the full child list.
+
+---
+
+## 3. Full Sequence Diagram
 
 ```mermaid
 sequenceDiagram
     autonumber
-    actor Client as Client / Script
-    participant API as API Server (sandbox-api Router)
+    actor Client as Client / Dashboard
+    participant API as FastAPI Router
+    participant Redis as Redis (KV + Pub/Sub)
     participant RMQ as RabbitMQ (scan.delete Queue)
-    participant Handler as delete_handler (Consumer)
-    participant Redis as Redis (Pub/Sub + KV)
-    participant K8s as Kubernetes (opensandbox-server)
+    participant Consumer as RabbitMQ Consumer
+    participant DelJob as perform_job_deletion()
+    participant OSSandbox as opensandbox-server
+    participant PVC as Kubernetes PVC
 
     Client->>API: DELETE /v1/jobs/{job_id}?purge=true
-    Note over API: Verifies JWT token & checks RabbitMQ health
+    Note over API: Verify JWT token & check RabbitMQ health
+
     alt RabbitMQ Offline
         API-->>Client: 503 Service Unavailable
     else RabbitMQ Online
-        API->>RMQ: Publish message: {"job_id": job_id, "purge": true}
-        API-->>Client: Return 200 OK {"status": "DELETE_QUEUED"}
+        alt purge=true — Eager synchronous purge
+            API->>API: state.job_tracker.delete_job(job_id)
+            API->>Redis: DEL job:{job_id}:status, :metadata, :events, :result, :cancelled, :child_jobs
+            Note over API,Redis: Job is invisible to GET /v1/repo-scan/jobs immediately
+        end
+
+        API->>RMQ: publish("scan.delete", {job_id, purge})
+        API-->>Client: 200 OK {"status": "DELETE_QUEUED"}
     end
 
-    Note over Handler: Asynchronously consumes from scan.delete
-    RMQ->>Handler: Deliver delete task
+    RMQ->>Consumer: on_message() — consume from scan.delete queue
+    Consumer->>DelJob: perform_job_deletion(state, job_id, purge)
 
-    rect rgb(240, 245, 255)
-        Note over Handler, Redis: Phase 1: Cross-Pod Coordination
-        Handler->>Redis: Set key "job:{job_id}:cancelled" = "true"
-        Handler->>Redis: Publish to channel "job:deletions" (job_id)
-        Redis-->>API: Notify other API pod replicas via Pub/Sub
-        Note over API: Cancel active python tasks & purge in-memory tracker
+    Note over DelJob: Step 1 — Collect all child job IDs
+    DelJob->>DelJob: Merge active_child_jobs_by_parent + all_child_jobs_by_parent
+    DelJob->>Redis: SMEMBERS job:{job_id}:child_jobs
+    Redis-->>DelJob: {child_id_1, child_id_2, ...}
+
+    Note over DelJob: Step 2 — Broadcast cancellation
+    DelJob->>Redis: SET job:{job_id}:cancelled "true" EX 86400
+    alt purge=false (Cancel)
+        DelJob->>Redis: PUBLISH job:cancellations {job_id}
+    else purge=true (Delete)
+        DelJob->>Redis: PUBLISH job:deletions {job_id}
+    end
+    Note over Redis: All pod replicas' setup_cancellation_listener()<br/>receive the broadcast and cancel their local asyncio tasks
+
+    Note over DelJob: Step 3 — Cancel local asyncio task (parent)
+    DelJob->>DelJob: task = app_state.active_tasks.get(job_id)
+    DelJob->>DelJob: task.cancel() → injects CancelledError into pipeline
+    Note over DelJob: Pipeline finally block runs: destroy_sandbox() + cleanup_child_jobs()
+
+    Note over DelJob: Step 4 — Delete parent PVC & sandbox
+    DelJob->>OSSandbox: DELETE /scan-jobs/{job_id}?terminate=true
+    OSSandbox->>PVC: Remove parent workspace & report
+    OSSandbox-->>DelJob: 200 OK
+
+    Note over DelJob: Step 5 — Cascade: delete each child job
+    loop for each child_id in child_job_ids
+        DelJob->>DelJob: cancel_active_task(state, child_id, purge)
+        DelJob->>OSSandbox: DELETE /scan-jobs/{child_id}?terminate=true
+        OSSandbox->>PVC: Remove child workspace & artifacts
+        OSSandbox-->>DelJob: 200 OK
+        alt purge=true
+            DelJob->>Redis: DEL job:{child_id}:status, :metadata, :result, :events
+            DelJob->>DelJob: job_tracker.delete_job(child_id)
+        end
     end
 
-    rect rgb(255, 240, 240)
-        Note over Handler, K8s: Phase 2: Kubernetes Sandbox & PVC Cleanup
-        Handler->>K8s: DELETE /api/v1/01sbx/scan-jobs/{job_id}?terminate=true
-        Note over K8s: opensandbox-server kills sandbox pods and purges PVC workspaces
-        Handler->>Handler: Call cleanup_child_jobs() to terminate all child language pods
-        Handler->>K8s: DELETE /api/v1/01sbx/scan-jobs/{child_job_id}?terminate=true
-    end
-
-    rect rgb(240, 255, 240)
-        Note over Handler, Redis: Phase 3: Final State Purge
-        Handler->>Redis: Delete all Redis keys: job:{job_id}:status, job:{job_id}:events, etc.
-        Handler->>Handler: Purge from local job tracker
+    Note over DelJob: Step 6 — Purge parent tracking state (purge=true only)
+    alt purge=true
+        DelJob->>DelJob: job_tracker.delete_job(job_id)
+        DelJob->>Redis: DEL job:{job_id}:child_jobs
+        DelJob->>DelJob: all_child_jobs_by_parent.pop(job_id)
+        DelJob->>DelJob: active_child_jobs_by_parent.pop(job_id)
     end
 ```
 
 ---
 
-## Why Redis is Used in `delete_handler.py` (Cross-Pod Coordination)
+## 4. Why Redis is Used for Cross-Pod Coordination
 
-In a Kubernetes deployment, the `sandbox-api` service scales horizontally with multiple active pod replicas (e.g., 5 replicas running concurrently).
+In a Kubernetes deployment, `sandbox-api` scales horizontally with multiple active pod replicas. Because RabbitMQ distributes queue messages using a **competing consumer pattern**, a deletion message is delivered to **exactly one** replica — almost never the replica currently running the active scan task.
 
-Because **RabbitMQ distributes queue messages using a round-robin competing consumer pattern**, a deletion request from the `scan.delete` queue will only be delivered to **exactly one** worker replica.
+### The Problem
+The pod that consumes the `scan.delete` message cannot directly reach into another pod's Python memory to cancel its running `asyncio.Task`.
 
-This creates a distributed synchronization challenge:
-* **The Problem:** The replica that consumes the `scan.delete` message from RabbitMQ is almost never the same replica that is currently executing the active scanning task (which runs as a local `asyncio.Task` on the Python event loop).
-* **The Solution (Redis Pub/Sub):** To coordinate cancellation across all replicas:
-  1. The consuming replica writes a persistent cancellation flag (`job:{job_id}:cancelled`) to **Redis key-value storage**. This ensures that even if a scanning task hasn't started yet, it will see the flag and abort immediately upon starting.
-  2. The consuming replica publishes the `job_id` to a shared **Redis Pub/Sub channel** (`job:deletions` or `job:cancellations`).
-  3. Every running replica pod runs a background listener subscribing to these channels. When they receive the message, the specific replica pod holding the active `asyncio.Task` cancels it immediately, ensuring the running scan is stopped instantly regardless of where it was running.
+### The Solution — Two Redis primitives working together
 
----
-
-### Simple Analogy: The "Megaphone" and the "Whiteboard"
-
-To understand how Redis solves this in simple terms, imagine you have **5 security guards (API pods)** guarding a building:
-
-1. **RabbitMQ Whispers to One Guard:**
-   * RabbitMQ is a dispatcher who whispers to **Guard A** only: *"Cancel and delete Job #123."*
-   * But **Guard A** is not the one running Job #123. **Guard B** is the one running it. Guard A cannot directly touch Guard B's hands or memory.
-2. **The Megaphone (Redis Pub/Sub):**
-   * Guard A picks up a **megaphone (Redis Pub/Sub)** and shouts: **"Attention all guards! Cancel and delete Job #123!"**
-   * Every guard in the building has a walkie-talkie tuned to this channel.
-   * Guard B hears this shout, realizes they are running Job #123, and stops it immediately.
-3. **The Whiteboard (Redis Key-Value):**
-   * At the same time, Guard A writes *"Job #123 is cancelled"* on a **central whiteboard (Redis Key-Value store)**.
-   * If any other guard is about to start Job #123 in the future, they check the whiteboard first. If they see the cancellation note, they abort immediately.
-
-**Yes, Redis absolutely carries the `job_id` information!** The megaphone broadcast contains the `job_id`, and the whiteboard note is indexed by the `job_id`, ensuring the correct job is targeted across the entire cluster.
-
----
-
-## Key Functions Reference (Deletion & Cleanup Flow)
-
-Below is the functional map of the exact Python routines that implement the RabbitMQ-based deletion and Kubernetes sandbox pod cleanup pipeline:
-
-### 1. API Entry & Queueing (Publisher)
-* **`cancel_or_delete_job(job_id, purge)`** in [`scan_jobs/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_jobs/router.py)
-  * **Role:** Serves the `DELETE /v1/jobs/{job_id}` endpoint. It performs a lightweight health check on RabbitMQ, publishes the delete request message to the `scan.delete` queue, and immediately returns a `200 OK` response with `DELETE_QUEUED` to the client.
-* **`proxy_cancel_or_delete_job(...)`** in [`proxy/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/proxy/router.py)
-  * **Role:** Intercepts proxied deletion requests and publishes them to the RabbitMQ `scan.delete` queue.
-
-### 2. Queue Consumer & Coordination
-* **`handle_delete_job(state, job_id, purge)`** in [`core/queue/delete_handler.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/delete_handler.py)
-  * **Role:** The primary asynchronous orchestration function triggered by the RabbitMQ consumer. It sets the Redis cancellation flag, publishes cross-pod notifications, terminates the parent sandbox/PVC on `opensandbox-server`, cleans up the child language pods, and purges metadata records.
-
-### 3. Cross-Pod Coordination (Redis Pub/Sub)
-* **`setup_cancellation_listener(app_state)`** in [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)
-  * **Role:** Runs on every pod replica to listen to the Redis Pub/Sub channels `job:cancellations` and `job:deletions`. Decodes the bytes message payload and routes it for task cancellation.
-* **`cancel_active_task(app_state, job_id, purge)`** in [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)
-  * **Role:** Aborts the running Python `asyncio.Task` on the current pod replica and pushes a `CANCELLED` status event.
-* **`is_job_cancelled_or_deleted(app_state, job_id)`** in [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)
-  * **Role:** Checked periodically by active scan steps (cloning, language analysis) to abort execution mid-flight if a delete event is received.
-
-### 4. Kubernetes Sandbox Pod Cleanup
-* **`cleanup_child_jobs(state, parent_job_id)`** in [`scan_repository/file_scanner.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/file_scanner.py)
-  * **Role:** Extracts the child language job IDs from the parent's metadata and sends concurrent `DELETE` requests to `opensandbox-server` to terminate all active child language pods on the cluster.
-* **`delete_scan_job(job_id, terminate)`** in [`backends.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/backends.py)
-  * **Role:** Dispatches HTTP delete requests directly to the remote `opensandbox-server` API to terminate running sandboxes and clear PVC storage workspaces.
-
----
-
-## Code Base Changes
-
-### 1. Queue Configuration
-
-#### **[apiServer/fastapi/core/queue/job_types.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/job_types.py)**
-* Declared a new `DELETE_SCAN` job type:
+**1. The Whiteboard (Redis Key-Value)**
 ```python
-DELETE_SCAN = ScanJobType(
-    "delete-scan",
-    "scan.delete",
-    "scan.delete",
-    5,
-    ("scan.delete.5s", "scan.delete.30s", "scan.delete.2m"),
-)
+state.redis_client.set(f"job:{job_id}:cancelled", "true", ex=86400)
 ```
-* Appended `DELETE_SCAN` to the list of `ALL_SCAN_JOB_TYPES` so the runner automatically spins up consumers for it.
+Any pod that is about to start processing this job checks this flag first and aborts. Also polled inside `scan_single_language()` between language scans:
+```python
+if is_job_cancelled_or_deleted(app_state, job_id):
+    raise asyncio.CancelledError()
+```
+
+**2. The Megaphone (Redis Pub/Sub)**
+```python
+state.redis_client.publish("job:deletions", job_id)
+```
+Every pod runs a background coroutine (`setup_cancellation_listener`) subscribed to `job:cancellations` and `job:deletions`. The pod running the scan receives the broadcast and cancels its local `asyncio.Task` immediately via `task.cancel()`.
+
+### Simple Analogy
+Imagine **5 security guards (API pods)** guarding a building:
+
+- **RabbitMQ whispers to one guard:** "Cancel Job #123." But Guard A isn't running it — Guard B is.
+- **The Megaphone (Redis Pub/Sub):** Guard A picks up a megaphone and shouts: _"All guards — cancel Job #123!"_ Guard B hears it and stops immediately.
+- **The Whiteboard (Redis KV):** Guard A writes _"Job #123 is cancelled"_ on a central board. Any guard who is about to start Job #123 checks the board first and aborts.
 
 ---
 
-### 2. Consumer Routing & Delete Logic
+## 5. Cancel vs. Delete — Behavioural Difference
 
-#### **[apiServer/fastapi/core/queue/delete_handler.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/delete_handler.py)**
-* **[NEW]** Created `handle_delete_job(state, job_id, purge)`:
-  * Leverages Redis Pub/Sub (`job:deletions` or `job:cancellations`) to coordinate cancellation across multiple pod replicas.
-  * Dispatches backend sandbox/PVC resource cleanup to a separate thread executor via `asyncio.to_thread` to maintain loop performance.
-  * Triggers concurrent cleanup of all active child language pods spawned in parallel.
-  * Optionally clears job tracking details from the gateway state and Redis.
-
-#### **[apiServer/fastapi/core/queue/consumer.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/consumer.py)**
-* Added branching to route incoming `delete-scan` messages to the new delete handler.
-
----
-
-### 3. Cross-Pod Coordination
-
-#### **[apiServer/fastapi/core/queue/cancellation.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)**
-* Configured the background Redis Pub/Sub listener to subscribe to `job:cancellations` and `job:deletions`.
-* When a message is received, it decodes the payload, cancels the local `asyncio.Task` if the job is running on that specific pod replica, and purges the job from its in-memory tracker.
+| Behaviour | Cancel (`purge=false`) | Delete (`purge=true`) |
+|---|---|---|
+| Redis `job:{id}:cancelled` flag set | ✅ (24h TTL) | ✅ |
+| Redis Pub/Sub channel published | `job:cancellations` | `job:deletions` |
+| asyncio task cancelled | ✅ | ✅ |
+| Status pushed to `CANCELLED` | ✅ | ❌ (records wiped) |
+| PVC artifacts removed | ✅ (parent + all children) | ✅ (parent + all children) |
+| Redis keys deleted immediately | ❌ (natural TTL expiry) | ✅ **in HTTP handler, before queue** |
+| In-memory tracker cleared immediately | ❌ | ✅ **in HTTP handler, before queue** |
+| Child tracking maps cleared | ❌ | ✅ (async, in queue worker) |
+| Job visible in UI after action | ✅ (shown as CANCELLED) | ❌ (gone immediately) |
 
 ---
 
-### 4. Child Sandbox Pod Cleanup
+## 6. Bug Fix: Ghost Job After Cancel → Delete
 
-#### **[apiServer/fastapi/scan_repository/file_scanner.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/file_scanner.py)**
-* Implemented `cleanup_child_jobs(state, parent_job_id)`:
-  * Extracts child job IDs (the separate language scans running in parallel) from the parent's metadata.
-  * Dispatches parallel `DELETE /api/v1/01sbx/scan-jobs/{child_job_id}?terminate=true` requests to `opensandbox-server` to terminate all active child language pods.
+### The Problem
+
+When a job was first **cancelled** (`purge=false`) and then the user clicked the **trash icon** (delete, `purge=true`) on the cancelled entry, the job reappeared in the UI within 5 seconds.
+
+Two bugs were conspiring:
+
+**Bug 1 — Backend race window (primary cause)**
+
+The original `cancel_or_delete_job` handler published straight to RabbitMQ and returned `DELETE_QUEUED`. The actual Redis key deletion happened asynchronously inside the queue worker — potentially seconds later. During that window, the UI's 5-second `GET /v1/repo-scan/jobs` poll still found `job:{id}:status = "CANCELLED"` in Redis and returned the job to the frontend, causing `syncFromServer` to re-insert it, overriding the local removal.
+
+**Bug 2 — Frontend misclassified `CANCELLED` as active**
+
+The mount-time SSE reconnect logic and both `syncFromServer` branches only checked `["DONE", "ERROR"]` as terminal states. A `CANCELLED` job was treated as still-active, causing the frontend to open an unnecessary SSE stream and re-insert the job when loaded from `localStorage` after a page refresh.
+
+### Fix 1 — Eager synchronous Redis purge in the HTTP handler
+
+**File:** [`scan_jobs/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_jobs/router.py)
+
+When `purge=true`, the HTTP handler now wipes all Redis keys and the in-memory tracker entry **synchronously before** publishing to the queue:
+
+```python
+if purge:
+    # Wipe immediately so the next UI poll finds nothing
+    state.job_tracker.delete_job(job_id)
+    state.redis_client.delete(
+        f"job:{job_id}:status",    f"job:{job_id}:metadata",
+        f"job:{job_id}:events",    f"job:{job_id}:result",
+        f"job:{job_id}:cancelled", f"job:{job_id}:child_jobs",
+    )
+
+# Queue the RabbitMQ worker for PVC/sandbox teardown (still async)
+await publish("scan.delete", {"job_id": job_id, "purge": purge})
+```
+
+The RabbitMQ worker still runs to tear down PVC/sandbox artifacts — it just no longer races against the UI poll for the Redis job record.
+
+### Fix 2 — `CANCELLED` added to terminal-state sets in the frontend
+
+**File:** [`z1sandbox-website/src/hooks/useJobStore.ts`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/z1sandbox-website/src/hooks/useJobStore.ts)
+
+`"CANCELLED"` was added to all three terminal-status exclusion checks:
+
+```typescript
+// Mount-time reconnect — do not reopen SSE stream for cancelled jobs on page refresh
+const activeJobs = jobStore.getAll(jobType).filter(
+  j => !["DONE", "ERROR", "CANCELLED"].includes(j.status)
+);
+
+// syncFromServer — do not open SSE for a newly discovered cancelled job
+if (!["DONE", "ERROR", "CANCELLED"].includes(sj.status) && !esRefs.current[sj.job_id]) {
+  openStream(sj.job_id, sj.eventIndex ?? 0);
+}
+
+// syncFromServer — do not reconnect SSE for an existing cancelled job
+if (!["DONE", "ERROR", "CANCELLED"].includes(sj.status) && streamErrors.current[sj.job_id] < 3) {
+  openStream(sj.job_id, existing.eventIndex ?? 0);
+}
+```
 
 ---
 
-### 5. API Routers
+## 7. End-to-End Deletion Flow (Step-by-Step)
 
-#### **[apiServer/fastapi/scan_jobs/router.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_jobs/router.py)**
-* Refactored `cancel_or_delete_job` (DELETE `/v1/jobs/{job_id}`) to check RabbitMQ connection status.
-* Returns `status: "DELETE_QUEUED"` if successful, or raises a `503` exception if RabbitMQ is not available.
+**Step 1 — UI Client-Side Eviction**
+- The user clicks the trash icon on a scan job in the dashboard.
+- The frontend immediately removes the job from `localStorage` (`unified_jobs_v1`), closes any open SSE stream for that job ID, and re-renders (job disappears instantly).
+- It then sends `DELETE /v1/jobs/{job_id}?purge=true` to the API.
 
-#### **[apiServer/fastapi/proxy/router.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/proxy/router.py)**
-* Intercepted `proxy_cancel_or_delete_job` delete request (DELETE `/api/{version}/{backend_id}/v1/jobs/{job_id}`) and refactored it to follow the same RabbitMQ publish pipeline.
+**Step 2 — Gateway Router (Eager Purge + Decoupling)**
+- The FastAPI Gateway validates the auth token and checks RabbitMQ availability.
+- If `purge=true`: synchronously deletes all 6 Redis keys and removes the job from the in-memory `job_tracker` — making the job invisible to the next `GET /v1/repo-scan/jobs` poll immediately.
+- Publishes `{"job_id": job_id, "purge": true}` to the `scan.delete` RabbitMQ exchange.
+- Returns `200 OK {"status": "DELETE_QUEUED"}` in < 1 ms.
+
+**Step 3 — RabbitMQ Queue & Consumer Delivery**
+- The delete message sits in the durable `scan.delete` queue.
+- A background consumer worker receives the message and calls `handle_delete_job()` → `perform_job_deletion()`.
+
+**Step 4 — Redis Cross-Pod Coordination (Phase 1)**
+- Sets `job:{job_id}:cancelled = "true"` in Redis (24h TTL) as a poll-guard for pods about to start the job.
+- Publishes to `job:deletions` Pub/Sub channel. All replica pods' `setup_cancellation_listener()` coroutines receive the broadcast and call `cancel_active_task()` on any local `asyncio.Task` for that job.
+
+**Step 5 — Kubernetes Sandbox & PVC Cleanup (Phase 2)**
+- Calls `backend.delete_scan_job(job_id, terminate=True)` which hits `opensandbox-server` to terminate the parent sandbox pod and purge its PVC workspace.
+- Iterates over all collected child job IDs and sends individual `DELETE /scan-jobs/{child_id}?terminate=true` requests — removing every language-specific workspace from the PVC.
+
+**Step 6 — Final State Purge (Phase 3, purge=true only)**
+- Calls `job_tracker.delete_job(job_id)` to erase all in-memory events and status records.
+- Deletes `job:{job_id}:child_jobs` from Redis and clears `all_child_jobs_by_parent` / `active_child_jobs_by_parent` maps.
+- Consumer sends `msg.ack()` back to RabbitMQ, removing the deletion message from the queue.
 
 ---
 
-## Scaling & High-Concurrency Behavior (100+ Requests)
+## 8. Key Functions Reference
 
-When a burst of 100+ concurrent deletion or cancellation requests occurs, the system maintains reliability and responsiveness through the following mechanisms:
+### API Entry & Queuing (Publisher)
 
-1. **API Ingestion (High Throughput & Non-blocking):**
-   * The API router verifies RabbitMQ connection status in a lightweight check and immediately publishes the message to RabbitMQ's `scan.delete` queue.
-   * Because it returns `DELETE_QUEUED` with a `200 OK` status immediately, the HTTP request completes in a fraction of a millisecond, leaving the API Gateway server highly responsive to incoming traffic.
+**`cancel_or_delete_job(job_id, purge)`** — [`scan_jobs/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_jobs/router.py)
+- Serves `DELETE /v1/jobs/{job_id}`.
+- When `purge=true`: synchronously wipes Redis keys and in-memory tracker before publishing to the queue.
+- Returns `DELETE_QUEUED` in < 1 ms; raises `503` if RabbitMQ is offline.
 
-2. **RabbitMQ Flow Flow Control (QoS Prefetch Limits):**
-   * The `delete-scan` worker configures a prefetch count of `5` (`prefetch_count=5` by default, or configured via `MAX_DELETE_SCAN_WORKERS` environment variable).
-   * Even if 100+ tasks are sent to `scan.delete` concurrently, each consumer instance only pulls a maximum of 5 messages at a time. The remaining requests reside safely in RabbitMQ, avoiding CPU/Memory thrashing on worker pods.
+**`proxy_cancel_or_delete_job(...)`** — [`proxy/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/proxy/router.py)
+- Intercepts proxied deletion requests and publishes them to the `scan.delete` queue using the same pipeline.
 
-3. **Background Worker Concurrency:**
-   * The local active task is cancelled asynchronously. Redis Pub/Sub acts as a cross-pod broadcast notification system to handle multi-replica setups.
-   * Long-running operations like deleting PVC storage workspaces and destroying remote sandboxes are offloaded to an internal thread pool executor using `asyncio.to_thread()`, keeping the worker's primary asyncio event loop free to run other tasks.
+### Core Deletion Orchestrator
 
-4. **Horizontal Scaling:**
-   * Since RabbitMQ distributes messages in a round-robin/competing-consumer fashion, scaling worker pods increases queue throughput linearly, handling large bursts of cancellations efficiently.
+**`perform_job_deletion(state, job_id, purge)`** — [`core/delete_job.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/delete_job.py)
+- Merges child job IDs from all three sources (two in-memory maps + Redis).
+- Broadcasts cancellation via Redis Pub/Sub.
+- Cancels local asyncio task.
+- Issues PVC/sandbox DELETE calls for parent and all children.
+- Purges all Redis and in-memory records when `purge=true`.
+
+**`handle_delete_job(state, job_id, purge)`** — [`core/queue/delete_handler.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/delete_handler.py)
+- Thin shim called by the RabbitMQ consumer. Delegates to `perform_job_deletion()`.
+
+### Cross-Pod Coordination (Redis Pub/Sub)
+
+**`setup_cancellation_listener(app_state)`** — [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)
+- Runs on every pod replica. Subscribes to `job:cancellations` and `job:deletions` channels. Dispatches incoming job IDs to `cancel_active_task()`.
+
+**`cancel_active_task(app_state, job_id, purge)`** — [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)
+- Locates and cancels the running `asyncio.Task` for the job on this pod.
+- If `purge=false`, pushes a `CANCELLED` status event via `job_tracker.push_event()`.
+
+**`is_job_cancelled_or_deleted(app_state, job_id)`** — [`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)
+- Checked before each language scan starts to abort mid-flight if a cancel/delete arrived during a multi-language pipeline.
+
+### Kubernetes Sandbox Pod Cleanup
+
+**`cleanup_child_jobs(job_ids)`** — [`scan_repository/file_scanner.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/file_scanner.py)
+- Sends concurrent `DELETE /scan-jobs/{child_id}?terminate=true` requests to `opensandbox-server` for all active child language pods.
+- Also called from the pipeline's `finally` block to clean up dangling in-flight children when the parent is cancelled.
+
+**`delete_scan_job(job_id, terminate)`** — [`backends.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/backends.py)
+- Dispatches HTTP DELETE to the remote `opensandbox-server` API to terminate the sandbox and clear PVC storage.
+
+### Frontend Job Store
+
+**`removeJob(jobId)`** — [`hooks/useJobStore.ts`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/z1sandbox-website/src/hooks/useJobStore.ts)
+- Removes the job from `localStorage` and closes its SSE stream immediately.
+- Calls `DELETE /v1/jobs/{jobId}?purge=true` on the backend.
+- `CANCELLED` is now treated as a terminal state (alongside `DONE` and `ERROR`) — no SSE reconnection attempted.
 
 ---
 
-## Verification & Tests
+## 9. Code Base Changes Summary
 
-### 1. Automated Unit Tests
-The test file **[apiServer/fastapi/tests/test_async_delete.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/tests/test_async_delete.py)** validates core components:
-* `test_delete_endpoint_rabbitmq_available`: Validates that delete API returns `DELETE_QUEUED` and correctly publishes to RabbitMQ.
-* `test_delete_endpoint_rabbitmq_unavailable`: Validates that the delete API fails with `503` if RabbitMQ is offline.
-* `test_proxy_delete_endpoint`: Validates proxied delete requests behave asynchronously as well.
-* `test_delete_handler`: Mocks the scheduler state, checks task cancellation, confirms backend cleanup, and validates job tracker purging.
+### Queue Configuration
+**[`core/queue/job_types.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/job_types.py)**
+- Declared the `DELETE_SCAN` job type with `prefetch_count=5`, routing key `scan.delete`, and retry delay queues.
+- Appended to `ALL_SCAN_JOB_TYPES` so consumers start automatically.
 
-#### Run Command:
+### Consumer Routing
+**[`core/queue/consumer.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/consumer.py)**
+- Added branching for `delete-scan` job type → routes to `handle_delete_job()`.
+- Pre-checks `is_job_cancelled_or_deleted()` before starting any job type (early discard if already flagged).
+
+### Delete Handler & Core Orchestration
+**[`core/queue/delete_handler.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/delete_handler.py)** — **[NEW]**
+- Created `handle_delete_job()` as the entry point from the consumer.
+
+**[`core/delete_job.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/delete_job.py)**
+- Implements `perform_job_deletion()` — the core orchestrator for child collection, Redis broadcast, task cancellation, PVC teardown, and state purging.
+
+### Cross-Pod Coordination
+**[`core/queue/cancellation.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/cancellation.py)**
+- Background Redis Pub/Sub listener subscribing to both `job:cancellations` and `job:deletions`.
+- `cancel_active_task()` — cancels local asyncio task and pushes `CANCELLED` status.
+- `is_job_cancelled_or_deleted()` — Redis + in-memory fallback guard checked at scan start.
+
+### Child Sandbox Pod Cleanup
+**[`scan_repository/file_scanner.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/file_scanner.py)**
+- `_submit_scan_job()` — registers child IDs in `active_child_jobs_by_parent`, `all_child_jobs_by_parent`, and Redis `SADD`.
+- `cleanup_child_jobs()` — HTTP DELETE loop for dangling in-flight children.
+
+### API Routers
+**[`scan_jobs/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_jobs/router.py)**
+- **Updated** `cancel_or_delete_job()` to perform eager synchronous Redis purge when `purge=true` before queuing the delete message.
+- Returns `DELETE_QUEUED` on success; raises `503` if RabbitMQ is offline.
+
+**[`proxy/router.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/proxy/router.py)**
+- Intercepted `proxy_cancel_or_delete_job` to follow the same RabbitMQ publish pipeline.
+
+### Frontend
+**[`z1sandbox-website/src/hooks/useJobStore.ts`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/z1sandbox-website/src/hooks/useJobStore.ts)**
+- `removeJob()` calls `DELETE /v1/jobs/{jobId}?purge=true`.
+- `CANCELLED` added to all three terminal-state exclusion sets — prevents ghost job reappearance after cancel → delete.
+
+---
+
+## 10. Scaling & High-Concurrency Behaviour
+
+When 100+ concurrent deletion requests arrive:
+
+1. **API Ingestion (Non-blocking):** Each request completes the Redis eager purge (synchronous but fast — a single `DEL` pipeline call) and publishes to RabbitMQ in < 1 ms, keeping the API Gateway fully responsive.
+
+2. **RabbitMQ QoS Prefetch:** The `delete-scan` consumer configures `prefetch_count=5` (configurable via `PREFETCH_DELETE_SCAN` or `MAX_DELETE_SCAN_WORKERS` env vars). Even with 100+ queued tasks, each worker pulls at most 5 at a time, preventing CPU/memory thrashing.
+
+3. **Thread Pool Offload:** Long-running PVC and sandbox teardown calls are run via `asyncio.to_thread()`, keeping the primary asyncio event loop free for other tasks.
+
+4. **Horizontal Scaling:** Adding more `sandbox-api` replicas increases queue throughput linearly — RabbitMQ distributes messages in competing-consumer fashion across all replicas.
+
+---
+
+## 11. Verification & Tests
+
+### Automated Unit Tests
+
+**[`tests/test_async_delete.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/tests/test_async_delete.py)**
+- `test_delete_endpoint_rabbitmq_available` — validates `DELETE_QUEUED` response and RabbitMQ publish.
+- `test_delete_endpoint_rabbitmq_unavailable` — validates `503` when RabbitMQ is offline.
+- `test_proxy_delete_endpoint` — validates proxied delete requests follow the async pipeline.
+- `test_delete_handler` — mocks scheduler state, checks task cancellation, backend cleanup, and job tracker purging.
+
 ```bash
 PYTHONPATH=apiServer/fastapi pytest apiServer/fastapi/tests/test_async_delete.py
 ```
 
----
+### Integration & Server Verification Scripts
 
-### 2. Integration & Server Verification Scripts
+**[`tests/test_delete_scans.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/tests/test_delete_scans.py)**
+- Auto-detects all running or queued repo scan jobs on the server.
+- Dispatches concurrent deletion and purge requests to the RabbitMQ queue.
+- Verifies that parent jobs are cancelled, child language jobs are killed, and Kubernetes pods are fully cleaned up.
 
-#### **[apiServer/fastapi/tests/test_delete_scans.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/tests/test_delete_scans.py)**
-* Auto-detects all currently running or queued repository scan jobs on the server.
-* Dispatches concurrent deletion and purge requests to the RabbitMQ queue.
-* Verifies that parent jobs are cancelled, child language jobs are killed, and Kubernetes pods are fully cleaned up.
-
-#### **[apiServer/fastapi/tests/delete_existing_scans.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/tests/delete_existing_scans.py)**
-* Provides targeted deletion functionality.
-* Allows deleting by a specific Job UUID, matching a repository URL substring (e.g. `fastapi`), or interactive selection from a list of current jobs.
+**[`tests/delete_existing_scans.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/tests/delete_existing_scans.py)**
+- Targeted deletion by specific Job UUID, repository URL substring, or interactive list selection.
