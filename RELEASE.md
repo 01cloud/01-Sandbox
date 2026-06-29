@@ -1,3 +1,55 @@
+## Release v0.5.111 — 01-Sandbox
+**Release Date:** June 29, 2026
+
+---
+
+### Summary
+v0.5.111 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement fair task distribution in rabbitmq ([1ce9db8](https://github.com/01cloud/01-Sandbox/commit/1ce9db878143a1a337565b0aea4ce2d92ac9b529))
+* delete artificats from pvc ([367587f](https://github.com/01cloud/01-Sandbox/commit/367587fffcb7696f2dd9df9ff8138359ced397bd))
+* hpa ([41e9917](https://github.com/01cloud/01-Sandbox/commit/41e9917ce0f6b7fe45bc36e35fafe5f10868fc94))
+* hpa ([358fb8a](https://github.com/01cloud/01-Sandbox/commit/358fb8af39a671a9e7890af7f57c44e259321371))
+
+### Changes
+## [0.5.111](https://github.com/01cloud/01-Sandbox/compare/v0.5.110...v0.5.111) (2026-06-29)
+
+
+### 🚀 New Features
+
+* implement fair task distribution in rabbitmq ([1ce9db8](https://github.com/01cloud/01-Sandbox/commit/1ce9db878143a1a337565b0aea4ce2d92ac9b529))
+
+
+### 🐛 Bug Fixes
+
+* delete artificats from pvc ([367587f](https://github.com/01cloud/01-Sandbox/commit/367587fffcb7696f2dd9df9ff8138359ced397bd))
+* hpa ([41e9917](https://github.com/01cloud/01-Sandbox/commit/41e9917ce0f6b7fe45bc36e35fafe5f10868fc94))
+* hpa ([358fb8a](https://github.com/01cloud/01-Sandbox/commit/358fb8af39a671a9e7890af7f57c44e259321371))
+* rename the entrypoint file ([c819ee7](https://github.com/01cloud/01-Sandbox/commit/c819ee7805cb4c9fee601dcb9a2bdd5d2ad87f78))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.110 [skip ci] ([deb18f5](https://github.com/01cloud/01-Sandbox/commit/deb18f5b531710eec8853eb43de9de0e08e8013e))
+* **presentation:** add detailed end to end deletion flow ([a7c6f8f](https://github.com/01cloud/01-Sandbox/commit/a7c6f8fcd8912c85a9e2ec84c75201355fa67d3f))
+* **presentation:** add detailed end to end deletion flow ([6cc4245](https://github.com/01cloud/01-Sandbox/commit/6cc42459a9a378add899058e0cf7a44b529dc0de))
+* **readme:** udpate readmefile ([41e258d](https://github.com/01cloud/01-Sandbox/commit/41e258d99bc29945a1eaea25ab72b578bd75dc80))
+* **readme:** update readme file ([d5a3243](https://github.com/01cloud/01-Sandbox/commit/d5a324361cd756fa67e9bd3b5fbb4c40cbd8ca98))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.110 [skip ci] ([67db778](https://github.com/01cloud/01-Sandbox/commit/67db7781596eeb4013edae2b718d97b7cea1fb8d))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.111)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.110 — 01-Sandbox
 **Release Date:** June 26, 2026
 
