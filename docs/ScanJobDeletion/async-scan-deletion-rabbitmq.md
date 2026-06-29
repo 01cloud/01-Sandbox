@@ -666,7 +666,7 @@ async def cleanup_child_jobs(job_ids: set[str]) -> None:
 ### Consumer Routing
 **[`core/queue/consumer.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/consumer.py)**
 - Added branching for `delete-scan` job type → routes to `handle_delete_job()`.
-- Pre-checks `is_job_cancelled_or_deleted()` before starting any job type (early discard if already flagged).
+- Pre-checks `is_job_cancelled_or_deleted()` before starting active scan job types (`quick-scan` and `repo-scan`) to discard messages early while permitting `delete-scan` messages to process.
 
 ### Delete Handler & Core Orchestration
 **[`core/queue/delete_handler.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/delete_handler.py)** — **[NEW]**
