@@ -16,14 +16,14 @@ QUICK_SCAN = ScanJobType(
     "quick-scan",
     "scan.quick",
     "scan.quick",
-    5,
+    1,
     ("scan.quick.5s", "scan.quick.30s", "scan.quick.2m"),
 )
 REPO_SCAN = ScanJobType(
     "repo-scan",
     "scan.repo",
     "scan.repo",
-    3,
+    1,
     ("scan.repo.5s", "scan.repo.30s", "scan.repo.2m"),
 )
 EMAIL_NOTIFICATION = ScanJobType(
