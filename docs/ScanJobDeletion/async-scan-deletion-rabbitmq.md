@@ -342,7 +342,320 @@ if (!["DONE", "ERROR", "CANCELLED"].includes(sj.status) && streamErrors.current[
 
 ---
 
-## 9. Code Base Changes Summary
+## 9. Codebase Deletion Flow & Implementation Reference
+
+The execution flow of a job cancellation or deletion request travels through **7 key files** in order. Below is the precise implementation reference mapping this flow sequence with its code snippets.
+
+### A. Frontend Trigger (`z1sandbox-website/src/hooks/useJobStore.ts`)
+* **Role:** Evicts the job locally from browser cache, terminates the Server-Sent Events (SSE) stream, and dispatches the HTTP DELETE request with `purge=true`.
+
+```typescript
+const removeJob = async (jobId: string) => {
+  // 1. Evict from local store/memory immediately
+  deletedJobIds.current.add(jobId);
+  jobStore.remove(jobId);
+  if (esRefs.current[jobId]) {
+    esRefs.current[jobId].close();
+    delete esRefs.current[jobId];
+  }
+  setVolatileResults(prev => {
+    const copy = { ...prev };
+    delete copy[jobId];
+    return copy;
+  });
+  refresh();
+
+  // 2. HTTP call to trigger backend deletion
+  if (apiKey) {
+    await fetch(`${apiBase}/v1/jobs/${jobId}?purge=true`, {
+      method: "DELETE",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    });
+  }
+};
+```
+
+---
+
+### B. Gateway Router (`apiServer/fastapi/scan_jobs/router.py`)
+* **Role:** Synchronously cleans up cache layers (Redis + local tracker memory) on `purge=true` to prevent race conditions during frontend polling, and pushes the async deletion message to RabbitMQ.
+
+```python
+    @router.delete(
+        "/v1/jobs/{job_id}",
+        tags=["Security Scan Pipeline"],
+        dependencies=[Depends(validate_token)],
+        summary="Cancel a queued or running scan job, or permanently purge a completed job",
+    )
+    async def cancel_or_delete_job(job_id: str, purge: bool = Query(False)):
+        from core.queue import is_available, publish
+
+        if not is_available():
+            raise HTTPException(
+                status_code=503,
+                detail="RabbitMQ service is unavailable. Cannot process job deletion.",
+            )
+
+        # ── Eager purge: wipe Redis + in-memory tracker synchronously ──────────
+        if purge:
+            # 1. Remove from in-memory job tracker (this pod)
+            state.job_tracker.delete_job(job_id)
+
+            # 2. Delete all Redis keys for this job
+            if state.use_redis and state.redis_client:
+                try:
+                    state.redis_client.delete(
+                        f"job:{job_id}:status",
+                        f"job:{job_id}:metadata",
+                        f"job:{job_id}:events",
+                        f"job:{job_id}:result",
+                        f"job:{job_id}:cancelled",
+                        f"job:{job_id}:child_jobs",
+                    )
+                except Exception as redis_err:
+                    print(f"[DeleteJob] Warning: eager Redis purge failed: {redis_err}")
+
+        payload = {"job_id": job_id, "purge": purge}
+        await publish("scan.delete", payload)
+
+        return {"job_id": job_id, "status": "DELETE_QUEUED"}
+```
+
+---
+
+### C. Queue Consumer Routing (`apiServer/fastapi/core/queue/consumer.py` & `delete_handler.py`)
+* **Role:** Background worker consumer parses the message from `scan.delete` queue and forwards it to the orchestrator.
+
+```python
+# core/queue/delete_handler.py
+from core.delete_job import perform_job_deletion
+
+async def handle_delete_job(state, job_id: str, purge: bool = False) -> None:
+    """
+    Handles cancellation, remote PVC/sandbox cleanup, and state purging for a job.
+    Called asynchronously when a scan.delete event is consumed.
+    """
+    await perform_job_deletion(state, job_id, purge=purge)
+```
+
+---
+
+### D. Core Deletion Orchestration (`apiServer/fastapi/core/delete_job.py`)
+* **Role:** Gathers child IDs from all tracking layers, publishes cross-pod notifications to Redis, cancels the local pipeline task, and cascades deletion to child language sandboxes.
+
+```python
+async def perform_job_deletion(state, job_id: str, purge: bool = False) -> None:
+    # 1. Gather all child job IDs associated with this parent job (for cascading deletion)
+    child_job_ids = set()
+    try:
+        from scan_repository.file_scanner import (
+            active_child_jobs_by_parent,
+            all_child_jobs_by_parent,
+        )
+        if job_id in all_child_jobs_by_parent:
+            child_job_ids.update(all_child_jobs_by_parent[job_id])
+        if job_id in active_child_jobs_by_parent:
+            child_job_ids.update(active_child_jobs_by_parent[job_id])
+    except Exception as err:
+        print(f"[Delete Job] Failed to import child job tracking maps: {err}")
+
+    if state.use_redis and state.redis_client:
+        try:
+            redis_children = state.redis_client.smembers(f"job:{job_id}:child_jobs")
+            if redis_children:
+                child_job_ids.update(
+                    c.decode("utf-8") if isinstance(c, bytes) else c
+                    for c in redis_children
+                )
+        except Exception as redis_err:
+            print(f"[Delete Job] Failed to fetch child job IDs from Redis: {redis_err}")
+
+    # 2. Publish cancellation/deletion to Redis for cross-pod coordination
+    if state.use_redis and state.redis_client:
+        try:
+            state.redis_client.set(f"job:{job_id}:cancelled", "true", ex=86400)
+            if purge:
+                state.redis_client.publish("job:deletions", job_id)
+            else:
+                state.redis_client.publish("job:cancellations", job_id)
+        except Exception as e:
+            print(f"[Delete Job] Redis cancellation publish failed: {e}")
+
+    # 3. Cancel the local active task running in memory
+    await cancel_active_task(state, job_id, purge=purge)
+
+    # 4. Request remote PVC and sandbox container cleanup
+    try:
+        await asyncio.to_thread(state.backend.delete_scan_job, job_id, terminate=True)
+    except Exception as e:
+        print(f"[Delete Job] PVC/sandbox deletion failed for job {job_id}: {e}")
+
+    # 5. Cascading deletion of all identified child jobs
+    for cid in child_job_ids:
+        await cancel_active_task(state, cid, purge=purge)
+        try:
+            await asyncio.to_thread(state.backend.delete_scan_job, cid, terminate=True)
+        except Exception as e:
+            print(f"[Delete Job] Cascaded deletion failed for child job {cid}: {e}")
+
+        if purge:
+            state.job_tracker.delete_job(cid)
+            if state.use_redis and state.redis_client:
+                try:
+                    state.redis_client.delete(f"job:{cid}:status")
+                    state.redis_client.delete(f"job:{cid}:metadata")
+                    state.redis_client.delete(f"job:{cid}:result")
+                    state.redis_client.delete(f"job:{cid}:events")
+                except Exception:
+                    pass
+
+    # 6. If purge=True, remove job records from the local/in-memory job tracker
+    if purge:
+        state.job_tracker.delete_job(job_id)
+        if state.use_redis and state.redis_client:
+            try:
+                state.redis_client.delete(f"job:{job_id}:child_jobs")
+            except Exception:
+                pass
+        try:
+            from scan_repository.file_scanner import (
+                active_child_jobs_by_parent,
+                all_child_jobs_by_parent,
+            )
+            all_child_jobs_by_parent.pop(job_id, None)
+            active_child_jobs_by_parent.pop(job_id, None)
+        except Exception:
+            pass
+```
+
+---
+
+### E. Cross-Pod Coordination Listener (`apiServer/fastapi/core/queue/cancellation.py`)
+* **Role:** Subscribed to `job:cancellations` and `job:deletions` channels. When notified, it terminates the local `asyncio.Task` matching the `job_id`.
+
+```python
+async def setup_cancellation_listener(app_state) -> None:
+    pubsub = app_state.redis_client.pubsub()
+    pubsub.subscribe("job:cancellations", "job:deletions")
+
+    while True:
+        try:
+            msg = pubsub.get_message(ignore_subscribe_messages=True, timeout=1.0)
+            if msg:
+                channel = msg.get("channel")
+                job_id = msg.get("data")
+                if channel == "job:cancellations":
+                    await cancel_active_task(app_state, job_id)
+                elif channel == "job:deletions":
+                    await cancel_active_task(app_state, job_id, purge=True)
+                    if job_id in app_state.job_tracker._jobs:
+                        del app_state.job_tracker._jobs[job_id]
+        except Exception as e:
+            print(f"[Cancellation] Listener error: {e}")
+        await asyncio.sleep(0.5)
+
+
+async def cancel_active_task(app_state, job_id: str, purge: bool = False) -> None:
+    job = app_state.job_tracker.get_job(job_id)
+    current_progress = 0
+    if job and job.event_log:
+        current_progress = job.event_log[-1].progress
+
+    task = app_state.active_tasks.get(job_id)
+    if task:
+        task.cancel()  # Injects asyncio.CancelledError into task
+        if not purge:
+            await app_state.job_tracker.push_event(
+                job_id, "CANCELLED", "Job was cancelled by the user.", current_progress
+            )
+    else:
+        if not purge and job and job.step != "CANCELLED":
+            await app_state.job_tracker.push_event(
+                job_id, "CANCELLED", "Job was cancelled by the user.", current_progress
+            )
+```
+
+---
+
+### F. Pipeline Cancellation Handler (`apiServer/fastapi/scan_repository/scan_repository.py`)
+* **Role:** Catch `asyncio.CancelledError` thrown inside the runner loop, and use `finally` to trigger cleanup of parent/child sandboxes and context variables.
+
+```python
+    try:
+        # Core scanner execution logic...
+        pass
+    except asyncio.CancelledError:
+        log("CANCELLED", "Job was cancelled by the user")
+        raise
+    finally:
+        if sandbox_id:
+            log("CLEANUP", f"Destroying sandbox: {sandbox_id}")
+            await destroy_sandbox(sandbox_id)
+
+        # Clean up any active/dangling child scan jobs on the server
+        child_jobs = active_child_jobs_by_parent.pop(job_id, set())
+        if child_jobs:
+            log("CLEANUP", f"Cleaning up dangling child jobs on server: {child_jobs}")
+            await asyncio.shield(cleanup_child_jobs(child_jobs))
+
+        unregister_pipeline_task(job_id, app_state, token)
+```
+
+---
+
+### G. Task Registry & Child Job Cleanup (`lifecycle_tracker.py` & `file_scanner.py`)
+* **Role:** Map running Python thread contexts to `job_id` so the cancellation listener can find them, and perform remote `DELETE` queries to clean up child jobs.
+
+```python
+# scan_repository/lifecycle_tracker.py
+def register_pipeline_task(job_id: str, app_state):
+    token = current_parent_job_id.set(job_id)
+    try:
+        current_task = asyncio.current_task()
+        if current_task and hasattr(app_state, "active_tasks"):
+            app_state.active_tasks[job_id] = current_task
+    except Exception as e:
+        print(f"[RepoScanner][Lifecycle] Failed to register task: {e}")
+    return token
+
+def unregister_pipeline_task(job_id: str, app_state, token) -> None:
+    try:
+        if hasattr(app_state, "active_tasks"):
+            app_state.active_tasks.pop(job_id, None)
+    except Exception as e:
+        print(f"[RepoScanner][Lifecycle] Failed to unregister task: {e}")
+    try:
+        current_parent_job_id.reset(token)
+    except Exception as e:
+        print(f"[RepoScanner][Lifecycle] Failed to reset context: {e}")
+```
+
+```python
+# scan_repository/file_scanner.py
+async def cleanup_child_jobs(job_ids: set[str]) -> None:
+    base_url = opensandbox_base_url()
+    prefix = opensandbox_route_prefix()
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        for jid in list(job_ids):
+            try:
+                url = f"{base_url.rstrip('/')}{prefix}/scan-jobs/{jid}"
+                await client.delete(
+                    url, params={"terminate": "true"}, headers=opensandbox_headers()
+                )
+                try:
+                    from core import state
+                    state.job_tracker.delete_job(jid)
+                except Exception:
+                    pass
+            except Exception as e:
+                print(f"[CLEANUP] Failed to delete child job {jid}: {e}")
+```
+
+---
+
+## 10. Code Base Changes Summary
 
 ### Queue Configuration
 **[`core/queue/job_types.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/core/queue/job_types.py)**
@@ -387,7 +700,7 @@ if (!["DONE", "ERROR", "CANCELLED"].includes(sj.status) && streamErrors.current[
 
 ---
 
-## 10. Scaling & High-Concurrency Behaviour
+## 11. Scaling & High-Concurrency Behaviour
 
 When 100+ concurrent deletion requests arrive:
 
@@ -401,7 +714,7 @@ When 100+ concurrent deletion requests arrive:
 
 ---
 
-## 11. Verification & Tests
+## 12. Verification & Tests
 
 ### Automated Unit Tests
 
