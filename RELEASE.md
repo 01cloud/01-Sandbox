@@ -1,3 +1,50 @@
+## Release v0.5.117 — 01-Sandbox
+**Release Date:** June 30, 2026
+
+---
+
+### Summary
+v0.5.117 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement test suites in auth0 ([befb0b3](https://github.com/01cloud/01-Sandbox/commit/befb0b3a71c30d19c34b9669a9080c2735578789))
+* implement test suites in auth0 ([3e2b834](https://github.com/01cloud/01-Sandbox/commit/3e2b834b40b7149cda71e877c3e4f1c5e19ba17e))
+* assign prefetch to 1 ([40cf62a](https://github.com/01cloud/01-Sandbox/commit/40cf62ad696b6dd3a8ecef3589c1b94591f7c006))
+* assign prefetch to 1 ([d060b04](https://github.com/01cloud/01-Sandbox/commit/d060b04bbe18ab297d89f4e39abad3e1053da3be))
+
+### Changes
+## [0.5.117](https://github.com/01cloud/01-Sandbox/compare/v0.5.116...v0.5.117) (2026-06-30)
+
+
+### 🚀 New Features
+
+* implement test suites in auth0 ([befb0b3](https://github.com/01cloud/01-Sandbox/commit/befb0b3a71c30d19c34b9669a9080c2735578789))
+* implement test suites in auth0 ([3e2b834](https://github.com/01cloud/01-Sandbox/commit/3e2b834b40b7149cda71e877c3e4f1c5e19ba17e))
+
+
+### 🐛 Bug Fixes
+
+* assign prefetch to 1 ([40cf62a](https://github.com/01cloud/01-Sandbox/commit/40cf62ad696b6dd3a8ecef3589c1b94591f7c006))
+* assign prefetch to 1 ([d060b04](https://github.com/01cloud/01-Sandbox/commit/d060b04bbe18ab297d89f4e39abad3e1053da3be))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.116 [skip ci] ([f57e8d5](https://github.com/01cloud/01-Sandbox/commit/f57e8d5758e86cb6e36666857e0c022753103f0a))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.116 [skip ci] ([522bad2](https://github.com/01cloud/01-Sandbox/commit/522bad2b76ace0a6cd0a7e86d46a74a4ac9c98b8))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.117)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.116 — 01-Sandbox
 **Release Date:** June 30, 2026
 
