@@ -1,5 +1,29 @@
 # Changelog
 
+## [0.5.117](https://github.com/01cloud/01-Sandbox/compare/v0.5.116...v0.5.117) (2026-06-30)
+
+
+### 🚀 New Features
+
+* implement test suites in auth0 ([befb0b3](https://github.com/01cloud/01-Sandbox/commit/befb0b3a71c30d19c34b9669a9080c2735578789))
+* implement test suites in auth0 ([3e2b834](https://github.com/01cloud/01-Sandbox/commit/3e2b834b40b7149cda71e877c3e4f1c5e19ba17e))
+
+
+### 🐛 Bug Fixes
+
+* assign prefetch to 1 ([40cf62a](https://github.com/01cloud/01-Sandbox/commit/40cf62ad696b6dd3a8ecef3589c1b94591f7c006))
+* assign prefetch to 1 ([d060b04](https://github.com/01cloud/01-Sandbox/commit/d060b04bbe18ab297d89f4e39abad3e1053da3be))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.116 [skip ci] ([f57e8d5](https://github.com/01cloud/01-Sandbox/commit/f57e8d5758e86cb6e36666857e0c022753103f0a))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.116 [skip ci] ([522bad2](https://github.com/01cloud/01-Sandbox/commit/522bad2b76ace0a6cd0a7e86d46a74a4ac9c98b8))
+
 ## [0.5.116](https://github.com/01cloud/01-Sandbox/compare/v0.5.115...v0.5.116) (2026-06-30)
 
 
