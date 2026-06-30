@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.5.116](https://github.com/01cloud/01-Sandbox/compare/v0.5.115...v0.5.116) (2026-06-30)
+
+
+### 🐛 Bug Fixes
+
+* update the fixes to the demo ([cd74374](https://github.com/01cloud/01-Sandbox/commit/cd7437425ccd2fbd2743de44f6b0e4873c19dd74))
+* update the fixes to the demo ([f07c717](https://github.com/01cloud/01-Sandbox/commit/f07c717aac1e75668f8d44b0bfe362948e4cae0e))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.115 [skip ci] ([abfb3ff](https://github.com/01cloud/01-Sandbox/commit/abfb3ffb5d85008b8c88b559dc3d08a9b9a162c0))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.115 [skip ci] ([0ea2acf](https://github.com/01cloud/01-Sandbox/commit/0ea2acf5cb11571efab51b684054e4de8934238c))
+
 ## [0.5.115](https://github.com/01cloud/01-Sandbox/compare/v0.5.114...v0.5.115) (2026-06-29)
 
 
