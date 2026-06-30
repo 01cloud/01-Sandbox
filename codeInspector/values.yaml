@@ -159,8 +159,8 @@ apiServer:
     port: 5672
     user: "admin"
     password: "changeme"
-    maxQuickScanWorkers: "2"
-    maxRepoScanWorkers: "5"
+    maxQuickScanWorkers: "1"
+    maxRepoScanWorkers: "1"
 ################################################################
 # MetalLB component values
 ################################################################
