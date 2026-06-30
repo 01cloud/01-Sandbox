@@ -145,6 +145,9 @@ async def run_bulk_demo(connection):
 
     # Clean up
     await main_queue.cancel(consumer_tag)
+    # Wait for any active jobs to finish to avoid asyncio.CancelledError on channel close
+    while active_jobs:
+        await asyncio.sleep(0.1)
     await channel.close()
     print(f"\n{BOLD}{GREEN}=== DEMO 1 COMPLETE ==={RESET}")
     print(
@@ -215,13 +218,13 @@ async def run_retry_demo(connection):
             )
 
             # Acknowledge original message to remove it from main queue
-            message.ack()
+            await message.ack()
         else:
             # Final failure: Reject without requeue, moving it to DLQ via RabbitMQ topology
             print(
                 f"  ↳ ☠ {RED}Max retries exceeded! Rejecting message to move it to DLQ...{RESET}"
             )
-            message.reject(requeue=False)
+            await message.reject(requeue=False)
 
     consumer_tag = await main_queue.consume(process_failing_message)
 
