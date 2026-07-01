@@ -1,3 +1,44 @@
+## Release v0.5.119 — 01-Sandbox
+**Release Date:** July 01, 2026
+
+---
+
+### Summary
+v0.5.119 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* update the email body with timeframe and date ([82a53ec](https://github.com/01cloud/01-Sandbox/commit/82a53ecb751c571095c1408661c6c3d9a6e20c51))
+* update the email body with timeframe and date ([84f38f7](https://github.com/01cloud/01-Sandbox/commit/84f38f788bd73b8f57d89839cafbc86b80762378))
+* generate RELEASE.md for v0.5.118 [skip ci] ([502ebd8](https://github.com/01cloud/01-Sandbox/commit/502ebd86e11b68d616c14ffba9f40aad14133ec6))
+* bump versions to v0.5.118 [skip ci] ([880196e](https://github.com/01cloud/01-Sandbox/commit/880196e52e3487990f50e0254f297337cc5af2d6))
+
+### Changes
+## [0.5.119](https://github.com/01cloud/01-Sandbox/compare/v0.5.118...v0.5.119) (2026-07-01)
+
+
+### 🐛 Bug Fixes
+
+* update the email body with timeframe and date ([82a53ec](https://github.com/01cloud/01-Sandbox/commit/82a53ecb751c571095c1408661c6c3d9a6e20c51))
+* update the email body with timeframe and date ([84f38f7](https://github.com/01cloud/01-Sandbox/commit/84f38f788bd73b8f57d89839cafbc86b80762378))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.118 [skip ci] ([502ebd8](https://github.com/01cloud/01-Sandbox/commit/502ebd86e11b68d616c14ffba9f40aad14133ec6))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.118 [skip ci] ([880196e](https://github.com/01cloud/01-Sandbox/commit/880196e52e3487990f50e0254f297337cc5af2d6))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.119)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.118 — 01-Sandbox
 **Release Date:** July 01, 2026
 
