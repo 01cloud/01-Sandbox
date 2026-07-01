@@ -378,18 +378,18 @@ async def test_send_expiry_email_body_formatting():
             args_3m, kwargs_3m = mock_post.call_args
             body_3m = kwargs_3m["json"]["content"][0]["value"]
             assert "approaching expiration in 3 minutes" in body_3m
-            assert "16/06/2026 08:08 EST" in body_3m
+            assert "16/06/2026 08:08 AM EST" in body_3m
 
         with patch("httpx.AsyncClient.post", return_value=mock_response) as mock_post:
             await send_expiry_email(payload_1h)
             args_1h, kwargs_1h = mock_post.call_args
             body_1h = kwargs_1h["json"]["content"][0]["value"]
             assert "approaching expiration in 1 hour" in body_1h
-            assert "16/06/2026 10:00 EST" in body_1h
+            assert "16/06/2026 10:00 AM EST" in body_1h
 
         with patch("httpx.AsyncClient.post", return_value=mock_response) as mock_post:
             await send_expiry_email(payload_24h)
             args_24h, kwargs_24h = mock_post.call_args
             body_24h = kwargs_24h["json"]["content"][0]["value"]
             assert "approaching expiration in 24 hours" in body_24h
-            assert "26/06/2026 08:00 EST" in body_24h
+            assert "26/06/2026 08:00 AM EST" in body_24h
