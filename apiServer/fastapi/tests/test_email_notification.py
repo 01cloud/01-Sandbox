@@ -303,6 +303,7 @@ async def test_send_real_expiry_email():
         "recipient": "lamakamal89@gmail.com",
         "key_id": "real-test-jti",
         "key_name": "Real Test Key",
+        "created_at": "2026-06-15T12:00:00Z",
         "expires_at": "2026-06-16T12:00:00Z",
         "prefix": "ci_real",
     }
@@ -324,3 +325,71 @@ async def test_send_real_expiry_email():
         except Exception as e:
             print(f"\n[FAILURE] Failed to send real test email: {e}")
             raise e
+
+
+@pytest.mark.asyncio
+async def test_send_expiry_email_body_formatting():
+    """Verify that send_expiry_email correctly calculates the lead time (n) and formats the body with EST."""
+    # Scenario 1: TTL = 8 minutes (should trigger 3 minutes lead time)
+    payload_3m = {
+        "job_id": "email_job_3m",
+        "recipient": "user@example.com",
+        "key_id": "some-jti-3m",
+        "key_name": "Test Key 3M",
+        "created_at": "2026-06-16T12:00:00Z",
+        "expires_at": "2026-06-16T12:08:00Z",
+        "prefix": "ci_test",
+    }
+
+    # Scenario 2: TTL = 2 hours (should trigger 1 hour lead time)
+    payload_1h = {
+        "job_id": "email_job_1h",
+        "recipient": "user@example.com",
+        "key_id": "some-jti-1h",
+        "key_name": "Test Key 1H",
+        "created_at": "2026-06-16T12:00:00Z",
+        "expires_at": "2026-06-16T14:00:00Z",
+        "prefix": "ci_test",
+    }
+
+    # Scenario 3: TTL = 10 days (should trigger 24 hours lead time)
+    payload_24h = {
+        "job_id": "email_job_24h",
+        "recipient": "user@example.com",
+        "key_id": "some-jti-24h",
+        "key_name": "Test Key 24H",
+        "created_at": "2026-06-16T12:00:00Z",
+        "expires_at": "2026-06-26T12:00:00Z",
+        "prefix": "ci_test",
+    }
+
+    mock_response = MagicMock()
+    mock_response.status_code = 202
+    mock_response.text = "Accepted"
+
+    env_vars = {
+        "SENDGRID_API_KEY": "dummy-key",
+        "SENDGRID_FROM_EMAIL": "test@example.com",
+    }
+
+    with patch.dict(os.environ, env_vars):
+        with patch("httpx.AsyncClient.post", return_value=mock_response) as mock_post:
+            await send_expiry_email(payload_3m)
+            args_3m, kwargs_3m = mock_post.call_args
+            body_3m = kwargs_3m["json"]["content"][0]["value"]
+            assert "approaching expiration in 3 minutes" in body_3m
+            assert "16/06/2026 EST" in body_3m
+
+        with patch("httpx.AsyncClient.post", return_value=mock_response) as mock_post:
+            await send_expiry_email(payload_1h)
+            args_1h, kwargs_1h = mock_post.call_args
+            body_1h = kwargs_1h["json"]["content"][0]["value"]
+            assert "approaching expiration in 1 hour" in body_1h
+            assert "16/06/2026 EST" in body_1h
+
+        with patch("httpx.AsyncClient.post", return_value=mock_response) as mock_post:
+            await send_expiry_email(payload_24h)
+            args_24h, kwargs_24h = mock_post.call_args
+            body_24h = kwargs_24h["json"]["content"][0]["value"]
+            assert "approaching expiration in 24 hours" in body_24h
+            assert "26/06/2026 EST" in body_24h

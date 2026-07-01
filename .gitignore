@@ -26,3 +26,5 @@ test.sh
 
 __pycache__/
 *.pyc
+
+node_modules

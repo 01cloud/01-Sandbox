@@ -91,7 +91,12 @@ async def check_expiring_keys_task(app_state) -> None:
                             "recipient": recipient,
                             "key_id": key_id,
                             "key_name": row["name"],
-                            "expires_at": row["expires_at"],
+                            "created_at": row["created_at"].isoformat()
+                            if hasattr(row["created_at"], "isoformat")
+                            else row["created_at"],
+                            "expires_at": row["expires_at"].isoformat()
+                            if hasattr(row["expires_at"], "isoformat")
+                            else row["expires_at"],
                             "prefix": row["prefix"],
                         }
 
