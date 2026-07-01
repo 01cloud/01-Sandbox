@@ -1,3 +1,44 @@
+## Release v0.5.120 — 01-Sandbox
+**Release Date:** July 01, 2026
+
+---
+
+### Summary
+v0.5.120 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* update the email body with timeframe and AM/PM date format ([03da60c](https://github.com/01cloud/01-Sandbox/commit/03da60c51fc8c2bbdcfe45a14c33227590ba86d7))
+* update the email body with timeframe and AM/PM date format ([a7ac085](https://github.com/01cloud/01-Sandbox/commit/a7ac085c850971bcb4e69ef61f9c452e70c5130a))
+* generate RELEASE.md for v0.5.119 [skip ci] ([f501a25](https://github.com/01cloud/01-Sandbox/commit/f501a25d65fde964552cff781f2ac6446ab75200))
+* bump versions to v0.5.119 [skip ci] ([ed4f0ad](https://github.com/01cloud/01-Sandbox/commit/ed4f0ad27f70244cfeda6698c3dcfb2fa5caa61b))
+
+### Changes
+## [0.5.120](https://github.com/01cloud/01-Sandbox/compare/v0.5.119...v0.5.120) (2026-07-01)
+
+
+### 🐛 Bug Fixes
+
+* update the email body with timeframe and AM/PM date format ([03da60c](https://github.com/01cloud/01-Sandbox/commit/03da60c51fc8c2bbdcfe45a14c33227590ba86d7))
+* update the email body with timeframe and AM/PM date format ([a7ac085](https://github.com/01cloud/01-Sandbox/commit/a7ac085c850971bcb4e69ef61f9c452e70c5130a))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.119 [skip ci] ([f501a25](https://github.com/01cloud/01-Sandbox/commit/f501a25d65fde964552cff781f2ac6446ab75200))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.119 [skip ci] ([ed4f0ad](https://github.com/01cloud/01-Sandbox/commit/ed4f0ad27f70244cfeda6698c3dcfb2fa5caa61b))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.5.120)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.119 — 01-Sandbox
 **Release Date:** July 01, 2026
 
