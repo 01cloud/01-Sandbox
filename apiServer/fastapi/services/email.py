@@ -44,7 +44,7 @@ async def send_expiry_email(payload: dict) -> None:
 
             # Convert to America/New_York timezone (EST/EDT)
             expires_est = expires_at.astimezone(ZoneInfo("America/New_York"))
-            time_str = expires_est.strftime("%d/%m/%Y")
+            time_str = expires_est.strftime("%d/%m/%Y %H:%M")
         except Exception:
             time_str = str(expires_at_val)
 
