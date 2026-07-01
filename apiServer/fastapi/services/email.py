@@ -1,4 +1,6 @@
+import datetime
 import os
+from zoneinfo import ZoneInfo
 
 import httpx
 
@@ -22,11 +24,65 @@ async def send_expiry_email(payload: dict) -> None:
         )
         return
 
+    # Parse and format expires_at and created_at timestamps
+    created_at_val = payload.get("created_at")
+    expires_at_val = payload.get("expires_at")
+
+    created_at = None
+    expires_at = None
+    time_str = "unknown"
+    n_str = "24 hours"
+
+    if expires_at_val:
+        try:
+            if isinstance(expires_at_val, str):
+                expires_at = datetime.datetime.fromisoformat(
+                    expires_at_val.replace("Z", "+00:00")
+                )
+            else:
+                expires_at = expires_at_val
+
+            # Convert to America/New_York timezone (EST/EDT)
+            expires_est = expires_at.astimezone(ZoneInfo("America/New_York"))
+            time_str = expires_est.strftime("%d/%m/%Y")
+        except Exception:
+            time_str = str(expires_at_val)
+
+    if created_at_val and expires_at:
+        try:
+            if isinstance(created_at_val, str):
+                created_at = datetime.datetime.fromisoformat(
+                    created_at_val.replace("Z", "+00:00")
+                )
+            else:
+                created_at = created_at_val
+
+            # Ensure both are timezone-aware or both naive for subtraction
+            if created_at.tzinfo is None and expires_at.tzinfo is not None:
+                created_at = created_at.replace(tzinfo=datetime.timezone.utc)
+            if expires_at.tzinfo is None and created_at.tzinfo is not None:
+                expires_at = expires_at.replace(tzinfo=datetime.timezone.utc)
+
+            ttl_minutes = (expires_at - created_at).total_seconds() / 60.0
+
+            if ttl_minutes <= 10.0:
+                n_str = "3 minutes"
+            elif ttl_minutes <= 60.0:
+                n_str = "10 minutes"
+            elif ttl_minutes <= 1440.0:
+                n_str = "1 hour"
+            elif ttl_minutes <= 10080.0:
+                n_str = "12 hours"
+            else:
+                n_str = "24 hours"
+        except Exception:
+            pass
+
     subject = f"Security Alert: Your API key '{key_name}' is approaching expiration"
     body = (
         f"Hello,\n\n"
         f"This is an automated notification that your API key '{key_name}' "
-        f"is approaching expiration.\n\n"
+        f"is approaching expiration in {n_str} on {time_str} EST.\n\n"
         f"To prevent any service interruption, please generate a new API key as soon as possible "
         f"and update your client configuration.\n\n"
         f"Best Regards,\n"
