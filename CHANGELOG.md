@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.5.118](https://github.com/01cloud/01-Sandbox/compare/v0.5.117...v0.5.118) (2026-07-01)
+
+
+### 🐛 Bug Fixes
+
+* update the email body with timeframe and date ([1a66f48](https://github.com/01cloud/01-Sandbox/commit/1a66f487531bd39e4d36565a03e34b04fea24ba3))
+* update the email body with timeframe and date ([6f6e2c7](https://github.com/01cloud/01-Sandbox/commit/6f6e2c7f9700bd7de93caad27b55171f5631379b))
+* update the email body with timeframe and date ([a502cde](https://github.com/01cloud/01-Sandbox/commit/a502cde0614d85794d46980ca35ef9c0859ccfbe))
+* update the email body with timeframe and date ([1e24eb3](https://github.com/01cloud/01-Sandbox/commit/1e24eb3c2c096a7e26a150e35670ee610fbb6b5b))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.117 [skip ci] ([8f80876](https://github.com/01cloud/01-Sandbox/commit/8f8087640fe2fee9fa0674dfbde85c14393a6ac7))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.117 [skip ci] ([361462f](https://github.com/01cloud/01-Sandbox/commit/361462f81b66464cea78efa9c84d8c02b74c632d))
+
 ## [0.5.117](https://github.com/01cloud/01-Sandbox/compare/v0.5.116...v0.5.117) (2026-06-30)
 
 
