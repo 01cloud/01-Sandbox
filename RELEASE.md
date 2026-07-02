@@ -1,3 +1,50 @@
+## Release v0.6.0 — 01-Sandbox
+**Release Date:** July 02, 2026
+
+---
+
+### Summary
+v0.6.0 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement test in the ci pipeline
+* implement test in the ci pipeline ([2ebef40](https://github.com/01cloud/01-Sandbox/commit/2ebef40937a46936619aacb48e0023dbf41823ae))
+* postgresql pytest implementation ([e90bd09](https://github.com/01cloud/01-Sandbox/commit/e90bd09760952f96a12211511c0c6a2a4eb05912))
+* redis pytest implementation ([7f20c27](https://github.com/01cloud/01-Sandbox/commit/7f20c277c26f60fe75c3a1a7780b5d74cca1023f))
+
+### Changes
+## [0.6.0](https://github.com/01cloud/01-Sandbox/compare/v0.5.120...v0.6.0) (2026-07-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* implement test in the ci pipeline
+
+### 🚀 New Features
+
+* implement test in the ci pipeline ([2ebef40](https://github.com/01cloud/01-Sandbox/commit/2ebef40937a46936619aacb48e0023dbf41823ae))
+* postgresql pytest implementation ([e90bd09](https://github.com/01cloud/01-Sandbox/commit/e90bd09760952f96a12211511c0c6a2a4eb05912))
+* redis pytest implementation ([7f20c27](https://github.com/01cloud/01-Sandbox/commit/7f20c277c26f60fe75c3a1a7780b5d74cca1023f))
+* redis pytest implementation ([afe865d](https://github.com/01cloud/01-Sandbox/commit/afe865d01c27940e7b081775dbdbc5eeace1e637))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.5.120 [skip ci] ([500ba56](https://github.com/01cloud/01-Sandbox/commit/500ba56b133cf76066968ba59903f5f3b15452b7))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.5.120 [skip ci] ([79e224d](https://github.com/01cloud/01-Sandbox/commit/79e224d603959ab39ccd1bdf1b16954102ef4e51))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.0)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.5.120 — 01-Sandbox
 **Release Date:** July 01, 2026
 
