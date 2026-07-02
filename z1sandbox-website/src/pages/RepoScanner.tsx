@@ -113,6 +113,7 @@ export default function RepoScanner() {
   const [expandedLang, setExpandedLang] = useState<string | null>(null);
   // ID of the job currently streamed on this page (UI-submitted or CLI-detected)
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [scanningLanguages, setScanningLanguages] = useState<Record<string, string>>({});
 
   // Private repository scan states
   const [requiresAuth, setRequiresAuth] = useState(false);
@@ -186,6 +187,7 @@ export default function RepoScanner() {
   const resetScan = () => {
     setCurrentStep(""); setStepMessage(""); setProgress(0); setResult(null); setExpandedLang(null);
     setActiveJobId(null);
+    setScanningLanguages({});
     esRef.current?.close(); esRef.current = null;
   };
 
@@ -206,6 +208,10 @@ export default function RepoScanner() {
         setCurrentStep(ev.step);
         setStepMessage(ev.message);
         setProgress(ev.progress);
+
+        if (ev.step === "SCANNING" && ev.detail && ev.detail.languages) {
+          setScanningLanguages(ev.detail.languages);
+        }
 
         if (ev.step === "DONE") {
           if (ev.detail) setResult(ev.detail as ScanResult);
@@ -600,9 +606,53 @@ export default function RepoScanner() {
           )}
 
           {isScanning && !result && (
-            <div className="h-[480px] rounded-[2rem] border border-violet-500/20 bg-violet-500/5 flex flex-col items-center justify-center gap-6">
-              <Loader2 className="w-10 h-10 animate-spin text-violet-500" />
-              <p className="font-black text-xl tracking-tight">{STEP_LABELS[currentStep] || "Processing..."}</p>
+            <div className="h-[480px] rounded-[2rem] border border-violet-500/20 bg-violet-500/5 flex flex-col items-center justify-center p-8 gap-6 overflow-hidden">
+              {currentStep === "SCANNING" && Object.keys(scanningLanguages).length > 0 ? (
+                <div className="w-full max-w-md flex flex-col gap-6">
+                  <div className="text-center">
+                    <Loader2 className="w-10 h-10 animate-spin text-violet-500 mx-auto mb-3" />
+                    <p className="font-black text-xl tracking-tight">Security Scan In Progress</p>
+                    <p className="text-xs text-muted-foreground mt-1.5">{stepMessage || "Analyzing files in isolated sandboxes..."}</p>
+                  </div>
+
+                  <div className="rounded-2xl border border-border/50 bg-background/50 p-5 flex flex-col gap-3 shadow-md max-h-[260px] overflow-y-auto">
+                    <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground mb-1">Language Pipeline</p>
+                    {Object.entries(scanningLanguages).map(([lang, status]) => {
+                      const isPending = status === "PENDING";
+                      const isScanningLang = status === "SCANNING";
+                      const isDone = status === "DONE";
+                      const isFailed = status === "FAILED";
+
+                      return (
+                        <div key={lang} className="flex items-center justify-between py-1.5 border-b border-border/20 last:border-0">
+                          <span className="font-bold text-sm">{lang}</span>
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-bold px-2 py-0.5 flex items-center gap-1.5 uppercase",
+                              isPending && "bg-muted/30 text-muted-foreground border-border",
+                              isScanningLang && "bg-violet-500/10 text-violet-500 border-violet-500/30",
+                              isDone && "bg-emerald-500/10 text-emerald-500 border-emerald-500/30",
+                              isFailed && "bg-destructive/10 text-destructive border-destructive/30"
+                            )}
+                          >
+                            {isScanningLang && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
+                            {isDone && <CheckCircle2 className="w-2.5 h-2.5" />}
+                            {isFailed && <AlertCircle className="w-2.5 h-2.5" />}
+                            {status === "PENDING" ? "Pending" : status === "SCANNING" ? "Scanning" : status === "DONE" ? "Complete" : "Failed"}
+                          </Badge>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <>
+                  <Loader2 className="w-10 h-10 animate-spin text-violet-500" />
+                  <p className="font-black text-xl tracking-tight">{STEP_LABELS[currentStep] || "Processing..."}</p>
+                  {stepMessage && <p className="text-xs text-muted-foreground -mt-3">{stepMessage}</p>}
+                </>
+              )}
             </div>
           )}
 
