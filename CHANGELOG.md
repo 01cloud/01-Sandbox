@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.2](https://github.com/01cloud/01-Sandbox/compare/v0.6.1...v0.6.2) (2026-07-02)
+
+
+### 🐛 Bug Fixes
+
+* arguements of tests and job dependencies ([72c9725](https://github.com/01cloud/01-Sandbox/commit/72c9725136401f51c12a963770990082ec3ad1c2))
+* arguements of tests and job dependencies ([7b4a5dd](https://github.com/01cloud/01-Sandbox/commit/7b4a5dd52826a2e20341aa78598ba72546708e3f))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.1 [skip ci] ([efb8545](https://github.com/01cloud/01-Sandbox/commit/efb85450d533e2f819bd679d355b685a4a979405))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.1 [skip ci] ([146b0a9](https://github.com/01cloud/01-Sandbox/commit/146b0a91cd0df192505774be8fad1d8e3fd6e1fe))
+
 ## [0.6.1](https://github.com/01cloud/01-Sandbox/compare/v0.6.0...v0.6.1) (2026-07-02)
 
 
