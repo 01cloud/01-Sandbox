@@ -59,10 +59,39 @@ jobs:
             controller:
               - 'opensandbox-controller/**'
 
+  test:
+    name: Run API Tests Gate
+    needs: filter
+    if: needs.filter.outputs.api == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: 'apiServer/fastapi/requirements.txt'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r apiServer/fastapi/requirements.txt
+
+      - name: Run Tests
+        working-directory: apiServer/fastapi
+        run: |
+          pytest tests/postgresql/ tests/redis/
+
   build:
     name: Build
-    needs: [release-please, filter]
-    if: needs.release-please.outputs.release_created == 'true'
+    needs: [release-please, filter, test]
+    if: |
+      always() &&
+      needs.release-please.outputs.release_created == 'true' &&
+      (needs.filter.outputs.api != 'true' || needs.test.result == 'success')
     uses: 01cloud/actions/.github/workflows/docker-build-multi.yaml@main
     with:
       version: ${{ needs.release-please.outputs.version }}
