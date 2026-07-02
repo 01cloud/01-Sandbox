@@ -61,87 +61,39 @@ child_job_ids.update(c.decode("utf-8") for c in redis_children)
 
 The Redis set is the critical fallback: if the parent ran on a different replica pod than the one processing the deletion, in-memory maps are empty on that pod, but Redis still has the full child list.
 
----
-
-## 3. Full Sequence Diagram
-
+## 3. Structural Flowchart
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as Client / Dashboard
-    participant API as FastAPI Router
-    participant Redis as Redis (KV + Pub/Sub)
-    participant RMQ as RabbitMQ (scan.delete Queue)
-    participant Consumer as RabbitMQ Consumer
-    participant DelJob as perform_job_deletion()
-    participant OSSandbox as opensandbox-server
-    participant PVC as Kubernetes PVC
+flowchart TD
+    %% Node definitions
+    Client["User / Frontend"]
+    Gateway["FastAPI Gateway (apiServer HTTP)"]
+    RMQ["RabbitMQ Broker (scan.delete queue)"]
+    Workers["Background Workers (apiServer Consumer)"]
+    Redis["Redis Database (KV & Pub/Sub)"]
+    OSbx["Opensandbox-Server (K8s Resource Manager)"]
 
-    Client->>API: DELETE /v1/jobs/{job_id}?purge=true
-    Note over API: Verify JWT token & check RabbitMQ health
+    %% Numbered connections
+    Client -->|1. DELETE Request /v1/jobs/:id?purge=true| Gateway
 
-    alt RabbitMQ Offline
-        API-->>Client: 503 Service Unavailable
-    else RabbitMQ Online
-        alt purge=true — Eager synchronous purge
-            API->>API: state.job_tracker.delete_job(job_id)
-            API->>Redis: DEL job:{job_id}:status, :metadata, :events, :result, :cancelled
-            Note over API,Redis: Job is invisible to GET /v1/repo-scan/jobs immediately. The :child_jobs key is preserved for the worker.
-        end
+    Gateway -->|2. Eager Purge status/metadata keys| Redis
+    Gateway -->|3. Publish JSON delete task| RMQ
+    Gateway -->|4. Return 200 OK - DELETE_QUEUED| Client
 
-        API->>RMQ: publish("scan.delete", {job_id, purge})
-        API-->>Client: 200 OK {"status": "DELETE_QUEUED"}
-    end
+    RMQ -->|5. Deliver delete scan task| Workers
 
-    RMQ->>Consumer: on_message() — consume from scan.delete queue
-    Consumer->>DelJob: perform_job_deletion(state, job_id, purge)
+    Workers -->|6. Write cancellation flag & publish deletions| Redis
+    Redis -.->|7. Broadcast: Cancel active asyncio tasks on all pods| Workers
 
-    Note over DelJob: Step 1 — Collect all child job IDs
-    DelJob->>DelJob: Merge active_child_jobs_by_parent + all_child_jobs_by_parent
-    DelJob->>Redis: SMEMBERS job:{job_id}:child_jobs
-    Redis-->>DelJob: {child_id_1, child_id_2, ...}
+    Workers -->|8. HTTP DELETE parent scan pod & PVC workspace| OSbx
+    Workers -->|9. Cascade HTTP DELETE child sandboxes| OSbx
 
-    Note over DelJob: Step 2 — Broadcast cancellation
-    DelJob->>Redis: SET job:{job_id}:cancelled "true" EX 86400
-    alt purge=false (Cancel)
-        DelJob->>Redis: PUBLISH job:cancellations {job_id}
-    else purge=true (Delete)
-        DelJob->>Redis: PUBLISH job:deletions {job_id}
-    end
-    Note over Redis: All pod replicas' setup_cancellation_listener()<br/>receive the broadcast and cancel their local asyncio tasks
-
-    Note over DelJob: Step 3 — Cancel local asyncio task (parent)
-    DelJob->>DelJob: task = app_state.active_tasks.get(job_id)
-    DelJob->>DelJob: task.cancel() → injects CancelledError into pipeline
-    Note over DelJob: Pipeline finally block runs: destroy_sandbox() + cleanup_child_jobs()
-
-    Note over DelJob: Step 4 — Delete parent PVC & sandbox
-    DelJob->>OSSandbox: DELETE /scan-jobs/{job_id}?terminate=true
-    OSSandbox->>PVC: Remove parent workspace & report
-    OSSandbox-->>DelJob: 200 OK
-
-    Note over DelJob: Step 5 — Cascade: delete each child job
-    loop for each child_id in child_job_ids
-        DelJob->>DelJob: cancel_active_task(state, child_id, purge)
-        DelJob->>OSSandbox: DELETE /scan-jobs/{child_id}?terminate=true
-        OSSandbox->>PVC: Remove child workspace & artifacts
-        OSSandbox-->>DelJob: 200 OK
-        alt purge=true
-            DelJob->>Redis: DEL job:{child_id}:status, :metadata, :result, :events
-            DelJob->>DelJob: job_tracker.delete_job(child_id)
-        end
-    end
-
-    Note over DelJob: Step 6 — Purge parent tracking state (purge=true only)
-    alt purge=true
-        DelJob->>DelJob: job_tracker.delete_job(job_id)
-        DelJob->>Redis: DEL job:{job_id}:child_jobs
-        DelJob->>DelJob: all_child_jobs_by_parent.pop(job_id)
-        DelJob->>DelJob: active_child_jobs_by_parent.pop(job_id)
-    end
+    Workers -->|10. Final State Purge: DEL child_jobs keys| Redis
+    Workers -->|11. Acknowledge message - msg.ack| RMQ
 ```
 
 ---
+
+![alt text](image.png)
 
 ## 4. Why Redis is Used for Cross-Pod Coordination
 
