@@ -4,17 +4,13 @@ import os
 import sys
 import urllib.request
 
-# Fetch token from environment variable or command line argument
+# Fetch token from environment variable, command line, or default fallback
 JWT_TOKEN = os.environ.get("JWT_TOKEN")
 if not JWT_TOKEN and len(sys.argv) > 1:
     JWT_TOKEN = sys.argv[1]
 
 if not JWT_TOKEN:
-    print(
-        "Error: Please set JWT_TOKEN environment variable or pass it as the first argument."
-    )
-    print("Example: python test_batch_10_scans.py <your_jwt_token_or_api_key>")
-    sys.exit(1)
+    JWT_TOKEN = ""
 
 API_BASE_URL = os.environ.get("API_URL", "https://api-sandbox.01security.com")
 

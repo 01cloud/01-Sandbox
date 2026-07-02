@@ -213,6 +213,16 @@ export function useJobStore(
       console.debug(`[useJobStore] syncFromServer: got ${serverJobs.length} job(s) from server`);
       let didUpdate = false;
 
+      // ── Clean up locally cached jobs that were deleted from the server ──
+      const serverJobIds = new Set(serverJobs.map(sj => sj.job_id));
+      const localJobs = jobStore.getAll(jobType);
+      for (const lj of localJobs) {
+        if (!serverJobIds.has(lj.job_id)) {
+          jobStore.remove(lj.job_id);
+          didUpdate = true;
+        }
+      }
+
       for (const sj of serverJobs) {
         if (deletedJobIds.current.has(sj.job_id)) {
           continue;
