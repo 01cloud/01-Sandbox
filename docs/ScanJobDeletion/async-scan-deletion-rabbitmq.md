@@ -77,7 +77,7 @@ flowchart TD
 
     Gateway -->|2. Eager Purge status/metadata keys| Redis
     Gateway -->|3. Publish JSON delete task| RMQ
-    Gateway -->|4. Return 200 OK (DELETE_QUEUED)| Client
+    Gateway -->|4. Return 200 OK - DELETE_QUEUED| Client
 
     RMQ -->|5. Deliver delete scan task| Workers
 
@@ -88,7 +88,7 @@ flowchart TD
     Workers -->|9. Cascade HTTP DELETE child sandboxes| OSbx
 
     Workers -->|10. Final State Purge: DEL child_jobs keys| Redis
-    Workers -->|11. Acknowledge message (msg.ack)| RMQ
+    Workers -->|11. Acknowledge message - msg.ack| RMQ
 ```
 
 ---
