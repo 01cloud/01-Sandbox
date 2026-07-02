@@ -112,7 +112,7 @@ jobs:
     if: |
       always() &&
       needs.release-please.outputs.release_created == 'true' &&
-      needs.build.result != 'failure'
+      needs.build.result == 'success'
     secrets: inherit
     uses: 01cloud/actions/.github/workflows/update-values.yaml@main
     with:
