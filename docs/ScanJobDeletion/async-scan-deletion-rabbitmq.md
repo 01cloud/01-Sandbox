@@ -93,6 +93,8 @@ flowchart TD
 
 ---
 
+![alt text](image.png)
+
 ## 4. Why Redis is Used for Cross-Pod Coordination
 
 In a Kubernetes deployment, `sandbox-api` scales horizontally with multiple active pod replicas. Because RabbitMQ distributes queue messages using a **competing consumer pattern**, a deletion message is delivered to **exactly one** replica — almost never the replica currently running the active scan task.
