@@ -83,7 +83,7 @@ jobs:
       - name: Run Tests
         working-directory: apiServer/fastapi
         run: |
-          pytest tests/postgresql/ tests/redis/
+          pytest tests/postgresql/ tests/redis/ --cov=health --cov-report=term-missing -v
 
   build:
     name: Build
