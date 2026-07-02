@@ -73,7 +73,7 @@ flowchart TD
     OSbx["Opensandbox-Server (K8s Resource Manager)"]
 
     %% Numbered connections
-    Client -->|1. DELETE Request /v1/jobs/{id}?purge=true| Gateway
+    Client -->|1. DELETE Request /v1/jobs/:id?purge=true| Gateway
 
     Gateway -->|2. Eager Purge status/metadata keys| Redis
     Gateway -->|3. Publish JSON delete task| RMQ
