@@ -3,7 +3,7 @@ private_clone.py — Modular functions for secure private repository scanning.
 
 This module handles:
 1. URL parsing to identify Git providers (GitHub, GitLab, Bitbucket).
-2. Credential sanitation to scrub PATs and SSH keys from logs/outputs.
+2. Credential sanitation to scrub PATs and SSH keys from logs/output.
 3. Universal repo checking using 'git ls-remote'.
 4. Authenticated clone executions using subprocesses.
 """
