@@ -61,84 +61,109 @@ child_job_ids.update(c.decode("utf-8") for c in redis_children)
 
 The Redis set is the critical fallback: if the parent ran on a different replica pod than the one processing the deletion, in-memory maps are empty on that pod, but Redis still has the full child list.
 
----
-
-## 3. Full Sequence Diagram
+## 3. Structural Flowchart Diagram
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor Client as Client / Dashboard
-    participant API as FastAPI Router
-    participant Redis as Redis (KV + Pub/Sub)
-    participant RMQ as RabbitMQ (scan.delete Queue)
-    participant Consumer as RabbitMQ Consumer
-    participant DelJob as perform_job_deletion()
-    participant OSSandbox as opensandbox-server
-    participant PVC as Kubernetes PVC
+flowchart TD
+    %% Define Styles
+    classDef startEnd fill:#ECECFF,stroke:#333,stroke-width:2px,rx:10px;
+    classDef process fill:#FFF,stroke:#333,stroke-width:1px;
+    classDef decision fill:#FFFEE0,stroke:#333,stroke-width:1px;
+    classDef db fill:#E8F8F5,stroke:#333,stroke-width:1px;
+    classDef external fill:#FBEEE6,stroke:#333,stroke-width:1px;
 
-    Client->>API: DELETE /v1/jobs/{job_id}?purge=true
-    Note over API: Verify JWT token & check RabbitMQ health
+    %% Elements
+    Start([User clicks Delete Scan Job]) --> AuthCheck{Authorize & Check<br/>RabbitMQ Health}
+    class Start startEnd;
+    class AuthCheck decision;
 
-    alt RabbitMQ Offline
-        API-->>Client: 503 Service Unavailable
-    else RabbitMQ Online
-        alt purge=true — Eager synchronous purge
-            API->>API: state.job_tracker.delete_job(job_id)
-            API->>Redis: DEL job:{job_id}:status, :metadata, :events, :result, :cancelled
-            Note over API,Redis: Job is invisible to GET /v1/repo-scan/jobs immediately. The :child_jobs key is preserved for the worker.
-        end
+    AuthCheck -- Offline --> Err503[Return HTTP 503<br/>Service Unavailable]
+    class Err503 process;
 
-        API->>RMQ: publish("scan.delete", {job_id, purge})
-        API-->>Client: 200 OK {"status": "DELETE_QUEUED"}
-    end
+    AuthCheck -- Online --> CheckPurge{Is purge = true?}
+    class CheckPurge decision;
 
-    RMQ->>Consumer: on_message() — consume from scan.delete queue
-    Consumer->>DelJob: perform_job_deletion(state, job_id, purge)
+    %% Gateway Synchronous Eager Purge Branch
+    CheckPurge -- Yes --> EagerPurge[Eager Synchronous Purge:<br/>- Delete job status/metadata KV keys<br/>- Wipe local Gateway in-memory tracker]
+    class EagerPurge process;
+    EagerPurge --> RedisKV[("Redis Database")]
+    class RedisKV db;
+    EagerPurge --> EnqueueRMQ
 
-    Note over DelJob: Step 1 — Collect all child job IDs
-    DelJob->>DelJob: Merge active_child_jobs_by_parent + all_child_jobs_by_parent
-    DelJob->>Redis: SMEMBERS job:{job_id}:child_jobs
-    Redis-->>DelJob: {child_id_1, child_id_2, ...}
+    CheckPurge -- No --> EnqueueRMQ[Publish message to RabbitMQ<br/>exchange 'scan.delete' queue]
+    class EnqueueRMQ process;
 
-    Note over DelJob: Step 2 — Broadcast cancellation
-    DelJob->>Redis: SET job:{job_id}:cancelled "true" EX 86400
-    alt purge=false (Cancel)
-        DelJob->>Redis: PUBLISH job:cancellations {job_id}
-    else purge=true (Delete)
-        DelJob->>Redis: PUBLISH job:deletions {job_id}
-    end
-    Note over Redis: All pod replicas' setup_cancellation_listener()<br/>receive the broadcast and cancel their local asyncio tasks
+    EnqueueRMQ --> Resp200[Return HTTP 200 OK<br/>'DELETE_QUEUED']
+    class Resp200 process;
 
-    Note over DelJob: Step 3 — Cancel local asyncio task (parent)
-    DelJob->>DelJob: task = app_state.active_tasks.get(job_id)
-    DelJob->>DelJob: task.cancel() → injects CancelledError into pipeline
-    Note over DelJob: Pipeline finally block runs: destroy_sandbox() + cleanup_child_jobs()
+    Resp200 --> ClientUpdate([Client UI Updates Instantly:<br/>Job disappears from dashboard])
+    class ClientUpdate startEnd;
 
-    Note over DelJob: Step 4 — Delete parent PVC & sandbox
-    DelJob->>OSSandbox: DELETE /scan-jobs/{job_id}?terminate=true
-    OSSandbox->>PVC: Remove parent workspace & report
-    OSSandbox-->>DelJob: 200 OK
+    %% Async Background Processing
+    EnqueueRMQ -->|Asynchronously consumed| Worker[Background Worker Pod<br/>apiServer Consumer]
+    class Worker process;
 
-    Note over DelJob: Step 5 — Cascade: delete each child job
-    loop for each child_id in child_job_ids
-        DelJob->>DelJob: cancel_active_task(state, child_id, purge)
-        DelJob->>OSSandbox: DELETE /scan-jobs/{child_id}?terminate=true
-        OSSandbox->>PVC: Remove child workspace & artifacts
-        OSSandbox-->>DelJob: 200 OK
-        alt purge=true
-            DelJob->>Redis: DEL job:{child_id}:status, :metadata, :result, :events
-            DelJob->>DelJob: job_tracker.delete_job(child_id)
-        end
-    end
+    %% Phase 1
+    Worker --> Phase1[Phase 1: In-Memory Cancellation]
+    class Phase1 process;
+    Phase1 --> CancelKV[Set job:cancelled = 'true' in Redis KV]
+    class CancelKV process;
+    CancelKV --> RedisKV
 
-    Note over DelJob: Step 6 — Purge parent tracking state (purge=true only)
-    alt purge=true
-        DelJob->>DelJob: job_tracker.delete_job(job_id)
-        DelJob->>Redis: DEL job:{job_id}:child_jobs
-        DelJob->>DelJob: all_child_jobs_by_parent.pop(job_id)
-        DelJob->>DelJob: active_child_jobs_by_parent.pop(job_id)
-    end
+    CancelKV --> PubSub[Publish job_id to Redis Pub/Sub<br/>channel 'job:deletions' or 'job:cancellations']
+    class PubSub process;
+
+    PubSub --> Broadcast([Broadcast Message])
+    class Broadcast startEnd;
+
+    Broadcast --> Replicas[All apiServer Replica Pods<br/>setup_cancellation_listener]
+    class Replicas process;
+
+    Replicas --> CancelTask[Locate running asyncio.Task<br/>and call task.cancel]
+    class CancelTask process;
+
+    %% Phase 2
+    CancelTask --> Phase2[Phase 2: Kubernetes Sandbox Tear-Down]
+    class Phase2 process;
+
+    Phase2 --> FetchChildren[Fetch Child Job IDs from:<br/>- In-memory tracker<br/>- Redis job:child_jobs set]
+    class FetchChildren process;
+    FetchChildren --> RedisKV
+
+    FetchChildren --> HttpDeleteOSbx[Send Synchronous HTTP DELETE to Opensandbox-Server<br/>DELETE /api/v1/01sbx/scan-jobs/job_id?terminate=true]
+    class HttpDeleteOSbx process;
+
+    HttpDeleteOSbx --> OSbx[["Opensandbox-Server (K8s API)"]]
+    class OSbx external;
+
+    OSbx --> CleanK8s[Deletes K8s sandbox pods & PVC workspaces]
+    class CleanK8s process;
+
+    CleanK8s --> CascadeChildren{Are there child jobs?}
+    class CascadeChildren decision;
+
+    CascadeChildren -- Yes --> LoopChildren[Loop through child IDs:<br/>- Cancel active child tasks<br/>- HTTP DELETE for each child sandbox]
+    class LoopChildren process;
+    LoopChildren --> HttpDeleteOSbx
+
+    CascadeChildren -- No --> Phase3
+
+    %% Phase 3
+    LoopChildren --> Phase3[Phase 3: Final State Purge]
+    class Phase3 process;
+
+    Phase3 --> PurgeRedis[Delete remaining Redis keys:<br/>- job:child_jobs<br/>- job:status (if not eager-purged)]
+    class PurgeRedis process;
+    PurgeRedis --> RedisKV
+
+    PurgeRedis --> PurgeTracker[Clear local in-memory job tracker<br/>and pop child tracking maps]
+    class PurgeTracker process;
+
+    PurgeTracker --> AckRMQ[Acknowledge message in RabbitMQ<br/>msg.ack]
+    class AckRMQ process;
+
+    AckRMQ --> End([Job Deletion Lifecycle Complete])
+    class End startEnd;
 ```
 
 ---
