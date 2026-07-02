@@ -1,3 +1,44 @@
+## Release v0.6.4 — 01-Sandbox
+**Release Date:** July 02, 2026
+
+---
+
+### Summary
+v0.6.4 introduces new features along with important stability improvements. Test coverage has been expanded to ensure higher code quality. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* display real-time language scan statuses in the UI ([ac23049](https://github.com/01cloud/01-Sandbox/commit/ac23049504ebf3c5f99077bc0e2884aad8c3aa68))
+* display real-time language scan statuses in the UI ([f86540e](https://github.com/01cloud/01-Sandbox/commit/f86540e65b4d32e2bb23db80f2c17d01384611e9))
+* generate RELEASE.md for v0.6.3 [skip ci] ([f6239c7](https://github.com/01cloud/01-Sandbox/commit/f6239c7302a3a91ae7b99e2c4480bd04f96a8fa5))
+* bump versions to v0.6.3 [skip ci] ([73eb63d](https://github.com/01cloud/01-Sandbox/commit/73eb63de7ef7e2b067564450fcf22dfeb6b9b044))
+
+### Changes
+## [0.6.4](https://github.com/01cloud/01-Sandbox/compare/v0.6.3...v0.6.4) (2026-07-02)
+
+
+### 🚀 New Features
+
+* display real-time language scan statuses in the UI ([ac23049](https://github.com/01cloud/01-Sandbox/commit/ac23049504ebf3c5f99077bc0e2884aad8c3aa68))
+* display real-time language scan statuses in the UI ([f86540e](https://github.com/01cloud/01-Sandbox/commit/f86540e65b4d32e2bb23db80f2c17d01384611e9))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.3 [skip ci] ([f6239c7](https://github.com/01cloud/01-Sandbox/commit/f6239c7302a3a91ae7b99e2c4480bd04f96a8fa5))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.3 [skip ci] ([73eb63d](https://github.com/01cloud/01-Sandbox/commit/73eb63de7ef7e2b067564450fcf22dfeb6b9b044))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.4)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.3 — 01-Sandbox
 **Release Date:** July 02, 2026
 
