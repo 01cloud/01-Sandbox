@@ -1,3 +1,48 @@
+## Release v0.6.3 — 01-Sandbox
+**Release Date:** July 02, 2026
+
+---
+
+### Summary
+v0.6.3 focuses on reliability, bug resolution, and maintenance. Test coverage has been expanded to ensure higher code quality. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* clean up deleted jobs from localStorage on frontend sync ([959eacd](https://github.com/01cloud/01-Sandbox/commit/959eacd62f86046aa54521ad06fa37f65d76ece9))
+* fix Mermaid syntax error by escaping curly braces ([e77ff13](https://github.com/01cloud/01-Sandbox/commit/e77ff13aaf0f093fff7046d5d5ab2f50d97648e0))
+* generate RELEASE.md for v0.6.2 [skip ci] ([0627833](https://github.com/01cloud/01-Sandbox/commit/0627833464327e76e040a9bb838bc4412abd3447))
+* **readme:** update the diagram ([38b2ec6](https://github.com/01cloud/01-Sandbox/commit/38b2ec664c6fd9789f00a502625896d9fbe75cce))
+
+### Changes
+## [0.6.3](https://github.com/01cloud/01-Sandbox/compare/v0.6.2...v0.6.3) (2026-07-02)
+
+
+### 🐛 Bug Fixes
+
+* clean up deleted jobs from localStorage on frontend sync ([959eacd](https://github.com/01cloud/01-Sandbox/commit/959eacd62f86046aa54521ad06fa37f65d76ece9))
+
+
+### 📖 Documentation
+
+* fix Mermaid syntax error by escaping curly braces ([e77ff13](https://github.com/01cloud/01-Sandbox/commit/e77ff13aaf0f093fff7046d5d5ab2f50d97648e0))
+* generate RELEASE.md for v0.6.2 [skip ci] ([0627833](https://github.com/01cloud/01-Sandbox/commit/0627833464327e76e040a9bb838bc4412abd3447))
+* **readme:** update the diagram ([38b2ec6](https://github.com/01cloud/01-Sandbox/commit/38b2ec664c6fd9789f00a502625896d9fbe75cce))
+* remove parentheses from Mermaid links to fix parsing ([b3f9f45](https://github.com/01cloud/01-Sandbox/commit/b3f9f4569433fee5d62a66e7cee29f101c62fb44))
+* simplify flowchart to match block-diagram layout ([1399a7a](https://github.com/01cloud/01-Sandbox/commit/1399a7ad563b8e58c1ee26d18aa8b20571ac34eb))
+* unify to single structural flowchart for scan deletion ([1f1ea27](https://github.com/01cloud/01-Sandbox/commit/1f1ea276a3f5845f574dd44b85115635282b31b1))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.2 [skip ci] ([cd9c255](https://github.com/01cloud/01-Sandbox/commit/cd9c255a5e2dff3b2a060cba263f6837909b0cee))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.3)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.2 — 01-Sandbox
 **Release Date:** July 02, 2026
 
