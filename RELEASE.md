@@ -1,3 +1,44 @@
+## Release v0.6.8 — 01-Sandbox
+**Release Date:** July 06, 2026
+
+---
+
+### Summary
+v0.6.8 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* jobspanel language pipleine sidebar ([0c5e29c](https://github.com/01cloud/01-Sandbox/commit/0c5e29cfcc2b16afb3943b1db125d58be076da81))
+* jobspanel language pipleine sidebar ([0f6f651](https://github.com/01cloud/01-Sandbox/commit/0f6f651ee54e80dccd633a21cdbe128f3b9cce67))
+* generate RELEASE.md for v0.6.7 [skip ci] ([896b0d7](https://github.com/01cloud/01-Sandbox/commit/896b0d74b19deeb5e8e3365e6fd25408a803ce18))
+* bump versions to v0.6.7 [skip ci] ([7874464](https://github.com/01cloud/01-Sandbox/commit/7874464fbd698a3c49e989ba9304c4da43273742))
+
+### Changes
+## [0.6.8](https://github.com/01cloud/01-Sandbox/compare/v0.6.7...v0.6.8) (2026-07-06)
+
+
+### 🐛 Bug Fixes
+
+* jobspanel language pipleine sidebar ([0c5e29c](https://github.com/01cloud/01-Sandbox/commit/0c5e29cfcc2b16afb3943b1db125d58be076da81))
+* jobspanel language pipleine sidebar ([0f6f651](https://github.com/01cloud/01-Sandbox/commit/0f6f651ee54e80dccd633a21cdbe128f3b9cce67))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.7 [skip ci] ([896b0d7](https://github.com/01cloud/01-Sandbox/commit/896b0d74b19deeb5e8e3365e6fd25408a803ce18))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.7 [skip ci] ([7874464](https://github.com/01cloud/01-Sandbox/commit/7874464fbd698a3c49e989ba9304c4da43273742))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.8)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.7 — 01-Sandbox
 **Release Date:** July 06, 2026
 
