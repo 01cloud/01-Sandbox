@@ -36,11 +36,13 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
             )
             data = await state.backend.create_scan_job(req_dict)
 
-            high_count = medium_count = low_count = info_count = 0
+            critical_count = high_count = medium_count = low_count = info_count = 0
             findings = data.get("findings", [])
             for f in findings:
                 sev = str(f.get("severity", "INFO")).upper()
-                if "CRITICAL" in sev or "HIGH" in sev:
+                if "CRITICAL" in sev:
+                    critical_count += 1
+                elif "HIGH" in sev:
                     high_count += 1
                 elif "MEDIUM" in sev:
                     medium_count += 1
@@ -51,6 +53,7 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
 
             job_record = state.job_tracker.get_job(job_id)
             summary_data = {
+                "critical": critical_count,
                 "high": high_count,
                 "medium": medium_count,
                 "low": low_count,
@@ -84,6 +87,7 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                     pass
 
             detail_dict = dict(data)
+            detail_dict["critical_count"] = critical_count
             detail_dict["high_count"] = high_count
             detail_dict["medium_count"] = medium_count
             detail_dict["low_count"] = low_count
@@ -110,6 +114,7 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
         req: ScanJobRequest,
         background_tasks: BackgroundTasks,
         is_async: bool = Query(False, alias="async"),
+        user_data: dict = Depends(validate_token),
     ):
         """
         Submits files for unified security scanning.
@@ -127,6 +132,7 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
         req.metadata["job_id"] = job_id
 
         submitted_at = datetime.datetime.now(datetime.UTC).isoformat()
+        user_id = user_data.get("sub")
 
         # Initialize in job tracker
         state.job_tracker.create_job(
@@ -135,6 +141,7 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
             {
                 "submitted_at": submitted_at,
                 "files_count": len(req.files) if req.files else 0,
+                "user_id": user_id,
             },
         )
 
@@ -178,6 +185,7 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                 data = await state.backend.create_scan_job(req.dict(exclude_none=True))
 
                 # Count findings
+                critical_count = 0
                 high_count = 0
                 medium_count = 0
                 low_count = 0
@@ -185,7 +193,9 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                 findings = data.get("findings", [])
                 for f in findings:
                     sev = str(f.get("severity", "INFO")).upper()
-                    if "CRITICAL" in sev or "HIGH" in sev:
+                    if "CRITICAL" in sev:
+                        critical_count += 1
+                    elif "HIGH" in sev:
                         high_count += 1
                     elif "MEDIUM" in sev:
                         medium_count += 1
@@ -197,6 +207,7 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                 job_record = state.job_tracker.get_job(job_id)
                 if job_record:
                     job_record.metadata["summary"] = {
+                        "critical": critical_count,
                         "high": high_count,
                         "medium": medium_count,
                         "low": low_count,
@@ -215,6 +226,7 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                             pass
 
                 detail_dict = dict(data)
+                detail_dict["critical_count"] = critical_count
                 detail_dict["high_count"] = high_count
                 detail_dict["medium_count"] = medium_count
                 detail_dict["low_count"] = low_count

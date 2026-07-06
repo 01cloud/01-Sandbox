@@ -136,8 +136,13 @@ export function JobsPanel({
                     {/* Severity Summary counts badge */}
                     {isDone && job.summary && (
                       <div className="flex gap-1 shrink-0">
+                        {job.summary.critical > 0 && (
+                          <Badge className="h-4 px-1 text-[8px] bg-red-600/25 hover:bg-red-600/25 text-red-500 border border-red-500/35 font-extrabold rounded-md">
+                            C:{job.summary.critical}
+                          </Badge>
+                        )}
                         {job.summary.high > 0 && (
-                          <Badge className="h-4 px-1 text-[8px] bg-red-500/20 hover:bg-red-500/20 text-red-500 border border-red-500/30 font-extrabold rounded-md">
+                          <Badge className="h-4 px-1 text-[8px] bg-orange-500/20 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 font-extrabold rounded-md">
                             H:{job.summary.high}
                           </Badge>
                         )}
@@ -156,7 +161,7 @@ export function JobsPanel({
                             I:{job.summary.info}
                           </Badge>
                         )}
-                        {job.summary.high === 0 && job.summary.medium === 0 && job.summary.low === 0 && (
+                        {(job.summary.critical ?? 0) === 0 && job.summary.high === 0 && job.summary.medium === 0 && job.summary.low === 0 && (
                           <Badge className="h-4 px-1 text-[8px] bg-emerald-500/20 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 font-extrabold rounded-md">
                             SECURE
                           </Badge>

@@ -133,6 +133,7 @@ export function useJobStore(
           eventIndex: since + 1,
           summary: ev.step === "DONE" && ev.detail
             ? {
+                critical: ev.detail.critical_count || 0,
                 high: ev.detail.high_count || 0,
                 medium: ev.detail.medium_count || 0,
                 low: ev.detail.low_count || 0,

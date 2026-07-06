@@ -359,7 +359,9 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
               const sevCounts = info.findings.reduce(
                 (acc: any, f: any) => {
                   const sev = (f.severity || "INFO").toUpperCase();
-                  if (sev === "CRITICAL" || sev === "HIGH") {
+                  if (sev === "CRITICAL") {
+                    acc.critical = (acc.critical || 0) + 1;
+                  } else if (sev === "HIGH") {
                     acc.high = (acc.high || 0) + 1;
                   } else if (sev === "MEDIUM") {
                     acc.medium = (acc.medium || 0) + 1;
@@ -370,7 +372,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                   }
                   return acc;
                 },
-                { high: 0, medium: 0, low: 0, info: 0 }
+                { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
               );
 
               return (
@@ -387,8 +389,13 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                       <div className="flex flex-col items-end gap-1">
                         <p className="text-[9px] text-muted-foreground">{info.file_count} files · {info.percentage.toFixed(1)}%</p>
                         <div className="flex gap-0.5 items-center">
+                          {sevCounts.critical > 0 && (
+                            <Badge className="h-3.5 px-0.5 text-[7px] bg-red-600/25 hover:bg-red-600/25 text-red-500 border border-red-500/35 font-extrabold rounded-sm">
+                              C:{sevCounts.critical}
+                            </Badge>
+                          )}
                           {sevCounts.high > 0 && (
-                            <Badge className="h-3.5 px-0.5 text-[7px] bg-red-500/20 hover:bg-red-500/20 text-red-500 border border-red-500/30 font-extrabold rounded-sm">
+                            <Badge className="h-3.5 px-0.5 text-[7px] bg-orange-500/20 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 font-extrabold rounded-sm">
                               H:{sevCounts.high}
                             </Badge>
                           )}
@@ -407,7 +414,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                               I:{sevCounts.info}
                             </Badge>
                           )}
-                          {sevCounts.high === 0 && sevCounts.medium === 0 && sevCounts.low === 0 && sevCounts.info === 0 && (
+                          {sevCounts.critical === 0 && sevCounts.high === 0 && sevCounts.medium === 0 && sevCounts.low === 0 && sevCounts.info === 0 && (
                             <span className="text-[8px] font-black text-emerald-500 uppercase tracking-wider">
                               Secure
                             </span>
