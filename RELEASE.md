@@ -1,3 +1,44 @@
+## Release v0.6.11 — 01-Sandbox
+**Release Date:** July 06, 2026
+
+---
+
+### Summary
+v0.6.11 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. CI/CD and build pipelines have been enhanced for smoother deployments. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* ui fixes for the github repo scan ([52e57b3](https://github.com/01cloud/01-Sandbox/commit/52e57b3658382ad14d4fb1e2288aa26669f8fdff))
+* ui fixes for the github repo scan ([08e9ce5](https://github.com/01cloud/01-Sandbox/commit/08e9ce523cd738eb3c2b787c0ce8e6f3a93e52a5))
+* generate RELEASE.md for v0.6.10 [skip ci] ([de8e901](https://github.com/01cloud/01-Sandbox/commit/de8e901a3d034631351a582cdcc8c923a8703052))
+* bump versions to v0.6.10 [skip ci] ([03cfa64](https://github.com/01cloud/01-Sandbox/commit/03cfa64a00d158a475592f8c08f3cd41c7374ca9))
+
+### Changes
+## [0.6.11](https://github.com/01cloud/01-Sandbox/compare/v0.6.10...v0.6.11) (2026-07-06)
+
+
+### 🐛 Bug Fixes
+
+* ui fixes for the github repo scan ([52e57b3](https://github.com/01cloud/01-Sandbox/commit/52e57b3658382ad14d4fb1e2288aa26669f8fdff))
+* ui fixes for the github repo scan ([08e9ce5](https://github.com/01cloud/01-Sandbox/commit/08e9ce523cd738eb3c2b787c0ce8e6f3a93e52a5))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.10 [skip ci] ([de8e901](https://github.com/01cloud/01-Sandbox/commit/de8e901a3d034631351a582cdcc8c923a8703052))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.10 [skip ci] ([03cfa64](https://github.com/01cloud/01-Sandbox/commit/03cfa64a00d158a475592f8c08f3cd41c7374ca9))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.11)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.10 — 01-Sandbox
 **Release Date:** July 06, 2026
 
