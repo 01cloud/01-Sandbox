@@ -1,3 +1,46 @@
+## Release v0.6.7 — 01-Sandbox
+**Release Date:** July 06, 2026
+
+---
+
+### Summary
+v0.6.7 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implemented Security Metrics Alignment ([89b963c](https://github.com/01cloud/01-Sandbox/commit/89b963c524b673917eab2f159f62857b8ec78b3d))
+* implemented Security Metrics Alignment ([75d81a3](https://github.com/01cloud/01-Sandbox/commit/75d81a3b921a79a934cb7ee21855f9e17d500273))
+* replace LoC with severity badges ([aa485f0](https://github.com/01cloud/01-Sandbox/commit/aa485f01b2a1dd0db77e7c7bc155967973254248))
+* replace LoC with severity badges ([7670ce3](https://github.com/01cloud/01-Sandbox/commit/7670ce3a9c279190affd8e7d4390592c7e2dfb56))
+
+### Changes
+## [0.6.7](https://github.com/01cloud/01-Sandbox/compare/v0.6.6...v0.6.7) (2026-07-06)
+
+
+### 🐛 Bug Fixes
+
+* implemented Security Metrics Alignment ([89b963c](https://github.com/01cloud/01-Sandbox/commit/89b963c524b673917eab2f159f62857b8ec78b3d))
+* implemented Security Metrics Alignment ([75d81a3](https://github.com/01cloud/01-Sandbox/commit/75d81a3b921a79a934cb7ee21855f9e17d500273))
+* replace LoC with severity badges ([aa485f0](https://github.com/01cloud/01-Sandbox/commit/aa485f01b2a1dd0db77e7c7bc155967973254248))
+* replace LoC with severity badges ([7670ce3](https://github.com/01cloud/01-Sandbox/commit/7670ce3a9c279190affd8e7d4390592c7e2dfb56))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.6 [skip ci] ([96222a2](https://github.com/01cloud/01-Sandbox/commit/96222a2dfc32a1076ecc9a0093a6f943062ca054))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.6 [skip ci] ([f43a8cd](https://github.com/01cloud/01-Sandbox/commit/f43a8cdaede56a48bc216aa9d567c7d14055a2f8))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.7)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.6 — 01-Sandbox
 **Release Date:** July 06, 2026
 
