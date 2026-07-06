@@ -159,6 +159,41 @@ export function JobsPanel({
                       </div>
                     )}
                   </div>
+
+                  {/* Expanded language statuses for selected repository scans */}
+                  {isSelected && jobType === "repo-scan" && job.detail?.languages && Object.keys(job.detail.languages).length > 0 && (
+                    <div className="mt-3 pt-3 border-t border-border/20 flex flex-col gap-2 bg-muted/30 rounded-lg p-2.5">
+                      <p className="text-[9px] font-black uppercase tracking-wider text-muted-foreground mb-1">
+                        Language Pipeline
+                      </p>
+                      <div className="flex flex-col gap-1.5">
+                        {Object.entries(job.detail.languages).map(([lang, status]: [string, any]) => {
+                          const isPending = status === "PENDING";
+                          const isScanningLang = status === "SCANNING";
+                          const isDone = status === "DONE";
+                          const isFailed = status === "FAILED";
+
+                          return (
+                            <div key={lang} className="flex items-center justify-between text-[11px]">
+                              <span className="font-bold text-foreground/80">{lang}</span>
+                              <span
+                                className={cn(
+                                  "text-[8px] font-extrabold uppercase tracking-wide flex items-center gap-1",
+                                  isPending && "text-muted-foreground/60",
+                                  isScanningLang && "text-violet-400 animate-pulse",
+                                  isDone && "text-emerald-500",
+                                  isFailed && "text-destructive"
+                                )}
+                              >
+                                {isScanningLang && <Loader2 className="w-2.5 h-2.5 animate-spin shrink-0" />}
+                                {status === "PENDING" ? "Pending" : status === "SCANNING" ? "Scanning" : status === "DONE" ? "Complete" : "Failed"}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })}

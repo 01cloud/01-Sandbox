@@ -10,6 +10,7 @@ export interface GenericJob<TMetadata = any, TSummary = any> {
   result: any | null;       // Full scan result (loaded in volatile RAM only, stripped on storage sync)
   submittedAt: string;
   completedAt: string | null;
+  detail?: any;
 }
 
 export const jobStore = {
