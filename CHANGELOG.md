@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.12](https://github.com/01cloud/01-Sandbox/compare/v0.6.11...v0.6.12) (2026-07-06)
+
+
+### 📖 Documentation
+
+* add integration flow and usage documentation to config.py ([4aad6e7](https://github.com/01cloud/01-Sandbox/commit/4aad6e7d002dd22097672121dd177479782bd7f0))
+* generate RELEASE.md for v0.6.11 [skip ci] ([b6793c3](https://github.com/01cloud/01-Sandbox/commit/b6793c392a07f3cd30b78de95a2da40cdc743a9a))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.11 [skip ci] ([122e5f0](https://github.com/01cloud/01-Sandbox/commit/122e5f0a20e91319b1e3d15689836755b7174de7))
+
 ## [0.6.11](https://github.com/01cloud/01-Sandbox/compare/v0.6.10...v0.6.11) (2026-07-06)
 
 
