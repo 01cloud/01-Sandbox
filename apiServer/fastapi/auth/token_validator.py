@@ -144,7 +144,7 @@ async def validate_token(request: Request):
                 except Exception:
                     pass
 
-            # Identity Bridge for Docs: Rotate active developer API keys to scale the rate limit
+            # Identity Bridge for Docs: Rotate active developer API keys to scale the rate limits
             if user_id:
                 try:
                     active_keys = await get_active_developer_keys(state, user_id)
