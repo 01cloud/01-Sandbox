@@ -1,3 +1,44 @@
+## Release v0.6.6 — 01-Sandbox
+**Release Date:** July 06, 2026
+
+---
+
+### Summary
+v0.6.6 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* erroneous failed status in pipeline UI ([7c96b54](https://github.com/01cloud/01-Sandbox/commit/7c96b54436a3837fd8fcf0cd9b0b259479a259b5))
+* erroneous failed status in pipeline UI ([b421337](https://github.com/01cloud/01-Sandbox/commit/b4213370b98e7a60a3b1e1a3aec835373a9029b6))
+* generate RELEASE.md for v0.6.5 [skip ci] ([055a7dd](https://github.com/01cloud/01-Sandbox/commit/055a7ddad888325a8b9f7d5d8329322bd365d2a0))
+* bump versions to v0.6.5 [skip ci] ([dc0eede](https://github.com/01cloud/01-Sandbox/commit/dc0eedeb3b0a052483a9d19074c642a4e3c38ed5))
+
+### Changes
+## [0.6.6](https://github.com/01cloud/01-Sandbox/compare/v0.6.5...v0.6.6) (2026-07-06)
+
+
+### 🐛 Bug Fixes
+
+* erroneous failed status in pipeline UI ([7c96b54](https://github.com/01cloud/01-Sandbox/commit/7c96b54436a3837fd8fcf0cd9b0b259479a259b5))
+* erroneous failed status in pipeline UI ([b421337](https://github.com/01cloud/01-Sandbox/commit/b4213370b98e7a60a3b1e1a3aec835373a9029b6))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.5 [skip ci] ([055a7dd](https://github.com/01cloud/01-Sandbox/commit/055a7ddad888325a8b9f7d5d8329322bd365d2a0))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.5 [skip ci] ([dc0eede](https://github.com/01cloud/01-Sandbox/commit/dc0eedeb3b0a052483a9d19074c642a4e3c38ed5))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.6)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.5 — 01-Sandbox
 **Release Date:** July 06, 2026
 
