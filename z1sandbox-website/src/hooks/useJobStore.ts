@@ -118,11 +118,13 @@ export function useJobStore(
         const isTerminal = ["DONE", "ERROR"].includes(ev.step);
 
         // Extract and volatile-cache full result when done
-        if (ev.step === "DONE" && ev.detail) {
-          setVolatileResults(prev => ({
-            ...prev,
-            [jobId]: ev.detail
-          }));
+        if (ev.step === "DONE") {
+          // NOTE: ev.detail here contains only language-pipeline statuses (e.g. {"Go": "DONE"}),
+          // NOT the full scan report. We do NOT write it into volatileResults here because
+          // that would block lazyFetchResult from fetching the real rich result (with findings,
+          // percentages, file counts) that powers the language distribution chart.
+          // lazyFetchResult is triggered by the useEffect in RepoScannerWidget when a DONE
+          // job is selected and volatileResults[jobId] is absent.
         }
 
         const updatedJob: GenericJob = {
@@ -151,6 +153,13 @@ export function useJobStore(
         if (isTerminal) {
           es.close();
           delete esRefs.current[jobId];
+
+          // Eagerly fetch the full rich result when the scan finishes so the
+          // language distribution chart and per-language cards render immediately
+          // without the user having to deselect and reselect the job.
+          if (ev.step === "DONE") {
+            lazyFetchResult(jobId);
+          }
         }
       } catch (err) {
         console.error("[useJobStore] SSE parse error", err);
