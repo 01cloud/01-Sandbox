@@ -14,6 +14,7 @@ async def list_jobs(job_type: str, user_data: dict = Depends(validate_token)):
     """Lists active and cached jobs matching a specific type.
     Combines in-memory active jobs and historical jobs from Redis.
     """
+    user_id = user_data.get("sub")
     jobs = []
     seen_ids = set()
 
@@ -21,6 +22,9 @@ async def list_jobs(job_type: str, user_data: dict = Depends(validate_token)):
     stale_ids = []
     for job_id, job in state.job_tracker._jobs.items():
         if job.job_type == job_type:
+            if job.metadata.get("user_id") != user_id:
+                continue
+
             # Sync with Redis if it has completed elsewhere
             redis_status = None
             if state.use_redis and state.redis_client:
@@ -84,6 +88,8 @@ async def list_jobs(job_type: str, user_data: dict = Depends(validate_token)):
                 metadata = json.loads(metadata_str)
                 if metadata.get("job_type") != job_type:
                     continue
+                if metadata.get("user_id") != user_id:
+                    continue
 
                 status = r.get(key)
                 events_len = r.llen(f"job:{job_id}:events")
@@ -126,8 +132,13 @@ async def get_job_events(
     job_id: str, since: int = 0, user_data: dict = Depends(validate_token)
 ):
     """Retrieves all past events for replay/hydration."""
+    user_id = user_data.get("sub")
     job = state.job_tracker.get_job(job_id)
     if job:
+        if job.metadata.get("user_id") != user_id:
+            raise HTTPException(
+                status_code=403, detail="Forbidden: You do not own this job."
+            )
         events = list(job.event_log)[since:]
         return [
             json.loads(
@@ -138,6 +149,17 @@ async def get_job_events(
 
     if state.use_redis and state.redis_client:
         r = state.redis_client
+        meta_str = r.get(f"job:{job_id}:metadata")
+        if meta_str:
+            try:
+                metadata = json.loads(meta_str)
+                if metadata.get("user_id") != user_id:
+                    raise HTTPException(
+                        status_code=403, detail="Forbidden: You do not own this job."
+                    )
+            except Exception as e:
+                if isinstance(e, HTTPException):
+                    raise e
         events_json = r.lrange(f"job:{job_id}:events", since, -1)
         return [json.loads(e) for e in events_json]
 
@@ -149,6 +171,26 @@ async def stream_job_status(
     job_id: str, since: int = 0, user_data: dict = Depends(validate_token)
 ):
     """Streams live events using the Generic SSE Manager."""
+    user_id = user_data.get("sub")
+    job = state.job_tracker.get_job(job_id)
+    if job:
+        if job.metadata.get("user_id") != user_id:
+            raise HTTPException(
+                status_code=403, detail="Forbidden: You do not own this job."
+            )
+    elif state.use_redis and state.redis_client:
+        r = state.redis_client
+        meta_str = r.get(f"job:{job_id}:metadata")
+        if meta_str:
+            try:
+                metadata = json.loads(meta_str)
+                if metadata.get("user_id") != user_id:
+                    raise HTTPException(
+                        status_code=403, detail="Forbidden: You do not own this job."
+                    )
+            except Exception as e:
+                if isinstance(e, HTTPException):
+                    raise e
     return StreamingResponse(
         state.job_tracker.stream(job_id, since_index=since),
         media_type="text/event-stream",
@@ -166,14 +208,31 @@ async def get_job_result(job_id: str, user_data: dict = Depends(validate_token))
     Reads report dynamically from PVC, Redis, or local memory, completely
     bypassing localStorage.
     """
+    user_id = user_data.get("sub")
     # 1. Try local/in-memory active job result
     job = state.job_tracker.get_job(job_id)
-    if job and job.result:
-        return job.result
+    if job:
+        if job.metadata.get("user_id") != user_id:
+            raise HTTPException(
+                status_code=403, detail="Forbidden: You do not own this job."
+            )
+        if job.result:
+            return job.result
 
     # 2. Try Redis cached result (first layer fallback)
     if state.use_redis and state.redis_client:
         r = state.redis_client
+        meta_str = r.get(f"job:{job_id}:metadata")
+        if meta_str:
+            try:
+                metadata = json.loads(meta_str)
+                if metadata.get("user_id") != user_id:
+                    raise HTTPException(
+                        status_code=403, detail="Forbidden: You do not own this job."
+                    )
+            except Exception as e:
+                if isinstance(e, HTTPException):
+                    raise e
         cached = r.get(f"job:{job_id}:result")
         if cached:
             return json.loads(cached)

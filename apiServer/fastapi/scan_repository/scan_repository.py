@@ -499,6 +499,7 @@ async def _run_scan_pipeline(
         )
 
         # Count severities
+        critical_count = 0
         high_count = 0
         medium_count = 0
         low_count = 0
@@ -506,7 +507,9 @@ async def _run_scan_pipeline(
         for r in language_results.values():
             for f in r.findings:
                 sev = str(f.severity).upper()
-                if "CRITICAL" in sev or "HIGH" in sev:
+                if "CRITICAL" in sev:
+                    critical_count += 1
+                elif "HIGH" in sev:
                     high_count += 1
                 elif "MEDIUM" in sev:
                     medium_count += 1
@@ -516,6 +519,7 @@ async def _run_scan_pipeline(
                     info_count += 1
 
         detail_dict = final_result.dict()
+        detail_dict["critical_count"] = critical_count
         detail_dict["high_count"] = high_count
         detail_dict["medium_count"] = medium_count
         detail_dict["low_count"] = low_count
@@ -524,6 +528,7 @@ async def _run_scan_pipeline(
         # Save summary count to job tracker metadata
         job_record = app_state.job_tracker.get_job(job_id)
         summary_data = {
+            "critical": critical_count,
             "high": high_count,
             "medium": medium_count,
             "low": low_count,
@@ -677,6 +682,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
     async def submit_repo_scan(
         req: RepoScanRequest,
         background_tasks: BackgroundTasks,
+        user_data: dict = Depends(validate_token),
     ) -> RepoScanSubmitResponse:
         """
         Validates a repository URL and enqueues a full scan job.
@@ -688,11 +694,16 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         import datetime
 
         submitted_at = datetime.datetime.now(datetime.UTC).isoformat()
+        user_id = user_data.get("sub")
 
         app_state.job_tracker.create_job(
             job_id,
             "repo-scan",
-            {"repo_url": req.repo_url, "submitted_at": submitted_at},
+            {
+                "repo_url": req.repo_url,
+                "submitted_at": submitted_at,
+                "user_id": user_id,
+            },
         )
 
         await app_state.job_tracker.push_event(
@@ -740,12 +751,34 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         summary="Stream live scan progress via Server-Sent Events",
         dependencies=[Depends(validate_token)],
     )
-    async def stream_scan_status(job_id: str, since: int = 0) -> StreamingResponse:
+    async def stream_scan_status(
+        job_id: str, since: int = 0, user_data: dict = Depends(validate_token)
+    ) -> StreamingResponse:
         """
         SSE endpoint streaming scan step events in real-time.
         Accepts an optional ``since`` query parameter to resume from a specific
         event index (avoids replaying the full log on reconnect).
         """
+        user_id = user_data.get("sub")
+        job = app_state.job_tracker.get_job(job_id)
+        if job:
+            if job.metadata.get("user_id") != user_id:
+                raise HTTPException(
+                    status_code=403, detail="Forbidden: You do not own this job."
+                )
+        elif app_state.use_redis and app_state.redis_client:
+            meta_str = app_state.redis_client.get(f"job:{job_id}:metadata")
+            if meta_str:
+                try:
+                    metadata = json.loads(meta_str)
+                    if metadata.get("user_id") != user_id:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Forbidden: You do not own this job.",
+                        )
+                except Exception as e:
+                    if isinstance(e, HTTPException):
+                        raise e
         return StreamingResponse(
             app_state.job_tracker.stream(job_id, since_index=since),
             media_type="text/event-stream",
@@ -764,17 +797,37 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         summary="Retrieve the final aggregated scan result",
         dependencies=[Depends(validate_token)],
     )
-    async def get_scan_result(job_id: str) -> RepoScanResult:
+    async def get_scan_result(
+        job_id: str, user_data: dict = Depends(validate_token)
+    ) -> RepoScanResult:
         """
         Returns the complete scan result once the job reaches DONE or ERROR.
         Resolves via cluster Redis cache fallback if processed on another node.
         """
+        user_id = user_data.get("sub")
         job = app_state.job_tracker.get_job(job_id)
-        if job and job.result:
-            return job.result
+        if job:
+            if job.metadata.get("user_id") != user_id:
+                raise HTTPException(
+                    status_code=403, detail="Forbidden: You do not own this job."
+                )
+            if job.result:
+                return job.result
 
         if app_state.use_redis and app_state.redis_client:
             res_str = app_state.redis_client.get(f"job:{job_id}:result")
+            meta_str = app_state.redis_client.get(f"job:{job_id}:metadata")
+            if meta_str:
+                try:
+                    metadata = json.loads(meta_str)
+                    if metadata.get("user_id") != user_id:
+                        raise HTTPException(
+                            status_code=403,
+                            detail="Forbidden: You do not own this job.",
+                        )
+                except Exception as e:
+                    if isinstance(e, HTTPException):
+                        raise e
             if res_str:
                 try:
                     return RepoScanResult.parse_raw(res_str)
@@ -797,7 +850,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         summary="List all repo-scan jobs — API-key auth (enables CLI→UI sync)",
         dependencies=[Depends(validate_token)],
     )
-    async def list_repo_scan_jobs():
+    async def list_repo_scan_jobs(user_data: dict = Depends(validate_token)):
         """
         Lists all repo-scan jobs from in-memory tracker and Redis.
         Uses API-key Bearer authentication — same as POST /v1/repo-scan.
@@ -809,6 +862,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         """
         import json as _json
 
+        user_id = user_data.get("sub")
         jobs = []
         seen_ids: set = set()
 
@@ -830,6 +884,8 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 stale_ids.append(jid)
                 continue
             if job.job_type != "repo-scan":
+                continue
+            if job.metadata.get("user_id") != user_id:
                 continue
 
             # Sync with Redis if it has completed elsewhere
@@ -921,6 +977,8 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                             continue
 
                         if metadata.get("job_type") != "repo-scan":
+                            continue
+                        if metadata.get("user_id") != user_id:
                             continue
 
                         last_msg = ""
