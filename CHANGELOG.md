@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.6](https://github.com/01cloud/01-Sandbox/compare/v0.6.5...v0.6.6) (2026-07-06)
+
+
+### 🐛 Bug Fixes
+
+* erroneous failed status in pipeline UI ([7c96b54](https://github.com/01cloud/01-Sandbox/commit/7c96b54436a3837fd8fcf0cd9b0b259479a259b5))
+* erroneous failed status in pipeline UI ([b421337](https://github.com/01cloud/01-Sandbox/commit/b4213370b98e7a60a3b1e1a3aec835373a9029b6))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.5 [skip ci] ([055a7dd](https://github.com/01cloud/01-Sandbox/commit/055a7ddad888325a8b9f7d5d8329322bd365d2a0))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.5 [skip ci] ([dc0eede](https://github.com/01cloud/01-Sandbox/commit/dc0eedeb3b0a052483a9d19074c642a4e3c38ed5))
+
 ## [0.6.5](https://github.com/01cloud/01-Sandbox/compare/v0.6.4...v0.6.5) (2026-07-06)
 
 
