@@ -1,3 +1,38 @@
+## Release v0.6.12 — 01-Sandbox
+**Release Date:** July 06, 2026
+
+---
+
+### Summary
+v0.6.12 focuses on reliability, bug resolution, and maintenance. Test coverage has been expanded to ensure higher code quality. Documentation has been updated for better clarity and onboarding. CI/CD and build pipelines have been enhanced for smoother deployments. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* add integration flow and usage documentation to config.py ([4aad6e7](https://github.com/01cloud/01-Sandbox/commit/4aad6e7d002dd22097672121dd177479782bd7f0))
+* generate RELEASE.md for v0.6.11 [skip ci] ([b6793c3](https://github.com/01cloud/01-Sandbox/commit/b6793c392a07f3cd30b78de95a2da40cdc743a9a))
+* bump versions to v0.6.11 [skip ci] ([122e5f0](https://github.com/01cloud/01-Sandbox/commit/122e5f0a20e91319b1e3d15689836755b7174de7))
+
+### Changes
+## [0.6.12](https://github.com/01cloud/01-Sandbox/compare/v0.6.11...v0.6.12) (2026-07-06)
+
+
+### 📖 Documentation
+
+* add integration flow and usage documentation to config.py ([4aad6e7](https://github.com/01cloud/01-Sandbox/commit/4aad6e7d002dd22097672121dd177479782bd7f0))
+* generate RELEASE.md for v0.6.11 [skip ci] ([b6793c3](https://github.com/01cloud/01-Sandbox/commit/b6793c392a07f3cd30b78de95a2da40cdc743a9a))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.11 [skip ci] ([122e5f0](https://github.com/01cloud/01-Sandbox/commit/122e5f0a20e91319b1e3d15689836755b7174de7))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.12)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.11 — 01-Sandbox
 **Release Date:** July 06, 2026
 
