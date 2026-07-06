@@ -302,7 +302,9 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
 
   // Find currently selected job record
   const selectedJob = jobs.find((j) => j.job_id === selectedJobId) || null;
-  const selectedResult = selectedJobId ? volatileResults[selectedJobId] : null;
+  // Use volatile RAM result first (freshly fetched), fall back to job.detail which is
+  // persisted in localStorage from the DONE SSE event and contains the full scan report.
+  const selectedResult = (selectedJobId ? volatileResults[selectedJobId] : null) ?? selectedJob?.detail ?? null;
 
   // Custom renderer for scan result findings
   const renderRepoScanResult = (result: any) => {
