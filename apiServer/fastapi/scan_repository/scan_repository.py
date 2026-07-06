@@ -502,20 +502,24 @@ async def _run_scan_pipeline(
         high_count = 0
         medium_count = 0
         low_count = 0
+        info_count = 0
         for r in language_results.values():
             for f in r.findings:
                 sev = str(f.severity).upper()
-                if "HIGH" in sev:
+                if "CRITICAL" in sev or "HIGH" in sev:
                     high_count += 1
                 elif "MEDIUM" in sev:
                     medium_count += 1
                 elif "LOW" in sev:
                     low_count += 1
+                elif "INFO" in sev:
+                    info_count += 1
 
         detail_dict = final_result.dict()
         detail_dict["high_count"] = high_count
         detail_dict["medium_count"] = medium_count
         detail_dict["low_count"] = low_count
+        detail_dict["info_count"] = info_count
 
         # Save summary count to job tracker metadata
         job_record = app_state.job_tracker.get_job(job_id)
@@ -523,6 +527,7 @@ async def _run_scan_pipeline(
             "high": high_count,
             "medium": medium_count,
             "low": low_count,
+            "info": info_count,
         }
         if job_record:
             job_record.metadata["summary"] = summary_data

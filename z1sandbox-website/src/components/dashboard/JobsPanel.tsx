@@ -151,6 +151,11 @@ export function JobsPanel({
                             L:{job.summary.low}
                           </Badge>
                         )}
+                        {job.summary.info > 0 && (
+                          <Badge className="h-4 px-1 text-[8px] bg-slate-500/20 hover:bg-slate-500/20 text-slate-400 border border-slate-500/30 font-extrabold rounded-md">
+                            I:{job.summary.info}
+                          </Badge>
+                        )}
                         {job.summary.high === 0 && job.summary.medium === 0 && job.summary.low === 0 && (
                           <Badge className="h-4 px-1 text-[8px] bg-emerald-500/20 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 font-extrabold rounded-md">
                             SECURE
@@ -168,10 +173,11 @@ export function JobsPanel({
                       </p>
                       <div className="flex flex-col gap-1.5">
                         {Object.entries(job.detail.languages).map(([lang, status]: [string, any]) => {
-                          const isPending = status === "PENDING";
-                          const isScanningLang = status === "SCANNING";
-                          const isDone = status === "DONE";
-                          const isFailed = status === "FAILED";
+                          const statusStr = typeof status === "string" ? status : "DONE";
+                          const isPending = statusStr === "PENDING";
+                          const isScanningLang = statusStr === "SCANNING";
+                          const isDone = statusStr === "DONE";
+                          const isFailed = statusStr === "FAILED";
 
                           return (
                             <div key={lang} className="flex items-center justify-between text-[11px]">
@@ -186,7 +192,7 @@ export function JobsPanel({
                                 )}
                               >
                                 {isScanningLang && <Loader2 className="w-2.5 h-2.5 animate-spin shrink-0" />}
-                                {status === "PENDING" ? "Pending" : status === "SCANNING" ? "Scanning" : status === "DONE" ? "Complete" : "Failed"}
+                                {statusStr === "PENDING" ? "Pending" : statusStr === "SCANNING" ? "Scanning" : statusStr === "DONE" ? "Complete" : "Failed"}
                               </span>
                             </div>
                           );
