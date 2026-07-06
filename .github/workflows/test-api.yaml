@@ -29,7 +29,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r apiServer/fastapi/requirements.txt
 
-      - name: Run Tests
+      - name: Run PostgreSQL Health Tests
         working-directory: apiServer/fastapi
         run: |
-          pytest tests/postgresql/ tests/redis/ tests/ratelimit/ --cov=health --cov-report=term-missing -v
+          pytest tests/postgresql/ --cov=health --cov-report=term-missing -v
+
+      - name: Run Redis Health Tests
+        working-directory: apiServer/fastapi
+        run: |
+          pytest tests/redis/ --cov=health --cov-report=term-missing -v
+
+      - name: Run Ratelimit Tests
+        working-directory: apiServer/fastapi
+        run: |
+          pytest tests/ratelimit/ --cov=ratelimit --cov-report=term-missing -v
