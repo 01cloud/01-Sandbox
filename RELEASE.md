@@ -1,3 +1,44 @@
+## Release v0.6.10 — 01-Sandbox
+**Release Date:** July 06, 2026
+
+---
+
+### Summary
+v0.6.10 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* fixes ([04df0f3](https://github.com/01cloud/01-Sandbox/commit/04df0f3ae5af3f51de1f9940035e9db3d657a38a))
+* fixes ([87eec4d](https://github.com/01cloud/01-Sandbox/commit/87eec4dfd54beb6e9c7b2f71b5937da06a1fd2da))
+* generate RELEASE.md for v0.6.9 [skip ci] ([226b17e](https://github.com/01cloud/01-Sandbox/commit/226b17e6a325383f4330171f86ab404ef16f7e4f))
+* bump versions to v0.6.9 [skip ci] ([3b23d54](https://github.com/01cloud/01-Sandbox/commit/3b23d54a96fd462fbd5a6bb59bd70ebf4628321e))
+
+### Changes
+## [0.6.10](https://github.com/01cloud/01-Sandbox/compare/v0.6.9...v0.6.10) (2026-07-06)
+
+
+### 🐛 Bug Fixes
+
+* fixes ([04df0f3](https://github.com/01cloud/01-Sandbox/commit/04df0f3ae5af3f51de1f9940035e9db3d657a38a))
+* fixes ([87eec4d](https://github.com/01cloud/01-Sandbox/commit/87eec4dfd54beb6e9c7b2f71b5937da06a1fd2da))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.9 [skip ci] ([226b17e](https://github.com/01cloud/01-Sandbox/commit/226b17e6a325383f4330171f86ab404ef16f7e4f))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.9 [skip ci] ([3b23d54](https://github.com/01cloud/01-Sandbox/commit/3b23d54a96fd462fbd5a6bb59bd70ebf4628321e))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.10)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.9 — 01-Sandbox
 **Release Date:** July 06, 2026
 
