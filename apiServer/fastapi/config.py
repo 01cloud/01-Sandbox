@@ -1,3 +1,41 @@
+"""
+config.py
+=========
+
+This module is the centralized configuration hub for the FastAPI Sandbox API.
+It loads and formats environment variables, providing default fallbacks,
+sanitization (e.g. repairing messy cryptographic PEM key formatting),
+and fail-safe validation.
+
+Key Functionality:
+------------------
+1. `backend_mappings()`:
+   - Configures the routing URLs for underlying code-execution sandboxes (e.g. Docker, Firecracker).
+   - Allows dynamically adding new sandbox backends at runtime via JSON strings.
+2. `opensandbox_headers()`:
+   - Sets the HTTP authentication headers required to talk to internal sandbox services.
+3. `jwt_config()`:
+   - Resolves public/private key pairs used to generate and validate JWT credentials.
+   - If keys are missing in the environment, it auto-generates ephemeral fallback keys
+     and caches them inside the process to avoid key rotation on subsequent HTTP requests.
+
+Application Flow & Usage:
+--------------------------
+Other modules in the application import config.py to retrieve runtime parameters:
+- `main.py` -> Entry point. Runs initialization routines, but does not read environment directly.
+- `auth/token_validator.py` -> Imports `jwt_config()` to load public verification keys for checking user tokens.
+- `api_keys/router.py` -> Imports `jwt_config()` to sign newly generated API keys (JWTs) for users.
+- `scan_repository/file_scanner.py` & `proxy/router.py` -> Import `opensandbox_base_url()` and `opensandbox_headers()`
+  to establish authorized HTTP connections with the sandbox workers.
+
+How to Test:
+------------
+This configuration module is covered by isolated unit tests inside:
+  `tests/config/test_config.py`
+Run them using:
+  `pytest tests/config/ --cov=config --cov-report=term-missing -v`
+"""
+
 import base64
 import os
 
