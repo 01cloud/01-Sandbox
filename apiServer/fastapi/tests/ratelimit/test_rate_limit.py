@@ -130,7 +130,7 @@ def test_invalid_env_fallback(monkeypatch):
 # ===========================================================================
 #
 # WHAT THIS FUNCTION DOES (rate_limiter.py lines 131-156):
-#   1. Returns False immediately if jti is empty
+#   1. Returns False immediately if jti (Jason Web Token ID) is empty
 #   2. If Redis is enabled → reads the current count from Redis and compares
 #      to the limit
 #   3. If Redis is disabled → reads from state.local_rate_limits (a dict) and
@@ -154,7 +154,7 @@ def test_invalid_env_fallback(monkeypatch):
 
 def test_empty_jti_returns_false():
     """
-    SCENARIO: jti is an empty string.
+    SCENARIO: jti(Jason Web Token ID) is an empty string.
     EXPECTATION: The function returns False immediately (first line guard check).
 
     NOTE: No monkeypatch or MagicMock needed here — the function exits before

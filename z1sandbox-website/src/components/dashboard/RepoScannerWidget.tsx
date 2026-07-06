@@ -537,130 +537,135 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
             </button>
           </DialogHeader>
 
-          {/* Triple Panel Layout */}
+          {/* Two-Column Sidebar View */}
           <div className="flex-1 flex overflow-hidden">
 
-            {/* Panel 1: Input URL and Submission Controls (left) */}
-            <div className="w-[400px] shrink-0 flex flex-col p-6 border-r border-border/50 bg-muted/5 gap-5">
-              <div className="flex flex-col gap-2">
-                <div className="flex items-center justify-between mb-1">
-                  <label htmlFor="repo-url-input" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground block">
-                    Repository URL
-                  </label>
-                  {isValidating && <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-500" />}
+            {/* Panel 1: Input URL, Submission Controls, and Repository Scans (left sidebar) */}
+            <div className="w-[400px] shrink-0 flex flex-col border-r border-border/50 bg-muted/5 h-full overflow-hidden">
+              <div className="flex flex-col p-6 gap-5 shrink-0">
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between mb-1">
+                    <label htmlFor="repo-url-input" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground block">
+                      Repository URL
+                    </label>
+                    {isValidating && <Loader2 className="w-3.5 h-3.5 animate-spin text-violet-500" />}
+                  </div>
+                  <Input
+                    id="repo-url-input"
+                    value={repoUrl}
+                    onChange={(e) => {
+                      setRepoUrl(e.target.value);
+                      validateUrl(e.target.value);
+                      if (!e.target.value) {
+                        setRequiresAuth(false);
+                        setGitToken("");
+                        setSshKey("");
+                      }
+                    }}
+                    onBlur={handleUrlBlur}
+                    placeholder="https://github.com/owner/repo1, repo2..."
+                    className={cn("rounded-xl h-11 font-mono text-sm border transition-colors", urlError ? "border-destructive" : "")}
+                    disabled={isScanning}
+                  />
+                  {urlError && <p className="text-[11px] text-destructive font-medium">{urlError}</p>}
                 </div>
-                <Input
-                  id="repo-url-input"
-                  value={repoUrl}
-                  onChange={(e) => {
-                    setRepoUrl(e.target.value);
-                    validateUrl(e.target.value);
-                    if (!e.target.value) {
-                      setRequiresAuth(false);
-                      setGitToken("");
-                      setSshKey("");
-                    }
-                  }}
-                  onBlur={handleUrlBlur}
-                  placeholder="https://github.com/owner/repo1, repo2..."
-                  className={cn("rounded-xl h-11 font-mono text-sm border transition-colors", urlError ? "border-destructive" : "")}
-                  disabled={isScanning}
-                />
-                {urlError && <p className="text-[11px] text-destructive font-medium">{urlError}</p>}
+
+                {requiresAuth && (
+                  <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-violet-500 font-bold text-xs uppercase tracking-wider">
+                        <Shield className="w-4 h-4" />
+                        Private Repo Detected
+                      </div>
+                      <div className="flex bg-muted/40 rounded-lg p-0.5 border border-border/50">
+                        <button
+                          type="button"
+                          onClick={() => setAuthMethod("token")}
+                          className={cn(
+                            "px-3 py-1 text-[10px] font-black uppercase rounded-md transition-all",
+                            authMethod === "token"
+                              ? "bg-violet-600 text-white shadow-sm"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          Token
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAuthMethod("ssh")}
+                          className={cn(
+                            "px-3 py-1 text-[10px] font-black uppercase rounded-md transition-all",
+                            authMethod === "ssh"
+                              ? "bg-violet-600 text-white shadow-sm"
+                              : "text-muted-foreground hover:text-foreground"
+                          )}
+                        >
+                          SSH Key
+                        </button>
+                      </div>
+                    </div>
+
+                    {authMethod === "token" ? (
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="git-token-input" className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+                          Personal Access Token (PAT)
+                        </label>
+                        <Input
+                          id="git-token-input"
+                          type="password"
+                          value={gitToken}
+                          onChange={(e) => setGitToken(e.target.value)}
+                          placeholder="ghp_xxxxxxxxxxxx or GitLab/Bitbucket token"
+                          className="rounded-xl h-10 font-mono text-xs border bg-background/50 focus:border-violet-500/50"
+                        />
+                        <p className="text-[10px] text-muted-foreground/60 leading-normal">
+                          Token is not stored. It will be used ephemerally to authenticate the clone process and then discarded.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="ssh-key-input" className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
+                          SSH Private Key
+                        </label>
+                        <textarea
+                          id="ssh-key-input"
+                          value={sshKey}
+                          onChange={(e) => setSshKey(e.target.value)}
+                          placeholder="Paste your SSH Private Key here..."
+                          className="rounded-xl min-h-[120px] p-3 font-mono text-xs border border-border/50 bg-background/50 focus:border-violet-500/50 focus:outline-none focus:ring-1 focus:ring-violet-500/50 resize-y"
+                        />
+                        <p className="text-[10px] text-muted-foreground/60 leading-normal">
+                          Paste the private deploy key with read permissions. This is processed entirely in memory and never stored in the database.
+                        </p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <Button
+                  id="scan-repo-btn"
+                  onClick={handleScan}
+                  disabled={isScanning || !!urlError || !repoUrl}
+                  className="h-11 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold flex items-center gap-2 shadow-lg shadow-violet-600/15 transition-all disabled:opacity-60 shrink-0"
+                >
+                  {isScanning ? <><Loader2 className="w-4 h-4 animate-spin" /> Ingesting...</> : <><Search className="w-4 h-4" /> Scan Repository</>}
+                </Button>
               </div>
 
-              {requiresAuth && (
-                <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-violet-500 font-bold text-xs uppercase tracking-wider">
-                      <Shield className="w-4 h-4" />
-                      Private Repo Detected
-                    </div>
-                    <div className="flex bg-muted/40 rounded-lg p-0.5 border border-border/50">
-                      <button
-                        type="button"
-                        onClick={() => setAuthMethod("token")}
-                        className={cn(
-                          "px-3 py-1 text-[10px] font-black uppercase rounded-md transition-all",
-                          authMethod === "token"
-                            ? "bg-violet-600 text-white shadow-sm"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        Token
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAuthMethod("ssh")}
-                        className={cn(
-                          "px-3 py-1 text-[10px] font-black uppercase rounded-md transition-all",
-                          authMethod === "ssh"
-                            ? "bg-violet-600 text-white shadow-sm"
-                            : "text-muted-foreground hover:text-foreground"
-                        )}
-                      >
-                        SSH Key
-                      </button>
-                    </div>
-                  </div>
-
-                  {authMethod === "token" ? (
-                    <div className="flex flex-col gap-1.5">
-                      <label htmlFor="git-token-input" className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
-                        Personal Access Token (PAT)
-                      </label>
-                      <Input
-                        id="git-token-input"
-                        type="password"
-                        value={gitToken}
-                        onChange={(e) => setGitToken(e.target.value)}
-                        placeholder="ghp_xxxxxxxxxxxx or GitLab/Bitbucket token"
-                        className="rounded-xl h-10 font-mono text-xs border bg-background/50 focus:border-violet-500/50"
-                      />
-                      <p className="text-[10px] text-muted-foreground/60 leading-normal">
-                        Token is not stored. It will be used ephemerally to authenticate the clone process and then discarded.
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="flex flex-col gap-1.5">
-                      <label htmlFor="ssh-key-input" className="text-[9px] font-black uppercase tracking-wider text-muted-foreground">
-                        SSH Private Key
-                      </label>
-                      <textarea
-                        id="ssh-key-input"
-                        value={sshKey}
-                        onChange={(e) => setSshKey(e.target.value)}
-                        placeholder="Paste your SSH Private Key here..."
-                        className="rounded-xl min-h-[120px] p-3 font-mono text-xs border border-border/50 bg-background/50 focus:border-violet-500/50 focus:outline-none focus:ring-1 focus:ring-violet-500/50 resize-y"
-                      />
-                      <p className="text-[10px] text-muted-foreground/60 leading-normal">
-                        Paste the private deploy key with read permissions. This is processed entirely in memory and never stored in the database.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <Button
-                id="scan-repo-btn"
-                onClick={handleScan}
-                disabled={isScanning || !!urlError || !repoUrl}
-                className="h-11 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold flex items-center gap-2 shadow-lg shadow-violet-600/15 transition-all disabled:opacity-60"
-              >
-                {isScanning ? <><Loader2 className="w-4 h-4 animate-spin" /> Ingesting...</> : <><Search className="w-4 h-4" /> Scan Repository</>}
-              </Button>
+              {/* Nested JobsPanel inside sidebar */}
+              <div className="flex-1 min-h-0">
+                <JobsPanel
+                  jobs={jobs}
+                  selectedJobId={selectedJobId}
+                  onSelectJob={setSelectedJobId}
+                  onDeleteJob={removeJob}
+                  jobType="repo-scan"
+                  embedded={true}
+                />
+              </div>
             </div>
 
-            {/* Panel 2: Sidebar list panel (middle) */}
-            <JobsPanel
-              jobs={jobs}
-              selectedJobId={selectedJobId}
-              onSelectJob={setSelectedJobId}
-              onDeleteJob={removeJob}
-              jobType="repo-scan"
-            />
-
-            {/* Panel 3: Execution View / Result renderer (right) */}
+            {/* Panel 2: Execution View / Result renderer (right sidebar) */}
             <div className="flex-1 bg-background overflow-hidden flex flex-col p-6">
               <ScrollArea className="flex-1">
                 <div className="max-w-5xl mx-auto w-full">

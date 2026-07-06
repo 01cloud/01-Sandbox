@@ -11,6 +11,7 @@ interface JobsPanelProps {
   onSelectJob: (jobId: string) => void;
   onDeleteJob: (jobId: string) => void;
   jobType: "repo-scan" | "quick-scan";
+  embedded?: boolean;
 }
 
 export function JobsPanel({
@@ -19,6 +20,7 @@ export function JobsPanel({
   onSelectJob,
   onDeleteJob,
   jobType,
+  embedded = false,
 }: JobsPanelProps) {
   const formatTime = (isoString: string) => {
     try {
@@ -30,9 +32,14 @@ export function JobsPanel({
   };
 
   return (
-    <div className="w-[320px] shrink-0 border-r border-border/50 bg-muted/10 flex flex-col h-full animate-in slide-in-from-left duration-300">
+    <div className={cn(
+      "flex flex-col h-full transition-all duration-300",
+      embedded
+        ? "w-full border-t border-border/50 bg-transparent"
+        : "w-[320px] shrink-0 border-r border-border/50 bg-muted/10 animate-in slide-in-from-left duration-300"
+    )}>
       {/* Header */}
-      <div className="p-5 border-b border-border/50 flex flex-col gap-1 shrink-0">
+      <div className={cn("flex flex-col gap-1 shrink-0", embedded ? "p-4 pb-2 border-b border-border/30" : "p-5 border-b border-border/50")}>
         <h3 className="text-sm font-black uppercase tracking-wider text-foreground">
           {jobType === "repo-scan" ? "Repository Scans" : "Quick Scans"}
         </h3>
