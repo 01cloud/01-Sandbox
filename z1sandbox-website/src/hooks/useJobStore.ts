@@ -138,6 +138,7 @@ export function useJobStore(
                 low: ev.detail.low_count || 0
               }
             : stored.summary,
+          detail: ev.detail || stored.detail,
           result: null, // Keep localStorage entry result stripped
           completedAt: ev.step === "DONE" ? new Date().toISOString() : stored.completedAt
         };
@@ -248,7 +249,8 @@ export function useJobStore(
             if (
               existing.status !== sj.status ||
               existing.progress !== sj.progress ||
-              existing.stepMessage !== sj.stepMessage
+              existing.stepMessage !== sj.stepMessage ||
+              JSON.stringify(existing.detail) !== JSON.stringify(sj.detail)
             ) {
               const updatedJob: GenericJob = {
                 ...existing,
@@ -257,6 +259,7 @@ export function useJobStore(
                 stepMessage: sj.stepMessage,
                 eventIndex: sj.eventIndex ?? existing.eventIndex,
                 summary: sj.summary ?? existing.summary,
+                detail: sj.detail ?? existing.detail,
                 completedAt: sj.completedAt ?? existing.completedAt
               };
               jobStore.upsert(updatedJob);

@@ -20,11 +20,11 @@ from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 
 from .file_scanner import (
+    _is_k8s_yaml,
     active_child_jobs_by_parent,
     cleanup_child_jobs,
     current_parent_job_id,
     scan_language,
-    _is_k8s_yaml,
 )
 from .github_validator import parse_github_url, validate_github_repo
 from .language_detector import detect_languages
@@ -206,13 +206,13 @@ async def _run_scan_pipeline(
             lang_statuses[lang] = "PENDING"
 
         # Check if yaml is present and precheck its classification
-        has_yaml = any(l.lower() in ("yaml", "yml") for l in lang_map.keys())
+        has_yaml = any(lang.lower() in ("yaml", "yml") for lang in lang_map.keys())
         yaml_plain_present = False
         yaml_k8s_present = False
         if has_yaml:
             yaml_files = []
-            for l, files in lang_map.items():
-                if l.lower() in ("yaml", "yml"):
+            for lang, files in lang_map.items():
+                if lang.lower() in ("yaml", "yml"):
                     yaml_files.extend(files)
             for f in yaml_files:
                 if _is_k8s_yaml(f):
@@ -845,6 +845,11 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
 
             job_status = redis_status if redis_status else job.step
 
+            # Get the last event's detail if available
+            last_event_detail = None
+            if job.event_log:
+                last_event_detail = job.event_log[-1].detail
+
             jobs.append(
                 {
                     "job_id": job.job_id,
@@ -860,6 +865,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                     "metadata": job.metadata,
                     "summary": job.metadata.get("summary"),
                     "result": None,
+                    "detail": last_event_detail,
                     "submittedAt": job.metadata.get("submitted_at", ""),
                     "completedAt": job.metadata.get("completed_at", ""),
                 }
@@ -914,11 +920,13 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
 
                         last_msg = ""
                         last_progress = 10
+                        last_detail = None
                         if last_ev_str:
                             try:
                                 last_ev = _json.loads(last_ev_str)
                                 last_msg = last_ev.get("message", "")
                                 last_progress = last_ev.get("progress", 10)
+                                last_detail = last_ev.get("detail")
                             except Exception:
                                 pass
 
@@ -937,6 +945,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                                 "metadata": metadata,
                                 "summary": metadata.get("summary"),
                                 "result": None,
+                                "detail": last_detail,
                                 "submittedAt": metadata.get("submitted_at", ""),
                                 "completedAt": metadata.get("completed_at", ""),
                             }
