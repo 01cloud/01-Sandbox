@@ -135,7 +135,8 @@ export function useJobStore(
             ? {
                 high: ev.detail.high_count || 0,
                 medium: ev.detail.medium_count || 0,
-                low: ev.detail.low_count || 0
+                low: ev.detail.low_count || 0,
+                info: ev.detail.info_count || 0
               }
             : stored.summary,
           detail: ev.detail || stored.detail,

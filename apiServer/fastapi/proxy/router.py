@@ -132,16 +132,18 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
             )
             data = await state.backend.create_scan_job(req_dict)
 
-            high_count = medium_count = low_count = 0
+            high_count = medium_count = low_count = info_count = 0
             findings = data.get("findings", [])
             for f in findings:
                 sev = str(f.get("severity", "INFO")).upper()
-                if "HIGH" in sev:
+                if "CRITICAL" in sev or "HIGH" in sev:
                     high_count += 1
                 elif "MEDIUM" in sev:
                     medium_count += 1
                 elif "LOW" in sev:
                     low_count += 1
+                elif "INFO" in sev:
+                    info_count += 1
 
             job_record = state.job_tracker.get_job(job_id)
             if job_record:
@@ -149,6 +151,7 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
                     "high": high_count,
                     "medium": medium_count,
                     "low": low_count,
+                    "info": info_count,
                 }
                 if state.use_redis and state.redis_client:
                     try:
@@ -166,6 +169,7 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
             detail_dict["high_count"] = high_count
             detail_dict["medium_count"] = medium_count
             detail_dict["low_count"] = low_count
+            detail_dict["info_count"] = info_count
 
             await state.job_tracker.push_event(
                 job_id,
@@ -237,16 +241,18 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
                 )
                 data = await state.backend.create_scan_job(req.dict(exclude_none=True))
 
-                high_count = medium_count = low_count = 0
+                high_count = medium_count = low_count = info_count = 0
                 findings = data.get("findings", [])
                 for f in findings:
                     sev = str(f.get("severity", "INFO")).upper()
-                    if "HIGH" in sev:
+                    if "CRITICAL" in sev or "HIGH" in sev:
                         high_count += 1
                     elif "MEDIUM" in sev:
                         medium_count += 1
                     elif "LOW" in sev:
                         low_count += 1
+                    elif "INFO" in sev:
+                        info_count += 1
 
                 job_record = state.job_tracker.get_job(job_id)
                 if job_record:
@@ -254,6 +260,7 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
                         "high": high_count,
                         "medium": medium_count,
                         "low": low_count,
+                        "info": info_count,
                     }
                     if state.use_redis and state.redis_client:
                         try:
@@ -271,6 +278,7 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
                 detail_dict["high_count"] = high_count
                 detail_dict["medium_count"] = medium_count
                 detail_dict["low_count"] = low_count
+                detail_dict["info_count"] = info_count
 
                 await state.job_tracker.push_event(
                     job_id,
