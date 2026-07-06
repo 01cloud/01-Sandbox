@@ -44,3 +44,8 @@ jobs:
         working-directory: apiServer/fastapi
         run: |
           pytest tests/ratelimit/ --cov=ratelimit --cov-report=term-missing -v
+
+      - name: Run Configuration Tests
+        working-directory: apiServer/fastapi
+        run: |
+          pytest tests/config/ --cov=config --cov-report=term-missing -v
