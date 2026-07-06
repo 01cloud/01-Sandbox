@@ -355,79 +355,124 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
         <div>
           <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-4">Per-Language Details</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {langEntries.map(([lang, info]: [string, any], i) => (
-              <div key={lang} className="rounded-2xl border border-border/40 bg-card hover:bg-muted/15 transition-all overflow-hidden">
-                <button
-                  className="w-full p-4 flex items-center justify-between text-left"
-                  onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: LANG_COLORS[i % LANG_COLORS.length] }} />
-                    <span className="font-black text-xs text-foreground">{lang}</span>
-                  </div>
-                  <div className="flex items-center gap-3 text-right">
-                    <div className="text-right">
-                      <p className="text-[9px] text-muted-foreground">{info.file_count} files · {info.lines_of_code.toLocaleString()} LoC</p>
-                      <p className="text-xs font-bold text-foreground">{info.percentage.toFixed(1)}%</p>
+            {langEntries.map(([lang, info]: [string, any], i) => {
+              const sevCounts = info.findings.reduce(
+                (acc: any, f: any) => {
+                  const sev = (f.severity || "INFO").toUpperCase();
+                  if (sev === "CRITICAL" || sev === "HIGH") {
+                    acc.high = (acc.high || 0) + 1;
+                  } else if (sev === "MEDIUM") {
+                    acc.medium = (acc.medium || 0) + 1;
+                  } else if (sev === "LOW") {
+                    acc.low = (acc.low || 0) + 1;
+                  } else if (sev === "INFO") {
+                    acc.info = (acc.info || 0) + 1;
+                  }
+                  return acc;
+                },
+                { high: 0, medium: 0, low: 0, info: 0 }
+              );
+
+              return (
+                <div key={lang} className="rounded-2xl border border-border/40 bg-card hover:bg-muted/15 transition-all overflow-hidden">
+                  <button
+                    className="w-full p-4 flex items-center justify-between text-left"
+                    onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: LANG_COLORS[i % LANG_COLORS.length] }} />
+                      <span className="font-black text-xs text-foreground">{lang}</span>
                     </div>
-                    {info.findings.length > 0 && (
-                      <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-500 border-orange-500/20 py-0">
-                        {info.findings.length}
-                      </Badge>
-                    )}
-                  </div>
-                </button>
-                {expandedLang === lang && (
-                  <div className="border-t border-border/20 bg-muted/5">
-                    {info.findings.length === 0 ? (
-                      <div className="p-4 text-xs font-semibold text-muted-foreground/60 text-center">
-                        No security findings for this language
+                    <div className="flex items-center gap-3 text-right">
+                      <div className="flex flex-col items-end gap-1">
+                        <p className="text-[9px] text-muted-foreground">{info.file_count} files · {info.percentage.toFixed(1)}%</p>
+                        <div className="flex gap-0.5 items-center">
+                          {sevCounts.high > 0 && (
+                            <Badge className="h-3.5 px-0.5 text-[7px] bg-red-500/20 hover:bg-red-500/20 text-red-500 border border-red-500/30 font-extrabold rounded-sm">
+                              H:{sevCounts.high}
+                            </Badge>
+                          )}
+                          {sevCounts.medium > 0 && (
+                            <Badge className="h-3.5 px-0.5 text-[7px] bg-yellow-500/20 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 font-extrabold rounded-sm">
+                              M:{sevCounts.medium}
+                            </Badge>
+                          )}
+                          {sevCounts.low > 0 && (
+                            <Badge className="h-3.5 px-0.5 text-[7px] bg-blue-500/20 hover:bg-blue-500/20 text-blue-500 border-blue-500/30 font-extrabold rounded-sm">
+                              L:{sevCounts.low}
+                            </Badge>
+                          )}
+                          {sevCounts.info > 0 && (
+                            <Badge className="h-3.5 px-0.5 text-[7px] bg-slate-500/20 hover:bg-slate-500/20 text-slate-400 border border-slate-500/30 font-extrabold rounded-sm">
+                              I:{sevCounts.info}
+                            </Badge>
+                          )}
+                          {sevCounts.high === 0 && sevCounts.medium === 0 && sevCounts.low === 0 && sevCounts.info === 0 && (
+                            <span className="text-[8px] font-black text-emerald-500 uppercase tracking-wider">
+                              Secure
+                            </span>
+                          )}
+                        </div>
                       </div>
-                    ) : (
-                      <div className="overflow-y-auto p-4 space-y-3 max-h-[350px]">
-                        {info.findings.map((f: any, fi: number) => {
-                          const sev = f.severity?.toUpperCase() ?? "INFO";
-                          const sevColor =
-                            sev === "CRITICAL" ? "border-red-500/60 bg-red-500/5" :
-                            sev === "HIGH"     ? "border-orange-500/60 bg-orange-500/5" :
-                            sev === "MEDIUM"   ? "border-yellow-500/60 bg-yellow-500/5" :
-                            sev === "LOW"      ? "border-blue-500/60 bg-blue-500/5" :
-                                                 "border-border/50 bg-muted/10";
-                          const badgeColor =
-                            sev === "CRITICAL" ? "bg-red-500/15 text-red-500 border-red-500/30" :
-                            sev === "HIGH"     ? "bg-orange-500/15 text-orange-500 border-orange-500/30" :
-                            sev === "MEDIUM"   ? "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" :
-                            sev === "LOW"      ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
-                                                 "bg-muted text-muted-foreground border-border";
-                          return (
-                            <div key={fi} className={cn("p-3 rounded-xl border text-[11px] transition-all", sevColor)}>
-                              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                                <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide", badgeColor)}>
-                                  {sev}
-                                </Badge>
-                                <span className="text-[9px] font-bold text-muted-foreground">{f.tool}</span>
-                                {f.line && (
-                                  <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">L:{f.line}</span>
+                      {info.findings.length > 0 && (
+                        <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-500 border-orange-500/20 py-0">
+                          {info.findings.length}
+                        </Badge>
+                      )}
+                    </div>
+                  </button>
+                  {expandedLang === lang && (
+                    <div className="border-t border-border/20 bg-muted/5">
+                      {info.findings.length === 0 ? (
+                        <div className="p-4 text-xs font-semibold text-muted-foreground/60 text-center">
+                          No security findings for this language
+                        </div>
+                      ) : (
+                        <div className="overflow-y-auto p-4 space-y-3 max-h-[350px]">
+                          {info.findings.map((f: any, fi: number) => {
+                            const sev = f.severity?.toUpperCase() ?? "INFO";
+                            const sevColor =
+                              sev === "CRITICAL" ? "border-red-500/60 bg-red-500/5" :
+                              sev === "HIGH"     ? "border-orange-500/60 bg-orange-500/5" :
+                              sev === "MEDIUM"   ? "border-yellow-500/60 bg-yellow-500/5" :
+                              sev === "LOW"      ? "border-blue-500/60 bg-blue-500/5" :
+                                                   "border-border/50 bg-muted/10";
+                            const badgeColor =
+                              sev === "CRITICAL" ? "bg-red-500/15 text-red-500 border-red-500/30" :
+                              sev === "HIGH"     ? "bg-orange-500/15 text-orange-500 border-orange-500/30" :
+                              sev === "MEDIUM"   ? "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" :
+                              sev === "LOW"      ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
+                                                   "bg-muted text-muted-foreground border-border";
+                            return (
+                              <div key={fi} className={cn("p-3 rounded-xl border text-[11px] transition-all", sevColor)}>
+                                <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                  <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide", badgeColor)}>
+                                    {sev}
+                                  </Badge>
+                                  <span className="text-[9px] font-bold text-muted-foreground">{f.tool}</span>
+                                  {f.line && (
+                                    <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">L:{f.line}</span>
+                                  )}
+                                </div>
+                                <p className="font-bold text-foreground leading-snug">{f.issue}</p>
+                                {f.file && (
+                                  <div className="flex items-center gap-1.5 mt-1.5">
+                                    <p className="text-[9px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
+                                  </div>
+                                )}
+                                {f.remediation && (
+                                  <p className="text-[9px] text-muted-foreground/60 mt-1 leading-relaxed">{f.remediation}</p>
                                 )}
                               </div>
-                              <p className="font-bold text-foreground leading-snug">{f.issue}</p>
-                              {f.file && (
-                                <div className="flex items-center gap-1.5 mt-1.5">
-                                  <p className="text-[9px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
-                                </div>
-                              )}
-                              {f.remediation && (
-                                <p className="text-[9px] text-muted-foreground/60 mt-1 leading-relaxed">{f.remediation}</p>
-                              )}
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            ))}
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         </div>
       </div>
