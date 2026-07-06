@@ -1,3 +1,44 @@
+## Release v0.6.5 — 01-Sandbox
+**Release Date:** July 06, 2026
+
+---
+
+### Summary
+v0.6.5 introduces new features along with important stability improvements. Test coverage has been expanded to ensure higher code quality. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* resolve the pre-commit warning ([7ebc2fa](https://github.com/01cloud/01-Sandbox/commit/7ebc2fa8513f4efb802235d44702eb6859a2a66b))
+* resolve the pre-commit warning ([f00fe76](https://github.com/01cloud/01-Sandbox/commit/f00fe76800b90590267de498edfcc13f43b7959a))
+* generate RELEASE.md for v0.6.4 [skip ci] ([b693d44](https://github.com/01cloud/01-Sandbox/commit/b693d448881b528198e4aa966fabc9904b0e8757))
+* bump versions to v0.6.4 [skip ci] ([0e9f43b](https://github.com/01cloud/01-Sandbox/commit/0e9f43bbce64a1267f69e459b329899b46df5d6b))
+
+### Changes
+## [0.6.5](https://github.com/01cloud/01-Sandbox/compare/v0.6.4...v0.6.5) (2026-07-06)
+
+
+### 🐛 Bug Fixes
+
+* resolve the pre-commit warning ([7ebc2fa](https://github.com/01cloud/01-Sandbox/commit/7ebc2fa8513f4efb802235d44702eb6859a2a66b))
+* resolve the pre-commit warning ([f00fe76](https://github.com/01cloud/01-Sandbox/commit/f00fe76800b90590267de498edfcc13f43b7959a))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.4 [skip ci] ([b693d44](https://github.com/01cloud/01-Sandbox/commit/b693d448881b528198e4aa966fabc9904b0e8757))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.4 [skip ci] ([0e9f43b](https://github.com/01cloud/01-Sandbox/commit/0e9f43bbce64a1267f69e459b329899b46df5d6b))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.5)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.4 — 01-Sandbox
 **Release Date:** July 02, 2026
 
