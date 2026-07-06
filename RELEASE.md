@@ -1,3 +1,48 @@
+## Release v0.6.9 — 01-Sandbox
+**Release Date:** July 06, 2026
+
+---
+
+### Summary
+v0.6.9 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* fix the report on the UI ([79d9adf](https://github.com/01cloud/01-Sandbox/commit/79d9adfa1f67abe79c3f6476527a2cd133038f88))
+* fix the report on the UI ([f5608f6](https://github.com/01cloud/01-Sandbox/commit/f5608f664da1263418adffda8ed475d4c823307e))
+* fixes ([902a193](https://github.com/01cloud/01-Sandbox/commit/902a1936473a442f83837ee7fb337e652b635284))
+* fixes ([e0582d7](https://github.com/01cloud/01-Sandbox/commit/e0582d7828973de6468c0e8888a68b47733b7ebe))
+
+### Changes
+## [0.6.9](https://github.com/01cloud/01-Sandbox/compare/v0.6.8...v0.6.9) (2026-07-06)
+
+
+### 🐛 Bug Fixes
+
+* fix the report on the UI ([79d9adf](https://github.com/01cloud/01-Sandbox/commit/79d9adfa1f67abe79c3f6476527a2cd133038f88))
+* fix the report on the UI ([f5608f6](https://github.com/01cloud/01-Sandbox/commit/f5608f664da1263418adffda8ed475d4c823307e))
+* fixes ([902a193](https://github.com/01cloud/01-Sandbox/commit/902a1936473a442f83837ee7fb337e652b635284))
+* fixes ([e0582d7](https://github.com/01cloud/01-Sandbox/commit/e0582d7828973de6468c0e8888a68b47733b7ebe))
+* ratelimit test implementation ([2721037](https://github.com/01cloud/01-Sandbox/commit/2721037f2fb919205bd240cc9957e70a7a56cba9))
+* ratelimit test implementation ([9c80539](https://github.com/01cloud/01-Sandbox/commit/9c80539c55fc3373799fb84ca324404045e5f775))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.8 [skip ci] ([94a7b0d](https://github.com/01cloud/01-Sandbox/commit/94a7b0d5516ea870db3548a67ce6b4372b19b3a7))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.8 [skip ci] ([06583c1](https://github.com/01cloud/01-Sandbox/commit/06583c1eb0b36bf65674710cd4ed32f46d8fc6c9))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.9)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.8 — 01-Sandbox
 **Release Date:** July 06, 2026
 
