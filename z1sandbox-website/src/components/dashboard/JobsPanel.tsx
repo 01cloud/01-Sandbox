@@ -51,13 +51,13 @@ export function JobsPanel({
       )}
 
       {/* Scrollable list of jobs */}
-      <ScrollArea className="flex-1 min-h-0">
+      <ScrollArea className="flex-1 min-h-0 w-full [&>div]:overflow-x-hidden">
         {jobs.length === 0 ? (
           <div className="p-8 text-center text-xs font-semibold text-muted-foreground/40 flex flex-col items-center justify-center h-[200px]">
             No recent scans
           </div>
         ) : (
-          <div className="p-3.5 space-y-2">
+          <div className="p-3.5 space-y-2 w-full min-w-0 flex flex-col">
             {jobs.map((job) => {
               const isSelected = job.job_id === selectedJobId;
               const isActive = !["DONE", "ERROR"].includes(job.status);
@@ -76,13 +76,13 @@ export function JobsPanel({
                 <div
                   key={job.job_id}
                   className={cn(
-                    "group relative rounded-xl border border-border/40 bg-card/40 hover:bg-card hover:border-violet-500/30 transition-all duration-200 cursor-pointer overflow-hidden p-3.5 flex flex-col gap-1.5",
+                    "group relative w-full min-w-0 rounded-xl border border-border/40 bg-card/40 hover:bg-card hover:border-violet-500/30 transition-all duration-200 cursor-pointer overflow-hidden p-3.5 flex flex-col gap-1.5",
                     isSelected && "border-violet-500/60 bg-violet-500/5 shadow-md shadow-violet-500/5 hover:bg-violet-500/5 hover:border-violet-500/60"
                   )}
                   onClick={() => onSelectJob(job.job_id)}
                 >
                   {/* Top line: Type Icon + Name */}
-                  <div className="flex items-start gap-2.5">
+                  <div className="flex items-start gap-2.5 w-full min-w-0">
                     <div
                       className={cn(
                         "p-1.5 rounded-lg border text-muted-foreground",
@@ -119,7 +119,7 @@ export function JobsPanel({
                   </div>
 
                   {/* Status row */}
-                  <div className="flex items-center gap-1.5 mt-1 border-t border-border/20 pt-2.5">
+                  <div className="flex items-center gap-1.5 mt-1 border-t border-border/20 pt-2.5 w-full min-w-0">
                     {isDone ? (
                       <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
                     ) : isError ? (
@@ -181,11 +181,11 @@ export function JobsPanel({
 
                   {/* Expanded language statuses for selected repository scans */}
                   {isSelected && jobType === "repo-scan" && job.detail?.languages && Object.keys(job.detail.languages).length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-border/20 flex flex-col gap-2 bg-muted/30 rounded-lg p-2.5">
+                    <div className="mt-3 pt-3 border-t border-border/20 flex flex-col gap-2 bg-muted/30 rounded-lg p-2.5 w-full min-w-0">
                       <p className="text-[9px] font-black uppercase tracking-wider text-muted-foreground mb-1">
                         Language Pipeline
                       </p>
-                      <div className="flex flex-col gap-1.5">
+                      <div className="flex flex-col gap-1.5 w-full min-w-0">
                         {Object.entries(job.detail.languages).map(([lang, status]: [string, any]) => {
                           const statusStr = typeof status === "string" ? status : "DONE";
                           const isPending = statusStr === "PENDING";
@@ -194,11 +194,11 @@ export function JobsPanel({
                           const isFailed = statusStr === "FAILED";
 
                           return (
-                            <div key={lang} className="flex items-center justify-between text-[11px]">
-                              <span className="font-bold text-foreground/80">{lang}</span>
+                            <div key={lang} className="flex items-center justify-between text-[11px] w-full min-w-0 gap-2">
+                              <span className="font-bold text-foreground/80 truncate">{lang}</span>
                               <span
                                 className={cn(
-                                  "text-[8px] font-extrabold uppercase tracking-wide flex items-center gap-1",
+                                  "text-[8px] font-extrabold uppercase tracking-wide flex items-center gap-1 shrink-0",
                                   isPending && "text-muted-foreground/60",
                                   isScanningLang && "text-violet-400 animate-pulse",
                                   isDone && "text-emerald-500",
