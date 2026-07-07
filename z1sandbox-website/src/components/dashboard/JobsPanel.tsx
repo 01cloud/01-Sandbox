@@ -35,12 +35,12 @@ export function JobsPanel({
     <div className={cn(
       "flex flex-col h-full transition-all duration-300",
       embedded
-        ? "w-full border-t border-border/15 bg-transparent"
-        : "w-[320px] shrink-0 border-r border-border/50 bg-muted/10 animate-in slide-in-from-left duration-300"
+        ? "w-full border-t border-border/40 bg-transparent"
+        : "w-[320px] shrink-0 border-r border-border bg-muted/5 animate-in slide-in-from-left duration-300"
     )}>
       {/* Header */}
-      <div className={cn("flex flex-col gap-1 shrink-0", embedded ? "p-4 pb-2 border-b border-border/15" : "p-5 border-b border-border/50")}>
-        <h3 className={cn("text-sm font-black uppercase tracking-wider", embedded ? "text-white/80" : "text-foreground")}>
+      <div className={cn("flex flex-col gap-1 shrink-0", embedded ? "p-4 pb-2 border-b border-border/30" : "p-5 border-b border-border")}>
+        <h3 className={cn("text-sm font-black uppercase tracking-wider text-foreground")}>
           {jobType === "repo-scan" ? "Repository Scans" : "Quick Scans"}
         </h3>
         <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">
@@ -74,7 +74,7 @@ export function JobsPanel({
                 <div
                   key={job.job_id}
                   className={cn(
-                    "group relative rounded-xl border border-border/40 bg-card/40 hover:bg-card hover:border-violet-500/30 transition-all duration-200 cursor-pointer overflow-hidden p-3.5 flex flex-col gap-1.5",
+                    "group relative rounded-xl border border-border/50 bg-card hover:bg-muted/10 hover:border-violet-500/35 transition-all duration-200 cursor-pointer overflow-hidden p-3.5 flex flex-col gap-1.5",
                     isSelected && "border-violet-500/60 bg-violet-500/5 shadow-md shadow-violet-500/5 hover:bg-violet-500/5 hover:border-violet-500/60"
                   )}
                   onClick={() => onSelectJob(job.job_id)}
@@ -83,15 +83,15 @@ export function JobsPanel({
                   <div className="flex items-start gap-2.5">
                     <div
                       className={cn(
-                        "p-1.5 rounded-lg border text-muted-foreground",
-                        jobType === "repo-scan" ? "bg-violet-500/10 border-violet-500/10 text-violet-400" : "bg-blue-500/10 border-blue-500/10 text-blue-400",
+                        "p-2 rounded-full border bg-muted text-muted-foreground/80 flex items-center justify-center shrink-0",
+                        jobType === "repo-scan" ? "bg-violet-500/10 border-violet-500/10 text-violet-500 dark:text-violet-400" : "bg-blue-500/10 border-blue-500/10 text-blue-500 dark:text-blue-400",
                         isSelected && "border-violet-500/20"
                       )}
                     >
                       {jobType === "repo-scan" ? (
-                        <Github className="w-3.5 h-3.5" />
+                        <Github className="w-4 h-4" />
                       ) : (
-                        <FileText className="w-3.5 h-3.5" />
+                        <FileText className="w-4 h-4" />
                       )}
                     </div>
 
@@ -100,7 +100,7 @@ export function JobsPanel({
                         {repoName}
                       </p>
                       <span className="text-[9px] text-muted-foreground/60 block mt-0.5">
-                        {jobType === "repo-scan" ? "GitHub" : `${filesCount} files`} · {formatTime(job.submittedAt)}
+                        {jobType === "repo-scan" ? "GitHub" : `${filesCount} files`} - {formatTime(job.submittedAt)}
                       </span>
                     </div>
 
@@ -116,66 +116,80 @@ export function JobsPanel({
                     </button>
                   </div>
 
-                  {/* Status row */}
-                  <div className="flex items-center gap-1.5 mt-1 border-t border-border/20 pt-2.5">
-                    {isDone ? (
-                      <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
-                    ) : isError ? (
-                      <AlertCircle className="w-3 h-3 text-destructive shrink-0" />
-                    ) : isCancelled ? (
-                      <StopCircle className="w-3 h-3 text-orange-500 shrink-0" />
-                    ) : (
-                      <Loader2 className="w-3 h-3 text-violet-500 animate-spin shrink-0" />
-                    )}
-
-                    <span
-                      className={cn(
-                        "text-[9px] font-bold uppercase tracking-wider truncate flex-1",
-                        isDone && "text-emerald-500",
-                        isError && "text-destructive",
-                        isCancelled && "text-orange-500",
-                        isActive && !isCancelled && "text-violet-400"
-                      )}
-                    >
-                      {isActive ? `${job.status} (${job.progress}%)` : job.status}
-                    </span>
-
-                    {/* Severity Summary counts badge */}
-                    {isDone && job.summary && (
-                      <div className="flex gap-1 shrink-0">
-                        {job.summary.critical > 0 && (
-                          <Badge className="h-4 px-1 text-[8px] bg-red-600/25 hover:bg-red-600/25 text-red-500 border border-red-500/35 font-extrabold rounded-md">
-                            C:{job.summary.critical}
-                          </Badge>
-                        )}
-                        {job.summary.high > 0 && (
-                          <Badge className="h-4 px-1 text-[8px] bg-orange-500/20 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 font-extrabold rounded-md">
-                            H:{job.summary.high}
-                          </Badge>
-                        )}
-                        {job.summary.medium > 0 && (
-                          <Badge className="h-4 px-1 text-[8px] bg-yellow-500/20 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 font-extrabold rounded-md">
-                            M:{job.summary.medium}
-                          </Badge>
-                        )}
-                        {job.summary.low > 0 && (
-                          <Badge className="h-4 px-1 text-[8px] bg-blue-500/20 hover:bg-blue-500/20 text-blue-500 border border-blue-500/30 font-extrabold rounded-md">
-                            L:{job.summary.low}
-                          </Badge>
-                        )}
-                        {job.summary.info > 0 && (
-                          <Badge className="h-4 px-1 text-[8px] bg-slate-500/20 hover:bg-slate-500/20 text-slate-400 border border-slate-500/30 font-extrabold rounded-md">
-                            I:{job.summary.info}
-                          </Badge>
-                        )}
-                        {(job.summary.critical ?? 0) === 0 && job.summary.high === 0 && job.summary.medium === 0 && job.summary.low === 0 && (
-                          <Badge className="h-4 px-1 text-[8px] bg-emerald-500/20 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 font-extrabold rounded-md">
-                            SECURE
-                          </Badge>
-                        )}
+                  {/* Status/Progress section */}
+                  {isActive && !isCancelled ? (
+                    <div className="flex flex-col gap-1.5 mt-1 border-t border-border/20 pt-2.5">
+                      <div className="flex items-center gap-1.5">
+                        <Loader2 className="w-3 h-3 text-violet-500 animate-spin shrink-0" />
+                        <span className="text-[9px] font-black uppercase tracking-wider text-violet-500 dark:text-violet-400">
+                          {job.status} ({job.progress}%)
+                        </span>
                       </div>
-                    )}
-                  </div>
+                      <div className="w-full h-1.5 rounded-full bg-muted/40 overflow-hidden">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-violet-500 to-blue-500 transition-all duration-300"
+                          style={{ width: `${job.progress}%` }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1.5 mt-1 border-t border-border/20 pt-2.5">
+                      {isDone ? (
+                        <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
+                      ) : isError ? (
+                        <AlertCircle className="w-3 h-3 text-destructive shrink-0" />
+                      ) : (
+                        <StopCircle className="w-3 h-3 text-orange-500 shrink-0" />
+                      )}
+
+                      <span
+                        className={cn(
+                          "text-[9px] font-bold uppercase tracking-wider truncate flex-1",
+                          isDone && "text-emerald-500",
+                          isError && "text-destructive",
+                          isCancelled && "text-orange-500"
+                        )}
+                      >
+                        {job.status}
+                      </span>
+
+                      {/* Severity Summary counts badge */}
+                      {isDone && job.summary && (
+                        <div className="flex gap-1 shrink-0">
+                          {job.summary.critical > 0 && (
+                            <Badge className="h-4 px-1 text-[8px] bg-red-600/25 hover:bg-red-600/25 text-red-500 border border-red-500/35 font-extrabold rounded-md">
+                              C:{job.summary.critical}
+                            </Badge>
+                          )}
+                          {job.summary.high > 0 && (
+                            <Badge className="h-4 px-1 text-[8px] bg-orange-500/20 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 font-extrabold rounded-md">
+                              H:{job.summary.high}
+                            </Badge>
+                          )}
+                          {job.summary.medium > 0 && (
+                            <Badge className="h-4 px-1 text-[8px] bg-yellow-500/20 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 font-extrabold rounded-md">
+                              M:{job.summary.medium}
+                            </Badge>
+                          )}
+                          {job.summary.low > 0 && (
+                            <Badge className="h-4 px-1 text-[8px] bg-blue-500/20 hover:bg-blue-500/20 text-blue-500 border border-blue-500/30 font-extrabold rounded-md">
+                              L:{job.summary.low}
+                            </Badge>
+                          )}
+                          {job.summary.info > 0 && (
+                            <Badge className="h-4 px-1 text-[8px] bg-slate-500/20 hover:bg-slate-500/20 text-slate-400 border border-slate-500/30 font-extrabold rounded-md">
+                              I:{job.summary.info}
+                            </Badge>
+                          )}
+                          {(job.summary.critical ?? 0) === 0 && job.summary.high === 0 && job.summary.medium === 0 && job.summary.low === 0 && (
+                            <Badge className="h-4 px-1 text-[8px] bg-emerald-500/20 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 font-extrabold rounded-md">
+                              SECURE
+                            </Badge>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* Expanded language statuses for selected repository scans */}
                   {isSelected && jobType === "repo-scan" && job.detail?.languages && Object.keys(job.detail.languages).length > 0 && (
@@ -196,15 +210,15 @@ export function JobsPanel({
                               <span className="font-bold text-foreground/80">{lang}</span>
                               <span
                                 className={cn(
-                                  "text-[8px] font-extrabold uppercase tracking-wide flex items-center gap-1",
+                                  "text-[8px] font-extrabold uppercase tracking-wide flex items-center gap-1.5",
                                   isPending && "text-muted-foreground/60",
-                                  isScanningLang && "text-violet-400 animate-pulse",
-                                  isDone && "text-emerald-500",
+                                  isScanningLang && "text-violet-500 dark:text-violet-400 animate-pulse",
+                                  isDone && "text-emerald-500 dark:text-emerald-400",
                                   isFailed && "text-destructive"
                                 )}
                               >
-                                {isScanningLang && <Loader2 className="w-2.5 h-2.5 animate-spin shrink-0" />}
-                                {statusStr === "PENDING" ? "Pending" : statusStr === "SCANNING" ? "Scanning" : statusStr === "DONE" ? "Complete" : "Failed"}
+                                {isScanningLang && <Loader2 className="w-2.5 h-2.5 animate-spin shrink-0 text-violet-500" />}
+                                {statusStr === "PENDING" ? "PENDING" : statusStr === "SCANNING" ? "SCANNING" : statusStr === "DONE" ? "COMPLETE" : "FAILED"}
                               </span>
                             </div>
                           );

@@ -577,16 +577,16 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
 
       {/* Full Scanner Dialog */}
       <Dialog open={isOpen} onOpenChange={(o) => { if (!o) { setSelectedJobId(null); setRequiresAuth(false); setGitToken(""); setSshKey(""); } setIsOpen(o); }}>
-        <DialogContent className="max-w-[100vw] w-screen h-screen m-0 p-0 overflow-hidden border-none bg-[#080812] flex flex-col rounded-none">
+        <DialogContent className="max-w-[100vw] w-screen h-screen m-0 p-0 overflow-hidden border-none bg-background flex flex-col rounded-none">
 
           {/* ── Header ── */}
-          <DialogHeader className="px-8 py-4 border-b border-border/20 bg-[#0c0c1d] flex flex-row items-center justify-between space-y-0 shrink-0">
+          <DialogHeader className="px-8 py-4 border-b border-border/50 bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
             <div className="flex items-center gap-4">
-              <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400 shadow-[0_0_20px_rgba(139,92,246,0.1)]">
+              <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-500 shadow-[0_0_20px_rgba(139,92,246,0.1)]">
                 <Github className="w-5 h-5" />
               </div>
               <div>
-                <DialogTitle className="text-lg font-black tracking-tight text-white">GitHub Repository Scanner</DialogTitle>
+                <DialogTitle className="text-lg font-black tracking-tight text-foreground">GitHub Repository Scanner</DialogTitle>
                 <DialogDescription className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.25em] flex items-center gap-3 mt-1">
                   <span className="flex items-center gap-1.5">
                     <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse shadow-[0_0_8px_rgba(139,92,246,0.5)]" />
@@ -601,7 +601,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                 </DialogDescription>
               </div>
             </div>
-            <button onClick={() => { setSelectedJobId(null); setIsOpen(false); }} className="p-2 rounded-xl hover:bg-white/5 transition-colors text-muted-foreground/60 hover:text-white">
+            <button onClick={() => { setSelectedJobId(null); setIsOpen(false); }} className="p-2 rounded-xl hover:bg-muted transition-colors text-muted-foreground/60 hover:text-foreground">
               <X className="w-5 h-5" />
             </button>
           </DialogHeader>
@@ -610,15 +610,15 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
           <div className="flex-1 flex overflow-hidden">
 
             {/* Left Sidebar: Input + Scans */}
-            <div className="w-[340px] shrink-0 flex flex-col border-r border-border/15 bg-[#0c0c1d] h-full overflow-hidden">
+            <div className="w-[340px] shrink-0 flex flex-col border-r border-border/50 bg-muted/5 h-full overflow-hidden">
               <div className="flex flex-col p-5 gap-4 shrink-0">
                 {/* URL Input */}
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
-                    <label htmlFor="repo-url-input" className="text-[9px] font-black uppercase tracking-[0.25em] text-muted-foreground/70">
+                    <label htmlFor="repo-url-input" className="text-[9px] font-black uppercase tracking-[0.25em] text-muted-foreground/75">
                       Repository URL
                     </label>
-                    {isValidating && <Loader2 className="w-3 h-3 animate-spin text-violet-400" />}
+                    {isValidating && <Loader2 className="w-3 h-3 animate-spin text-violet-500" />}
                   </div>
                   <Input
                     id="repo-url-input"
@@ -634,21 +634,21 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                     }}
                     onBlur={handleUrlBlur}
                     placeholder="https://github.com/owner/repo..."
-                    className={cn("rounded-lg h-10 font-mono text-xs border border-border/20 bg-[#0a0a18] text-white/90 placeholder:text-muted-foreground/30 transition-colors focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20", urlError ? "border-red-500/50" : "")}
+                    className={cn("rounded-lg h-10 font-mono text-xs border border-border bg-background text-foreground placeholder:text-muted-foreground/45 transition-colors focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20", urlError ? "border-red-500/50" : "")}
                     disabled={isScanning}
                   />
-                  {urlError && <p className="text-[10px] text-red-400 font-medium">{urlError}</p>}
+                  {urlError && <p className="text-[10px] text-red-500 font-medium">{urlError}</p>}
                 </div>
 
                 {/* Auth Panel */}
                 {requiresAuth && (
                   <div className="rounded-xl border border-violet-500/15 bg-violet-500/5 p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
                     <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-violet-400 font-bold text-[10px] uppercase tracking-wider">
+                      <div className="flex items-center gap-1.5 text-violet-500 font-bold text-[10px] uppercase tracking-wider">
                         <Shield className="w-3.5 h-3.5" />
                         Private Repo
                       </div>
-                      <div className="flex bg-[#0a0a18] rounded-md p-0.5 border border-border/20">
+                      <div className="flex bg-muted/40 rounded-md p-0.5 border border-border/50">
                         <button
                           type="button"
                           onClick={() => setAuthMethod("token")}
@@ -656,7 +656,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                             "px-2.5 py-1 text-[9px] font-black uppercase rounded transition-all",
                             authMethod === "token"
                               ? "bg-violet-600 text-white shadow-sm"
-                              : "text-muted-foreground/60 hover:text-white"
+                              : "text-muted-foreground hover:text-foreground"
                           )}
                         >
                           Token
@@ -668,7 +668,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                             "px-2.5 py-1 text-[9px] font-black uppercase rounded transition-all",
                             authMethod === "ssh"
                               ? "bg-violet-600 text-white shadow-sm"
-                              : "text-muted-foreground/60 hover:text-white"
+                              : "text-muted-foreground hover:text-foreground"
                           )}
                         >
                           SSH Key
@@ -687,9 +687,9 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                           value={gitToken}
                           onChange={(e) => setGitToken(e.target.value)}
                           placeholder="ghp_xxxxxxxxxxxx"
-                          className="rounded-lg h-9 font-mono text-[11px] border border-border/20 bg-[#0a0a18] text-white/90 focus:border-violet-500/40"
+                          className="rounded-lg h-9 font-mono text-[11px] border border-border bg-background text-foreground/90 focus:border-violet-500/40"
                         />
-                        <p className="text-[9px] text-muted-foreground/40 leading-normal">
+                        <p className="text-[9px] text-muted-foreground/45 leading-normal">
                           Token is used ephemerally and never stored.
                         </p>
                       </div>
@@ -703,19 +703,19 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                           value={sshKey}
                           onChange={(e) => setSshKey(e.target.value)}
                           placeholder="Paste your SSH Private Key here..."
-                          className="rounded-lg min-h-[100px] p-3 font-mono text-[11px] border border-border/20 bg-[#0a0a18] text-white/90 focus:border-violet-500/40 focus:outline-none focus:ring-1 focus:ring-violet-500/20 resize-y"
+                          className="rounded-lg min-h-[100px] p-3 font-mono text-[11px] border border-border bg-background text-foreground/90 focus:border-violet-500/40 focus:outline-none focus:ring-1 focus:ring-violet-500/20 resize-y"
                         />
                       </div>
                     )}
                   </div>
                 )}
 
-                {/* Scan Button */}
+                {/* Scan Button - Purple Solid matching Image 1 */}
                 <Button
                   id="scan-repo-btn"
                   onClick={handleScan}
                   disabled={isScanning || !!urlError || !repoUrl}
-                  className="h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.15)] transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
+                  className="h-10 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(139,92,246,0.15)] transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
                 >
                   {isScanning ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Ingesting...</> : <><Search className="w-3.5 h-3.5" /> Scan Repository</>}
                 </Button>
@@ -735,7 +735,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
             </div>
 
             {/* Right Panel: Pipeline + Results */}
-            <div className="flex-1 bg-[#080812] overflow-hidden flex flex-col">
+            <div className="flex-1 bg-background overflow-hidden flex flex-col">
               <ScrollArea className="flex-1">
                 <div className="max-w-5xl mx-auto w-full p-6">
                   {selectedJob ? (
@@ -752,8 +752,8 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                         <Activity className="w-7 h-7 text-violet-500/30" />
                       </div>
                       <div>
-                        <h3 className="text-sm font-black uppercase tracking-wider text-muted-foreground/40">No Scan Selected</h3>
-                        <p className="text-xs text-muted-foreground/30 mt-1">
+                        <h3 className="text-sm font-black uppercase tracking-wider text-muted-foreground/45">No Scan Selected</h3>
+                        <p className="text-xs text-muted-foreground/35 mt-1">
                           Select a repository scan job from the panel or run a new scan.
                         </p>
                       </div>
