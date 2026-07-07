@@ -245,36 +245,3 @@ export function UnifiedPipelineView({
     </div>
   );
 }
-      </div >
-
-  {/* ── Status Banners ── */ }
-{
-  job.status === "RETRYING" && (
-    <div className="p-5 rounded-2xl flex items-center gap-4 border border-amber-500/20 bg-amber-500/5 text-amber-400 animate-in fade-in duration-300">
-      <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
-        <RotateCw className="w-5 h-5 animate-spin" />
-      </div>
-      <div className="flex-1 min-w-0">
-        <h4 className="text-xs font-black uppercase tracking-tight">Retry in Progress</h4>
-        <p className="text-[10px] opacity-70 mt-0.5 font-mono truncate">{job.stepMessage}</p>
-      </div>
-    </div>
-  )
-}
-
-{
-  job.status === "CANCELLED" && (
-    <div className="p-5 rounded-2xl flex items-center gap-4 border border-orange-500/20 bg-orange-500/5 text-orange-400 animate-in fade-in duration-300">
-      <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
-        <XCircle className="w-5 h-5" />
-      </div>
-      <div>
-        <h4 className="text-xs font-black uppercase tracking-tight">Scan Cancelled</h4>
-        <p className="text-[10px] opacity-70 mt-0.5">This job was cancelled by the user and sandbox resources were reclaimed.</p>
-      </div>
-    </div>
-  )
-}
-    </div >
-  );
-}

@@ -221,5 +221,3 @@ export function JobsPanel({
     </div>
   );
 }
-  );
-}
