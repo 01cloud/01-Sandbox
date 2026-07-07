@@ -62,18 +62,39 @@ The `apiServer` reads the contents of the detected files into memory, filters ou
 The OpenSandbox server receives the JSON, writes the files to the shared PVC, and spawns the isolated `BatchSandbox` pod using the specific PVC `subPath` directory containing only the target files.
 
 #### Step 7: Local Workspace Destruction
-Once the child scan jobs are dispatched and successfully return their reports, the `apiServer` runs `destroy_sandbox()` in a `finally` block. This executes `shutil.rmtree("/tmp/reposcanner_abc123")`, completely purging the cloned repository code from the `apiServer` pod's local container disk.
+To prevent local disk leakage, once the scanning pipeline finishes (or aborts due to timeouts, errors, or cancellation), the `apiServer` runs `destroy_sandbox()` inside a **`finally` block**. This invokes `shutil.rmtree(sandbox_id)` which deletes the entire `/tmp/reposcanner_abc123` workspace folder from the `apiServer` pod disk.
 
-### 1.2 Deep Dive: Where does the "Local Sandbox Provisioning" happen?
-It happens locally on the **API host pod's disk** (the container running the FastAPI server).
+### 1.2 Deep Dive: Where does the "Local Sandbox Provisioning" happen and how is it deleted?
+It happens locally on the **ephemeral filesystem (container storage) of the running `apiServer` pod**.
 
-The function `provision_sandbox()` inside [sandbox_provisioner.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/sandbox_provisioner.py) uses standard Python temporary folder creation:
+* **Creation**:
+  The function `provision_sandbox()` inside [sandbox_provisioner.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/sandbox_provisioner.py) uses standard Python temporary folder creation:
+  ```python
+  tmpdir = await loop.run_in_executor(None, tempfile.mkdtemp, None, "reposcanner_")
+  ```
 
-```python
-tmpdir = await loop.run_in_executor(None, tempfile.mkdtemp, None, "reposcanner_")
-```
+* **Guarantee of Deletion**:
+  The deletion is wrapped in a robust `try...finally` structure inside the main pipeline executor of [scan_repository.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/scan_repository.py):
+  ```python
+  try:
+      # ... Perform clone, classification, and submit parallel scan jobs ...
+  finally:
+      if sandbox_id:
+          log("CLEANUP", f"Destroying sandbox: {sandbox_id}")
+          await destroy_sandbox(sandbox_id)
+  ```
 
-This returns a directory path like `/tmp/reposcanner_abc123` on the API pod. The word "sandbox" is used here in a general sense to mean a local isolated workspace directory on the apiServer's container filesystem, not a Kubernetes container.
+* **Deletion Execution**:
+  In [sandbox_provisioner.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/sandbox_provisioner.py), the `destroy_sandbox()` function calls Python's `shutil.rmtree` to perform a recursive folder deletion:
+  ```python
+  async def destroy_sandbox(sandbox_id: str) -> None:
+      try:
+          loop = asyncio.get_event_loop()
+          await loop.run_in_executor(None, shutil.rmtree, sandbox_id, True)
+      except Exception as exc:
+          print(f"WARNING: failed to destroy sandbox {sandbox_id}: {exc}")
+  ```
+
 
 ### 1.3 Architecture Rationale: Why is the repository not cloned directly inside a Kubernetes pod?
 As noted in the codebase:
