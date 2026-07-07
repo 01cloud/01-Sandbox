@@ -1,3 +1,61 @@
+## Release v0.6.14 — 01-Sandbox
+**Release Date:** July 07, 2026
+
+---
+
+### Summary
+v0.6.14 focuses on reliability, bug resolution, and maintenance. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* api test ([48f861e](https://github.com/01cloud/01-Sandbox/commit/48f861e622bae161ca811600afd029aca3c7eeb8))
+* api test ([d5aa1f4](https://github.com/01cloud/01-Sandbox/commit/d5aa1f464dcf457b6e89673083750a99c976faee))
+* api test ([f105eed](https://github.com/01cloud/01-Sandbox/commit/f105eed070c59d0e86bae790b1843cd3c490c0a6))
+* api test ([8f4db6f](https://github.com/01cloud/01-Sandbox/commit/8f4db6f96e6a27987cfec11f4aca36fc1f6f4683))
+
+### Changes
+## [0.6.14](https://github.com/01cloud/01-Sandbox/compare/v0.6.13...v0.6.14) (2026-07-07)
+
+
+### 🐛 Bug Fixes
+
+* api test ([48f861e](https://github.com/01cloud/01-Sandbox/commit/48f861e622bae161ca811600afd029aca3c7eeb8))
+* api test ([d5aa1f4](https://github.com/01cloud/01-Sandbox/commit/d5aa1f464dcf457b6e89673083750a99c976faee))
+* api test ([f105eed](https://github.com/01cloud/01-Sandbox/commit/f105eed070c59d0e86bae790b1843cd3c490c0a6))
+* api test ([8f4db6f](https://github.com/01cloud/01-Sandbox/commit/8f4db6f96e6a27987cfec11f4aca36fc1f6f4683))
+* ui enhancement ([7262c4f](https://github.com/01cloud/01-Sandbox/commit/7262c4f99eac8e135f3de1e99430021215bf0cd9))
+* ui enhancement ([1df5da1](https://github.com/01cloud/01-Sandbox/commit/1df5da176d78b71b2f1e609f165dbfbe948df51c))
+* ui enhancement ([ce3c5ca](https://github.com/01cloud/01-Sandbox/commit/ce3c5ca2c68a956a5bd302f48183a621481eb89c))
+* ui enhancement ([61728ba](https://github.com/01cloud/01-Sandbox/commit/61728baf42ef234fd3ccbeacb4148b09641c9637))
+* ui enhancement ([ba35e06](https://github.com/01cloud/01-Sandbox/commit/ba35e064e7563712abd1fc937556de6c088d63f2))
+* ui enhancement ([95c92d8](https://github.com/01cloud/01-Sandbox/commit/95c92d8303b21745c826de9e9fc888d9bf3623f6))
+* ui enhancement ([a77831b](https://github.com/01cloud/01-Sandbox/commit/a77831be85e3b572dc9b6b686c07c8712f4cc7e7))
+* ui enhancement ([b09a483](https://github.com/01cloud/01-Sandbox/commit/b09a483cf84ab224ef86de90361eca224af1bcc5))
+* ui enhancement ([4366fef](https://github.com/01cloud/01-Sandbox/commit/4366fef35c0f1f5772f7665f7d04b985051f571f))
+* ui enhancement ([cf141c1](https://github.com/01cloud/01-Sandbox/commit/cf141c1837d087137186e6d85f165d0abf48b264))
+* ui enhancement ([dad4030](https://github.com/01cloud/01-Sandbox/commit/dad4030db4a73868283e96e609376742954ddf47))
+* ui enhancement ([9f31869](https://github.com/01cloud/01-Sandbox/commit/9f318690ed3e1cd548918846bff45b753ab1932b))
+* ui enhancement ([763f285](https://github.com/01cloud/01-Sandbox/commit/763f2858983d3ebc54359cd5eb232484fcfaf060))
+* ui enhancement ([6b07f3a](https://github.com/01cloud/01-Sandbox/commit/6b07f3a890106273511980b5b20186b87104940a))
+* ui enhancement ([1d051d1](https://github.com/01cloud/01-Sandbox/commit/1d051d182dc6e6af04a97069be97d5a546feb270))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.13 [skip ci] ([29bc2d4](https://github.com/01cloud/01-Sandbox/commit/29bc2d4bfc0037f2e47934f7b2036d008c20d2bf))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.13 [skip ci] ([86c1737](https://github.com/01cloud/01-Sandbox/commit/86c1737df46d4d9005c289e58fc15c0cd396d26d))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.14)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.13 — 01-Sandbox
 **Release Date:** July 07, 2026
 
