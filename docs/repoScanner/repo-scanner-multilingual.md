@@ -1,81 +1,27 @@
 # Repository Scanner: Multilingual Sandbox Provisioning Technical Architecture
 
 This document provides a comprehensive technical overview of how the multi-language repository scanning pipeline orchestrates sandbox pod provisioning, handles isolation using Kubernetes custom resources, and executes targeted security analysis tools.
----
-
-## Summary - Overview
-
-### 1. Payload Format for `POST /scan-jobs`
-The OpenSandbox server receives code files inside a JSON payload (corresponding to the `ScanJobRequest` model) under the `files` key. This key maps relative filenames to their string content. If the files contain binary or special characters, they are Base64 encoded by the API gateway:
-
-```json
-{
-  "files": {
-    "src/main.py": "import os\nprint('Scanning python code')",
-    "src/utils.py": "def helper():\n    return True"
-  },
-  "metadata": {
-    "job_id": "8b9e67d2-7fb6-4552-bfbc-87c17d23a492",
-    "parent_job_id": "786e76d7-e9a2-4272-9140-2029400e10a1"
-  },
-  "tools": ["bandit", "semgrep"],
-  "timeout": 300
-}
-```
-
-The OpenSandbox server's `lifecycle.py` parses this JSON payload and automatically attempts to decode it as Base64, falling back to writing it as plain-text if decoding fails:
-
-```python
-# Decoding logic in OpenSandbox server
-try:
-    decoded_content = base64.b64decode(content, validate=True)
-    with open(file_path, "wb") as f:
-        f.write(decoded_content)
-except Exception:
-    with open(file_path, "w") as f:
-        f.write(content)
-```
-
-### 2. How the `BatchSandbox` Pod Mounts Only That Specific Subpath
-Kubernetes natively isolates directories at the container filesystem layer using the `subPath` configuration on a container's `volumeMounts`.
-
-* **Volume Spec Formulation**: In `volume_helper.py`, the `apply_volumes_to_pod_spec` function builds the volume mounts for the container and appends `subPath` dynamically:
-  ```python
-  mount = {
-      "name": pvc_to_volume_name[pvc_claim_name],
-      "mountPath": vol.mount_path,
-      "readOnly": vol.read_only,
-  }
-  if vol.sub_path:
-      mount["subPath"] = vol.sub_path
-  mounts.append(mount)
-  ```
-
-* **Generated Pod YAML**: This results in a Pod spec containing:
-  ```yaml
-  volumeMounts:
-  - name: job-volume
-    mountPath: /workspace                         # Target path inside container
-    subPath: parent-job-id/child-job-id/workspace  # Specific subpath directory on PVC
-  ```
-
-* **Linux Namespace Mount Isolation**: When the Kubernetes `kubelet` schedules the Pod on a node:
-  1. It mounts the shared `scan-pvc` PersistentVolume locally onto the host node.
-  2. It appends the `subPath` value to the mount path on the host.
-  3. Using a **Linux bind mount**, it attaches *only* that specific subdirectory to `/workspace` inside the container’s mount namespace.
-
-As a result, processes inside the runner pod see a normal directory at `/workspace`, but have no access or visibility to other directories or files belonging to other scan jobs on the same PVC.
 
 ---
 
 ## 1. High-Level Architecture Overview
 
-When a user submits a GitHub repository, the system avoids running a single heavy, monolithic scan. Instead, it clones the repository, automatically detects all constituent programming languages, and **provisions dedicated, isolated container sandboxes** (pods) for each detected language concurrently.
+When a user submits a GitHub repository, the system avoids running a single heavy, monolithic scan. Instead, it clones the repository inside the `apiServer` pod, automatically detects all constituent programming languages, and **provisions dedicated, isolated container sandboxes** (pods) for each detected language concurrently.
 
 The pipeline architecture is split into three main components:
-1. **API Server Gateway (FastAPI)**: Coordinates the parent scan workflow, parses languages, schedules parallel sub-tasks, and aggregates findings.
-2. **OpenSandbox Server**: Manages the lifecycle of isolated sandbox pods (Kubernetes-backed container sandboxes).
-3. **Scanner Orchestrator**: The engine running inside each child sandbox pod that invokes specific security tools against the uploaded files.
+1. **API Server Gateway (FastAPI)**: Coordinates the parent scan workflow, clones the repo locally, parses languages, schedules parallel sub-tasks via `asyncio.gather`, and aggregates findings.
+2. **OpenSandbox Server**: Manages the lifecycle of isolated sandbox pods (Kubernetes-backed container sandboxes). It receives files via JSON payload and writes them to a shared `PersistentVolumeClaim (scan-pvc)`.
+3. **Scanner Orchestrator**: The engine running inside each child sandbox pod that mounts its language-specific workspace directory and invokes targeted security tools.
+
+### Core Architectural Pillars
+
+1. **JSON Payload Transfer**: The `apiServer` packages target source files into a JSON payload sent to `POST /scan-jobs` mapping relative file paths directly to file contents (Base64 encoded if binary). The OpenSandbox server decodes and writes them directly to a directory path under `/data/{parent_job_id}/{job_id}/workspace`.
+2. **Kubernetes `subPath` Mount Isolation**: To prevent directory namespace collisions and cross-tenant leakage across concurrent runners, the OpenSandbox server leverages Kubernetes **`subPath` volume mounting**. When building the runner pod spec:
+   - The pod mounts the shared PVC (`scan-pvc`) to `/workspace`.
+   - A `subPath` is set targeting only `{parent_job_id}/{job_id}/workspace`.
+   - The Kubernetes `kubelet` enforces this via a Linux bind mount on the host, ensuring the container cannot see or access other job directories on the PVC.
+
+---
 
 ```mermaid
 graph TD
