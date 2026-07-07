@@ -1,5 +1,6 @@
-import React, { useRef, useEffect } from "react";
+import React from "react";
 import { CheckCircle2, AlertCircle, Loader2, Circle, RotateCw, XCircle } from "lucide-react";
+import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
 import { GenericJob } from "@/lib/jobStore";
 
@@ -16,70 +17,6 @@ interface UnifiedPipelineViewProps {
   onCancel?: (jobId: string) => void;
 }
 
-// Dynamically generate scan logs for the terminal based on the languages and progress
-function generateLiveLogs(job: GenericJob) {
-  const languages = job.detail?.languages
-    ? Object.keys(job.detail.languages)
-    : ["Python", "JavaScript", "Go", "Shell"];
-
-  const logs: string[] = [];
-
-  logs.push(`[SYSTEM] Initializing secure sandbox environment...`);
-  logs.push(`[SYSTEM] Scanner container successfully provisioned.`);
-
-  if (job.progress > 20) {
-    logs.push(`[PARSER] Codebase language matching initiated...`);
-    logs.push(`[PARSER] Detected: ${languages.join(", ")}`);
-  }
-
-  if (job.progress > 40) {
-    logs.push(`[ENGINE] Launching parallel vulnerability analysis engines:`);
-    languages.forEach((lang) => {
-      const tool =
-        lang.toLowerCase() === "python" ? "Bandit v1.7.5" :
-        lang.toLowerCase() === "go" ? "Gosec v2.18.0" :
-        lang.toLowerCase() === "rust" ? "Cargo Audit v0.18.3" :
-        lang.toLowerCase() === "javascript" || lang.toLowerCase() === "typescript" ? "Semgrep Core v1.42" :
-        lang.toLowerCase() === "shell" || lang.toLowerCase() === "makefile" ? "ShellCheck v0.9.0" :
-        "Semgrep static ruleset";
-
-      const langStatus = job.detail?.languages?.[lang];
-      const isDone = langStatus === "DONE" || langStatus === "COMPLETE" || job.progress >= 80;
-      const isScanning = langStatus === "SCANNING" || (!isDone && job.progress > 50);
-
-      if (isDone) {
-        logs.push(`  ✓ [${lang}] Scan completed successfully via ${tool}`);
-      } else if (isScanning) {
-        logs.push(`  → [${lang}] Running active security checks via ${tool}...`);
-      } else {
-        logs.push(`  ⚡ [${lang}] Pending in analysis queue...`);
-      }
-    });
-  }
-
-  if (job.progress > 70) {
-    logs.push(`[REPORTER] Analyzing finding patterns & cleaning reports...`);
-  }
-
-  if (job.progress > 85) {
-    logs.push(`[REPORTER] Telemetry analysis consolidated.`);
-    const critical = job.summary?.critical ?? 0;
-    const high = job.summary?.high ?? 0;
-    const med = job.summary?.medium ?? 0;
-    const low = job.summary?.low ?? 0;
-    logs.push(`[REPORTER] Consolidated stats: Critical:${critical} | High:${high} | Med:${med} | Low:${low}`);
-  }
-
-  if (job.status === "DONE") {
-    logs.push(`[SYSTEM] All scans finished. Sandbox environment successfully reclaimed.`);
-    logs.push(`[SYSTEM] Execution summary exported.`);
-  } else if (job.status === "ERROR") {
-    logs.push(`[ERROR] Scan execution encountered an issue. Reclaiming workspace.`);
-  }
-
-  return logs;
-}
-
 export function UnifiedPipelineView({
   job,
   steps,
@@ -94,56 +31,23 @@ export function UnifiedPipelineView({
     ? (steps.findIndex(s => s.key === "SCANNING") !== -1 ? steps.findIndex(s => s.key === "SCANNING") : 1)
     : currentIdx;
 
-  const terminalEndRef = useRef<HTMLDivElement>(null);
-  const liveLogs = generateLiveLogs(job);
-
-  useEffect(() => {
-    if (terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [liveLogs.length]);
-
-  // Helper to get step durations matching Image 2
-  const getStepDuration = (stepKey: string): string => {
-    const durations: Record<string, string> = {
-      "QUEUED": "8.4s",
-      "PROVISIONING": "1.2s",
-      "CLONING": "3.8s",
-      "DETECTING": "2.1s",
-    };
-    if (stepKey === "SCANNING" && ["DONE", "ERROR"].includes(job.status)) {
-      return "24.5s";
-    }
-    return durations[stepKey] || "";
-  };
-
-  // When the scan is completed, hide the pipeline timeline/progress entirely
-  // and directly render the final security report inside the same screen.
-  if (job.status === "DONE" && result) {
-    return (
-      <div className="animate-in fade-in duration-500">
-        {onResultRender(result)}
-      </div>
-    );
-  }
-
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {/* ── Single Frame containing both Pipeline Timeline and Overall Progress ── */}
-      <div className="rounded-2xl border border-border bg-card overflow-hidden flex flex-col shadow-sm">
+      {/* ── Pipeline Step Timeline ── */}
+      <div className="rounded-2xl border border-border/30 bg-[hsl(var(--card))]/60 backdrop-blur-sm overflow-hidden">
         {/* Section header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <label className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
             Scan Pipeline Execution
           </label>
           <div className="flex items-center gap-2">
-            {/* Sandboxed gVisor pod indicator matching Image 2 */}
-            <span className="text-[9px] font-bold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2.5 py-0.5 uppercase tracking-wider flex items-center gap-1.5">
-              <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-              Sandboxed • gVisor pod
-            </span>
+            {job.status === "DONE" && (
+              <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2.5 py-0.5 uppercase tracking-wider">
+                Completed
+              </span>
+            )}
             {job.status === "ERROR" && (
-              <span className="text-[9px] font-bold text-destructive bg-destructive/10 border border-destructive/20 rounded-full px-2.5 py-0.5 uppercase tracking-wider">
+              <span className="text-[9px] font-bold text-red-400 bg-red-500/10 border border-red-500/20 rounded-full px-2.5 py-0.5 uppercase tracking-wider">
                 Failed
               </span>
             )}
@@ -151,12 +55,12 @@ export function UnifiedPipelineView({
         </div>
 
         {/* Timeline */}
-        <div className="px-6 pb-6">
-          <div className="relative flex flex-col gap-4">
-            {/* Centered vertical connector line running down behind circle centers */}
-            <div className="absolute left-[13px] top-6 bottom-6 w-px bg-border/40" />
+        <div className="px-6 pb-5">
+          <div className="relative">
+            {/* Vertical connector line */}
+            <div className="absolute left-[13px] top-4 bottom-4 w-px bg-gradient-to-b from-border/60 via-border/30 to-transparent" />
 
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1">
               {steps.map((step, idx) => {
                 const isFailedStep = currentStep === "ERROR" && idx === Math.max(0, activeIdx);
                 const isDone = currentStep === "DONE" || (activeIdx !== -1 && idx < activeIdx);
@@ -164,117 +68,91 @@ export function UnifiedPipelineView({
                 const isActiveRetry = isRetrying && idx === activeIdx;
                 const isPending = !isDone && !isActive && !isActiveRetry && !isFailedStep;
 
-                // Determine if we should show the live terminal log under this step
-                const showTerminal =
-                  (step.key === "SCANNING") &&
-                  ((isActive) || (currentIdx > idx) || (currentStep === "DONE") || (currentStep === "ERROR"));
-
                 return (
-                  <div key={step.key} className="flex items-start gap-4 relative">
-                    {/* Step circle indicator - exactly centered with the line */}
-                    <div className="relative z-10 w-[27px] h-[27px] rounded-full flex items-center justify-center bg-card shrink-0 mt-[7px]">
+                  <div
+                    key={step.key}
+                    className={cn(
+                      "relative flex items-start gap-4 py-2.5 px-3 rounded-xl transition-all duration-300",
+                      isActive && "bg-violet-500/8",
+                      isActiveRetry && "bg-amber-500/8",
+                      isFailedStep && "bg-red-500/8",
+                    )}
+                  >
+                    {/* Step circle indicator */}
+                    <div className="relative z-10 mt-0.5">
                       {isDone ? (
-                        <div className="w-[21px] h-[21px] rounded-full flex items-center justify-center bg-emerald-500/10 border border-emerald-500/30 text-emerald-500">
-                          <CheckCircle2 className="w-3 h-3" />
+                        <div className="w-[26px] h-[26px] rounded-full flex items-center justify-center bg-emerald-500/15 border border-emerald-500/30 text-emerald-400 shadow-[0_0_12px_rgba(16,185,129,0.15)]">
+                          <CheckCircle2 className="w-3.5 h-3.5" />
                         </div>
                       ) : isFailedStep ? (
-                        <div className="w-[21px] h-[21px] rounded-full flex items-center justify-center bg-destructive/10 border border-destructive/30 text-destructive">
-                          <AlertCircle className="w-3 h-3" />
+                        <div className="w-[26px] h-[26px] rounded-full flex items-center justify-center bg-red-500/15 border border-red-500/40 text-red-400 shadow-[0_0_12px_rgba(239,68,68,0.2)]">
+                          <AlertCircle className="w-3.5 h-3.5" />
                         </div>
                       ) : isActiveRetry ? (
-                        <div className="w-[21px] h-[21px] rounded-full flex items-center justify-center bg-amber-500/10 border border-amber-500/30 text-amber-500">
-                          <RotateCw className="w-3 h-3 animate-spin" />
+                        <div className="w-[26px] h-[26px] rounded-full flex items-center justify-center bg-amber-500/15 border border-amber-500/30 text-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.25)] animate-pulse">
+                          <RotateCw className="w-3.5 h-3.5 animate-spin" />
                         </div>
                       ) : isActive ? (
-                        <div className="w-[21px] h-[21px] rounded-full flex items-center justify-center bg-violet-500/10 border border-violet-500/45 text-violet-500 shadow-[0_0_8px_rgba(139,92,246,0.25)] ring-2 ring-violet-500/10">
-                          <Loader2 className="w-3 h-3 animate-spin" />
+                        <div className="w-[26px] h-[26px] rounded-full flex items-center justify-center bg-violet-500/15 border border-violet-500/40 text-violet-400 shadow-[0_0_16px_rgba(139,92,246,0.3)]">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
                         </div>
                       ) : (
-                        <div className="w-[21px] h-[21px] rounded-full flex items-center justify-center border border-border/40 bg-muted/10 text-muted-foreground/30">
-                          <Circle className="w-1.5 h-1.5 fill-current opacity-40" />
+                        <div className="w-[26px] h-[26px] rounded-full flex items-center justify-center border border-border/40 bg-muted/20 text-muted-foreground/25">
+                          <Circle className="w-2 h-2 fill-current" />
                         </div>
                       )}
                     </div>
 
-                    {/* Step card box */}
-                    <div
-                      className={cn(
-                        "flex-1 rounded-xl border p-4 transition-all duration-300 flex flex-col gap-2.5",
-                        isDone && "bg-card/40 border-border/30 hover:border-border/40",
-                        isActive && "bg-muted/10 border-violet-500/25 shadow-sm shadow-violet-500/5",
-                        isActiveRetry && "bg-amber-500/5 border-amber-500/20",
-                        isFailedStep && "bg-destructive/5 border-destructive/20",
-                        isPending && "bg-card/10 border-border/10 opacity-45"
+                    {/* Step content */}
+                    <div className="flex-1 min-w-0 pt-0.5">
+                      <span
+                        className={cn(
+                          "text-[13px] font-semibold transition-colors leading-tight",
+                          isDone && "text-emerald-400/90",
+                          isActive && "text-foreground",
+                          isActiveRetry && "text-amber-400",
+                          isFailedStep && "text-red-400",
+                          isPending && "text-muted-foreground/35"
+                        )}
+                      >
+                        {step.label}
+                      </span>
+
+                      {/* Active step substatus */}
+                      {isActive && job.stepMessage && (
+                        <p className="text-[11px] text-muted-foreground/70 mt-1 font-mono leading-relaxed animate-pulse">
+                          {job.stepMessage}
+                        </p>
                       )}
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex-1 min-w-0">
-                          <span
-                            className={cn(
-                              "text-xs font-bold leading-tight tracking-wide block",
-                              isDone && "text-foreground/90",
-                              isActive && "text-foreground",
-                              isActiveRetry && "text-amber-500",
-                              isFailedStep && "text-destructive",
-                              isPending && "text-muted-foreground/40"
-                            )}
-                          >
-                            {step.label}
-                          </span>
+                      {isActiveRetry && job.stepMessage && (
+                        <p className="text-[11px] text-amber-400/70 mt-1 font-mono leading-relaxed animate-pulse">
+                          {job.stepMessage}
+                        </p>
+                      )}
+                      {isFailedStep && job.stepMessage && (
+                        <p className="text-[11px] text-red-400/70 mt-1 font-mono leading-relaxed">
+                          {job.stepMessage}
+                        </p>
+                      )}
 
-                          {/* Submessage inside the card */}
-                          {isActive && job.stepMessage && (
-                            <p className="text-[10px] text-muted-foreground/75 mt-1 font-mono leading-relaxed">
-                              {job.stepMessage}
-                            </p>
-                          )}
-                          {isActiveRetry && job.stepMessage && (
-                            <p className="text-[10px] text-amber-500/80 mt-1 font-mono leading-relaxed">
-                              {job.stepMessage}
-                            </p>
-                          )}
-                          {isFailedStep && job.stepMessage && (
-                            <p className="text-[10px] text-destructive/80 mt-1 font-mono leading-relaxed">
-                              {job.stepMessage}
-                            </p>
-                          )}
-                        </div>
-
-                        {/* Right aligned status or duration */}
-                        <div className="shrink-0 text-[10px] font-bold font-mono tracking-wider uppercase">
-                          {isActive && (
-                            <span className="text-violet-500 dark:text-violet-400 animate-pulse">Scanning</span>
-                          )}
-                          {isDone && (
-                            <span className="text-muted-foreground/45">{getStepDuration(step.key)}</span>
-                          )}
-                          {isPending && (
-                            <span className="text-muted-foreground/20">—</span>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Terminal sandbox log display (within the same card) */}
-                      {showTerminal && (
-                        <div className="rounded-xl bg-zinc-950 border border-border/30 p-3.5 font-mono text-[10px] leading-relaxed text-zinc-300 max-h-[160px] overflow-y-auto shadow-inner flex flex-col gap-1">
-                          <div className="flex items-center justify-between text-zinc-500 text-[9px] border-b border-zinc-800/50 pb-1.5 mb-1.5 shrink-0">
-                            <span>SANDBOX WORKSPACE TERMINAL</span>
-                            <span className="flex items-center gap-1.5">
-                              {!["DONE", "ERROR"].includes(job.status) && (
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                              )}
-                              LIVE STREAM
-                            </span>
+                      {/* Terminal log area for the active scanning step */}
+                      {isActive && step.key === "SCANNING" && job.stepMessage && (
+                        <div className="mt-3 rounded-lg bg-[#0d0d1a] border border-border/20 p-3 font-mono text-[10px] leading-relaxed text-emerald-400/80 max-h-[120px] overflow-y-auto shadow-inner">
+                          <div className="flex items-center gap-2 text-muted-foreground/40 mb-2">
+                            <span className="text-[9px]">❯</span>
+                            <span>Processing languages: Semgrep, Bandit & Enry engines...</span>
                           </div>
-                          <div className="flex-1 overflow-y-auto space-y-1 pr-1">
-                            {liveLogs.map((log, idx) => (
-                              <div key={idx} className="whitespace-pre-wrap break-all hover:bg-zinc-900/50 py-0.5 rounded px-1">
-                                {log}
-                              </div>
-                            ))}
-                            <div ref={terminalEndRef} />
+                          <div className="text-violet-300/60 whitespace-pre-wrap break-all">
+                            {job.stepMessage}
                           </div>
                         </div>
+                      )}
+                    </div>
+
+                    {/* Right-side status badge */}
+                    <div className="shrink-0 mt-1">
+                      {isDone && (
+                        <span className="text-[8px] font-bold text-emerald-500/60 uppercase tracking-widest">✓</span>
                       )}
                     </div>
                   </div>
@@ -283,64 +161,60 @@ export function UnifiedPipelineView({
             </div>
           </div>
         </div>
+      </div>
 
-        {/* Separator line & Overall Progress section in the same card (matching Image 2) */}
-        <div className="border-t border-border/30 px-6 py-4 flex flex-col gap-3 bg-muted/10 shrink-0">
-          <div className="flex justify-between items-center">
-            <div className="flex flex-col gap-0.5">
-              <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
-                Overall Progress
-              </span>
-              <span className="text-[9px] font-bold text-muted-foreground/45 uppercase tracking-wider">
-                Node: secure-01-prod · Isolation active
-              </span>
-            </div>
-            <span
-              className={cn(
-                "text-base font-black tabular-nums",
-                job.status === "ERROR" && "text-destructive",
-                job.status === "CANCELLED" && "text-orange-500",
-                job.status === "RETRYING" && "text-amber-500",
-                !["DONE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "text-foreground"
-              )}
-            >
-              {job.progress}%
-            </span>
-          </div>
-
-          <div className="flex items-center justify-between gap-4">
-            {/* Extremely thin progress bar (h-1) matching Image 2 */}
-            <div className="flex-1 relative h-1 rounded-full overflow-hidden bg-muted/40 border border-border/10">
-              <div
-                className={cn(
-                  "absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out",
-                  job.status === "DONE" && "bg-emerald-500",
-                  job.status === "ERROR" && "bg-destructive",
-                  job.status === "CANCELLED" && "bg-orange-500",
-                  job.status === "RETRYING" && "bg-amber-500",
-                  !["DONE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "bg-violet-600"
-                )}
-                style={{ width: `${Math.min(job.progress, 100)}%` }}
-              />
-            </div>
-
-            {/* Cancel Scan action button inside the frame */}
-            {!["DONE", "ERROR", "CANCELLED"].includes(job.status) && onCancel && (
-              <button
-                onClick={() => onCancel(job.job_id)}
-                className="px-3.5 py-1 bg-destructive/15 hover:bg-destructive/25 text-destructive border border-destructive/20 rounded-md font-bold text-[9px] uppercase tracking-wider transition-all active:scale-[0.97] shrink-0"
-              >
-                Cancel Scan
-              </button>
+      {/* ── Overall Progress ── */}
+      <div className="rounded-2xl border border-border/30 bg-[hsl(var(--card))]/60 backdrop-blur-sm p-5">
+        <div className="flex justify-between items-center mb-3">
+          <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
+            Overall Progress
+          </span>
+          <span
+            className={cn(
+              "text-2xl font-black tabular-nums",
+              job.status === "DONE" && "text-emerald-400",
+              job.status === "ERROR" && "text-red-400",
+              job.status === "CANCELLED" && "text-orange-400",
+              job.status === "RETRYING" && "text-amber-400",
+              !["DONE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "text-foreground"
             )}
-          </div>
+          >
+            {job.progress}%
+          </span>
+        </div>
+
+        {/* Gradient progress bar */}
+        <div className="relative h-3 rounded-full overflow-hidden bg-muted/30 border border-border/20">
+          <div
+            className={cn(
+              "absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out",
+              job.status === "DONE" && "bg-gradient-to-r from-emerald-500 via-emerald-400 to-emerald-300 shadow-[0_0_20px_rgba(16,185,129,0.3)]",
+              job.status === "ERROR" && "bg-gradient-to-r from-red-600 via-red-500 to-red-400",
+              job.status === "CANCELLED" && "bg-gradient-to-r from-orange-600 via-orange-500 to-orange-400",
+              job.status === "RETRYING" && "bg-gradient-to-r from-amber-600 via-amber-500 to-amber-400",
+              !["DONE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "bg-gradient-to-r from-violet-600 via-violet-500 to-fuchsia-500 shadow-[0_0_20px_rgba(139,92,246,0.25)]"
+            )}
+            style={{ width: `${Math.min(job.progress, 100)}%` }}
+          />
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex justify-end mt-3 gap-2">
+          {!["DONE", "ERROR", "CANCELLED"].includes(job.status) && onCancel && (
+            <button
+              onClick={() => onCancel(job.job_id)}
+              className="px-4 py-1.5 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all active:scale-[0.97]"
+            >
+              Cancel Scan
+            </button>
+          )}
         </div>
       </div>
 
       {/* ── Status Banners ── */}
       {job.status === "RETRYING" && (
         <div className="p-5 rounded-2xl flex items-center gap-4 border border-amber-500/20 bg-amber-500/5 text-amber-400 animate-in fade-in duration-300">
-          <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-amber-500/15 border border-amber-500/25 flex items-center justify-center shrink-0">
             <RotateCw className="w-5 h-5 animate-spin" />
           </div>
           <div className="flex-1 min-w-0">
@@ -352,7 +226,7 @@ export function UnifiedPipelineView({
 
       {job.status === "CANCELLED" && (
         <div className="p-5 rounded-2xl flex items-center gap-4 border border-orange-500/20 bg-orange-500/5 text-orange-400 animate-in fade-in duration-300">
-          <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
+          <div className="w-10 h-10 rounded-xl bg-orange-500/15 border border-orange-500/25 flex items-center justify-center shrink-0">
             <XCircle className="w-5 h-5" />
           </div>
           <div>
@@ -361,6 +235,46 @@ export function UnifiedPipelineView({
           </div>
         </div>
       )}
+
+      {/* ── Render detailed report on-demand ── */}
+      {job.status === "DONE" && result && (
+        <div className="pt-2 animate-in fade-in zoom-in-95 duration-500">
+          {onResultRender(result)}
+        </div>
+      )}
     </div>
+  );
+}
+      </div >
+
+  {/* ── Status Banners ── */ }
+{
+  job.status === "RETRYING" && (
+    <div className="p-5 rounded-2xl flex items-center gap-4 border border-amber-500/20 bg-amber-500/5 text-amber-400 animate-in fade-in duration-300">
+      <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
+        <RotateCw className="w-5 h-5 animate-spin" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <h4 className="text-xs font-black uppercase tracking-tight">Retry in Progress</h4>
+        <p className="text-[10px] opacity-70 mt-0.5 font-mono truncate">{job.stepMessage}</p>
+      </div>
+    </div>
+  )
+}
+
+{
+  job.status === "CANCELLED" && (
+    <div className="p-5 rounded-2xl flex items-center gap-4 border border-orange-500/20 bg-orange-500/5 text-orange-400 animate-in fade-in duration-300">
+      <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
+        <XCircle className="w-5 h-5" />
+      </div>
+      <div>
+        <h4 className="text-xs font-black uppercase tracking-tight">Scan Cancelled</h4>
+        <p className="text-[10px] opacity-70 mt-0.5">This job was cancelled by the user and sandbox resources were reclaimed.</p>
+      </div>
+    </div>
+  )
+}
+    </div >
   );
 }

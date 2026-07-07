@@ -21,10 +21,10 @@ interface RepoScannerWidgetProps {
 
 const REPO_SCAN_STEPS = [
   { key: "QUEUED", label: "Job Queued" },
-  { key: "PROVISIONING", label: "Provisioning sandbox environment" },
-  { key: "CLONING", label: "Cloning repository" },
-  { key: "DETECTING", label: "Detecting languages" },
-  { key: "SCANNING", label: "Running security scan" },
+  { key: "PROVISIONING", label: "Provisioning sandbox environment..." },
+  { key: "CLONING", label: "Cloning repository..." },
+  { key: "DETECTING", label: "Detecting languages..." },
+  { key: "SCANNING", label: "Running security scan..." },
   { key: "DONE", label: "Scan complete" },
 ];
 
@@ -42,36 +42,6 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
   const [isScanning, setIsScanning] = useState(false);
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [expandedLang, setExpandedLang] = useState<string | null>(null);
-
-  const [sidebarWidth, setSidebarWidth] = useState(330);
-  const [isResizing, setIsResizing] = useState(false);
-
-  const startResizing = (mouseDownEvent: React.MouseEvent) => {
-    setIsResizing(true);
-    mouseDownEvent.preventDefault();
-  };
-
-  useEffect(() => {
-    const handleMouseMove = (e: MouseEvent) => {
-      if (!isResizing) return;
-      const newWidth = Math.max(280, Math.min(550, e.clientX));
-      setSidebarWidth(newWidth);
-    };
-
-    const handleMouseUp = () => {
-      setIsResizing(false);
-    };
-
-    if (isResizing) {
-      window.addEventListener("mousemove", handleMouseMove);
-      window.addEventListener("mouseup", handleMouseUp);
-    }
-
-    return () => {
-      window.removeEventListener("mousemove", handleMouseMove);
-      window.removeEventListener("mouseup", handleMouseUp);
-    };
-  }, [isResizing]);
 
   const [requiresAuth, setRequiresAuth] = useState(false);
   const [authMethod, setAuthMethod] = useState<"token" | "ssh">("token");
@@ -347,10 +317,10 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
     return (
       <div className="space-y-6 mt-4 animate-in fade-in duration-500">
         {/* ── Summary Banner ── */}
-        <div className="rounded-2xl border border-border bg-card p-5">
+        <div className="rounded-2xl border border-border/30 bg-[hsl(var(--card))]/60 backdrop-blur-sm p-5">
           <div className="flex flex-wrap items-center gap-4">
             <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-              <CheckCircle2 className="w-5 h-5 text-emerald-500 dark:text-emerald-400" />
+              <CheckCircle2 className="w-5 h-5 text-emerald-400" />
             </div>
             <div className="flex-1 min-w-0">
               <p className="font-black text-base text-foreground">{result.owner}/{result.repo}</p>
@@ -359,10 +329,10 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
               </p>
             </div>
             <div className="flex gap-2 flex-wrap">
-              <Badge variant="outline" className="bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/25 font-bold text-xs px-3 py-1">
+              <Badge variant="outline" className="bg-violet-500/10 text-violet-400 border-violet-500/25 font-bold text-xs px-3 py-1">
                 {langEntries.length} Languages
               </Badge>
-              <Badge variant="outline" className={cn("font-bold text-xs px-3 py-1", result.total_findings > 0 ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/25" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25")}>
+              <Badge variant="outline" className={cn("font-bold text-xs px-3 py-1", result.total_findings > 0 ? "bg-orange-500/10 text-orange-400 border-orange-500/25" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/25")}>
                 {result.total_findings} Findings
               </Badge>
             </div>
@@ -371,7 +341,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
 
         {/* ── Language Distribution ── */}
         {chartData.length > 0 && (
-          <div className="rounded-2xl border border-border bg-card p-5">
+          <div className="rounded-2xl border border-border/30 bg-[hsl(var(--card))]/60 backdrop-blur-sm p-5">
             <div className="flex items-center justify-between mb-4">
               <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
                 Language Distribution
@@ -381,12 +351,12 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
               </span>
             </div>
 
-            {/* Thinner stacked horizontal color bar */}
-            <div className="h-1.5 rounded-full overflow-hidden flex mb-4 border border-border/10 bg-muted/20">
+            {/* Stacked horizontal color bar */}
+            <div className="h-5 rounded-full overflow-hidden flex mb-6 border border-border/20 shadow-inner">
               {chartData.map((d, i) => (
                 <div
                   key={d.name}
-                  className="h-full transition-all duration-500 hover:brightness-110 relative group"
+                  className="h-full transition-all duration-500 hover:brightness-125 relative group"
                   style={{
                     width: `${Math.max(d.value, 1)}%`,
                     backgroundColor: LANG_COLORS[i % LANG_COLORS.length],
@@ -400,22 +370,30 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
               ))}
             </div>
 
-            {/* Grid legend list with file count and percentage (no individual bars) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5 pt-2">
+            {/* Individual language bars */}
+            <div className="space-y-3">
               {chartData.map((d, i) => {
                 const langInfo = (result.languages as any)[d.name];
                 return (
-                  <div key={d.name} className="flex items-center justify-between text-xs py-1 border-b border-border/10">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="w-2 h-2 rounded-full shrink-0"
-                        style={{ backgroundColor: LANG_COLORS[i % LANG_COLORS.length] }}
+                  <div key={d.name} className="flex items-center gap-3">
+                    <span
+                      className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
+                      style={{ backgroundColor: LANG_COLORS[i % LANG_COLORS.length] }}
+                    />
+                    <span className="text-xs font-bold text-foreground/90 w-24 truncate">{d.name}</span>
+                    <div className="flex-1 h-2 rounded-full bg-muted/20 overflow-hidden border border-border/10">
+                      <div
+                        className="h-full rounded-full transition-all duration-700"
+                        style={{
+                          width: `${d.value}%`,
+                          backgroundColor: LANG_COLORS[i % LANG_COLORS.length],
+                          opacity: 0.8,
+                        }}
                       />
-                      <span className="font-bold text-foreground/90 truncate">{d.name}</span>
                     </div>
-                    <div className="flex items-center gap-2 text-right shrink-0">
+                    <div className="text-right shrink-0 w-20 flex items-center justify-end gap-2">
                       <span className="text-[10px] text-muted-foreground/60">{langInfo?.file_count || 0} files</span>
-                      <span className="font-extrabold text-foreground/80 tabular-nums">{d.value}%</span>
+                      <span className="text-xs font-bold text-foreground/70 tabular-nums">{d.value}%</span>
                     </div>
                   </div>
                 );
@@ -451,7 +429,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
               const isSecure = sevCounts.critical === 0 && sevCounts.high === 0 && sevCounts.medium === 0 && sevCounts.low === 0 && sevCounts.info === 0;
 
               return (
-                <div key={lang} className="rounded-xl border border-border bg-card overflow-hidden hover:shadow-sm transition-all group">
+                <div key={lang} className="rounded-xl border border-border/30 bg-[hsl(var(--card))]/60 backdrop-blur-sm overflow-hidden hover:border-border/50 transition-all group">
                   <button
                     className="w-full p-4 flex items-center justify-between text-left"
                     onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
@@ -472,33 +450,33 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                         </div>
                         <div className="flex gap-1 items-center">
                           {isSecure ? (
-                            <Badge className="h-5 px-2 text-[9px] bg-emerald-500/10 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold rounded-md">
+                            <Badge className="h-5 px-2 text-[9px] bg-emerald-500/15 hover:bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 font-bold rounded-md">
                               SECURE
                             </Badge>
                           ) : (
                             <>
                               {sevCounts.critical > 0 && (
-                                <Badge className="h-4.5 px-1.5 text-[8px] bg-red-500/10 hover:bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 font-extrabold rounded-md">
+                                <Badge className="h-4.5 px-1.5 text-[8px] bg-red-500/15 hover:bg-red-500/15 text-red-400 border border-red-500/30 font-extrabold rounded-md">
                                   C:{sevCounts.critical}
                                 </Badge>
                               )}
                               {sevCounts.high > 0 && (
-                                <Badge className="h-4.5 px-1.5 text-[8px] bg-orange-500/10 hover:bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 font-extrabold rounded-md">
+                                <Badge className="h-4.5 px-1.5 text-[8px] bg-orange-500/15 hover:bg-orange-500/15 text-orange-400 border border-orange-500/30 font-extrabold rounded-md">
                                   H:{sevCounts.high}
                                 </Badge>
                               )}
                               {sevCounts.medium > 0 && (
-                                <Badge className="h-4.5 px-1.5 text-[8px] bg-yellow-500/10 hover:bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20 font-extrabold rounded-md">
+                                <Badge className="h-4.5 px-1.5 text-[8px] bg-yellow-500/15 hover:bg-yellow-500/15 text-yellow-400 border border-yellow-500/30 font-extrabold rounded-md">
                                   M:{sevCounts.medium}
                                 </Badge>
                               )}
                               {sevCounts.low > 0 && (
-                                <Badge className="h-4.5 px-1.5 text-[8px] bg-blue-500/10 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-extrabold rounded-md">
+                                <Badge className="h-4.5 px-1.5 text-[8px] bg-blue-500/15 hover:bg-blue-500/15 text-blue-400 border border-blue-500/30 font-extrabold rounded-md">
                                   L:{sevCounts.low}
                                 </Badge>
                               )}
                               {sevCounts.info > 0 && (
-                                <Badge className="h-4.5 px-1.5 text-[8px] bg-slate-500/10 hover:bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20 font-extrabold rounded-md">
+                                <Badge className="h-4.5 px-1.5 text-[8px] bg-slate-500/15 hover:bg-slate-500/15 text-slate-400 border border-slate-500/30 font-extrabold rounded-md">
                                   I:{sevCounts.info}
                                 </Badge>
                               )}
@@ -507,14 +485,14 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                         </div>
                       </div>
                       {info.findings.length > 0 && (
-                        <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20 py-0">
+                        <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-400 border-orange-500/20 py-0">
                           {info.findings.length}
                         </Badge>
                       )}
                     </div>
                   </button>
                   {expandedLang === lang && (
-                    <div className="border-t border-border bg-muted/40">
+                    <div className="border-t border-border/20 bg-[#0a0a14]/50">
                       {info.findings.length === 0 ? (
                         <div className="p-4 text-xs font-semibold text-muted-foreground/50 text-center">
                           No security findings for this language
@@ -524,36 +502,36 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                           {info.findings.map((f: any, fi: number) => {
                             const sev = f.severity?.toUpperCase() ?? "INFO";
                             const sevColor =
-                              sev === "CRITICAL" ? "border-red-500/20 bg-red-500/10 dark:bg-red-500/5 text-red-950 dark:text-red-100" :
-                              sev === "HIGH"     ? "border-orange-500/20 bg-orange-500/10 dark:bg-orange-500/5 text-orange-950 dark:text-orange-100" :
-                              sev === "MEDIUM"   ? "border-yellow-500/20 bg-yellow-500/10 dark:bg-yellow-500/5 text-yellow-950 dark:text-yellow-100" :
-                              sev === "LOW"      ? "border-blue-500/20 bg-blue-500/10 dark:bg-blue-500/5 text-blue-950 dark:text-blue-100" :
-                                                   "border-border bg-card text-foreground";
+                              sev === "CRITICAL" ? "border-red-500/40 bg-red-500/5" :
+                                sev === "HIGH" ? "border-orange-500/40 bg-orange-500/5" :
+                                  sev === "MEDIUM" ? "border-yellow-500/40 bg-yellow-500/5" :
+                                    sev === "LOW" ? "border-blue-500/40 bg-blue-500/5" :
+                                      "border-border/30 bg-muted/5";
                             const badgeColor =
-                              sev === "CRITICAL" ? "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30" :
-                              sev === "HIGH"     ? "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/30" :
-                              sev === "MEDIUM"   ? "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 border-yellow-500/30" :
-                              sev === "LOW"      ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30" :
-                                                   "bg-muted text-muted-foreground border-border";
+                              sev === "CRITICAL" ? "bg-red-500/15 text-red-400 border-red-500/30" :
+                                sev === "HIGH" ? "bg-orange-500/15 text-orange-400 border-orange-500/30" :
+                                  sev === "MEDIUM" ? "bg-yellow-500/15 text-yellow-400 border-yellow-500/30" :
+                                    sev === "LOW" ? "bg-blue-500/15 text-blue-400 border-blue-500/30" :
+                                      "bg-muted text-muted-foreground border-border";
                             return (
                               <div key={fi} className={cn("p-3 rounded-lg border text-[11px] transition-all", sevColor)}>
                                 <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                                   <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide", badgeColor)}>
                                     {sev}
                                   </Badge>
-                                  <span className="text-[9px] font-semibold text-muted-foreground">{f.tool}</span>
+                                  <span className="text-[9px] font-bold text-muted-foreground/60">{f.tool}</span>
                                   {f.line && (
-                                    <span className="text-[9px] font-mono text-muted-foreground/80 ml-auto">L:{f.line}</span>
+                                    <span className="text-[9px] font-mono text-muted-foreground/40 ml-auto">L:{f.line}</span>
                                   )}
                                 </div>
-                                <p className="font-extrabold text-foreground leading-snug">{f.issue}</p>
+                                <p className="font-bold text-foreground/90 leading-snug">{f.issue}</p>
                                 {f.file && (
                                   <div className="flex items-center gap-1.5 mt-1.5">
-                                    <p className="text-[9px] font-mono text-foreground/75 font-medium truncate">{f.file}</p>
+                                    <p className="text-[9px] font-mono text-muted-foreground/40 truncate">{f.file}</p>
                                   </div>
                                 )}
                                 {f.remediation && (
-                                  <p className="text-[9px] text-foreground/80 font-medium mt-1 leading-relaxed">{f.remediation}</p>
+                                  <p className="text-[9px] text-muted-foreground/50 mt-1 leading-relaxed">{f.remediation}</p>
                                 )}
                               </div>
                             );
@@ -561,157 +539,15 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                         </div>
                       )}
                     </div>
-                  placeholder="https://github.com/user/repo"
-                  className={cn(
-                    "rounded-xl h-11 border-border/70 focus-visible:ring-violet-500/20 bg-background/50",
-                    urlError && "border-destructive focus-visible:ring-destructive/20"
                   )}
-                  disabled={isScanning}
-                />
-                {urlError && (
-                  <p className="text-[10px] font-bold text-destructive flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3 shrink-0" />
-                    {urlError}
-                  </p>
-                )}
-              </div>
-
-              {/* Private Auth Checkbox & Fields */}
-              <div className="flex flex-col gap-3 pt-1 border-t border-border/10">
-                <label className="flex items-center gap-2.5 cursor-pointer group">
-                  <input
-                    type="checkbox"
-                    checked={requiresAuth}
-                    onChange={(e) => setRequiresAuth(e.target.checked)}
-                    className="rounded border-border text-violet-600 focus:ring-violet-500/20 w-4 h-4"
-                  />
-                  <span className="text-[11px] font-bold text-foreground/80 group-hover:text-foreground transition-colors">
-                    Private Repository Authentication
-                  </span>
-                </label>
-
-                {requiresAuth && (
-                  <div className="flex flex-col gap-3 mt-1.5 p-3 rounded-xl bg-muted/20 border border-border/50 animate-in slide-in-from-top-2 duration-200">
-                    <div className="flex gap-2 p-0.5 bg-background rounded-lg border border-border/40">
-                      <button
-                        type="button"
-                        onClick={() => setAuthMethod("token")}
-                        className={cn(
-                          "flex-1 py-1 text-[10px] font-black uppercase tracking-wider rounded-md transition-all",
-                          authMethod === "token" ? "bg-muted text-foreground shadow-sm" : "text-muted-foreground/60 hover:text-foreground"
-                        )}
-                      >
-                        Token
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAuthMethod("ssh")}
-                        className={cn(
-                          "flex-1 py-1 text-[10px] font-black uppercase tracking-wider rounded-md transition-all",
-                          authMethod === "ssh" ? "bg-muted text-foreground shadow-sm" : "text-muted-foreground/60 hover:text-foreground"
-                        )}
-                      >
-                        SSH Key
-                      </button>
-                    </div>
-
-                    {authMethod === "token" ? (
-                      <Input
-                        type="password"
-                        placeholder="GitHub Personal Access Token"
-                        value={gitToken}
-                        onChange={(e) => setGitToken(e.target.value)}
-                        className="h-9 rounded-lg text-xs border-border/70 focus-visible:ring-violet-500/20 bg-background"
-                      />
-                    ) : (
-                      <textarea
-                        placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                        value={sshKey}
-                        onChange={(e) => setSshKey(e.target.value)}
-                        className="h-20 rounded-lg text-xs border border-border/70 focus-visible:ring-violet-500/20 bg-background p-2 font-mono resize-none focus:outline-none focus:ring-1"
-                      />
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Submit Button */}
-              <Button
-                onClick={handleStartScan}
-                disabled={isScanning || !!urlError || !repoUrl}
-                className="w-full bg-violet-600 hover:bg-violet-500 text-white rounded-xl h-11 font-bold flex items-center justify-center gap-2 shadow-lg shadow-violet-500/10 transition-all disabled:opacity-50"
-              >
-                {isScanning ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Scanning...
-                  </>
-                ) : (
-                  <>
-                    <Search className="w-4 h-4" />
-                    Scan Repository
-                  </>
-                )}
-              </Button>
-            </div>
-
-            {/* Box 2: Scrollable Scan List */}
-            <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-              <JobsPanel
-                jobs={jobs}
-                selectedJobId={selectedJobId}
-                onSelectJob={setSelectedJobId}
-                onDeleteJob={removeJob}
-                jobType="repo-scan"
-                embedded={true}
-              />
-            </div>
+                </div>
+              );
+            })}
           </div>
-
-          {/* Resizable handle */}
-          <div
-            className={cn(
-              "w-1 hover:w-1.5 cursor-col-resize self-stretch bg-border hover:bg-violet-500/50 transition-all duration-150 shrink-0 relative group",
-              isResizing && "bg-violet-600 w-1.5"
-            )}
-            onMouseDown={startResizing}
-          >
-            <div className="absolute inset-y-0 -left-1 -right-1 cursor-col-resize" />
-          </div>
-
-          {/* Right Panel: Pipeline + Results */}
-          <div className="flex-1 bg-background overflow-hidden flex flex-col">
-            <ScrollArea className="flex-1">
-              <div className="w-full p-6">
-                {selectedJob ? (
-                  <UnifiedPipelineView
-                    job={selectedJob}
-                    steps={REPO_SCAN_STEPS}
-                    result={selectedResult}
-                    onResultRender={renderRepoScanResult}
-                    onCancel={handleCancelJob}
-                  />
-                ) : (
-                  <div className="h-[60vh] flex flex-col items-center justify-center text-center gap-4">
-                    <div className="w-16 h-16 rounded-2xl bg-violet-500/5 border border-violet-500/10 flex items-center justify-center">
-                      <Activity className="w-7 h-7 text-violet-500/30" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-black uppercase tracking-wider text-muted-foreground/45">No Scan Selected</h3>
-                      <p className="text-xs text-muted-foreground/35 mt-1">
-                        Select a repository scan job from the panel or run a new scan.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </ScrollArea>
-          </div>
-
         </div>
       </div>
     );
-  }
+  };
 
   return (
     <>
@@ -738,6 +574,198 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
           </Button>
         </CardContent>
       </Card>
+
+      {/* Full Scanner Dialog */}
+      <Dialog open={isOpen} onOpenChange={(o) => { if (!o) { setSelectedJobId(null); setRequiresAuth(false); setGitToken(""); setSshKey(""); } setIsOpen(o); }}>
+        <DialogContent className="max-w-[100vw] w-screen h-screen m-0 p-0 overflow-hidden border-none bg-[#080812] flex flex-col rounded-none">
+
+          {/* ── Header ── */}
+          <DialogHeader className="px-8 py-4 border-b border-border/20 bg-[#0c0c1d] flex flex-row items-center justify-between space-y-0 shrink-0">
+            <div className="flex items-center gap-4">
+              <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-400 shadow-[0_0_20px_rgba(139,92,246,0.1)]">
+                <Github className="w-5 h-5" />
+              </div>
+              <div>
+                <DialogTitle className="text-lg font-black tracking-tight text-white">GitHub Repository Scanner</DialogTitle>
+                <DialogDescription className="text-[10px] font-bold text-muted-foreground/60 uppercase tracking-[0.25em] flex items-center gap-3 mt-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-pulse shadow-[0_0_8px_rgba(139,92,246,0.5)]" />
+                    linguist
+                  </span>
+                  <span className="text-border/40">·</span>
+                  <span>tokei</span>
+                  <span className="text-border/40">·</span>
+                  <span>enry</span>
+                  <span className="text-border/40">·</span>
+                  <span>static analysis</span>
+                </DialogDescription>
+              </div>
+            </div>
+            <button onClick={() => { setSelectedJobId(null); setIsOpen(false); }} className="p-2 rounded-xl hover:bg-white/5 transition-colors text-muted-foreground/60 hover:text-white">
+              <X className="w-5 h-5" />
+            </button>
+          </DialogHeader>
+
+          {/* ── Two-Column Layout ── */}
+          <div className="flex-1 flex overflow-hidden">
+
+            {/* Left Sidebar: Input + Scans */}
+            <div className="w-[340px] shrink-0 flex flex-col border-r border-border/15 bg-[#0c0c1d] h-full overflow-hidden">
+              <div className="flex flex-col p-5 gap-4 shrink-0">
+                {/* URL Input */}
+                <div className="flex flex-col gap-2">
+                  <div className="flex items-center justify-between">
+                    <label htmlFor="repo-url-input" className="text-[9px] font-black uppercase tracking-[0.25em] text-muted-foreground/70">
+                      Repository URL
+                    </label>
+                    {isValidating && <Loader2 className="w-3 h-3 animate-spin text-violet-400" />}
+                  </div>
+                  <Input
+                    id="repo-url-input"
+                    value={repoUrl}
+                    onChange={(e) => {
+                      setRepoUrl(e.target.value);
+                      validateUrl(e.target.value);
+                      if (!e.target.value) {
+                        setRequiresAuth(false);
+                        setGitToken("");
+                        setSshKey("");
+                      }
+                    }}
+                    onBlur={handleUrlBlur}
+                    placeholder="https://github.com/owner/repo..."
+                    className={cn("rounded-lg h-10 font-mono text-xs border border-border/20 bg-[#0a0a18] text-white/90 placeholder:text-muted-foreground/30 transition-colors focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20", urlError ? "border-red-500/50" : "")}
+                    disabled={isScanning}
+                  />
+                  {urlError && <p className="text-[10px] text-red-400 font-medium">{urlError}</p>}
+                </div>
+
+                {/* Auth Panel */}
+                {requiresAuth && (
+                  <div className="rounded-xl border border-violet-500/15 bg-violet-500/5 p-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-violet-400 font-bold text-[10px] uppercase tracking-wider">
+                        <Shield className="w-3.5 h-3.5" />
+                        Private Repo
+                      </div>
+                      <div className="flex bg-[#0a0a18] rounded-md p-0.5 border border-border/20">
+                        <button
+                          type="button"
+                          onClick={() => setAuthMethod("token")}
+                          className={cn(
+                            "px-2.5 py-1 text-[9px] font-black uppercase rounded transition-all",
+                            authMethod === "token"
+                              ? "bg-violet-600 text-white shadow-sm"
+                              : "text-muted-foreground/60 hover:text-white"
+                          )}
+                        >
+                          Token
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAuthMethod("ssh")}
+                          className={cn(
+                            "px-2.5 py-1 text-[9px] font-black uppercase rounded transition-all",
+                            authMethod === "ssh"
+                              ? "bg-violet-600 text-white shadow-sm"
+                              : "text-muted-foreground/60 hover:text-white"
+                          )}
+                        >
+                          SSH Key
+                        </button>
+                      </div>
+                    </div>
+
+                    {authMethod === "token" ? (
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="git-token-input" className="text-[8px] font-black uppercase tracking-wider text-muted-foreground/60">
+                          Personal Access Token (PAT)
+                        </label>
+                        <Input
+                          id="git-token-input"
+                          type="password"
+                          value={gitToken}
+                          onChange={(e) => setGitToken(e.target.value)}
+                          placeholder="ghp_xxxxxxxxxxxx"
+                          className="rounded-lg h-9 font-mono text-[11px] border border-border/20 bg-[#0a0a18] text-white/90 focus:border-violet-500/40"
+                        />
+                        <p className="text-[9px] text-muted-foreground/40 leading-normal">
+                          Token is used ephemerally and never stored.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col gap-1.5">
+                        <label htmlFor="ssh-key-input" className="text-[8px] font-black uppercase tracking-wider text-muted-foreground/60">
+                          SSH Private Key
+                        </label>
+                        <textarea
+                          id="ssh-key-input"
+                          value={sshKey}
+                          onChange={(e) => setSshKey(e.target.value)}
+                          placeholder="Paste your SSH Private Key here..."
+                          className="rounded-lg min-h-[100px] p-3 font-mono text-[11px] border border-border/20 bg-[#0a0a18] text-white/90 focus:border-violet-500/40 focus:outline-none focus:ring-1 focus:ring-violet-500/20 resize-y"
+                        />
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Scan Button */}
+                <Button
+                  id="scan-repo-btn"
+                  onClick={handleScan}
+                  disabled={isScanning || !!urlError || !repoUrl}
+                  className="h-10 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs flex items-center gap-2 shadow-[0_0_20px_rgba(16,185,129,0.15)] transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
+                >
+                  {isScanning ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Ingesting...</> : <><Search className="w-3.5 h-3.5" /> Scan Repository</>}
+                </Button>
+              </div>
+
+              {/* Embedded JobsPanel */}
+              <div className="flex-1 min-h-0">
+                <JobsPanel
+                  jobs={jobs}
+                  selectedJobId={selectedJobId}
+                  onSelectJob={setSelectedJobId}
+                  onDeleteJob={removeJob}
+                  jobType="repo-scan"
+                  embedded={true}
+                />
+              </div>
+            </div>
+
+            {/* Right Panel: Pipeline + Results */}
+            <div className="flex-1 bg-[#080812] overflow-hidden flex flex-col">
+              <ScrollArea className="flex-1">
+                <div className="max-w-5xl mx-auto w-full p-6">
+                  {selectedJob ? (
+                    <UnifiedPipelineView
+                      job={selectedJob}
+                      steps={REPO_SCAN_STEPS}
+                      result={selectedResult}
+                      onResultRender={renderRepoScanResult}
+                      onCancel={handleCancelJob}
+                    />
+                  ) : (
+                    <div className="h-[60vh] flex flex-col items-center justify-center text-center gap-4">
+                      <div className="w-16 h-16 rounded-2xl bg-violet-500/5 border border-violet-500/10 flex items-center justify-center">
+                        <Activity className="w-7 h-7 text-violet-500/30" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black uppercase tracking-wider text-muted-foreground/40">No Scan Selected</h3>
+                        <p className="text-xs text-muted-foreground/30 mt-1">
+                          Select a repository scan job from the panel or run a new scan.
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </ScrollArea>
+            </div>
+
+          </div>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

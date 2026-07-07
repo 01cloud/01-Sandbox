@@ -84,7 +84,7 @@ export function useJobStore(
       console.error(`[useJobStore] Error fetching result for job ${jobId}`, e);
       return null;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, apiKey, jobType]);
 
   const openStream = useCallback((jobId: string, since = 0) => {
@@ -127,23 +127,20 @@ export function useJobStore(
           // job is selected and volatileResults[jobId] is absent.
         }
 
-        const storedProgress = typeof stored.progress === "number" && !isNaN(stored.progress) ? stored.progress : 0;
-        const newProgress = typeof ev.progress === "number" && !isNaN(ev.progress) ? ev.progress : 0;
-
         const updatedJob: GenericJob = {
           ...stored,
           status: ev.step,
-          progress: Math.max(storedProgress, newProgress),
+          progress: ev.progress,
           stepMessage: ev.message,
           eventIndex: since + 1,
           summary: ev.step === "DONE" && ev.detail
             ? {
-                critical: ev.detail.critical_count || 0,
-                high: ev.detail.high_count || 0,
-                medium: ev.detail.medium_count || 0,
-                low: ev.detail.low_count || 0,
-                info: ev.detail.info_count || 0
-              }
+              critical: ev.detail.critical_count || 0,
+              high: ev.detail.high_count || 0,
+              medium: ev.detail.medium_count || 0,
+              low: ev.detail.low_count || 0,
+              info: ev.detail.info_count || 0
+            }
             : stored.summary,
           detail: ev.detail || stored.detail,
           result: null, // Keep localStorage entry result stripped
@@ -196,7 +193,7 @@ export function useJobStore(
         });
       }, 3000);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiBase, apiKey, jobType]);
 
   // ─── Server sync: discover CLI/API-triggered jobs ────────────────────────────
@@ -266,13 +263,10 @@ export function useJobStore(
               existing.stepMessage !== sj.stepMessage ||
               JSON.stringify(existing.detail) !== JSON.stringify(sj.detail)
             ) {
-              const existingProgress = typeof existing.progress === "number" && !isNaN(existing.progress) ? existing.progress : 0;
-              const newProgress = typeof sj.progress === "number" && !isNaN(sj.progress) ? sj.progress : 0;
-
               const updatedJob: GenericJob = {
                 ...existing,
                 status: sj.status,
-                progress: Math.max(existingProgress, newProgress),
+                progress: sj.progress,
                 stepMessage: sj.stepMessage,
                 eventIndex: sj.eventIndex ?? existing.eventIndex,
                 summary: sj.summary ?? existing.summary,
@@ -304,7 +298,7 @@ export function useJobStore(
     } catch (err) {
       console.warn("[useJobStore] syncFromServer error:", err);
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [apiKey, getJobsListUrl, openStream, jobType]);
 
   // Reconnect active streams on mount (handles page refresh mid-scan)
@@ -320,7 +314,7 @@ export function useJobStore(
       // Cleanup all open event sources on unmount
       Object.values(esRefs.current).forEach(es => es.close());
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jobType, apiKey]);
 
   // Poll server every 5 seconds to pick up CLI/API-triggered jobs
