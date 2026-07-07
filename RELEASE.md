@@ -1,3 +1,49 @@
+## Release v0.6.13 — 01-Sandbox
+**Release Date:** July 07, 2026
+
+---
+
+### Summary
+v0.6.13 focuses on reliability, bug resolution, and maintenance. Test coverage has been expanded to ensure higher code quality. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* ui enhancement ([d0ece9c](https://github.com/01cloud/01-Sandbox/commit/d0ece9c4eb1626e605bca520dae56f2934ef0b38))
+* ui enhancement ([9f91790](https://github.com/01cloud/01-Sandbox/commit/9f917906b9792dd3ec47ad83d78f620fa81aaffc))
+* ui enhancement ([f702b73](https://github.com/01cloud/01-Sandbox/commit/f702b73e92a5c439edc2a46061f8c3864a515ec0))
+* ui enhancement ([78c9ea4](https://github.com/01cloud/01-Sandbox/commit/78c9ea48b7d50f7afa0393b5ec62015466bef2d6))
+
+### Changes
+## [0.6.13](https://github.com/01cloud/01-Sandbox/compare/v0.6.12...v0.6.13) (2026-07-07)
+
+
+### 🐛 Bug Fixes
+
+* ui enhancement ([d0ece9c](https://github.com/01cloud/01-Sandbox/commit/d0ece9c4eb1626e605bca520dae56f2934ef0b38))
+* ui enhancement ([9f91790](https://github.com/01cloud/01-Sandbox/commit/9f917906b9792dd3ec47ad83d78f620fa81aaffc))
+* ui enhancement ([f702b73](https://github.com/01cloud/01-Sandbox/commit/f702b73e92a5c439edc2a46061f8c3864a515ec0))
+* ui enhancement ([78c9ea4](https://github.com/01cloud/01-Sandbox/commit/78c9ea48b7d50f7afa0393b5ec62015466bef2d6))
+* ui enhancement ([1e6325b](https://github.com/01cloud/01-Sandbox/commit/1e6325b47687d3db99b2644bb33d0449ba7ca269))
+* ui enhancement ([f725785](https://github.com/01cloud/01-Sandbox/commit/f725785e08a009fba26debc27738902f1ab01b6d))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.12 [skip ci] ([ef71288](https://github.com/01cloud/01-Sandbox/commit/ef71288c20c64ff3b1a5ff464f56099585439f33))
+* include date (July 6) in updates summary file ([f0ce500](https://github.com/01cloud/01-Sandbox/commit/f0ce500098e4cf780d00ff193052a98bc7d778c6))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.12 [skip ci] ([4dd6065](https://github.com/01cloud/01-Sandbox/commit/4dd6065641c37395f50803d724a82633bf081d17))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.13)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.12 — 01-Sandbox
 **Release Date:** July 06, 2026
 
