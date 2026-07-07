@@ -116,7 +116,7 @@ export function UnifiedPipelineView({
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
       {/* ── Single Frame containing both Pipeline Timeline and Overall Progress ── */}
-      <div className="rounded-2xl border border-border/30 bg-card/60 backdrop-blur-sm overflow-hidden flex flex-col">
+      <div className="rounded-2xl border border-border bg-card overflow-hidden flex flex-col">
         {/* Section header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <label className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
