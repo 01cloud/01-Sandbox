@@ -23,7 +23,8 @@ import {
   Play,
   FileCode,
   Square,
-  Activity
+  Activity,
+  Github
 } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Button } from "@/components/ui/button";
@@ -626,6 +627,10 @@ const Dashboard = () => {
             <Box className="w-4 h-4" />
             Applications
           </TabsTrigger>
+          <TabsTrigger value="scanner" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
+            <Github className="w-4 h-4" />
+            Repository Scanner
+          </TabsTrigger>
           <TabsTrigger value="apis" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
             <Key className="w-4 h-4" />
             API Management
@@ -846,7 +851,7 @@ const Dashboard = () => {
               })}
 
               {/* GitHub Repository Scanner Widget */}
-              <RepoScannerWidget apiBaseUrl={API_BASE_URL} keys={keys} authToken={authToken} />
+              <RepoScannerWidget apiBaseUrl={API_BASE_URL} keys={keys} authToken={authToken} onSwitchTab={setActiveTab} />
             </div>
 
             {/* Sticky Right-Side Telemetry log reader panel */}
@@ -965,6 +970,10 @@ const Dashboard = () => {
               )}
             </div>
           </div>
+        </TabsContent>
+
+        <TabsContent value="scanner" className="animate-in fade-in-50 slide-in-from-bottom-5 duration-500">
+          <RepoScannerWidget apiBaseUrl={API_BASE_URL} keys={keys} authToken={authToken} inline={true} onSwitchTab={setActiveTab} />
         </TabsContent>
 
         <TabsContent value="apis" className="animate-in fade-in-50 slide-in-from-bottom-5 duration-500">
