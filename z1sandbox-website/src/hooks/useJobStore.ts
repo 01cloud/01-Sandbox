@@ -130,7 +130,7 @@ export function useJobStore(
         const updatedJob: GenericJob = {
           ...stored,
           status: ev.step,
-          progress: ev.progress,
+          progress: Math.max(stored.progress || 0, ev.progress),
           stepMessage: ev.message,
           eventIndex: since + 1,
           summary: ev.step === "DONE" && ev.detail
@@ -266,7 +266,7 @@ export function useJobStore(
               const updatedJob: GenericJob = {
                 ...existing,
                 status: sj.status,
-                progress: sj.progress,
+                progress: Math.max(existing.progress || 0, sj.progress),
                 stepMessage: sj.stepMessage,
                 eventIndex: sj.eventIndex ?? existing.eventIndex,
                 summary: sj.summary ?? existing.summary,
