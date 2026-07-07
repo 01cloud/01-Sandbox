@@ -15,31 +15,40 @@ The pipeline architecture is split into three main components:
 
 ```mermaid
 graph TD
-    User([User Request]) -->|POST /v1/repo-scan| API[FastAPI API Pod]
+    User([User Request]) -->|POST /v1/repo-scan| API[FastAPI apiServer Pod]
 
-    subgraph FastAPI Host Pod
-        API -->|1. Clone Repo| TempDir[Local Temp Directory]
+    subgraph K8s Node: apiServer Pod Container
+        API -->|1. Clone Repo| TempDir["Local Filesystem (/tmp)"]
         TempDir -->|2. Detect Languages| Detector[Language Detector]
         Detector -->|3. Map Files| LangMap[Language Map]
-
         LangMap -->|4. Parallel Dispatch| ThreadPool{asyncio.gather}
     end
 
-    subgraph OpenSandbox Cluster
-        ThreadPool -->|Submit Python| Pod1[Python Sandbox Pod]
-        ThreadPool -->|Submit Go| Pod2[Go Sandbox Pod]
-        ThreadPool -->|Submit YAML| Pod3[YAML Sandbox Pod]
+    subgraph OpenSandbox Server Orchestration
+        ThreadPool -->|Submit Python Files| OS_Srv[OpenSandbox Server]
+        ThreadPool -->|Submit Go Files| OS_Srv
+        ThreadPool -->|Submit YAML Files| OS_Srv
+
+        OS_Srv -->|Write code| PVC[(Shared PVC: scan-pvc)]
+        OS_Srv -->|Spawn Pods| Pods[K8s Runner Pods]
     end
 
-    subgraph Sandbox Pod execution
-        Pod1 -->|Runs| Bandit[Bandit / Semgrep]
-        Pod2 -->|Runs| Gosec[Gosec / Staticcheck]
-        Pod3 -->|Runs| Yamllint[Yamllint]
+    subgraph K8s Runner Pod Execution
+        Pods -->|Pod 1: Python| Pod1[Python Sandbox Pod]
+        Pods -->|Pod 2: Go| Pod2[Go Sandbox Pod]
+        Pods -->|Pod 3: YAML| Pod3[YAML Sandbox Pod]
+
+        Pod1 -->|Mount subPath & Run| Bandit[Bandit / Semgrep]
+        Pod2 -->|Mount subPath & Run| Gosec[Gosec / Staticcheck]
+        Pod3 -->|Mount subPath & Run| Yamllint[Yamllint]
+
+        Bandit -->|Write Report| PVC
+        Gosec -->|Write Report| PVC
+        Yamllint -->|Write Report| PVC
     end
 
-    Pod1 -->|Return JSON| API
-    Pod2 -->|Return JSON| API
-    Pod3 -->|Return JSON| API
+    PVC -->|Read Report| OS_Srv
+    OS_Srv -->|Return JSON| ThreadPool
 
     API -->|5. Aggregate & Deduplicate| FinalResult[Unified Report]
     FinalResult -->|6. Stream SSE| User
@@ -55,8 +64,17 @@ graph TD
 3. The scan job is delegated to `_run_scan_pipeline` in `scan_repository.py`.
 
 ### Step 2.2: Workspace Creation & Git Clone
-1. **Local Sandbox Provisioning**: The parent worker calls `provision_sandbox()` inside `sandbox_provisioner.py`, which creates a temporary directory on the API pod (e.g. `/tmp/reposcanner_abc123`).
-2. **Shallow Clone**: The repository is cloned into this workspace with `--depth=1` to minimize resource consumption and download speed.
+1. **Local Workspace Provisioning**: The parent worker calls `provision_sandbox()` inside [sandbox_provisioner.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/sandbox_provisioner.py). Despite its name, this functions as a **temporary directory** created directly on the local filesystem (ephemeral container storage) of the running `apiServer` pod itself (using `tempfile.mkdtemp` to produce `/tmp/reposcanner_abc123`).
+2. **Local Shallow Clone**: The repository is cloned directly into this temporary folder `/tmp/reposcanner_abc123/repo` using an `asyncio` subprocess running `git clone --depth=1` inside the `apiServer` container.
+
+> [!IMPORTANT]
+> **Why is cloning done locally inside the `apiServer` Pod instead of inside a dedicated Kubernetes Sandbox Pod?**
+>
+> The OpenSandbox server is designed as a secure sandbox execution runtime and does not expose generic shell or command execution endpoints (like `/exec`).
+> Therefore:
+> 1. The repository must first be cloned inside the running `apiServer` pod's own container filesystem so that the application can read and analyze its structure.
+> 2. This local copy is used to run language classification tools (like GitHub Linguist or Tokei) directly within the `apiServer` container to map the files.
+> 3. Once files are grouped by language, only the relevant source code files (excluding massive `.git/` history, assets, and binaries) are read into memory and sent to the OpenSandbox server via `POST /scan-jobs`. The OpenSandbox server then writes them to the shared PVC and provisions the dedicated Kubernetes sandbox runner pods to perform the scan.
 
 ### Step 2.3: Multilingual Detection Phase
 Before launching any sandboxes, the system runs local tools inside the API pod's workspace via `detect_languages` (in `language_detector.py`). It evaluates detection tools in the following priority:
