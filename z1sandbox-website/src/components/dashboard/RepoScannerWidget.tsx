@@ -610,12 +610,14 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
           <div className="flex-1 flex overflow-hidden">
 
             {/* Left Sidebar: Input + Scans */}
-            <div className="w-[340px] shrink-0 flex flex-col border-r border-border/50 bg-muted/5 h-full overflow-hidden">
-              <div className="flex flex-col p-5 gap-4 shrink-0">
+            <div className="w-[350px] shrink-0 flex flex-col border-r border-border bg-muted/5 h-full overflow-hidden p-4 space-y-4">
+
+              {/* Box 1: REPOSITORY URL Input & Button */}
+              <div className="rounded-[1.25rem] border border-border bg-card p-4 flex flex-col gap-4 shadow-sm shrink-0">
                 {/* URL Input */}
                 <div className="flex flex-col gap-2">
                   <div className="flex items-center justify-between">
-                    <label htmlFor="repo-url-input" className="text-[9px] font-black uppercase tracking-[0.25em] text-muted-foreground/75">
+                    <label htmlFor="repo-url-input" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75">
                       Repository URL
                     </label>
                     {isValidating && <Loader2 className="w-3 h-3 animate-spin text-violet-500" />}
@@ -633,7 +635,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                       }
                     }}
                     onBlur={handleUrlBlur}
-                    placeholder="https://github.com/owner/repo..."
+                    placeholder="https://github.com/owner/repo"
                     className={cn("rounded-lg h-10 font-mono text-xs border border-border bg-background text-foreground placeholder:text-muted-foreground/45 transition-colors focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20", urlError ? "border-red-500/50" : "")}
                     disabled={isScanning}
                   />
@@ -710,19 +712,29 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
                   </div>
                 )}
 
-                {/* Scan Button - Purple Solid matching Image 1 */}
+                {/* Scan Button - Purple Solid matching Image 2 */}
                 <Button
                   id="scan-repo-btn"
                   onClick={handleScan}
                   disabled={isScanning || !!urlError || !repoUrl}
-                  className="h-10 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(139,92,246,0.15)] transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
+                  className="w-full h-10 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(139,92,246,0.15)] transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
                 >
                   {isScanning ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Ingesting...</> : <><Search className="w-3.5 h-3.5" /> Scan Repository</>}
                 </Button>
               </div>
 
-              {/* Embedded JobsPanel */}
-              <div className="flex-1 min-h-0">
+              {/* Title & Stats */}
+              <div className="flex items-center justify-between px-1 shrink-0">
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
+                  Repository Scans
+                </span>
+                <span className="text-[9px] text-muted-foreground/60 font-semibold tracking-wider uppercase">
+                  Recent ({jobs.length})
+                </span>
+              </div>
+
+              {/* Box 2: Scrollable Scan List */}
+              <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
                 <JobsPanel
                   jobs={jobs}
                   selectedJobId={selectedJobId}

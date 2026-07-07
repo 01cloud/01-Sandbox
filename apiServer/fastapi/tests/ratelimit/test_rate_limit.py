@@ -240,6 +240,7 @@ def test_local_at_limit_returns_true(monkeypatch):
         "test-jti-abc": {
             "count": 7,  # Exactly at the limit
             "expires_at": 1060.0,  # Window is still active
+            "expires_at": 1060.0,  # Window is still active
         }
     }
 
