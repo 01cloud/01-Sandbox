@@ -27,7 +27,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-# Inject current directory into python path to load core modules correctly
+# Inject current directory into python path to load core module correctly
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from auth.token_validator import validate_token
