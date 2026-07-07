@@ -351,12 +351,12 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
               </span>
             </div>
 
-            {/* Stacked horizontal color bar */}
-            <div className="h-5 rounded-full overflow-hidden flex mb-6 border border-border/20 shadow-inner">
+            {/* Thinner stacked horizontal color bar */}
+            <div className="h-1.5 rounded-full overflow-hidden flex mb-4 border border-border/10 bg-muted/20">
               {chartData.map((d, i) => (
                 <div
                   key={d.name}
-                  className="h-full transition-all duration-500 hover:brightness-125 relative group"
+                  className="h-full transition-all duration-500 hover:brightness-110 relative group"
                   style={{
                     width: `${Math.max(d.value, 1)}%`,
                     backgroundColor: LANG_COLORS[i % LANG_COLORS.length],
@@ -370,30 +370,22 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
               ))}
             </div>
 
-            {/* Individual language bars */}
-            <div className="space-y-3">
+            {/* Grid legend list with file count and percentage (no individual bars) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5 pt-2">
               {chartData.map((d, i) => {
                 const langInfo = (result.languages as any)[d.name];
                 return (
-                  <div key={d.name} className="flex items-center gap-3">
-                    <span
-                      className="w-2.5 h-2.5 rounded-full shrink-0 shadow-sm"
-                      style={{ backgroundColor: LANG_COLORS[i % LANG_COLORS.length] }}
-                    />
-                    <span className="text-xs font-bold text-foreground/90 w-24 truncate">{d.name}</span>
-                    <div className="flex-1 h-2 rounded-full bg-muted/20 overflow-hidden border border-border/10">
-                      <div
-                        className="h-full rounded-full transition-all duration-700"
-                        style={{
-                          width: `${d.value}%`,
-                          backgroundColor: LANG_COLORS[i % LANG_COLORS.length],
-                          opacity: 0.8,
-                        }}
+                  <div key={d.name} className="flex items-center justify-between text-xs py-1 border-b border-border/10">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <span
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: LANG_COLORS[i % LANG_COLORS.length] }}
                       />
+                      <span className="font-bold text-foreground/90 truncate">{d.name}</span>
                     </div>
-                    <div className="text-right shrink-0 w-20 flex items-center justify-end gap-2">
+                    <div className="flex items-center gap-2 text-right shrink-0">
                       <span className="text-[10px] text-muted-foreground/60">{langInfo?.file_count || 0} files</span>
-                      <span className="text-xs font-bold text-foreground/70 tabular-nums">{d.value}%</span>
+                      <span className="font-extrabold text-foreground/80 tabular-nums">{d.value}%</span>
                     </div>
                   </div>
                 );
@@ -610,7 +602,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
           <div className="flex-1 flex overflow-hidden">
 
             {/* Left Sidebar: Input + Scans */}
-            <div className="w-[350px] shrink-0 flex flex-col border-r border-border bg-muted/5 h-full overflow-hidden p-4 space-y-4">
+            <div className="w-[310px] shrink-0 flex flex-col h-full overflow-hidden p-4 space-y-4">
 
               {/* Box 1: REPOSITORY URL Input & Button */}
               <div className="rounded-[1.25rem] border border-border bg-card p-4 flex flex-col gap-4 shadow-sm shrink-0">
