@@ -1,6 +1,6 @@
 # Repository Scanner: Multilingual Sandbox Provisioning Technical Architecture
 
-This document provides a comprehensive technical overview of how the multi-language repository scanning pipeline orchestrates sandbox pod provisioning and executes targeted security analysis tools.
+This document provides a comprehensive technical overview of how the multi-language repository scanning pipeline orchestrates sandbox pod provisioning, handles isolation using Kubernetes custom resources, and executes targeted security analysis tools.
 
 ---
 
@@ -50,16 +50,16 @@ graph TD
 ## 2. Step-by-Step Execution Journey
 
 ### Step 2.1: Repository Ingest & Pre-validation
-1. The user makes an authenticated request to `POST /v1/repo-scan` with the repository URL and optional credentials.
-2. The FastAPI controller parses the GitHub URL (using [github_validator.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/github_validator.py)) and registers a parent job ID in the `job_tracker` (synchronized via Redis for multi-pod environments).
-3. The scan job is delegated to `_run_scan_pipeline` in [scan_repository.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/scan_repository.py).
+1. The user makes an request to `POST /v1/repo-scan` with the repository URL and credentials.
+2. The FastAPI controller parses the GitHub URL (using `github_validator.py`) and registers a parent job ID in the `job_tracker`.
+3. The scan job is delegated to `_run_scan_pipeline` in `scan_repository.py`.
 
 ### Step 2.2: Workspace Creation & Git Clone
-1. **Local Sandbox Provisioning**: The parent worker calls `provision_sandbox()` inside [sandbox_provisioner.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/sandbox_provisioner.py), which creates a temporary directory on the API pod (e.g. `/tmp/reposcanner_abc123`).
+1. **Local Sandbox Provisioning**: The parent worker calls `provision_sandbox()` inside `sandbox_provisioner.py`, which creates a temporary directory on the API pod (e.g. `/tmp/reposcanner_abc123`).
 2. **Shallow Clone**: The repository is cloned into this workspace with `--depth=1` to minimize resource consumption and download speed.
 
 ### Step 2.3: Multilingual Detection Phase
-Before launching any sandboxes, the system runs local tools inside the API pod's workspace via `detect_languages` (in [language_detector.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/language_detector.py)). It evaluates detection tools in the following priority:
+Before launching any sandboxes, the system runs local tools inside the API pod's workspace via `detect_languages` (in `language_detector.py`). It evaluates detection tools in the following priority:
 1. **`github-linguist`**: Runs `linguist <repo_path> --breakdown --json` to get file-level breakdowns.
 2. **`tokei`**: If Linguist is unavailable, runs `tokei <repo_path> --output json`.
 3. **`enry`**: If Tokei is unavailable, runs `enry <repo_path>` and correlates files.
@@ -81,7 +81,7 @@ This outputs a language map mapping canonical language names to their matching a
 Once the languages are mapped, the orchestrator begins the parallel scanning phase. It utilizes `asyncio.gather(*tasks)` to run language scanners concurrently.
 
 ### Step 3.1: Language Dispatching Heuristics
-For each detected language, the system calls `scan_language()` in [file_scanner.py](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/apiServer/fastapi/scan_repository/file_scanner.py).
+For each detected language, the system calls `scan_language()` in `file_scanner.py`.
 
 > [!NOTE]
 > **LoC-Only Languages**: Languages like JSON, Markdown, Text, TOML, XML, and Dockerfiles skip security scanning. The system merely calculates their Lines of Code (LoC) locally without requesting new sandbox resources.
@@ -123,5 +123,205 @@ To prevent container pod leakage and disk clutter:
 
 ---
 
+## 5. OpenSandbox Lifecycle: Deep Dive into `/scan-jobs` Pod Spawning
+
+When the gateway makes a `POST /scan-jobs` request to OpenSandbox server, the backend performs file mapping, directory structuring on a shared PersistentVolumeClaim (PVC), and interfaces directly with the Kubernetes API using a custom resource wrapper called `BatchSandbox`.
+
+```mermaid
+sequenceDiagram
+    participant GW as FastAPI Gateway
+    participant OS as OpenSandbox Server
+    participant PVC as Shared PVC (scan-pvc)
+    participant K8s as Kubernetes API
+    participant Pod as Sandbox Pod
+
+    GW->>OS: POST /scan-jobs (JSON containing files & tools)
+    OS->>OS: Extract Job ID & Parent Job ID
+    OS->>PVC: Create directory "/data/{parent_job_id}/{job_id}/workspace"
+    OS->>PVC: Write submitted code files
+    OS->>OS: Build CreateSandboxRequest
+    OS->>K8s: Create Custom Object "BatchSandbox" (v1alpha1)
+    K8s->>Pod: Reconcile and spawn Pod (Mounts PVC subPath)
+    Pod->>Pod: Run execd-installer init-container
+    Pod->>Pod: Run bootstrap.sh (starts execd & scan orchestrator)
+    Loop Poll for results
+        OS->>PVC: Check if security_scan_report.json exists
+    end
+    Pod->>PVC: Write findings to security_scan_report.json
+    OS->>GW: Return ScanJobResponse with report content
+```
+
+### 5.1 Step-by-Step Backend Lifecycle Code Implementation
+
+#### 1. Ingestion and Shared Directory Initialization
+The endpoint handler `/scan-jobs` receives the payload, structures the directory on the shared PVC, and saves the target language files.
+
+```python
+# Defined in opensandbox-server/docker-build/src/api/lifecycle.py
+@router.post(
+    "/scan-jobs",
+    response_model=ScanJobResponse,
+    status_code=status.HTTP_201_CREATED,
+    tags=["Security Scan Pipeline"],
+)
+async def create_scan_job(
+    request: Request,
+    x_request_id: Optional[str] = Header(None, alias="X-Request-ID"),
+) -> ScanJobResponse:
+    # ...
+    # 1. Parse JSON body payload containing code files
+    body_bytes = await request.body()
+    body_str = body_bytes.decode("utf-8")
+
+    # ... (robust parsing of ScanJobRequest, generating job_id)
+    job_id = metadata.get("job_id", str(uuid4()))
+    parent_job_id = metadata.get("parent_job_id")
+    subpath_prefix = f"{parent_job_id}/{job_id}" if parent_job_id else job_id
+
+    # 2. Establish directories on the shared PVC (/data)
+    data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
+    job_dir = os.path.join(data_root, subpath_prefix, "workspace")
+    reports_dir = os.path.join(data_root, subpath_prefix, "reports")
+
+    os.makedirs(job_dir, exist_ok=True)
+    os.makedirs(reports_dir, exist_ok=True)
+
+    # 3. Write target language source files to the workspace path
+    for filename, content in files_to_save.items():
+        safe_filename = os.path.basename(filename)
+        file_path = os.path.join(job_dir, safe_filename)
+        # Decodes base64 content, otherwise writes plain text
+        try:
+            decoded_content = base64.b64decode(content, validate=True)
+            with open(file_path, "wb") as f:
+                f.write(decoded_content)
+        except Exception:
+            with open(file_path, "w") as f:
+                f.write(content)
+```
+
+#### 2. Building the Sandbox Specification with PVC Isolation
+Once the files are persistent on the shared volume, a detailed `CreateSandboxRequest` is constructed. It isolations the scan context by mounting **specific subpaths** of the shared volume claim (`scan-pvc`) to `/workspace` and `/reports` inside the container:
+
+```python
+    # Constructing sandbox specification
+    sandbox_req = CreateSandboxRequest(
+        image=ImageSpec(uri=sandbox_image),
+        resourceLimits=SchemaResourceLimits(
+            root={
+                "cpu": os.environ.get("SANDBOX_CPU", "200m"),
+                "memory": os.environ.get("SANDBOX_MEMORY", "512Mi"),
+            }
+        ),
+        entrypoint=["/opt/opensandbox/code-interpreter.sh"],
+        timeout=scan_request.timeout if scan_request and scan_request.timeout else 300,
+        env={
+            "SCAN_DIR": "/workspace",
+            "SCAN_REPORT": "/reports/security_scan_report.json",
+            "SCAN_TOOLS": ",".join(scan_request.tools) if scan_request and scan_request.tools else "",
+        },
+        volumes=[
+            Volume(
+                name="workspace",
+                pvc=PVC(claimName="scan-pvc"),
+                mountPath="/workspace",
+                subPath=f"{subpath_prefix}/workspace",  # Mounts ONLY this job's workspace files
+            ),
+            Volume(
+                name="reports",
+                pvc=PVC(claimName="scan-pvc"),
+                mountPath="/reports",
+                subPath=f"{subpath_prefix}/reports",    # Mounts ONLY this job's output directory
+            ),
+        ],
+        metadata=metadata,
+    )
+
+    # Request sandbox provisioning from service layer
+    created_sandbox = sandbox_service.create_sandbox(sandbox_req)
+    sandbox_id = created_sandbox.id
+```
+
+#### 3. Resolving Workload Provider & Constructing the CRD manifest
+Inside `KubernetesSandboxService` (defined in `src/services/k8s/kubernetes_service.py`), the request is received. The class generates a unique sandbox ID, metadata labels, and passes it to the `workload_provider` (`BatchSandboxProvider`):
+
+```python
+# Defined in opensandbox-server/docker-build/src/services/k8s/batchsandbox_provider.py
+def create_workload(
+    self,
+    sandbox_id: str,
+    namespace: str,
+    image_spec: ImageSpec,
+    entrypoint: List[str],
+    env: Dict[str, str],
+    resource_limits: Dict[str, str],
+    labels: Dict[str, str],
+    expires_at: Optional[datetime],
+    execd_image: str,
+    extensions: Optional[Dict[str, str]] = None,
+    network_policy: Optional[NetworkPolicy] = None,
+    egress_image: Optional[str] = None,
+    volumes: Optional[List[Volume]] = None,
+) -> Dict[str, Any]:
+    # ...
+    # 1. Build an init container that installs the daemon agent 'execd' into a shared emptyDir
+    init_container = self._build_execd_init_container(execd_image)
+
+    # 2. Build the main scan container
+    main_container = self._build_main_container(
+        image_spec=image_spec,
+        entrypoint=entrypoint,
+        env=env,
+        resource_limits=resource_limits,
+        has_network_policy=network_policy is not None,
+    )
+
+    # 3. Compile Pod Specification structure
+    pod_spec: Dict[str, Any] = {
+        "initContainers": [self._container_to_dict(init_container)],
+        "containers": [self._container_to_dict(main_container)],
+        "volumes": [{"name": "opensandbox-bin", "emptyDir": {}}],
+    }
+
+    # 4. Bind persistent volumes (applies PVC mounts for this job)
+    if volumes:
+        apply_volumes_to_pod_spec(pod_spec, volumes)
+
+    # 5. Build the Custom Resource (CRD) payload for BatchSandbox
+    runtime_manifest = {
+        "apiVersion": "sandbox.opensandbox.io/v1alpha1",
+        "kind": "BatchSandbox",
+        "metadata": {
+            "name": sandbox_id,
+            "namespace": namespace,
+            "labels": labels,
+        },
+        "spec": {
+            "replicas": 1,
+            "template": {
+                "spec": pod_spec,
+            },
+            "expireTime": expires_at.isoformat() if expires_at else None
+        },
+    }
+
+    # 6. Post custom resource object directly to the Kubernetes API server
+    created = self.k8s_client.create_custom_object(
+        group="sandbox.opensandbox.io",
+        version="v1alpha1",
+        namespace=namespace,
+        plural="batchsandboxes",
+        body=runtime_manifest,
+    )
+    return {"name": created["metadata"]["name"], "uid": created["metadata"]["uid"]}
+```
+
+#### 4. The Daemon Initialization & Execution Wrapper (`execd`)
+To monitor the sandboxes reliably, the container execution flow utilizes `execd` (daemon process) and an init container:
+- **`execd-installer` (Init Container)**: Pre-warmed Kubernetes pods run an init container before the main scanner container. This container copies the `execd` daemon and `bootstrap.sh` launcher to a shared, high-speed `emptyDir` volume mounted at `/opt/opensandbox/bin`.
+- **`bootstrap.sh` (Command Wrapper)**: The main container executes `/opt/opensandbox/bin/bootstrap.sh` rather than the tool entrypoint directly. This script spawns the background `execd` daemon (which handles stdout/stderr streaming, heartbeats, and process lifecycle events) and then uses standard shell `exec` to invoke `/opt/opensandbox/code-interpreter.sh` (or language tool executables).
+
+---
+
 > [!TIP]
-> This split-concurrency model optimizes performance. Instead of running a single long-running pod that carries the overhead of all language runtimes and scanning tools, resources are requested dynamically and run in parallel, returning aggregated results much faster.
+> **SubPath Volume Mount Isolation**: Because each task maps a unique subpath within `scan-pvc` (like `subPath: f"{parent_job_id}/{job_id}/workspace"`), Kubernetes isolates the directory namespaces at the mount level. Each concurrent pod sees its mount folder `/workspace` as if it were a clean dedicated partition, avoiding any file collisions during concurrent scanning processes.
