@@ -33,23 +33,25 @@ export function JobsPanel({
 
   return (
     <div className={cn(
-      "flex flex-col h-full transition-all duration-300",
+      "flex flex-col h-full min-h-0 overflow-hidden transition-all duration-300",
       embedded
         ? "w-full border-t border-border/15 bg-transparent"
         : "w-[320px] shrink-0 border-r border-border/50 bg-muted/10 animate-in slide-in-from-left duration-300"
     )}>
       {/* Header */}
-      <div className={cn("flex flex-col gap-1 shrink-0", embedded ? "p-4 pb-2 border-b border-border/15" : "p-5 border-b border-border/50")}>
-        <h3 className={cn("text-sm font-black uppercase tracking-wider", embedded ? "text-white/80" : "text-foreground")}>
-          {jobType === "repo-scan" ? "Repository Scans" : "Quick Scans"}
-        </h3>
-        <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">
-          Recent Executions ({jobs.length})
-        </p>
-      </div>
+      {!embedded && (
+        <div className="flex flex-col gap-1 shrink-0 p-5 border-b border-border/50">
+          <h3 className="text-sm font-black uppercase tracking-wider text-foreground">
+            {jobType === "repo-scan" ? "Repository Scans" : "Quick Scans"}
+          </h3>
+          <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">
+            Recent Executions ({jobs.length})
+          </p>
+        </div>
+      )}
 
       {/* Scrollable list of jobs */}
-      <ScrollArea className="flex-1">
+      <ScrollArea className="flex-1 min-h-0">
         {jobs.length === 0 ? (
           <div className="p-8 text-center text-xs font-semibold text-muted-foreground/40 flex flex-col items-center justify-center h-[200px]">
             No recent scans
