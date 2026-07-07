@@ -1,5 +1,28 @@
 # Changelog
 
+## [0.6.13](https://github.com/01cloud/01-Sandbox/compare/v0.6.12...v0.6.13) (2026-07-07)
+
+
+### 🐛 Bug Fixes
+
+* ui enhancement ([d0ece9c](https://github.com/01cloud/01-Sandbox/commit/d0ece9c4eb1626e605bca520dae56f2934ef0b38))
+* ui enhancement ([9f91790](https://github.com/01cloud/01-Sandbox/commit/9f917906b9792dd3ec47ad83d78f620fa81aaffc))
+* ui enhancement ([f702b73](https://github.com/01cloud/01-Sandbox/commit/f702b73e92a5c439edc2a46061f8c3864a515ec0))
+* ui enhancement ([78c9ea4](https://github.com/01cloud/01-Sandbox/commit/78c9ea48b7d50f7afa0393b5ec62015466bef2d6))
+* ui enhancement ([1e6325b](https://github.com/01cloud/01-Sandbox/commit/1e6325b47687d3db99b2644bb33d0449ba7ca269))
+* ui enhancement ([f725785](https://github.com/01cloud/01-Sandbox/commit/f725785e08a009fba26debc27738902f1ab01b6d))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.12 [skip ci] ([ef71288](https://github.com/01cloud/01-Sandbox/commit/ef71288c20c64ff3b1a5ff464f56099585439f33))
+* include date (July 6) in updates summary file ([f0ce500](https://github.com/01cloud/01-Sandbox/commit/f0ce500098e4cf780d00ff193052a98bc7d778c6))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.12 [skip ci] ([4dd6065](https://github.com/01cloud/01-Sandbox/commit/4dd6065641c37395f50803d724a82633bf081d17))
+
 ## [0.6.12](https://github.com/01cloud/01-Sandbox/compare/v0.6.11...v0.6.12) (2026-07-06)
 
 
