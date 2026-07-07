@@ -169,7 +169,42 @@ sequenceDiagram
     OS->>GW: Return ScanJobResponse with report content
 ```
 
-### 5.1 Step-by-Step Backend Lifecycle Code Implementation
+### 5.1 Payload Format: How OpenSandbox Server Receives Files
+
+The FastAPI gateway formats the HTTP POST request to `/scan-jobs` as JSON matching the `ScanJobRequest` model. The files are passed as a dictionary under the `files` key, where keys are relative file paths and values are the string content of the files.
+
+**Example HTTP Request Payload:**
+```json
+{
+  "files": {
+    "src/main.py": "import os\nprint('Scanning python code')",
+    "src/utils.py": "def helper():\n    return True"
+  },
+  "metadata": {
+    "job_id": "8b9e67d2-7fb6-4552-bfbc-87c17d23a492",
+    "parent_job_id": "786e76d7-e9a2-4272-9140-2029400e10a1"
+  },
+  "tools": ["bandit", "semgrep"],
+  "timeout": 300
+}
+```
+
+If a file contains binary characters or special symbols, the gateway Base64-encodes the content. The OpenSandbox server parses this JSON payload inside `lifecycle.py` and tries to decode it as Base64, falling back to writing it as plain-text if decoding fails:
+
+```python
+# Decoding logic in OpenSandbox server
+try:
+    decoded_content = base64.b64decode(content, validate=True)
+    with open(file_path, "wb") as f:
+        f.write(decoded_content)
+except Exception:
+    with open(file_path, "w") as f:
+        f.write(content)
+```
+
+---
+
+### 5.2 Step-by-Step Backend Lifecycle Code Implementation
 
 #### 1. Ingestion and Shared Directory Initialization
 The endpoint handler `/scan-jobs` receives the payload, structures the directory on the shared PVC, and saves the target language files.
@@ -341,5 +376,54 @@ To monitor the sandboxes reliably, the container execution flow utilizes `execd`
 
 ---
 
-> [!TIP]
-> **SubPath Volume Mount Isolation**: Because each task maps a unique subpath within `scan-pvc` (like `subPath: f"{parent_job_id}/{job_id}/workspace"`), Kubernetes isolates the directory namespaces at the mount level. Each concurrent pod sees its mount folder `/workspace` as if it were a clean dedicated partition, avoiding any file collisions during concurrent scanning processes.
+### 5.3 Kubernetes `subPath` Isolation Mechanics
+
+To run scans for multiple programming languages concurrently without file conflicts or cross-language data contamination, the OpenSandbox server relies on Kubernetes **`subPath` volume mounts** referencing a single PersistentVolumeClaim (`scan-pvc`).
+
+#### 1. Volume Helper Translation (`volume_helper.py`)
+When the `BatchSandboxProvider` builds the container spec, it delegates volume configuration to `apply_volumes_to_pod_spec`. This function maps the request's volume definitions into Kubernetes `volumeMounts`:
+
+```python
+# Defined in src/services/k8s/volume_helper.py
+mount = {
+    "name": pvc_to_volume_name[pvc_claim_name],
+    "mountPath": vol.mount_path,
+    "readOnly": vol.read_only,
+}
+if vol.sub_path:
+    mount["subPath"] = vol.sub_path
+mounts.append(mount)
+```
+
+#### 2. Generated Kubernetes Pod Specification
+This translates into a Kubernetes pod spec containing `subPath` mappings for both `/workspace` and `/reports`:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sandbox-python-job
+spec:
+  volumes:
+  - name: job-volume
+    persistentVolumeClaim:
+      claimName: scan-pvc
+  containers:
+  - name: sandbox
+    image: scanner-orchestrator-image
+    volumeMounts:
+    - name: job-volume
+      mountPath: /workspace                         # Target directory inside container
+      subPath: parent-job-id/child-job-id/workspace  # Isolated directory on the PVC
+    - name: job-volume
+      mountPath: /reports                           # Output directory inside container
+      subPath: parent-job-id/child-job-id/reports    # Isolated output path on the PVC
+```
+
+#### 3. How Kubernetes Enforces the Isolation
+When the kubelet receives this Pod spec:
+1. **PVC Mount**: It mounts the shared storage volume (the PVC `scan-pvc`) to a global mount path on the host node (e.g. `/var/lib/kubelet/pods/<pod-uid>/volumes/kubernetes.io~pvc/job-volume`).
+2. **SubPath Resolution**: It resolves the subpath directory path on the host node, appending the `subPath` value (e.g., `/var/lib/kubelet/pods/<pod-uid>/volumes/kubernetes.io~pvc/job-volume/parent-job-id/child-job-id/workspace`).
+3. **Container Bind Mount**: During container runtime creation, it performs a **Linux bind mount** targeting *only* that resolved subpath directory to `/workspace` inside the container's mount namespace.
+
+As a result, the tool processes running inside the container see a standard directory tree at `/workspace`, but have absolutely no visibility into the parent directories or other child job workspaces sharing the same PVC. This achieves secure, lightweight directory isolation without the overhead of creating distinct Persistent Volumes for every single language scan job.
