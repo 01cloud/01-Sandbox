@@ -21,10 +21,10 @@ interface RepoScannerWidgetProps {
 
 const REPO_SCAN_STEPS = [
   { key: "QUEUED", label: "Job Queued" },
-  { key: "PROVISIONING", label: "Provisioning sandbox environment..." },
-  { key: "CLONING", label: "Cloning repository..." },
-  { key: "DETECTING", label: "Detecting languages..." },
-  { key: "SCANNING", label: "Running security scan..." },
+  { key: "PROVISIONING", label: "Provisioning sandbox environment" },
+  { key: "CLONING", label: "Cloning repository" },
+  { key: "DETECTING", label: "Detecting languages" },
+  { key: "SCANNING", label: "Running security scan" },
   { key: "DONE", label: "Scan complete" },
 ];
 
@@ -569,7 +569,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken }: RepoS
 
       {/* Full Scanner Dialog */}
       <Dialog open={isOpen} onOpenChange={(o) => { if (!o) { setSelectedJobId(null); setRequiresAuth(false); setGitToken(""); setSshKey(""); } setIsOpen(o); }}>
-        <DialogContent className="max-w-[100vw] w-screen h-screen m-0 p-0 overflow-hidden border-none bg-background flex flex-col rounded-none">
+        <DialogContent className="max-w-[1240px] w-[95vw] h-[90vh] rounded-3xl border border-border bg-background flex flex-col overflow-hidden p-0 shadow-2xl">
 
           {/* ── Header ── */}
           <DialogHeader className="px-8 py-4 border-b border-border bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">

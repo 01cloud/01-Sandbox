@@ -127,10 +127,13 @@ export function useJobStore(
           // job is selected and volatileResults[jobId] is absent.
         }
 
+        const storedProgress = typeof stored.progress === "number" && !isNaN(stored.progress) ? stored.progress : 0;
+        const newProgress = typeof ev.progress === "number" && !isNaN(ev.progress) ? ev.progress : 0;
+
         const updatedJob: GenericJob = {
           ...stored,
           status: ev.step,
-          progress: Math.max(stored.progress || 0, ev.progress),
+          progress: Math.max(storedProgress, newProgress),
           stepMessage: ev.message,
           eventIndex: since + 1,
           summary: ev.step === "DONE" && ev.detail
@@ -263,10 +266,13 @@ export function useJobStore(
               existing.stepMessage !== sj.stepMessage ||
               JSON.stringify(existing.detail) !== JSON.stringify(sj.detail)
             ) {
+              const existingProgress = typeof existing.progress === "number" && !isNaN(existing.progress) ? existing.progress : 0;
+              const newProgress = typeof sj.progress === "number" && !isNaN(sj.progress) ? sj.progress : 0;
+
               const updatedJob: GenericJob = {
                 ...existing,
                 status: sj.status,
-                progress: Math.max(existing.progress || 0, sj.progress),
+                progress: Math.max(existingProgress, newProgress),
                 stepMessage: sj.stepMessage,
                 eventIndex: sj.eventIndex ?? existing.eventIndex,
                 summary: sj.summary ?? existing.summary,
