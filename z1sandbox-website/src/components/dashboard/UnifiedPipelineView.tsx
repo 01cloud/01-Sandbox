@@ -103,21 +103,26 @@ export function UnifiedPipelineView({
     }
   }, [liveLogs.length]);
 
+  // When the scan is completed, hide the pipeline timeline/progress entirely
+  // and directly render the final security report inside the same screen.
+  if (job.status === "DONE" && result) {
+    return (
+      <div className="animate-in fade-in duration-500">
+        {onResultRender(result)}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6 animate-in fade-in duration-300">
-      {/* ── Pipeline Step Timeline ── */}
-      <div className="rounded-2xl border border-border/30 bg-card/60 backdrop-blur-sm overflow-hidden">
+      {/* ── Single Frame containing both Pipeline Timeline and Overall Progress ── */}
+      <div className="rounded-2xl border border-border/30 bg-card/60 backdrop-blur-sm overflow-hidden flex flex-col">
         {/* Section header */}
         <div className="flex items-center justify-between px-6 pt-5 pb-3">
           <label className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
             Scan Pipeline Execution
           </label>
           <div className="flex items-center gap-2">
-            {job.status === "DONE" && (
-              <span className="text-[9px] font-bold text-emerald-500 bg-emerald-500/10 border border-emerald-500/20 rounded-full px-2.5 py-0.5 uppercase tracking-wider">
-                Completed
-              </span>
-            )}
             {job.status === "ERROR" && (
               <span className="text-[9px] font-bold text-destructive bg-destructive/10 border border-destructive/20 rounded-full px-2.5 py-0.5 uppercase tracking-wider">
                 Failed
@@ -129,8 +134,8 @@ export function UnifiedPipelineView({
         {/* Timeline */}
         <div className="px-6 pb-5">
           <div className="relative">
-            {/* Vertical connector line */}
-            <div className="absolute left-[13px] top-4 bottom-4 w-px bg-border" />
+            {/* Centered vertical connector line matching Image 2 */}
+            <div className="absolute left-[25px] top-4 bottom-4 w-px bg-border" />
 
             <div className="flex flex-col gap-1">
               {steps.map((step, idx) => {
@@ -141,7 +146,6 @@ export function UnifiedPipelineView({
                 const isPending = !isDone && !isActive && !isActiveRetry && !isFailedStep;
 
                 // Determine if we should show the live terminal log under this step
-                // (Show terminal for SCANNING or when the scan is completed/failed)
                 const showTerminal =
                   (step.key === "SCANNING") &&
                   ((isActive) || (currentIdx > idx) || (currentStep === "DONE") || (currentStep === "ERROR"));
@@ -251,59 +255,63 @@ export function UnifiedPipelineView({
             </div>
           </div>
         </div>
-      </div>
 
-      {/* ── Overall Progress ── */}
-      <div className="rounded-2xl border border-border/30 bg-card/60 backdrop-blur-sm p-5">
-        <div className="flex justify-between items-center mb-3">
-          <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
-            Overall Progress
-          </span>
-          <span
-            className={cn(
-              "text-2xl font-black tabular-nums",
-              job.status === "DONE" && "text-emerald-500",
-              job.status === "ERROR" && "text-destructive",
-              job.status === "CANCELLED" && "text-orange-500",
-              job.status === "RETRYING" && "text-amber-500",
-              !["DONE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "text-foreground"
-            )}
-          >
-            {job.progress}%
-          </span>
-        </div>
-
-        {/* Simplified color-coded progress bar */}
-        <div className="relative h-2.5 rounded-full overflow-hidden bg-muted/40 border border-border/20">
-          <div
-            className={cn(
-              "absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out",
-              job.status === "DONE" && "bg-emerald-500",
-              job.status === "ERROR" && "bg-destructive",
-              job.status === "CANCELLED" && "bg-orange-500",
-              job.status === "RETRYING" && "bg-amber-500",
-              !["DONE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "bg-violet-600"
-            )}
-            style={{ width: `${Math.min(job.progress, 100)}%` }}
-          />
-        </div>
-
-        {/* Action buttons */}
-        <div className="flex justify-end mt-3 gap-2">
-          {!["DONE", "ERROR", "CANCELLED"].includes(job.status) && onCancel && (
-            <button
-              onClick={() => onCancel(job.job_id)}
-              className="px-4 py-1.5 bg-destructive/10 hover:bg-destructive/20 text-destructive border border-destructive/20 rounded-lg font-bold text-[10px] uppercase tracking-wider transition-all active:scale-[0.97]"
+        {/* Separator line & Overall Progress section in the same card (matching Image 2) */}
+        <div className="border-t border-border/30 px-6 py-4 flex flex-col gap-3 bg-muted/10 shrink-0">
+          <div className="flex justify-between items-center">
+            <div className="flex flex-col gap-0.5">
+              <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
+                Overall Progress
+              </span>
+              <span className="text-[9px] font-bold text-muted-foreground/45 uppercase tracking-wider">
+                Node: secure-01-prod · Isolation active
+              </span>
+            </div>
+            <span
+              className={cn(
+                "text-base font-black tabular-nums",
+                job.status === "ERROR" && "text-destructive",
+                job.status === "CANCELLED" && "text-orange-500",
+                job.status === "RETRYING" && "text-amber-500",
+                !["DONE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "text-foreground"
+              )}
             >
-              Cancel Scan
-            </button>
-          )}
+              {job.progress}%
+            </span>
+          </div>
+
+          <div className="flex items-center justify-between gap-4">
+            {/* Extremely thin progress bar (h-1) matching Image 2 */}
+            <div className="flex-1 relative h-1 rounded-full overflow-hidden bg-muted/40 border border-border/10">
+              <div
+                className={cn(
+                  "absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out",
+                  job.status === "DONE" && "bg-emerald-500",
+                  job.status === "ERROR" && "bg-destructive",
+                  job.status === "CANCELLED" && "bg-orange-500",
+                  job.status === "RETRYING" && "bg-amber-500",
+                  !["DONE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "bg-violet-600"
+                )}
+                style={{ width: `${Math.min(job.progress, 100)}%` }}
+              />
+            </div>
+
+            {/* Cancel Scan action button inside the frame */}
+            {!["DONE", "ERROR", "CANCELLED"].includes(job.status) && onCancel && (
+              <button
+                onClick={() => onCancel(job.job_id)}
+                className="px-3.5 py-1 bg-destructive/15 hover:bg-destructive/25 text-destructive border border-destructive/20 rounded-md font-bold text-[9px] uppercase tracking-wider transition-all active:scale-[0.97] shrink-0"
+              >
+                Cancel Scan
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* ── Status Banners ── */}
       {job.status === "RETRYING" && (
-        <div className="p-5 rounded-2xl flex items-center gap-4 border border-amber-500/20 bg-amber-500/5 text-amber-500 animate-in fade-in duration-300">
+        <div className="p-5 rounded-2xl flex items-center gap-4 border border-amber-500/20 bg-amber-500/5 text-amber-400 animate-in fade-in duration-300">
           <div className="w-10 h-10 rounded-xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center shrink-0">
             <RotateCw className="w-5 h-5 animate-spin" />
           </div>
@@ -315,7 +323,7 @@ export function UnifiedPipelineView({
       )}
 
       {job.status === "CANCELLED" && (
-        <div className="p-5 rounded-2xl flex items-center gap-4 border border-orange-500/20 bg-orange-500/5 text-orange-500 animate-in fade-in duration-300">
+        <div className="p-5 rounded-2xl flex items-center gap-4 border border-orange-500/20 bg-orange-500/5 text-orange-400 animate-in fade-in duration-300">
           <div className="w-10 h-10 rounded-xl bg-orange-500/10 border border-orange-500/20 flex items-center justify-center shrink-0">
             <XCircle className="w-5 h-5" />
           </div>
@@ -323,13 +331,6 @@ export function UnifiedPipelineView({
             <h4 className="text-xs font-black uppercase tracking-tight">Scan Cancelled</h4>
             <p className="text-[10px] opacity-70 mt-0.5">This job was cancelled by the user and sandbox resources were reclaimed.</p>
           </div>
-        </div>
-      )}
-
-      {/* ── Render detailed report on-demand ── */}
-      {job.status === "DONE" && result && (
-        <div className="pt-2 animate-in fade-in zoom-in-95 duration-500">
-          {onResultRender(result)}
         </div>
       )}
     </div>
