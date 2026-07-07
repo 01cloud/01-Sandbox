@@ -35,18 +35,20 @@ export function JobsPanel({
     <div className={cn(
       "flex flex-col h-full transition-all duration-300",
       embedded
-        ? "w-full border-t border-border/40 bg-transparent"
+        ? "w-full bg-transparent"
         : "w-[320px] shrink-0 border-r border-border bg-muted/5 animate-in slide-in-from-left duration-300"
     )}>
       {/* Header */}
-      <div className={cn("flex flex-col gap-1 shrink-0", embedded ? "p-4 pb-2 border-b border-border/30" : "p-5 border-b border-border")}>
-        <h3 className={cn("text-sm font-black uppercase tracking-wider text-foreground")}>
-          {jobType === "repo-scan" ? "Repository Scans" : "Quick Scans"}
-        </h3>
-        <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">
-          Recent Executions ({jobs.length})
-        </p>
-      </div>
+      {!embedded && (
+        <div className="flex flex-col gap-1 shrink-0 p-5 border-b border-border">
+          <h3 className="text-sm font-black uppercase tracking-wider text-foreground">
+            {jobType === "repo-scan" ? "Repository Scans" : "Quick Scans"}
+          </h3>
+          <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">
+            Recent Executions ({jobs.length})
+          </p>
+        </div>
+      )}
 
       {/* Scrollable list of jobs */}
       <ScrollArea className="flex-1">
@@ -55,7 +57,7 @@ export function JobsPanel({
             No recent scans
           </div>
         ) : (
-          <div className="p-3.5 space-y-2">
+          <div className={cn(embedded ? "space-y-3.5" : "p-3.5 space-y-2")}>
             {jobs.map((job) => {
               const isSelected = job.job_id === selectedJobId;
               const isActive = !["DONE", "ERROR"].includes(job.status);
