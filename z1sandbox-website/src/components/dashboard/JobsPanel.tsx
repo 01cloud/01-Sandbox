@@ -57,7 +57,7 @@ export function JobsPanel({
             No recent scans
           </div>
         ) : (
-          <div className={cn(embedded ? "space-y-3.5" : "p-3.5 space-y-2")}>
+          <div className={cn("px-4 py-3", embedded ? "space-y-3.5" : "space-y-2")}>
             {jobs.map((job) => {
               const isSelected = job.job_id === selectedJobId;
               const isActive = !["DONE", "ERROR"].includes(job.status);
