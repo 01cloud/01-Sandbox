@@ -14,6 +14,9 @@ import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Cell
 } from "recharts";
+import ThemeToggle from "@/components/ThemeToggle";
+import UserSettingsDialog from "@/components/UserSettingsDialog";
+import { Settings } from "lucide-react";
 
 interface ScanEvent {
   job_id: string;
@@ -83,6 +86,7 @@ function getApiKey(): string | null {
 }
 
 function getApiBaseUrl(): string {
+  if (import.meta.env.DEV) return "";
   const explicit = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL;
   if (explicit) return explicit;
   try {
@@ -121,6 +125,7 @@ export default function RepoScanner() {
   const [gitToken, setGitToken] = useState("");
   const [sshKey, setSshKey] = useState("");
   const [isValidating, setIsValidating] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const esRef = useRef<EventSource | null>(null);
 
@@ -419,13 +424,25 @@ export default function RepoScanner() {
   return (
     <div className="min-h-screen pt-28 pb-20 px-6 sm:px-10 max-w-7xl mx-auto">
       <header className="mb-10">
-        <button
-          onClick={() => navigate("/dashboard")}
-          className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6 group"
-        >
-          <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
-          Back to Dashboard
-        </button>
+        <div className="flex items-center justify-between mb-6">
+          <button
+            onClick={() => navigate("/dashboard")}
+            className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors group"
+          >
+            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-0.5 transition-transform" />
+            Back to Dashboard
+          </button>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setIsSettingsOpen(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/50 bg-background/50 hover:bg-muted/65 text-xs font-bold text-muted-foreground hover:text-foreground transition-all group"
+            >
+              <Settings className="w-3.5 h-3.5 group-hover:rotate-45 transition-transform duration-300" />
+              Settings
+            </button>
+            <ThemeToggle />
+          </div>
+        </div>
 
         <div className="flex items-start gap-4">
           <div className="p-3 rounded-2xl bg-violet-500/10 border border-violet-500/20 text-violet-500 shrink-0 mt-1">
@@ -479,13 +496,13 @@ export default function RepoScanner() {
             </div>
 
             {requiresAuth && (
-              <div className="rounded-2xl border border-violet-500/20 bg-violet-500/5 p-5 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
+              <div className="border-t border-violet-500/20 pt-5 flex flex-col gap-4 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-1.5 text-violet-500 font-bold text-xs uppercase tracking-wider">
                     <Shield className="w-4 h-4" />
                     Private Repo Detected
                   </div>
-                  <div className="flex bg-muted/40 rounded-lg p-0.5 border border-border/50">
+                  <div className="flex bg-muted/30 rounded-lg p-0.5">
                     <button
                       type="button"
                       onClick={() => setAuthMethod("token")}
@@ -670,7 +687,7 @@ export default function RepoScanner() {
 
           {result && result.status === "DONE" && (
             <div className="space-y-7">
-              <div className="rounded-[2rem] border border-emerald-500/20 bg-emerald-500/5 p-7 flex flex-wrap items-center gap-6">
+              <div className="p-1 flex flex-wrap items-center gap-6">
                 <CheckCircle2 className="w-7 h-7 text-emerald-500" />
                 <div className="flex-1 min-w-0">
                   <h2 className="text-2xl font-black tracking-tight">{result.owner}/{result.repo}</h2>
@@ -690,8 +707,8 @@ export default function RepoScanner() {
               </div>
 
               {chartData.length > 0 && (
-                <div className="rounded-[2rem] border border-border/50 bg-background/50 p-8">
-                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-6">Language Distribution</h3>
+                <div className="p-1 space-y-4">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-2">Language Distribution</h3>
                   <div className="h-[220px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <BarChart data={chartData} layout="vertical" margin={{ left: 90, right: 40 }}>
@@ -707,149 +724,162 @@ export default function RepoScanner() {
                 </div>
               )}
 
-              <div className="space-y-3">
-                {langEntries.map(([lang, info], i) => {
-                  const sevCounts = info.findings.reduce(
-                    (acc: any, f: any) => {
-                      const sev = (f.severity || "INFO").toUpperCase();
-                      if (sev === "CRITICAL") {
-                        acc.critical = (acc.critical || 0) + 1;
-                      } else if (sev === "HIGH") {
-                        acc.high = (acc.high || 0) + 1;
-                      } else if (sev === "MEDIUM") {
-                        acc.medium = (acc.medium || 0) + 1;
-                      } else if (sev === "LOW") {
-                        acc.low = (acc.low || 0) + 1;
-                      } else if (sev === "INFO") {
-                        acc.info = (acc.info || 0) + 1;
-                      }
-                      return acc;
-                    },
-                    { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
-                  );
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
+                    Per-Language Details
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground/60 font-bold">
+                    {langEntries.length} languages analyzed
+                  </span>
+                </div>
+                <div className="flex flex-col divide-y divide-border/10">
+                  {langEntries.map(([lang, info], i) => {
+                    const sevCounts = info.findings.reduce(
+                      (acc: any, f: any) => {
+                        const sev = (f.severity || "INFO").toUpperCase();
+                        if (sev === "CRITICAL") {
+                          acc.critical = (acc.critical || 0) + 1;
+                        } else if (sev === "HIGH") {
+                          acc.high = (acc.high || 0) + 1;
+                        } else if (sev === "MEDIUM") {
+                          acc.medium = (acc.medium || 0) + 1;
+                        } else if (sev === "LOW") {
+                          acc.low = (acc.low || 0) + 1;
+                        } else if (sev === "INFO") {
+                          acc.info = (acc.info || 0) + 1;
+                        }
+                        return acc;
+                      },
+                      { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
+                    );
 
-                  return (
-                    <div key={lang} className="rounded-2xl border border-border/50 bg-background/40 overflow-hidden">
-                      <button
-                        className="w-full p-5 flex items-center gap-4 text-left hover:bg-muted/10 transition-colors"
-                        onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
-                      >
-                        <span className="w-3 h-3 rounded-full" style={{ background: LANG_COLORS[i % LANG_COLORS.length] }} />
-                        <span className="font-black text-base flex-1">{lang}</span>
-                        <div className="flex items-center gap-6 text-right mr-2">
-                          <div>
-                            <p className="text-[10px] text-muted-foreground">Files</p>
-                            <p className="font-black text-sm">{info.file_count}</p>
+                    return (
+                      <div key={lang} className="py-1 transition-all">
+                        <button
+                          className="w-full py-4 flex items-center justify-between text-left hover:bg-muted/10 px-2 rounded-xl transition-all group"
+                          onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
+                        >
+                          <div className="flex items-center gap-3">
+                            <span className="w-2.5 h-2.5 rounded-sm" style={{ background: LANG_COLORS[i % LANG_COLORS.length] }} />
+                            <span className="font-black text-base text-foreground">{lang}</span>
                           </div>
-                          <div>
-                            <p className="text-[10px] text-muted-foreground mb-0.5">Severity</p>
-                            <div className="flex gap-1 items-center">
-                              {sevCounts.critical > 0 && (
-                                <Badge className="h-4 px-1 text-[8px] bg-red-600/25 hover:bg-red-600/25 text-red-500 border border-red-500/35 font-extrabold rounded-md">
-                                  C:{sevCounts.critical}
-                                </Badge>
-                              )}
-                              {sevCounts.high > 0 && (
-                                <Badge className="h-4 px-1 text-[8px] bg-orange-500/20 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 font-extrabold rounded-md">
-                                  H:{sevCounts.high}
-                                </Badge>
-                              )}
-                              {sevCounts.medium > 0 && (
-                                <Badge className="h-4 px-1 text-[8px] bg-yellow-500/20 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 font-extrabold rounded-md">
-                                  M:{sevCounts.medium}
-                                </Badge>
-                              )}
-                              {sevCounts.low > 0 && (
-                                <Badge className="h-4 px-1 text-[8px] bg-blue-500/20 hover:bg-blue-500/20 text-blue-500 border border-blue-500/30 font-extrabold rounded-md">
-                                  L:{sevCounts.low}
-                                </Badge>
-                              )}
-                              {sevCounts.info > 0 && (
-                                <Badge className="h-4 px-1 text-[8px] bg-slate-500/20 hover:bg-slate-500/20 text-slate-400 border border-slate-500/30 font-extrabold rounded-md">
-                                  I:{sevCounts.info}
-                                </Badge>
-                              )}
-                              {sevCounts.critical === 0 && sevCounts.high === 0 && sevCounts.medium === 0 && sevCounts.low === 0 && sevCounts.info === 0 && (
-                                <span className="text-[10px] font-black text-emerald-500 uppercase tracking-wider">
-                                  Secure
-                                </span>
-                              )}
+                          <div className="flex items-center gap-6 text-right mr-2">
+                            <div>
+                              <p className="text-[10px] text-muted-foreground">Files</p>
+                              <p className="font-black text-sm">{info.file_count}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-muted-foreground mb-0.5">Severity</p>
+                              <div className="flex gap-1 items-center">
+                                {sevCounts.critical > 0 && (
+                                  <Badge className="h-4 px-1 text-[8px] bg-red-600/25 hover:bg-red-600/25 text-red-500 border border-red-500/35 font-extrabold rounded-md">
+                                    C:{sevCounts.critical}
+                                  </Badge>
+                                )}
+                                {sevCounts.high > 0 && (
+                                  <Badge className="h-4 px-1 text-[8px] bg-orange-500/20 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 font-extrabold rounded-md">
+                                    H:{sevCounts.high}
+                                  </Badge>
+                                )}
+                                {sevCounts.medium > 0 && (
+                                  <Badge className="h-4 px-1 text-[8px] bg-yellow-500/20 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 font-extrabold rounded-md">
+                                    M:{sevCounts.medium}
+                                  </Badge>
+                                )}
+                                {sevCounts.low > 0 && (
+                                  <Badge className="h-4 px-1 text-[8px] bg-blue-500/20 hover:bg-blue-500/20 text-blue-500 border border-blue-500/30 font-extrabold rounded-md">
+                                    L:{sevCounts.low}
+                                  </Badge>
+                                )}
+                                {sevCounts.info > 0 && (
+                                  <Badge className="h-4 px-1 text-[8px] bg-slate-500/20 hover:bg-slate-500/20 text-slate-400 border border-slate-500/30 font-extrabold rounded-md">
+                                    I:{sevCounts.info}
+                                  </Badge>
+                                )}
+                                {sevCounts.critical === 0 && sevCounts.high === 0 && sevCounts.medium === 0 && sevCounts.low === 0 && sevCounts.info === 0 && (
+                                  <span className="text-[10px] font-black text-emerald-500 uppercase tracking-wider">
+                                    Secure
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                            <div>
+                              <p className="text-[10px] text-muted-foreground">Share</p>
+                              <p className="font-black text-sm">{info.percentage.toFixed(1)}%</p>
                             </div>
                           </div>
-                          <div>
-                            <p className="text-[10px] text-muted-foreground">Share</p>
-                            <p className="font-black text-sm">{info.percentage.toFixed(1)}%</p>
-                          </div>
-                        </div>
-                        {info.findings.length > 0 && (
-                          <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-500 border-orange-500/20 py-0">
-                            {info.findings.length} issues
-                          </Badge>
-                        )}
-                      </button>
+                          {info.findings.length > 0 && (
+                            <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-500 border-orange-500/20 py-0 h-5">
+                              {info.findings.length} issues
+                            </Badge>
+                          )}
+                        </button>
 
-                      {expandedLang === lang && (
-                        <div className="border-t border-border/50">
-                          {info.findings.length === 0 ? (
-                            <div className="p-5 flex items-center gap-2 text-muted-foreground/60">
-                              <Shield className="w-4 h-4" />
-                              <span className="text-xs font-semibold">No security findings for this language</span>
-                            </div>
-                          ) : (
-                            <div
-                              className="overflow-y-auto p-5 space-y-3"
-                              style={{ maxHeight: "520px" }}
-                            >
-                              {info.findings.map((f, fi) => {
-                                const sev = f.severity?.toUpperCase() ?? "INFO";
-                                const sevColor =
-                                  sev === "CRITICAL" ? "border-red-500/60 bg-red-500/5" :
-                                    sev === "HIGH" ? "border-orange-500/60 bg-orange-500/5" :
-                                      sev === "MEDIUM" ? "border-yellow-500/60 bg-yellow-500/5" :
-                                        sev === "LOW" ? "border-blue-500/60 bg-blue-500/5" :
-                                          "border-border/50 bg-muted/10";
-                                const badgeColor =
-                                  sev === "CRITICAL" ? "bg-red-500/15 text-red-500 border-red-500/30" :
-                                    sev === "HIGH" ? "bg-orange-500/15 text-orange-500 border-orange-500/30" :
-                                      sev === "MEDIUM" ? "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" :
-                                        sev === "LOW" ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
-                                          "bg-muted text-muted-foreground border-border";
-                                return (
-                                  <div key={fi} className={cn("p-4 rounded-xl border", sevColor)}>
-                                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                                      <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide", badgeColor)}>
-                                        {sev}
-                                      </Badge>
-                                      <span className="text-[10px] font-bold text-muted-foreground">{f.tool}</span>
-                                      {f.line && (
-                                        <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">L:{f.line}</span>
+                        {expandedLang === lang && (
+                          <div className="mt-2 mb-4 pl-6 pr-2 space-y-3">
+                            {info.findings.length === 0 ? (
+                              <div className="py-4 text-xs font-semibold text-muted-foreground/45 flex items-center gap-2">
+                                <Shield className="w-4 h-4" />
+                                <span>No security findings for this language</span>
+                              </div>
+                            ) : (
+                              <div
+                                className="overflow-y-auto space-y-2.5 pr-1"
+                                style={{ maxHeight: "520px" }}
+                              >
+                                {info.findings.map((f, fi) => {
+                                  const sev = f.severity?.toUpperCase() ?? "INFO";
+                                  const borderLeftColor =
+                                    sev === "CRITICAL" ? "border-l-red-500 bg-red-500/[0.03]" :
+                                      sev === "HIGH" ? "border-l-orange-500 bg-orange-500/[0.03]" :
+                                        sev === "MEDIUM" ? "border-l-yellow-500 bg-yellow-500/[0.03]" :
+                                          sev === "LOW" ? "border-l-blue-500 bg-blue-500/[0.03]" :
+                                            "border-l-muted-foreground/30 bg-muted/[0.02]";
+                                  const badgeColor =
+                                    sev === "CRITICAL" ? "bg-red-500/15 text-red-500 border-red-500/30" :
+                                      sev === "HIGH" ? "bg-orange-500/15 text-orange-500 border-orange-500/30" :
+                                        sev === "MEDIUM" ? "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" :
+                                          sev === "LOW" ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
+                                            "bg-muted text-muted-foreground border-border";
+                                  return (
+                                    <div key={fi} className={cn("p-3 pl-4 border-l-2 border-y-0 border-r-0 rounded-r-xl text-[11px] transition-all flex flex-col gap-1.5", borderLeftColor)}>
+                                      <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                                        <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide", badgeColor)}>
+                                          {sev}
+                                        </Badge>
+                                        <span className="text-[10px] font-bold text-muted-foreground">{f.tool}</span>
+                                        {f.line && (
+                                          <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">L:{f.line}</span>
+                                        )}
+                                      </div>
+                                      <p className="text-sm font-semibold leading-snug">{f.issue}</p>
+                                      {f.file && (
+                                        <div className="flex items-center gap-1.5 mt-2">
+                                          <FileCode className="w-3 h-3 text-muted-foreground/40 shrink-0" />
+                                          <p className="text-[10px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
+                                        </div>
+                                      )}
+                                      {f.remediation && (
+                                        <p className="text-[10px] text-muted-foreground/60 mt-1.5 leading-relaxed">{f.remediation}</p>
                                       )}
                                     </div>
-                                    <p className="text-sm font-semibold leading-snug">{f.issue}</p>
-                                    {f.file && (
-                                      <div className="flex items-center gap-1.5 mt-2">
-                                        <FileCode className="w-3 h-3 text-muted-foreground/40 shrink-0" />
-                                        <p className="text-[10px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
-                                      </div>
-                                    )}
-                                    {f.remediation && (
-                                      <p className="text-[10px] text-muted-foreground/60 mt-1.5 leading-relaxed">{f.remediation}</p>
-                                    )}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
             </div>
           )}
         </div>
       </div>
+      <UserSettingsDialog isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </div>
   );
 }

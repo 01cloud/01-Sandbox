@@ -50,7 +50,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 
-const API_BASE_URL = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "";
+const API_BASE_URL = import.meta.env.DEV ? "" : ((window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "");
 
 interface UserSettingsDialogProps {
   isOpen: boolean;
@@ -142,6 +142,7 @@ export default function UserSettingsDialog({ isOpen, onClose }: UserSettingsDial
         console.warn("Auth0 not authenticated, using local mock key creation:", err);
       }
 
+      let ttl_hours: number = -1;
       let ttl_seconds: number | null = null;
       if (form.ttl !== "never") {
         const val = parseInt(form.ttlValue);
@@ -158,6 +159,7 @@ export default function UserSettingsDialog({ isOpen, onClose }: UserSettingsDial
           years: 31536000,
         };
         ttl_seconds = val * multipliers[form.ttl];
+        ttl_hours = ttl_seconds / 3600;
       }
 
       if (!token) {
@@ -197,7 +199,7 @@ export default function UserSettingsDialog({ isOpen, onClose }: UserSettingsDial
         body: JSON.stringify({
           name: sanitizedName,
           backend: form.backend,
-          ttl_seconds,
+          ttl_hours,
         }),
       });
 
@@ -298,7 +300,7 @@ export default function UserSettingsDialog({ isOpen, onClose }: UserSettingsDial
               )}
             >
               <Key className="w-4 h-4" />
-              API Key Management
+              API Keys
             </button>
             <button
               onClick={() => setActiveTab("profile")}
@@ -310,7 +312,7 @@ export default function UserSettingsDialog({ isOpen, onClose }: UserSettingsDial
               )}
             >
               <User className="w-4 h-4" />
-              Profile Settings
+              Profile
             </button>
           </div>
 
@@ -494,16 +496,24 @@ export default function UserSettingsDialog({ isOpen, onClose }: UserSettingsDial
                                   <span className="flex items-center gap-1">
                                     <Calendar className="w-3 h-3" />
                                     {(() => {
+                                      if (key.expires_at === "Never") return "Never";
                                       const exp = new Date(key.expires_at);
+                                      if (isNaN(exp.getTime())) return "Never";
                                       const now = new Date();
                                       const diffMs = exp.getTime() - now.getTime();
                                       if (diffMs <= 0) return "Expired";
                                       const diffYears = exp.getFullYear() - now.getFullYear();
                                       if (diffYears > 50) return "Never";
-                                      const diffDays = Math.ceil(diffMs / 86400000);
-                                      if (diffDays >= 365) return `${Math.floor(diffDays / 365)}y`;
-                                      if (diffDays >= 30) return `${Math.floor(diffDays / 30)}mo`;
-                                      return `${diffDays}d`;
+                                      const seconds = Math.floor(diffMs / 1000);
+                                      const minutes = Math.floor(seconds / 60);
+                                      const hours = Math.floor(minutes / 60);
+                                      const days = Math.floor(hours / 24);
+                                      if (days >= 365) return `${Math.floor(days / 365)}y`;
+                                      if (days >= 30) return `${Math.floor(days / 30)}mo`;
+                                      if (days >= 1) return `${days}d`;
+                                      if (hours >= 1) return `${hours}h`;
+                                      if (minutes >= 1) return `${minutes}m`;
+                                      return `${seconds}s`;
                                     })()}
                                   </span>
                                 </div>

@@ -112,12 +112,14 @@ const Navbar = () => {
                         </div>
                       </DropdownMenuLabel>
                       <DropdownMenuSeparator className="bg-border/50 mx-2" />
-                      <DropdownMenuItem className="rounded-xl px-3 py-3 focus:bg-primary/10 focus:text-primary font-bold cursor-pointer" asChild>
-                        <a href="/dashboard" className="flex items-center gap-3">
-                          <LayoutDashboard className="w-4 h-4" />
-                          Management Console
-                        </a>
-                      </DropdownMenuItem>
+                      {window.location.pathname !== "/dashboard" && (
+                        <DropdownMenuItem className="rounded-xl px-3 py-3 focus:bg-primary/10 focus:text-primary font-bold cursor-pointer" asChild>
+                          <a href="/dashboard" className="flex items-center gap-3">
+                            <LayoutDashboard className="w-4 h-4" />
+                            Management Console
+                          </a>
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem
                         className="rounded-xl px-3 py-3 focus:bg-primary/10 focus:text-primary font-bold cursor-pointer flex items-center gap-3"
                         onClick={() => setIsSettingsOpen(true)}

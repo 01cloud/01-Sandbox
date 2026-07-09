@@ -40,8 +40,8 @@ const Health = () => {
   const [copied, setCopied] = useState(false);
 
   // Dynamically resolve base API URL with fallbacks
-  const API_BASE_URL = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "";
-  let resolvedHealthUrl = "https://api-sandbox.01security.com/health";
+  const API_BASE_URL = import.meta.env.DEV ? "" : ((window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "");
+  let resolvedHealthUrl = import.meta.env.DEV ? "/health" : "https://api-sandbox.01security.com/health";
   if (API_BASE_URL) {
     const cleanBase = API_BASE_URL.replace(/\/api\/z1sandbox\/?$/, "").replace(/\/v1\/?$/, "");
     resolvedHealthUrl = `${cleanBase}/health`;
