@@ -694,8 +694,8 @@ const Dashboard = () => {
 
       {selectedBackend ? (
         // Consolidated Workspace Drawer/Console per Backend
-        <div className="space-y-8 animate-in fade-in duration-300">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border/40 pb-6 gap-4">
+        <div className="space-y-5 animate-in fade-in duration-300">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border/40 pb-4 gap-4">
             <div className="flex items-center gap-3">
               <Button
                 variant="ghost"
@@ -736,7 +736,7 @@ const Dashboard = () => {
             </div>
           </div>
 
-          <Tabs defaultValue="quick" className="space-y-6">
+          <Tabs defaultValue="quick" className="space-y-4">
             <TabsList className="bg-secondary/30 p-1.5 rounded-2xl border border-border/50 h-auto gap-1 flex-nowrap overflow-x-auto no-scrollbar justify-start">
               <TabsTrigger value="quick" className="rounded-xl px-5 py-2.5 text-xs font-bold data-[state=active]:bg-background">Quick Scanner</TabsTrigger>
               <TabsTrigger value="repo" className="rounded-xl px-5 py-2.5 text-xs font-bold data-[state=active]:bg-background">Repository Scanner</TabsTrigger>

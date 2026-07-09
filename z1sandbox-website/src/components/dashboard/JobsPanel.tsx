@@ -22,6 +22,8 @@ export function JobsPanel({
   jobType,
   embedded = false,
 }: JobsPanelProps) {
+  const [expandedPipelines, setExpandedPipelines] = React.useState<Record<string, boolean>>({});
+
   const formatTime = (isoString: string) => {
     try {
       const d = new Date(isoString);
@@ -36,7 +38,7 @@ export function JobsPanel({
       "flex flex-col h-full transition-all duration-300",
       embedded
         ? "w-full border-t border-border/15 bg-transparent"
-        : "w-[320px] shrink-0 border-r border-border/50 bg-muted/10 animate-in slide-in-from-left duration-300"
+        : "w-[260px] shrink-0 border-r border-border/50 bg-muted/10 animate-in slide-in-from-left duration-300"
     )}>
       {/* Header */}
       {!embedded && (
@@ -72,6 +74,9 @@ export function JobsPanel({
                 : `Scan Job #${job.job_id.slice(0, 6)}`;
               const filesCount = job.metadata?.files_count || 0;
 
+              // Language pipeline should collapse on DONE/ERROR/CANCELLED, but show if active or explicitly clicked
+              const showPipeline = isSelected && (isActive ? true : !!expandedPipelines[job.job_id]);
+
               return (
                 <div
                   key={job.job_id}
@@ -79,7 +84,15 @@ export function JobsPanel({
                     "group relative border-l-2 border-l-transparent hover:bg-muted/20 transition-all duration-200 cursor-pointer p-4 flex flex-col gap-1.5",
                     isSelected && (jobType === "repo-scan" ? "border-l-violet-500 bg-violet-500/[0.03]" : "border-l-blue-500 bg-blue-500/[0.03]")
                   )}
-                  onClick={() => onSelectJob(job.job_id)}
+                  onClick={() => {
+                    onSelectJob(job.job_id);
+                    if (isSelected && !isActive) {
+                      setExpandedPipelines(prev => ({
+                        ...prev,
+                        [job.job_id]: !prev[job.job_id]
+                      }));
+                    }
+                  }}
                 >
                   {/* Top line: Type Icon + Name */}
                   <div className="flex items-start gap-2.5">
@@ -180,7 +193,7 @@ export function JobsPanel({
                   </div>
 
                   {/* Expanded language statuses for selected repository scans */}
-                  {isSelected && jobType === "repo-scan" && job.detail?.languages && Object.keys(job.detail.languages).length > 0 && (
+                  {showPipeline && jobType === "repo-scan" && job.detail?.languages && Object.keys(job.detail.languages).length > 0 && (
                     <div className="mt-3 pt-3 border-t border-border/10 flex flex-col gap-2">
                       <p className="text-[9px] font-black uppercase tracking-wider text-muted-foreground mb-1">
                         Language Pipeline
