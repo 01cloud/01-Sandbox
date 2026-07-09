@@ -9,6 +9,16 @@ import pytest
 # Inject current directory into python path to load core modules correctly
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from dotenv import load_dotenv
+
+# Load from absolute path of fastapi directory
+load_dotenv(
+    dotenv_path=os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"
+    ),
+    override=True,
+)
+
 from core.app_state import state
 from services.email import send_expiry_email
 from services.expiry_checker import check_expiring_keys_task
@@ -309,9 +319,11 @@ async def test_send_real_expiry_email():
     }
 
     env_vars = {
-        "SENDGRID_API_KEY": "",
+        "SENDGRID_API_KEY": os.environ.get("SENDGRID_API_KEY", ""),
         # NOTE: Make sure this email is verified in your SendGrid dashboard as a Sender Identity
-        "SENDGRID_FROM_EMAIL": "kamal.tamang@berrybytes.com",
+        "SENDGRID_FROM_EMAIL": os.environ.get(
+            "SENDGRID_FROM_EMAIL", "sandbox@01security.com"
+        ),
     }
 
     with patch.dict(os.environ, env_vars):

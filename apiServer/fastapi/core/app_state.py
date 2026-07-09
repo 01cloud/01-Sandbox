@@ -86,19 +86,14 @@ class AppState:
 
     def get_db_conn(self):
         if os.environ.get("PG_HOST"):
-            try:
-                conn = psycopg2.connect(
-                    host=os.environ.get("PG_HOST"),
-                    port=os.environ.get("PG_PORT"),
-                    user=os.environ.get("PG_USER"),
-                    password=os.environ.get("PG_PASSWORD"),
-                    dbname=os.environ.get("PG_DATABASE"),
-                )
-                return InstrumentedConnection(conn)
-            except Exception as e:
-                print(
-                    f"[db] Failed to connect to PostgreSQL: {e}. Falling back to SQLite."
-                )
+            conn = psycopg2.connect(
+                host=os.environ.get("PG_HOST"),
+                port=os.environ.get("PG_PORT"),
+                user=os.environ.get("PG_USER"),
+                password=os.environ.get("PG_PASSWORD"),
+                dbname=os.environ.get("PG_DATABASE"),
+            )
+            return InstrumentedConnection(conn)
 
         import sqlite3
 
@@ -151,7 +146,32 @@ class AppState:
         return SQLiteConnection(sqlite_conn)
 
     def init_db(self):
-        conn = self.get_db_conn()
+        import time
+
+        if os.environ.get("PG_HOST"):
+            retries = 30
+            conn = None
+            for i in range(retries):
+                try:
+                    conn = self.get_db_conn()
+                    print(
+                        "[startup] Successfully connected to PostgreSQL for database initialization."
+                    )
+                    break
+                except Exception as e:
+                    if i < retries - 1:
+                        print(
+                            f"[startup] Waiting for PostgreSQL ({e}). Retrying in 2 seconds... ({i+1}/{retries})"
+                        )
+                        time.sleep(2)
+                    else:
+                        print(
+                            f"[startup] Crucial: Failed to connect to PostgreSQL after {retries} retries. Raising error."
+                        )
+                        raise e
+        else:
+            conn = self.get_db_conn()
+
         cursor = conn.cursor()
 
         # Create system_settings table for cluster-wide settings (e.g. shared JWT keys)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime
+import json
+import os
 from typing import Callable
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -26,6 +28,18 @@ DEFAULT_BACKENDS = [
         "documentationUrl": "/api/v1/awsvpc/docs",
     },
 ]
+
+custom_backends_json = os.environ.get("DASHBOARD_BACKENDS_JSON") or os.environ.get(
+    "VITE_DASHBOARD_BACKENDS_JSON"
+)
+if custom_backends_json:
+    try:
+        raw_json = custom_backends_json.strip()
+        if raw_json.startswith("'") and raw_json.endswith("'"):
+            raw_json = raw_json[1:-1]
+        DEFAULT_BACKENDS = json.loads(raw_json)
+    except Exception as e:
+        print(f"[subscriptions] Failed to parse custom backends JSON: {e}")
 
 
 class SubscribeRequest(BaseModel):
