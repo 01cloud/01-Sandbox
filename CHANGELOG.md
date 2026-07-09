@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.16](https://github.com/01cloud/01-Sandbox/compare/v0.6.15...v0.6.16) (2026-07-09)
+
+
+### 🐛 Bug Fixes
+
+* ui enhancement and backend enhancement ([e333053](https://github.com/01cloud/01-Sandbox/commit/e333053b690c4cdb79e0c46d10a66a258fb9f8f2))
+* ui enhancement and backend enhancement ([e56cdda](https://github.com/01cloud/01-Sandbox/commit/e56cdda3e80ca9c1285f47367836f327f88ce2e1))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.15 [skip ci] ([350db49](https://github.com/01cloud/01-Sandbox/commit/350db4904624245bb2ed79cd57a88cf567a88dda))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.15 [skip ci] ([04322c4](https://github.com/01cloud/01-Sandbox/commit/04322c416c8604268be88f639d9dc8a3f32f88e3))
+
 ## [0.6.15](https://github.com/01cloud/01-Sandbox/compare/v0.6.14...v0.6.15) (2026-07-09)
 
 
