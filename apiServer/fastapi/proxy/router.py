@@ -538,7 +538,12 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
                     if metadata.get("job_type") != job_type:
                         continue
 
-                    status = r.get(key)
+                    status_val = r.get(key)
+                    status = (
+                        status_val.decode()
+                        if isinstance(status_val, bytes)
+                        else status_val
+                    )
                     events_len = r.llen(f"job:{jid}:events")
 
                     last_msg = ""

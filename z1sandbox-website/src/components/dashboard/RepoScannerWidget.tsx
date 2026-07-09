@@ -13,6 +13,7 @@ import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/componen
 import { useJobStore } from "@/hooks/useJobStore";
 import { JobsPanel } from "./JobsPanel";
 import { UnifiedPipelineView } from "./UnifiedPipelineView";
+import { InlineApiKeyPanel } from "./InlineApiKeyPanel";
 
 interface RepoScannerWidgetProps {
   apiBaseUrl: string;

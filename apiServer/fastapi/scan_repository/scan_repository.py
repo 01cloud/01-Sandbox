@@ -840,7 +840,10 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 except Exception as e:
                     print(f"[RepoScanner] Error parsing result from Redis: {e}")
 
-            status = app_state.redis_client.get(f"job:{job_id}:status")
+            status_val = app_state.redis_client.get(f"job:{job_id}:status")
+            status = (
+                status_val.decode() if isinstance(status_val, bytes) else status_val
+            )
             if status and status not in ("DONE", "ERROR"):
                 raise HTTPException(
                     status_code=404,
@@ -971,7 +974,12 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
 
                     for idx, jid in enumerate(jids):
                         meta_str = results[idx * 4]
-                        status = results[idx * 4 + 1]
+                        status_val = results[idx * 4 + 1]
+                        status = (
+                            status_val.decode()
+                            if isinstance(status_val, bytes)
+                            else status_val
+                        )
                         events_len = results[idx * 4 + 2]
                         last_ev_str = results[idx * 4 + 3]
 

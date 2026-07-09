@@ -25,6 +25,8 @@ import { cn } from "@/lib/utils";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { useJobStore } from "@/hooks/useJobStore";
 import { UnifiedPipelineView } from "./UnifiedPipelineView";
+import { JobsPanel } from "./JobsPanel";
+import { InlineApiKeyPanel } from "./InlineApiKeyPanel";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip,
   ResponsiveContainer, Cell
@@ -54,7 +56,7 @@ const QUICK_SCAN_STEPS = [
 
 const CODE_TEMPLATES = [
   {
-    name: "Python (SQLi)",
+    name: "Python",
     lang: "py",
     icon: "🐍",
     code: `# Python SQL Injection & Unsafe Eval Example
@@ -74,7 +76,51 @@ def execute_config(user_code):
 `
   },
   {
-    name: "Go (Secret Leak)",
+    name: "JavaScript",
+    lang: "js",
+    icon: "🟨",
+    code: `// JavaScript XSS & Prototype Pollution Example
+const express = require('express');
+const app = express();
+
+// INSECURE: reflected XSS via query param
+app.get('/search', (req, res) => {
+  const query = req.query.q;
+  res.send('<html><body>Results for: ' + query + '</body></html>');
+});
+
+// INSECURE: prototype pollution
+function merge(obj, src) {
+  for (let key in src) {
+    obj[key] = src[key]; // no hasOwnProperty check
+  }
+}
+
+app.listen(3000);
+`
+  },
+  {
+    name: "TypeScript",
+    lang: "js",
+    icon: "🔷",
+    code: `// TypeScript unsafe any & eval example
+const express = require('express');
+
+// INSECURE: using any bypasses type safety
+function processInput(data: any) {
+  // DANGEROUS: eval on user-controlled data
+  return eval(data.command);
+}
+
+// INSECURE: hardcoded credentials
+const DB_PASSWORD: string = "admin1234";
+const JWT_SECRET: string = "supersecretkey";
+
+export { processInput, DB_PASSWORD, JWT_SECRET };
+`
+  },
+  {
+    name: "Go",
     lang: "go",
     icon: "🐹",
     code: `package main
@@ -95,7 +141,48 @@ func main() {
 `
   },
   {
-    name: "Kubernetes (Insecure)",
+    name: "Rust",
+    lang: "sh",
+    icon: "🦀",
+    code: `// Rust unsafe memory & command injection example
+use std::process::Command;
+
+// INSECURE: command injection via unsanitized input
+fn run_command(user_input: &str) {
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(user_input) // Never pass user input directly!
+        .output()
+        .expect("Failed to execute");
+    println!("{:?}", output);
+}
+
+// INSECURE: unsafe raw pointer dereference
+unsafe fn read_arbitrary_memory(ptr: *const u32) -> u32 {
+    *ptr
+}
+
+fn main() {
+    run_command("whoami; cat /etc/passwd");
+}
+`
+  },
+  {
+    name: "Shell",
+    lang: "sh",
+    icon: "🐚",
+    code: `#!/bin/bash
+# Shell Script Command Injection Vulnerability
+
+read -p "Enter server hostname: " hostname
+
+# INSECURE: direct variable expansion in eval/execution
+ping -c 3 $hostname
+eval "echo Logs processed for host: $hostname"
+`
+  },
+  {
+    name: "Kubernetes",
     lang: "k8s",
     icon: "☸️",
     code: `# Insecure Kubernetes Pod Deployment configuration
@@ -116,19 +203,32 @@ spec:
 `
   },
   {
-    name: "Shell (Injection)",
-    lang: "sh",
-    icon: "🐚",
-    code: `#!/bin/bash
-# Shell Script Command Injection Vulnerability
+    name: "Terraform",
+    lang: "yaml",
+    icon: "🏗️",
+    code: `# Terraform IaC Security Issues Example
+resource "aws_s3_bucket" "data" {
+  bucket = "company-data-bucket"
 
-read -p "Enter server hostname: " hostname
+  # INSECURE: public access not blocked
+}
 
-# INSECURE: direct variable expansion in eval/execution
-ping -c 3 $hostname
-eval "echo Logs processed for host: $hostname"
+resource "aws_s3_bucket_acl" "data" {
+  bucket = aws_s3_bucket.data.id
+  # INSECURE: public-read ACL exposes all objects
+  acl    = "public-read"
+}
+
+resource "aws_security_group_rule" "allow_all" {
+  type        = "ingress"
+  from_port   = 0
+  to_port     = 65535
+  protocol    = "tcp"
+  # INSECURE: open to the entire internet
+  cidr_blocks = ["0.0.0.0/0"]
+}
 `
-  }
+  },
 ];
 
 const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = false, onSwitchTab }: SecurityScannerProps) => {
@@ -1021,12 +1121,13 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
   if (inline) {
     return (
       <div className="w-full h-[650px] border-t border-b border-border/30 flex flex-row overflow-hidden p-0 animate-in fade-in duration-500">
-        {/* Left Column: Width 26% */}
-        <div className="w-full md:w-[26%] shrink-0 border-r border-border/30 flex flex-col h-full overflow-y-auto">
-          <div className="p-5 space-y-4 h-full bg-background/5 flex flex-col">
+
+        {/* ── Column 1: Code Editor (18%) ── */}
+        <div className="w-full md:w-[18%] shrink-0 border-r border-border/30 flex flex-col h-full overflow-hidden">
+          <div className="p-4 space-y-3 h-full flex flex-col">
             {/* Quick Templates */}
             <div className="flex flex-col gap-2 shrink-0">
-              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 block">
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75 block">
                 Quick Templates
               </span>
               <div className="flex flex-wrap gap-1.5">
@@ -1037,11 +1138,14 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                     disabled={isScanning}
                     onClick={() => setCode(tmpl.code)}
                     className={cn(
-                      "px-2.5 py-1.5 rounded-lg border border-border/50 bg-background/50 hover:bg-secondary/40 text-[10px] font-bold text-muted-foreground hover:text-foreground transition-all flex items-center gap-1.5",
-                      detectLanguage(code) === tmpl.lang ? "border-violet-500/30 bg-violet-500/5 text-violet-500" : ""
+                      "px-2 py-1 rounded-md border text-[9px] font-bold transition-all flex items-center gap-1",
+                      "border-border/60 bg-secondary/30 text-foreground/70 hover:bg-secondary/60 hover:text-foreground hover:border-border",
+                      detectLanguage(code) === tmpl.lang && code === tmpl.code
+                        ? "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400"
+                        : ""
                     )}
                   >
-                    <span className="text-xs">{tmpl.icon}</span>
+                    <span className="text-[10px]">{tmpl.icon}</span>
                     {tmpl.name}
                   </button>
                 ))}
@@ -1049,38 +1153,35 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
             </div>
 
             {/* Source Ingestion */}
-            <div className="flex-grow flex flex-col gap-2 min-h-[260px]">
-              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 block">
+            <div className="flex-grow flex flex-col gap-1.5 min-h-0">
+              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75 block shrink-0">
                 Source Ingestion
               </label>
 
-              <div className="flex-grow relative rounded-2xl bg-[#0b0e14] border border-border/60 overflow-hidden flex flex-col focus-within:ring-2 focus-within:ring-violet-500/25 transition-all shadow-lg shadow-black/10">
-                {/* Editor Window Header Tab */}
-                <div className="flex items-center justify-between px-4 py-2.5 bg-[#111622] border-b border-border/30 select-none">
-                  <div className="flex items-center gap-3">
-                    <div className="flex gap-1.5">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
+              <div className="flex-grow relative rounded-lg border border-border/60 overflow-hidden flex flex-col focus-within:ring-2 focus-within:ring-violet-500/25 transition-all bg-white dark:bg-[#0b0e14]">
+                {/* Editor Tab Bar */}
+                <div className="flex items-center justify-between px-3 py-2 bg-gray-100 dark:bg-[#111622] border-b border-border/30 select-none shrink-0">
+                  <div className="flex items-center gap-2">
+                    <div className="flex gap-1">
+                      <span className="w-2 h-2 rounded-full bg-[#ff5f56]" />
+                      <span className="w-2 h-2 rounded-full bg-[#ffbd2e]" />
+                      <span className="w-2 h-2 rounded-full bg-[#27c93f]" />
                     </div>
-                    <div className="h-3 w-px bg-zinc-800 mx-1" />
-                    <span className="font-mono text-[11px] text-zinc-400 flex items-center gap-1.5">
-                      <FileCode className="w-3.5 h-3.5 text-violet-400" />
+                    <span className="font-mono text-[10px] text-muted-foreground/70 flex items-center gap-1">
+                      <FileCode className="w-3 h-3 text-violet-400" />
                       {getFilename(detectLanguage(code))}
                     </span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="font-mono text-[9px] font-black tracking-wider uppercase text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
-                      {detectLanguage(code).toUpperCase()}
-                    </span>
-                  </div>
+                  <span className="font-mono text-[8px] font-black uppercase text-muted-foreground/50 bg-muted/40 px-1 py-0.5 rounded border border-border/40">
+                    {detectLanguage(code).toUpperCase()}
+                  </span>
                 </div>
 
-                {/* Editor Body */}
+                {/* Code textarea */}
                 <textarea
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  className="flex-grow bg-transparent p-5 font-mono text-xs text-zinc-100 focus:outline-none resize-none leading-relaxed focus:ring-0 overflow-y-auto selection:bg-violet-500/30 caret-violet-500"
+                  className="flex-grow bg-transparent p-3 font-mono text-[11px] text-foreground focus:outline-none resize-none leading-relaxed overflow-y-auto selection:bg-violet-500/30 caret-violet-500"
                   spellCheck="false"
                   placeholder="# Paste code here..."
                   disabled={isScanning}
@@ -1091,131 +1192,75 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
             <Button
               onClick={runScan}
               disabled={isScanning || !code.trim()}
-              className="h-9 w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all active:scale-[0.98] shrink-0 uppercase tracking-wider mt-2"
+              className="h-8 w-full rounded-md bg-violet-600 hover:bg-violet-500 text-white font-bold text-[10px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all active:scale-[0.98] shrink-0 uppercase tracking-wider"
             >
               {isScanning ? (
                 <>
                   <LoadingSpinner size="sm" className="text-current" />
-                  <span>Scanning Snippet...</span>
+                  <span>Scanning...</span>
                 </>
               ) : (
                 <>
-                  <Zap className="w-3.5 h-3.5 fill-current" />
-                  EXECUTE AUDIT
+                  <Zap className="w-3 h-3 fill-current" />
+                  Execute Audit
                 </>
               )}
             </Button>
-
-            {/* Stepper inside sidebar for selectedJob */}
-            {selectedJob && (
-              <div className="border-t border-border/10 pt-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300 mt-2 shrink-0">
-                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
-                <div className="flex flex-col gap-1">
-                  {QUICK_SCAN_STEPS.map((step, i) => {
-                    const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
-                    const isError = selectedJob.status === "ERROR";
-                    const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
-                    const isActive = step.key === selectedJob.status && !isError;
-                    return (
-                      <div key={step.key} className={cn("flex items-center gap-2.5 py-1.5 px-2 rounded-lg transition-all", isActive ? "bg-violet-500/8" : "")}>
-                        <div className={cn("w-4.5 h-4.5 rounded-full flex items-center justify-center shrink-0 border-2 text-[9px] transition-all",
-                          isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
-                            isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
-                              isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
-                                "border-border text-muted-foreground/35")}>
-                          {isDone ? <CheckCircle2 className="w-2.5 h-2.5" /> : isActive ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <span>{i + 1}</span>}
-                        </div>
-                        <span className={cn("text-[10px] font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/45")}>
-                          {step.label}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-                <div className="h-1 rounded-full bg-muted/50 overflow-hidden">
-                  <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
-                </div>
-                {selectedJob.stepMessage && <p className="text-[10px] text-muted-foreground">{selectedJob.stepMessage}</p>}
-              </div>
-            )}
           </div>
         </div>
 
-        {/* Right Column: Results & Telemetry */}
-        <div className="flex-grow flex flex-col h-full overflow-y-auto p-6 bg-background/5">
-          {/* Ready state */}
-          {!selectedJob && (
-            <div className="h-full rounded-[2rem] border border-border/40 bg-card/15 p-8 flex flex-col justify-between overflow-hidden shadow-inner relative animate-in fade-in duration-500">
-              {/* Decorative top-right glow */}
-              <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full bg-violet-500/10 blur-3xl" />
+        {/* ── Column 2: Jobs List (20%) ── */}
+        <div className="w-full md:w-[20%] shrink-0 border-r border-border/30 flex flex-col h-full overflow-hidden">
+          <div className="px-3 py-2.5 border-b border-border/20 shrink-0 flex items-center justify-between">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75">
+              Quick Scans
+            </span>
+            <span className="text-[9px] text-muted-foreground/50 font-semibold uppercase">
+              ({jobs.length})
+            </span>
+          </div>
+          <div className="flex-1 min-h-0 overflow-hidden">
+            <JobsPanel
+              jobs={jobs}
+              selectedJobId={selectedJobId}
+              onSelectJob={setSelectedJobId}
+              onDeleteJob={removeJob}
+              jobType="quick-scan"
+              embedded={true}
+            />
+          </div>
+        </div>
 
-              {/* Top Section: Header */}
-              <div className="flex flex-col items-center text-center mt-12">
-                <div className="p-4 rounded-3xl bg-violet-500/10 border border-violet-500/20 text-violet-500 mb-5 relative">
-                  <div className="absolute inset-0 rounded-3xl bg-violet-500/5 animate-ping" />
-                  <ShieldCheck className="w-10 h-10 relative z-10" />
-                </div>
-                <h3 className="font-display font-black text-2xl tracking-tight text-foreground">
-                  Security Sandbox Environment
-                </h3>
-                <p className="text-sm text-muted-foreground mt-2 max-w-md leading-relaxed">
-                  Submit code snippets to trigger isolated Kubernetes sandbox workloads for static analysis, secret checking, and dependency verification.
+        {/* ── Column 3: Results Panel (58%) ── */}
+        <div className="flex-grow flex flex-col h-full overflow-y-auto p-5 bg-background/5">
+          {/* Ready state – no job selected */}
+          {!selectedJob && (
+            <div className="h-full flex flex-col items-center justify-center gap-6 animate-in fade-in duration-500 text-center px-4">
+              <div className="p-4 rounded-2xl bg-violet-500/10 border border-violet-500/15 text-violet-500">
+                <ShieldCheck className="w-9 h-9" />
+              </div>
+              <div>
+                <h3 className="font-black text-lg tracking-tight text-foreground">Security Sandbox Environment</h3>
+                <p className="text-sm text-muted-foreground mt-1 max-w-sm leading-relaxed">
+                  Paste code, pick a template, and hit Execute Audit to trigger an isolated security analysis.
                 </p>
               </div>
-
-              {/* Middle Section: Feature Grid */}
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-8">
-                <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
-                  <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 w-fit border border-emerald-500/20">
-                    <Activity className="w-4 h-4" />
+              <div className="grid grid-cols-3 gap-3 w-full max-w-lg">
+                {[
+                  { icon: <Activity className="w-3.5 h-3.5" />, color: "emerald", title: "Isolated Sandboxes" },
+                  { icon: <FileCode className="w-3.5 h-3.5" />, color: "indigo", title: "Multi-Language" },
+                  { icon: <Zap className="w-3.5 h-3.5" />, color: "amber", title: "Deep Inspections" },
+                ].map((card) => (
+                  <div key={card.title} className="flex flex-col items-center gap-2 p-3 rounded-lg border border-border/30 bg-muted/10">
+                    <div className={`p-1.5 rounded-md bg-${card.color}-500/10 text-${card.color}-500`}>{card.icon}</div>
+                    <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">{card.title}</span>
                   </div>
-                  <div>
-                    <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Isolated Sandboxes</h4>
-                    <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
-                      Every code audit runs in a dedicated micro-pod sandbox.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
-                  <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500 w-fit border border-indigo-500/20">
-                    <FileCode className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Multi-Language</h4>
-                    <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
-                      Auto-detects Python, Go, JavaScript, YAML, and Kubernetes resource files.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
-                  <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500 w-fit border border-amber-500/20">
-                    <Zap className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Deep Inspections</h4>
-                    <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
-                      Leverages Bandit, GoSec, ESLint, KubeLinter, and regex-based secret scans.
-                    </p>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bottom Section: Footer/Status */}
-              <div className="border-t border-border/30 pt-5 flex items-center justify-between text-muted-foreground/60 text-[10px] font-bold uppercase tracking-widest mt-auto">
-                <div className="flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] animate-pulse" />
-                  Scanner Engine Active
-                </div>
-                <div>
-                  v1.2.0-Alpha
-                </div>
+                ))}
               </div>
             </div>
           )}
 
-          {/* Ingress / Scanning active state */}
+          {/* Scanning / in-progress state */}
           {selectedJob && selectedJob.status !== "DONE" && selectedJob.status !== "ERROR" && (
             <div className="max-w-5xl mx-auto w-full">
               <UnifiedPipelineView
@@ -1230,21 +1275,29 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
 
           {/* Error state */}
           {selectedJob && selectedJob.status === "ERROR" && (
-            <div className="rounded-[2rem] border-2 border-destructive/20 bg-destructive/5 p-10 flex flex-col gap-6">
-              <div className="flex items-center gap-4 text-destructive">
-                <AlertCircle className="w-10 h-10" />
-                <h2 className="text-2xl font-black tracking-tight">Scan Failed</h2>
+            <div className="rounded-xl border-2 border-destructive/20 bg-destructive/5 p-8 flex flex-col gap-5">
+              <div className="flex items-center gap-3 text-destructive">
+                <AlertCircle className="w-8 h-8" />
+                <h2 className="text-xl font-black tracking-tight">Scan Failed</h2>
               </div>
-              <p className="font-mono text-sm text-destructive/80 bg-black/5 rounded-2xl p-6 border border-destructive/10 leading-relaxed">
+              <p className="font-mono text-sm text-destructive/80 bg-black/5 rounded-xl p-5 border border-destructive/10 leading-relaxed">
                 {selectedJob.stepMessage || "An unexpected error occurred during sandbox execution."}
               </p>
             </div>
           )}
 
-          {/* Finished / Done state */}
+          {/* Done state */}
           {selectedJob && selectedJob.status === "DONE" && selectedResult && (
             <div className="max-w-5xl mx-auto w-full">
               {renderQuickScanResult(selectedResult)}
+            </div>
+          )}
+
+          {/* Done state but result still loading */}
+          {selectedJob && selectedJob.status === "DONE" && !selectedResult && (
+            <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground/50">
+              <Loader2 className="w-6 h-6 animate-spin" />
+              <span className="text-xs font-semibold">Loading scan results…</span>
             </div>
           )}
         </div>
