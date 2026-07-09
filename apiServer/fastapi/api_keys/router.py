@@ -8,7 +8,7 @@ from typing import Callable
 import bleach
 import jwt
 from config import jwt_config
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from psycopg2.extras import RealDictCursor
 
 from .models import (
@@ -74,7 +74,9 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
         tags=["Security"],
         dependencies=[Depends(validate_token)],
     )
-    async def list_user_api_keys(payload: dict = Depends(validate_token)):
+    async def list_user_api_keys(
+        request: Request, payload: dict = Depends(validate_token)
+    ):
         """Retrieves all active and revoked keys for the authenticated user from central store."""
         user_id = payload.get("sub")
         conn = state.get_db_conn()
@@ -84,7 +86,62 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         query = "SELECT * FROM api_keys WHERE LOWER(user_id) = LOWER(%s) AND expires_at > %s"
         cursor.execute(query, (user_id, now_iso))
-        rows = cursor.fetchall()
+        rows = [dict(r) for r in cursor.fetchall()]
+
+        # Self-healing: if any key is missing the user's email, resolve it and update the DB
+        needs_email_update = any(not r.get("user_email") for r in rows)
+        resolved_email = None
+
+        if needs_email_update:
+            # 1. Try to get from token claims
+            for k, v in payload.items():
+                if k == "email" or k.endswith("/email"):
+                    resolved_email = v
+                    break
+
+            # 2. Try to get from /userinfo fallback
+            if (
+                not resolved_email
+                and payload.get("iss")
+                and "auth0" in payload.get("iss")
+            ):
+                try:
+                    auth_header = request.headers.get(
+                        "Authorization"
+                    ) or request.headers.get("authorization")
+                    if auth_header:
+                        import httpx
+
+                        async with httpx.AsyncClient() as client:
+                            r = await client.get(
+                                f"{payload['iss'].rstrip('/')}/userinfo",
+                                headers={"Authorization": auth_header},
+                                timeout=5.0,
+                            )
+                            if r.status_code == 200:
+                                userinfo = r.json()
+                                resolved_email = userinfo.get("email")
+                                print(
+                                    f"[Security] Self-healed email={resolved_email} from /userinfo for list_user_api_keys"
+                                )
+                except Exception as e:
+                    print(f"[Security] Failed /userinfo self-healing fetch: {e}")
+
+            if resolved_email:
+                try:
+                    update_query = "UPDATE api_keys SET user_email = %s WHERE LOWER(user_id) = LOWER(%s) AND (user_email IS NULL OR user_email = '')"
+                    cursor.execute(update_query, (resolved_email, user_id))
+                    conn.commit()
+                    # Update local rows to reflect the healed email
+                    for r in rows:
+                        if not r.get("user_email"):
+                            r["user_email"] = resolved_email
+                except Exception as update_err:
+                    print(
+                        f"[Security] Failed to self-heal user_email in DB: {update_err}"
+                    )
+                    conn.rollback()
+
         conn.close()
 
         keys = []
@@ -112,7 +169,9 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
         dependencies=[Depends(validate_token)],
     )
     async def create_api_key(
-        req: APIKeyCreateRequest, payload: dict = Depends(validate_token)
+        req: APIKeyCreateRequest,
+        request: Request,
+        payload: dict = Depends(validate_token),
     ):
         """
         Generates a new signed API key (JWT) and persists metadata for revocation/management.
@@ -146,20 +205,29 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
         conf = jwt_config()
         jti = str(uuid.uuid4())
         now = datetime.datetime.now(datetime.UTC)
-        if req.ttl_hours == -1:
+
+        # Convert ttl_seconds to ttl_hours if provided
+        ttl_hours = req.ttl_hours
+        if req.ttl_seconds is not None:
+            if req.ttl_seconds == -1:
+                ttl_hours = -1
+            else:
+                ttl_hours = req.ttl_seconds / 3600.0
+
+        if ttl_hours == -1:
             expires_at = now + datetime.timedelta(
                 days=365 * 100
             )  # Effectively never expires
             status_msg = (
                 f"Key '{sanitized_name}' generated successfully. Valid indefinitely."
             )
-        elif req.ttl_hours < 1:
-            expires_at = now + datetime.timedelta(hours=req.ttl_hours)
-            minutes = int(req.ttl_hours * 60)
+        elif ttl_hours < 1:
+            expires_at = now + datetime.timedelta(hours=ttl_hours)
+            minutes = int(ttl_hours * 60)
             status_msg = f"Key '{sanitized_name}' generated successfully. Valid for {minutes} minute(s)."
         else:
-            expires_at = now + datetime.timedelta(hours=req.ttl_hours)
-            status_msg = f"Key '{sanitized_name}' generated successfully. Valid for {req.ttl_hours} hour(s)."
+            expires_at = now + datetime.timedelta(hours=ttl_hours)
+            status_msg = f"Key '{sanitized_name}' generated successfully. Valid for {ttl_hours} hour(s)."
 
         token_payload = {
             "sub": user_id,
@@ -196,6 +264,35 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
                     break
 
         user_email = req.user_email or auth0_email
+
+        # Fallback to Auth0 Userinfo endpoint if email is still not resolved
+        if (
+            not user_email
+            and payload
+            and payload.get("iss")
+            and "auth0" in payload.get("iss")
+        ):
+            try:
+                auth_header = request.headers.get(
+                    "Authorization"
+                ) or request.headers.get("authorization")
+                if auth_header:
+                    import httpx
+
+                    async with httpx.AsyncClient() as client:
+                        r = await client.get(
+                            f"{payload['iss'].rstrip('/')}/userinfo",
+                            headers={"Authorization": auth_header},
+                            timeout=5.0,
+                        )
+                        if r.status_code == 200:
+                            userinfo = r.json()
+                            user_email = userinfo.get("email")
+                            print(
+                                f"[Security] Resolved user_email={user_email} from Auth0 /userinfo"
+                            )
+            except Exception as e:
+                print(f"[Security] Failed to fetch /userinfo fallback: {e}")
 
         conn = state.get_db_conn()
         cursor = conn.cursor()

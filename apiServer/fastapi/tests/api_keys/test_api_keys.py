@@ -280,3 +280,54 @@ def test_create_api_key_quota_under_limit(mock_user_token):
     count = cursor.fetchone()[0]
     conn.close()
     assert count == 4
+
+
+def test_get_api_keys_self_heals_missing_email(mock_user_token):
+    """
+    SCENARIO: An existing key exists in the database with user_email = NULL/None.
+    EXPECTATION: GET /v1/api-keys resolves the email from the token payload (user@example.com)
+                 and updates the database self-healingly, so the returned record has the email.
+    """
+    client = TestClient(app)
+
+    # 1. Insert a key with a NULL email directly into the database
+    conn = state.get_db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO api_keys (id, name, backend, user_id, user_email, created_at, expires_at, prefix)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            "key-no-email",
+            "No Email Key",
+            "Z1_SANDBOX",
+            "auth0|user123",
+            None,
+            "2026-07-07T12:00:00Z",
+            "2030-07-08T12:00:00Z",
+            "ci_no_email",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    # 2. Call GET /v1/api-keys (token mock contains email: "user@example.com")
+    response = client.get("/v1/api-keys")
+    assert response.status_code == 200
+    data = response.json()
+
+    # 3. Verify returned key has resolved/healed email
+    keys = data.get("keys", [])
+    matched = [k for k in keys if k["id"] == "key-no-email"]
+    assert len(matched) == 1
+    assert matched[0]["user_email"] == "user@example.com"
+
+    # 4. Verify it was written back to the DB
+    conn = state.get_db_conn()
+    cursor = conn.cursor()
+    cursor.execute("SELECT user_email FROM api_keys WHERE id = %s", ("key-no-email",))
+    row = cursor.fetchone()
+    conn.close()
+    assert row is not None
+    assert row[0] == "user@example.com"
