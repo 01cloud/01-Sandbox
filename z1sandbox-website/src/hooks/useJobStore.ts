@@ -14,6 +14,7 @@ export function useJobStore(
   const esRefs = useRef<Record<string, EventSource>>({});
   const streamErrors = useRef<Record<string, number>>({});
   const deletedJobIds = useRef<Set<string>>(new Set());
+  const authFailedRef = useRef<boolean>(false); // Stop polling on 401
 
   const refresh = () => {
     setJobs(jobStore.getAll(jobType));
@@ -215,14 +216,22 @@ export function useJobStore(
 
   const syncFromServer = useCallback(async () => {
     if (!apiKey) return;
+    if (authFailedRef.current) return; // Stopped due to 401 — don't spam
     try {
       const resp = await fetch(getJobsListUrl(), {
         headers: { Authorization: `Bearer ${apiKey}` }
       });
       if (!resp.ok) {
-        console.warn(`[useJobStore] syncFromServer: ${getJobsListUrl()} returned HTTP ${resp.status}`);
+        if (resp.status === 401) {
+          authFailedRef.current = true;
+          console.warn(`[useJobStore] 401 on ${getJobsListUrl()} — polling suspended. Check your API key.`);
+        } else {
+          console.warn(`[useJobStore] syncFromServer: ${getJobsListUrl()} returned HTTP ${resp.status}`);
+        }
         return;
       }
+      // Reset on success
+      authFailedRef.current = false;
 
       const serverJobs: GenericJob[] = await resp.json();
       console.debug(`[useJobStore] syncFromServer: got ${serverJobs.length} job(s) from server`);
@@ -326,6 +335,9 @@ export function useJobStore(
   // Poll server every 5 seconds to pick up CLI/API-triggered jobs
   useEffect(() => {
     if (!apiKey) return;
+
+    // Reset 401 suspension when the key changes (e.g. user just created a new one)
+    authFailedRef.current = false;
 
     // Sync immediately on mount or key change — don't wait 5 seconds
     syncFromServer();

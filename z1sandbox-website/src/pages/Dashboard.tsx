@@ -107,6 +107,7 @@ const Dashboard = () => {
   const [authToken, setAuthToken] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState("apps");
+  const [resolvedApiKey, setResolvedApiKey] = useState<string>("");
 
   // --- DEVELOPER TESTING MODE STATES & FUNCTIONS ---
   const enableDevModeEnv = (window as any)._env_?.VITE_ENABLE_DEV_MODE
@@ -411,6 +412,22 @@ const Dashboard = () => {
   const [subscribingApp, setSubscribingApp] = useState<any | null>(null);
   const [isSubscribing, setIsSubscribing] = useState(false);
 
+  // Re-resolve the API key whenever: selected backend changes, keys list changes, or a new key is created via InlineApiKeyPanel
+  useEffect(() => {
+    const resolve = () => {
+      if (!selectedBackend) { setResolvedApiKey(""); return; }
+      const backendKeys = keys.filter(k => k.backend === selectedBackend.id);
+      for (const k of backendKeys) {
+        const saved = localStorage.getItem(`bound_key_${k.id}`);
+        if (saved) { setResolvedApiKey(saved); return; }
+      }
+      setResolvedApiKey("");
+    };
+    resolve();
+    window.addEventListener("api-keys-changed", resolve);
+    return () => window.removeEventListener("api-keys-changed", resolve);
+  }, [selectedBackend, keys]);
+
   const fetchBackends = async () => {
     try {
       let headers: any = {};
@@ -422,7 +439,17 @@ const Dashboard = () => {
           console.error("Error obtaining token for backends fetch:", err);
         }
       }
-      const response = await fetch(`${API_BASE_URL}/v1/backends`, { headers });
+
+      const controller = new AbortController();
+      const timeoutDuration = import.meta.env.DEV ? 2500 : 10000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
+
+      const response = await fetch(`${API_BASE_URL}/v1/backends`, {
+        headers,
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+
       if (response.ok) {
         const data = await response.json();
         setBackends(data);
@@ -496,13 +523,21 @@ const Dashboard = () => {
         return;
       }
 
+      const controller = new AbortController();
+      const timeoutDuration = import.meta.env.DEV ? 2500 : 10000;
+      const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
+
       const response = await fetch(`${API_BASE_URL}/v1/api-keys`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal: controller.signal
       });
+      clearTimeout(timeoutId);
+
       if (response.ok) {
         const data = await response.json();
         if (data.keys) {
-          setKeys(data.keys.filter((k: APIKey) => !k.is_revoked));
+          const validKeys: APIKey[] = data.keys.filter((k: APIKey) => !k.is_revoked);
+          setKeys(validKeys);
         }
       }
     } catch (error) {
@@ -730,7 +765,7 @@ const Dashboard = () => {
               <Button
                 onClick={() => bindAndVisit(selectedBackend.id, selectedBackend.documentationUrl)}
                 variant="outline"
-                className="rounded-xl font-bold h-9 text-xs flex items-center gap-1.5 border-border/50 hover:bg-secondary/20"
+                className="rounded-xl font-bold h-9 text-xs flex items-center gap-1.5 border-border/50 text-foreground hover:text-foreground hover:bg-secondary/30"
               >
                 View Docs
                 <ExternalLinkIcon className="w-3.5 h-3.5 opacity-55" />
@@ -751,17 +786,8 @@ const Dashboard = () => {
                 onClose={() => { }}
                 backend={selectedBackend.id}
                 baseUrl={selectedBackend.baseUrl}
-                apiKey={
-                  (() => {
-                    const backendKeys = keys.filter(k => k.backend === selectedBackend.id);
-                    let foundKey = "";
-                    for (const k of backendKeys) {
-                      const saved = localStorage.getItem(`bound_key_${k.id}`);
-                      if (saved) return saved;
-                    }
-                    return authToken;
-                  })()
-                }
+                apiKey={resolvedApiKey}
+                authToken={authToken}
                 inline={true}
                 onSwitchTab={setActiveTab}
               />
