@@ -25,10 +25,10 @@ graph TD
 
     subgraph Prefetch Regulation Layer
         D -->|Prefetch Limit = 3| E[RabbitMQ Dispatcher]
-        E -->|Deliver Max 3 Unacked Messages| F[Worker Channel Buffer<br/>Max Capacity: 3 Tasks]
+        E -->|Deliver Max 3 Unacked Messages| F[Consumer Channel Buffer<br/>Max Capacity: 3 Tasks]
     end
 
-    subgraph Worker Processing
+    subgraph Consumer (Worker) Processing
         F -->|Task 1| G1[Process Repo A]
         F -->|Task 2| G2[Process Repo B]
         F -->|Task 3| G3[Process Repo C]
@@ -61,23 +61,23 @@ graph TD
 3. The queue (`repo_scan_queue`) immediately holds these 20 messages. At this stage, all 20 messages are in a `Ready` state.
 
 ### 2. Prefetch Limit Enforcement (`basic.qos`)
-- When the worker connects to RabbitMQ, it sets `channel.basic_qos(prefetch_count=3)`.
+- When the consumer (worker) connects to RabbitMQ, it sets `channel.basic_qos(prefetch_count=3)`.
 - This tells the RabbitMQ broker: **"Do not send me more than 3 unacknowledged messages at a time."**
-- RabbitMQ looks at the queue, sees 20 messages, but only delivers **3 messages** to the worker.
+- RabbitMQ looks at the queue, sees 20 messages, but only delivers **3 messages** to the consumer.
 - The status of these 3 messages in RabbitMQ changes from `Ready` to `Unacknowledged`. The remaining 17 messages stay in `Ready` state in the queue.
 
-### 3. Worker Concurrency
-- The worker now has 3 active tasks in memory.
-- Depending on the worker's architecture:
-  - **Asynchronous Worker (e.g., asyncio/Celery)**: The worker processes all 3 repository scans concurrently.
-  - **Synchronous Worker**: The worker processes them one after another, but holds the other 2 in its local memory buffer.
-- This protects the worker from running out of CPU/memory by preventing it from pulling all 20 repositories into memory at the same time.
+### 3. Consumer Concurrency
+- The consumer now has 3 active tasks in memory.
+- Depending on the consumer's architecture:
+  - **Asynchronous Consumer (e.g., asyncio/Celery)**: The consumer processes all 3 repository scans concurrently.
+  - **Synchronous Consumer**: The consumer processes them one after another, but holds the other 2 in its local memory buffer.
+- This protects the consumer from running out of CPU/memory by preventing it from pulling all 20 repositories into memory at the same time.
 
 ### 4. Rolling Acknowledgment & Refill Loop (Sliding Window)
-1. **No Batch-Waiting**: The worker does not wait for all 3 tasks to finish before requesting more. Processing operates on a **rolling sliding window** basis.
+1. **No Batch-Waiting**: The consumer does not wait for all 3 tasks to finish before requesting more. Processing operates on a **rolling sliding window** basis.
 2. **Individual Completion**: As soon as **any single scan** completes (e.g., `Repo A` finishes processing):
-   - The worker sends a `basic_ack` (acknowledgment) for that specific message.
+   - The consumer sends a `basic_ack` (acknowledgment) for that specific message.
 3. **Queue Cleanup**: RabbitMQ deletes the message for `Repo A` from the queue.
-4. **Buffer Decrease**: The worker's unacknowledged message count drops from **3 to 2**.
-5. **Immediate Refill**: RabbitMQ detects that the worker's active message count is below the prefetch limit (2 < 3) and **immediately dispatches the 4th message** (`Repo D`) to the worker.
-6. **Continuous Stream**: The worker always maintains up to 3 active tasks in progress, pulling one new task each time any existing task completes, until all 20 repositories have been processed.
+4. **Buffer Decrease**: The consumer's unacknowledged message count drops from **3 to 2**.
+5. **Immediate Refill**: RabbitMQ detects that the consumer's active message count is below the prefetch limit (2 < 3) and **immediately dispatches the 4th message** (`Repo D`) to the consumer.
+6. **Continuous Stream**: The consumer always maintains up to 3 active tasks in progress, pulling one new task each time any existing task completes, until all 20 repositories have been processed.
