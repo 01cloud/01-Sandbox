@@ -1,3 +1,46 @@
+## Release v0.6.18 — 01-Sandbox
+**Release Date:** July 09, 2026
+
+---
+
+### Summary
+v0.6.18 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* api key validator fixes ([cf87261](https://github.com/01cloud/01-Sandbox/commit/cf872619a5674f6c697e31a63be9d77095ab844f))
+* api key validator fixes ([cce3ba3](https://github.com/01cloud/01-Sandbox/commit/cce3ba3b50e7da787d3dcdb44dce5789361c5a49))
+* ui fixes to the security scanners ([0c08240](https://github.com/01cloud/01-Sandbox/commit/0c0824021a9641a3be37a614994f4d44696f469f))
+* ui fixes to the security scanners ([2b46c59](https://github.com/01cloud/01-Sandbox/commit/2b46c590a675f1bbffb401f1477c8253b9714b14))
+
+### Changes
+## [0.6.18](https://github.com/01cloud/01-Sandbox/compare/v0.6.17...v0.6.18) (2026-07-09)
+
+
+### 🐛 Bug Fixes
+
+* api key validator fixes ([cf87261](https://github.com/01cloud/01-Sandbox/commit/cf872619a5674f6c697e31a63be9d77095ab844f))
+* api key validator fixes ([cce3ba3](https://github.com/01cloud/01-Sandbox/commit/cce3ba3b50e7da787d3dcdb44dce5789361c5a49))
+* ui fixes to the security scanners ([0c08240](https://github.com/01cloud/01-Sandbox/commit/0c0824021a9641a3be37a614994f4d44696f469f))
+* ui fixes to the security scanners ([2b46c59](https://github.com/01cloud/01-Sandbox/commit/2b46c590a675f1bbffb401f1477c8253b9714b14))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.17 [skip ci] ([7bbe3f1](https://github.com/01cloud/01-Sandbox/commit/7bbe3f1bca888c2e2273f5a4dfc0bd8a2e115c7c))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.17 [skip ci] ([faa0bd3](https://github.com/01cloud/01-Sandbox/commit/faa0bd30d1329b990a19332a808aba1b7e73fa56))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.18)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.17 — 01-Sandbox
 **Release Date:** July 09, 2026
 
