@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.6.19](https://github.com/01cloud/01-Sandbox/compare/v0.6.18...v0.6.19) (2026-07-09)
+
+
+### 🐛 Bug Fixes
+
+* api key validator fixes and timeline improvements ([208cdc6](https://github.com/01cloud/01-Sandbox/commit/208cdc6c8751c6aacc2046e804f2bbcf5bd0b7e7))
+* api key validator fixes and timeline improvements ([0a81db5](https://github.com/01cloud/01-Sandbox/commit/0a81db52d718ca63e4052f4aed716b2d693c02b8))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.18 [skip ci] ([a29d90b](https://github.com/01cloud/01-Sandbox/commit/a29d90b274a81508526d227d152cd4a017b7ad5e))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.18 [skip ci] ([abbdb26](https://github.com/01cloud/01-Sandbox/commit/abbdb267eed4b699582dad27170f180bba2ae2bb))
+
 ## [0.6.18](https://github.com/01cloud/01-Sandbox/compare/v0.6.17...v0.6.18) (2026-07-09)
 
 
