@@ -200,6 +200,7 @@ export default function UserSettingsDialog({ isOpen, onClose }: UserSettingsDial
           name: sanitizedName,
           backend: form.backend,
           ttl_hours,
+          user_email: user?.email || undefined,
         }),
       });
 

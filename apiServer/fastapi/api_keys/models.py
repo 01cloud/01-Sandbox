@@ -26,6 +26,7 @@ class APIKeyCreateRequest(BaseModel):
     name: str = Field(..., example="Prod-Scanner-Key")
     backend: APIKeyBackend = Field(APIKeyBackend.Z1_SANDBOX)
     ttl_hours: float = Field(1.0, ge=-1.0)  # Default 1 hour, -1 means never expire
+    ttl_seconds: Optional[float] = Field(None, ge=-1.0)
     user_email: Optional[str] = None
 
 

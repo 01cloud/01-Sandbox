@@ -1152,6 +1152,7 @@ const BackendKeysManagement = ({
           name: sanitizedName,
           backend: backendId,
           ttl_seconds,
+          user_email: user?.email || undefined,
         }),
       });
 
