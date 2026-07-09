@@ -803,11 +803,7 @@ export default function RepoScanner() {
                                 )}
                               </div>
                             </div>
-                            {info.findings.length > 0 && (
-                              <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/25 py-0 h-5">
-                                {info.findings.length}
-                              </Badge>
-                            )}
+
                           </div>
                         </button>
 

@@ -1020,35 +1020,16 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
 
   if (inline) {
     return (
-      <div className="w-full h-[calc(100vh-220px)] min-h-[680px] rounded-[2.5rem] border border-border/50 bg-background/30 backdrop-blur-xl flex flex-col overflow-hidden p-0 shadow-2xl animate-in fade-in duration-500">
-        {/* Top Header */}
-        <div className="px-8 py-5 border-b border-border/50 bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
-          <div className="flex items-center gap-4">
-            <div className="p-3 rounded-2xl bg-violet-500/10 border border-violet-500/20 text-violet-500 shrink-0">
-              <ShieldCheck className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-2xl font-display font-black tracking-tight text-foreground">
-                Quick Security Scanner
-              </h2>
-              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.25em] flex items-center gap-2 mt-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] animate-pulse" />
-                Cluster Node: {backend}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Two-Column Layout (Dynamic Partitions) ── */}
-        <ResizablePanelGroup direction="horizontal" className="flex-grow">
-          <ResizablePanel defaultSize={35} minSize={25} maxSize={55} className="flex flex-col h-full overflow-y-auto">
-            <div className="p-5 space-y-4 h-full bg-background/5 flex flex-col">
-              {/* Quick Templates */}
-              <div className="flex flex-col gap-2 shrink-0">
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 block">
-                  Quick Templates
-                </span>
-                <div className="flex flex-wrap gap-1.5">
+      <div className="w-full h-[650px] border-t border-b border-border/30 flex flex-row overflow-hidden p-0 animate-in fade-in duration-500">
+        {/* Left Column: Width 26% */}
+        <div className="w-full md:w-[26%] shrink-0 border-r border-border/30 flex flex-col h-full overflow-y-auto">
+          <div className="p-5 space-y-4 h-full bg-background/5 flex flex-col">
+            {/* Quick Templates */}
+            <div className="flex flex-col gap-2 shrink-0">
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 block">
+                Quick Templates
+              </span>
+              <div className="flex flex-wrap gap-1.5">
                 {CODE_TEMPLATES.map((tmpl) => (
                   <button
                     key={tmpl.name}
@@ -1107,169 +1088,166 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
               </div>
             </div>
 
-              <Button
-                onClick={runScan}
-                disabled={isScanning || !code.trim()}
-                className="h-9 w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all active:scale-[0.98] shrink-0 uppercase tracking-wider mt-2"
-              >
-                {isScanning ? (
-                  <>
-                    <LoadingSpinner size="sm" className="text-current" />
-                    <span>Scanning Snippet...</span>
-                  </>
-                ) : (
-                  <>
-                    <Zap className="w-3.5 h-3.5 fill-current" />
-                    EXECUTE AUDIT
-                  </>
-                )}
-              </Button>
-
-              {/* Stepper inside sidebar for selectedJob */}
-              {selectedJob && (
-                <div className="border-t border-border/10 pt-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300 mt-2 shrink-0">
-                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
-                  <div className="flex flex-col gap-1">
-                    {QUICK_SCAN_STEPS.map((step, i) => {
-                      const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
-                      const isError = selectedJob.status === "ERROR";
-                      const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
-                      const isActive = step.key === selectedJob.status && !isError;
-                      return (
-                        <div key={step.key} className={cn("flex items-center gap-2.5 py-1.5 px-2 rounded-lg transition-all", isActive ? "bg-violet-500/8" : "")}>
-                          <div className={cn("w-4.5 h-4.5 rounded-full flex items-center justify-center shrink-0 border-2 text-[9px] transition-all",
-                            isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
-                              isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
-                                isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
-                                  "border-border text-muted-foreground/35")}>
-                            {isDone ? <CheckCircle2 className="w-2.5 h-2.5" /> : isActive ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <span>{i + 1}</span>}
-                          </div>
-                          <span className={cn("text-[10px] font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/45")}>
-                            {step.label}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="h-1 rounded-full bg-muted/50 overflow-hidden">
-                    <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
-                  </div>
-                  {selectedJob.stepMessage && <p className="text-[10px] text-muted-foreground">{selectedJob.stepMessage}</p>}
-                </div>
+            <Button
+              onClick={runScan}
+              disabled={isScanning || !code.trim()}
+              className="h-9 w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all active:scale-[0.98] shrink-0 uppercase tracking-wider mt-2"
+            >
+              {isScanning ? (
+                <>
+                  <LoadingSpinner size="sm" className="text-current" />
+                  <span>Scanning Snippet...</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3.5 h-3.5 fill-current" />
+                  EXECUTE AUDIT
+                </>
               )}
-            </div>
-          </ResizablePanel>
+            </Button>
 
-          <ResizableHandle withHandle />
-
-          {/* Right Column: Results & Telemetry */}
-          <ResizablePanel defaultSize={65} className="flex flex-col h-full overflow-y-auto p-6 bg-background/5">
-            {/* Ready state */}
-            {!selectedJob && (
-              <div className="h-full rounded-[2rem] border border-border/40 bg-card/15 p-8 flex flex-col justify-between overflow-hidden shadow-inner relative animate-in fade-in duration-500">
-                {/* Decorative top-right glow */}
-                <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full bg-violet-500/10 blur-3xl" />
-
-                {/* Top Section: Header */}
-                <div className="flex flex-col items-center text-center mt-12">
-                  <div className="p-4 rounded-3xl bg-violet-500/10 border border-violet-500/20 text-violet-500 mb-5 relative">
-                    <div className="absolute inset-0 rounded-3xl bg-violet-500/5 animate-ping" />
-                    <ShieldCheck className="w-10 h-10 relative z-10" />
-                  </div>
-                  <h3 className="font-display font-black text-2xl tracking-tight text-foreground">
-                    Security Sandbox Environment
-                  </h3>
-                  <p className="text-sm text-muted-foreground mt-2 max-w-md leading-relaxed">
-                    Submit code snippets to trigger isolated Kubernetes sandbox workloads for static analysis, secret checking, and dependency verification.
-                  </p>
+            {/* Stepper inside sidebar for selectedJob */}
+            {selectedJob && (
+              <div className="border-t border-border/10 pt-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300 mt-2 shrink-0">
+                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
+                <div className="flex flex-col gap-1">
+                  {QUICK_SCAN_STEPS.map((step, i) => {
+                    const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
+                    const isError = selectedJob.status === "ERROR";
+                    const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
+                    const isActive = step.key === selectedJob.status && !isError;
+                    return (
+                      <div key={step.key} className={cn("flex items-center gap-2.5 py-1.5 px-2 rounded-lg transition-all", isActive ? "bg-violet-500/8" : "")}>
+                        <div className={cn("w-4.5 h-4.5 rounded-full flex items-center justify-center shrink-0 border-2 text-[9px] transition-all",
+                          isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
+                            isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
+                              isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
+                                "border-border text-muted-foreground/35")}>
+                          {isDone ? <CheckCircle2 className="w-2.5 h-2.5" /> : isActive ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <span>{i + 1}</span>}
+                        </div>
+                        <span className={cn("text-[10px] font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/45")}>
+                          {step.label}
+                        </span>
+                      </div>
+                    );
+                  })}
                 </div>
-
-                {/* Middle Section: Feature Grid */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-8">
-                  <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
-                    <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 w-fit border border-emerald-500/20">
-                      <Activity className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Isolated Sandboxes</h4>
-                      <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
-                        Every code audit runs in a dedicated micro-pod sandbox.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
-                    <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500 w-fit border border-indigo-500/20">
-                      <FileCode className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Multi-Language</h4>
-                      <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
-                        Auto-detects Python, Go, JavaScript, YAML, and Kubernetes resource files.
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
-                    <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500 w-fit border border-amber-500/20">
-                      <Zap className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Deep Inspections</h4>
-                      <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
-                        Leverages Bandit, GoSec, ESLint, KubeLinter, and regex-based secret scans.
-                      </p>
-                    </div>
-                  </div>
+                <div className="h-1 rounded-full bg-muted/50 overflow-hidden">
+                  <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
                 </div>
-
-                {/* Bottom Section: Footer/Status */}
-                <div className="border-t border-border/30 pt-5 flex items-center justify-between text-muted-foreground/60 text-[10px] font-bold uppercase tracking-widest mt-auto">
-                  <div className="flex items-center gap-1.5">
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] animate-pulse" />
-                    Scanner Engine Active
-                  </div>
-                  <div>
-                    v1.2.0-Alpha
-                  </div>
-                </div>
+                {selectedJob.stepMessage && <p className="text-[10px] text-muted-foreground">{selectedJob.stepMessage}</p>}
               </div>
             )}
+          </div>
+        </div>
 
-            {/* Ingress / Scanning active state */}
-            {selectedJob && selectedJob.status !== "DONE" && selectedJob.status !== "ERROR" && (
-              <div className="max-w-5xl mx-auto w-full">
-                <UnifiedPipelineView
-                  job={selectedJob}
-                  steps={QUICK_SCAN_STEPS}
-                  result={selectedResult}
-                  onResultRender={renderQuickScanResult}
-                  onCancel={handleCancelJob}
-                />
-              </div>
-            )}
+        {/* Right Column: Results & Telemetry */}
+        <div className="flex-grow flex flex-col h-full overflow-y-auto p-6 bg-background/5">
+          {/* Ready state */}
+          {!selectedJob && (
+            <div className="h-full rounded-[2rem] border border-border/40 bg-card/15 p-8 flex flex-col justify-between overflow-hidden shadow-inner relative animate-in fade-in duration-500">
+              {/* Decorative top-right glow */}
+              <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full bg-violet-500/10 blur-3xl" />
 
-            {/* Error state */}
-            {selectedJob && selectedJob.status === "ERROR" && (
-              <div className="rounded-[2rem] border-2 border-destructive/20 bg-destructive/5 p-10 flex flex-col gap-6">
-                <div className="flex items-center gap-4 text-destructive">
-                  <AlertCircle className="w-10 h-10" />
-                  <h2 className="text-2xl font-black tracking-tight">Scan Failed</h2>
+              {/* Top Section: Header */}
+              <div className="flex flex-col items-center text-center mt-12">
+                <div className="p-4 rounded-3xl bg-violet-500/10 border border-violet-500/20 text-violet-500 mb-5 relative">
+                  <div className="absolute inset-0 rounded-3xl bg-violet-500/5 animate-ping" />
+                  <ShieldCheck className="w-10 h-10 relative z-10" />
                 </div>
-                <p className="font-mono text-sm text-destructive/80 bg-black/5 rounded-2xl p-6 border border-destructive/10 leading-relaxed">
-                  {selectedJob.stepMessage || "An unexpected error occurred during sandbox execution."}
+                <h3 className="font-display font-black text-2xl tracking-tight text-foreground">
+                  Security Sandbox Environment
+                </h3>
+                <p className="text-sm text-muted-foreground mt-2 max-w-md leading-relaxed">
+                  Submit code snippets to trigger isolated Kubernetes sandbox workloads for static analysis, secret checking, and dependency verification.
                 </p>
               </div>
-            )}
 
-            {/* Finished / Done state */}
-            {selectedJob && selectedJob.status === "DONE" && selectedResult && (
-              <div className="max-w-5xl mx-auto w-full">
-                {renderQuickScanResult(selectedResult)}
+              {/* Middle Section: Feature Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-8">
+                <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
+                  <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 w-fit border border-emerald-500/20">
+                    <Activity className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Isolated Sandboxes</h4>
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
+                      Every code audit runs in a dedicated micro-pod sandbox.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
+                  <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500 w-fit border border-indigo-500/20">
+                    <FileCode className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Multi-Language</h4>
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
+                      Auto-detects Python, Go, JavaScript, YAML, and Kubernetes resource files.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
+                  <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500 w-fit border border-amber-500/20">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Deep Inspections</h4>
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
+                      Leverages Bandit, GoSec, ESLint, KubeLinter, and regex-based secret scans.
+                    </p>
+                  </div>
+                </div>
               </div>
-            )}
-          </ResizablePanel>
-        </ResizablePanelGroup>
+
+              {/* Bottom Section: Footer/Status */}
+              <div className="border-t border-border/30 pt-5 flex items-center justify-between text-muted-foreground/60 text-[10px] font-bold uppercase tracking-widest mt-auto">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] animate-pulse" />
+                  Scanner Engine Active
+                </div>
+                <div>
+                  v1.2.0-Alpha
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Ingress / Scanning active state */}
+          {selectedJob && selectedJob.status !== "DONE" && selectedJob.status !== "ERROR" && (
+            <div className="max-w-5xl mx-auto w-full">
+              <UnifiedPipelineView
+                job={selectedJob}
+                steps={QUICK_SCAN_STEPS}
+                result={selectedResult}
+                onResultRender={renderQuickScanResult}
+                onCancel={handleCancelJob}
+              />
+            </div>
+          )}
+
+          {/* Error state */}
+          {selectedJob && selectedJob.status === "ERROR" && (
+            <div className="rounded-[2rem] border-2 border-destructive/20 bg-destructive/5 p-10 flex flex-col gap-6">
+              <div className="flex items-center gap-4 text-destructive">
+                <AlertCircle className="w-10 h-10" />
+                <h2 className="text-2xl font-black tracking-tight">Scan Failed</h2>
+              </div>
+              <p className="font-mono text-sm text-destructive/80 bg-black/5 rounded-2xl p-6 border border-destructive/10 leading-relaxed">
+                {selectedJob.stepMessage || "An unexpected error occurred during sandbox execution."}
+              </p>
+            </div>
+          )}
+
+          {/* Finished / Done state */}
+          {selectedJob && selectedJob.status === "DONE" && selectedResult && (
+            <div className="max-w-5xl mx-auto w-full">
+              {renderQuickScanResult(selectedResult)}
+            </div>
+          )}
+        </div>
       </div>
     );
   }

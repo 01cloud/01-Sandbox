@@ -476,11 +476,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                           )}
                         </div>
                       </div>
-                      {info.findings.length > 0 && (
-                        <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/25 py-0 h-5">
-                          {info.findings.length}
-                        </Badge>
-                      )}
+
                     </div>
                   </button>
                   {expandedLang === lang && (
@@ -543,182 +539,163 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
 
   if (inline) {
     return (
-      <div className="w-full h-[calc(100vh-220px)] min-h-[680px] rounded-[2.5rem] border border-border/50 bg-background/30 backdrop-blur-xl flex flex-col overflow-hidden p-0 shadow-2xl animate-in fade-in duration-500">
-        {/* ── Header ── */}
-        <div className="px-8 py-5 border-b border-border/50 bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
-          <div className="flex items-center gap-4">
-            <div className="p-2.5 rounded-xl bg-violet-500/10 border border-violet-500/20 text-violet-500 shadow-[0_0_20px_rgba(139,92,246,0.15)]">
-              <Github className="w-5 h-5" />
+      <div className="w-full h-[650px] border-t border-b border-border/30 flex flex-row overflow-hidden p-0 animate-in fade-in duration-500">
+        {/* Left Sidebar: Input + Scans */}
+        <div className="w-full md:w-[22%] shrink-0 border-r border-border/30 flex flex-col h-full overflow-hidden p-4 space-y-4">
+          {/* Box 1: REPOSITORY URL Input & Button */}
+          <div className="flex flex-col gap-4 shrink-0 px-1 py-2">
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <label htmlFor="repo-url-input-inline" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75">
+                  Repository URL
+                </label>
+                {isValidating && <Loader2 className="w-3 h-3 animate-spin text-violet-500" />}
+              </div>
+              <Input
+                id="repo-url-input-inline"
+                value={repoUrl}
+                onChange={(e) => {
+                  setRepoUrl(e.target.value);
+                  validateUrl(e.target.value);
+                  if (!e.target.value) {
+                    setRequiresAuth(false);
+                    setGitToken("");
+                    setSshKey("");
+                  }
+                }}
+                onBlur={handleUrlBlur}
+                placeholder="https://github.com/owner/repo"
+                className={cn("rounded-lg h-10 font-mono text-xs border border-border/50 bg-background/50 text-foreground placeholder:text-muted-foreground/45 transition-colors focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20", urlError ? "border-red-500/50" : "")}
+                disabled={isScanning}
+              />
+              {urlError && <p className="text-[10px] text-red-500 font-medium">{urlError}</p>}
             </div>
-            <div>
-              <h2 className="text-2xl font-display font-black tracking-tight text-foreground">GitHub Repository Scanner</h2>
-            </div>
+
+            {requiresAuth && (
+              <div className="border-t border-violet-500/25 pt-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-1.5 text-violet-500 font-bold text-[10px] uppercase tracking-wider">
+                    <Shield className="w-3.5 h-3.5" />
+                    Private Repo
+                  </div>
+                  <div className="flex bg-muted/30 rounded-md p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => setAuthMethod("token")}
+                      className={cn(
+                        "px-2.5 py-1 text-[9px] font-black uppercase rounded transition-all",
+                        authMethod === "token"
+                          ? "bg-violet-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      Token
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setAuthMethod("ssh")}
+                      className={cn(
+                        "px-2.5 py-1 text-[9px] font-black uppercase rounded transition-all",
+                        authMethod === "ssh"
+                          ? "bg-violet-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      SSH Key
+                    </button>
+                  </div>
+                </div>
+
+                {authMethod === "token" ? (
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="git-token-input-inline" className="text-[8px] font-black uppercase tracking-wider text-muted-foreground/60">
+                      Personal Access Token (PAT)
+                    </label>
+                    <Input
+                      id="git-token-input-inline"
+                      type="password"
+                      value={gitToken}
+                      onChange={(e) => setGitToken(e.target.value)}
+                      placeholder="ghp_xxxxxxxxxxxx"
+                      className="rounded-lg h-9 font-mono text-[11px] border border-border/50 bg-background/50 text-foreground/90 focus:border-violet-500/40"
+                    />
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1.5">
+                    <label htmlFor="ssh-key-input-inline" className="text-[8px] font-black uppercase tracking-wider text-muted-foreground/60">
+                      SSH Private Key
+                    </label>
+                    <textarea
+                      id="ssh-key-input-inline"
+                      value={sshKey}
+                      onChange={(e) => setSshKey(e.target.value)}
+                      placeholder="Paste your SSH Private Key here..."
+                      className="rounded-lg min-h-[100px] p-3 font-mono text-[11px] border border-border/50 bg-background/50 text-foreground/90 focus:border-violet-500/40 focus:outline-none focus:ring-1 focus:ring-violet-500/20 resize-y"
+                    />
+                  </div>
+                )}
+              </div>
+            )}
+
+            <Button
+              id="scan-repo-btn-inline"
+              onClick={handleScan}
+              disabled={isScanning || !!urlError || !repoUrl}
+              className="w-full h-9 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
+            >
+              {isScanning ? <><Loader2 className="w-3 h-3 animate-spin" /> Ingesting...</> : <><Search className="w-3 h-3" /> Scan Repository</>}
+            </Button>
+          </div>
+
+          <div className="flex items-center justify-between px-1 shrink-0">
+            <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
+              Repository Scans
+            </span>
+            <span className="text-[9px] text-muted-foreground/60 font-semibold tracking-wider uppercase">
+              Recent ({jobs.length})
+            </span>
+          </div>
+
+          <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
+            <JobsPanel
+              jobs={jobs}
+              selectedJobId={selectedJobId}
+              onSelectJob={setSelectedJobId}
+              onDeleteJob={removeJob}
+              jobType="repo-scan"
+              embedded={true}
+            />
           </div>
         </div>
 
-        {/* ── Two-Column Layout (Dynamic Partitions) ── */}
-        <ResizablePanelGroup direction="horizontal" className="flex-grow">
-          {/* Left Sidebar: Input + Scans */}
-          <ResizablePanel defaultSize={30} minSize={20} maxSize={45} className="flex flex-col h-full overflow-hidden">
-            <div className="flex flex-col h-full overflow-hidden p-4 space-y-4">
-              {/* Box 1: REPOSITORY URL Input & Button */}
-              <div className="flex flex-col gap-4 shrink-0 px-1 py-2">
-                <div className="flex flex-col gap-2">
-                  <div className="flex items-center justify-between">
-                    <label htmlFor="repo-url-input-inline" className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75">
-                      Repository URL
-                    </label>
-                    {isValidating && <Loader2 className="w-3 h-3 animate-spin text-violet-500" />}
-                  </div>
-                  <Input
-                    id="repo-url-input-inline"
-                    value={repoUrl}
-                    onChange={(e) => {
-                      setRepoUrl(e.target.value);
-                      validateUrl(e.target.value);
-                      if (!e.target.value) {
-                        setRequiresAuth(false);
-                        setGitToken("");
-                        setSshKey("");
-                      }
-                    }}
-                    onBlur={handleUrlBlur}
-                    placeholder="https://github.com/owner/repo"
-                    className={cn("rounded-lg h-10 font-mono text-xs border border-border/50 bg-background/50 text-foreground placeholder:text-muted-foreground/45 transition-colors focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20", urlError ? "border-red-500/50" : "")}
-                    disabled={isScanning}
-                  />
-                  {urlError && <p className="text-[10px] text-red-500 font-medium">{urlError}</p>}
-                </div>
-
-                {requiresAuth && (
-                  <div className="border-t border-violet-500/25 pt-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-violet-500 font-bold text-[10px] uppercase tracking-wider">
-                        <Shield className="w-3.5 h-3.5" />
-                        Private Repo
-                      </div>
-                      <div className="flex bg-muted/30 rounded-md p-0.5">
-                        <button
-                          type="button"
-                          onClick={() => setAuthMethod("token")}
-                          className={cn(
-                            "px-2.5 py-1 text-[9px] font-black uppercase rounded transition-all",
-                            authMethod === "token"
-                              ? "bg-violet-600 text-white shadow-sm"
-                              : "text-muted-foreground hover:text-foreground"
-                          )}
-                        >
-                          Token
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setAuthMethod("ssh")}
-                          className={cn(
-                            "px-2.5 py-1 text-[9px] font-black uppercase rounded transition-all",
-                            authMethod === "ssh"
-                              ? "bg-violet-600 text-white shadow-sm"
-                              : "text-muted-foreground hover:text-foreground"
-                          )}
-                        >
-                          SSH Key
-                        </button>
-                      </div>
-                    </div>
-
-                    {authMethod === "token" ? (
-                      <div className="flex flex-col gap-1.5">
-                        <label htmlFor="git-token-input-inline" className="text-[8px] font-black uppercase tracking-wider text-muted-foreground/60">
-                          Personal Access Token (PAT)
-                        </label>
-                        <Input
-                          id="git-token-input-inline"
-                          type="password"
-                          value={gitToken}
-                          onChange={(e) => setGitToken(e.target.value)}
-                          placeholder="ghp_xxxxxxxxxxxx"
-                          className="rounded-lg h-9 font-mono text-[11px] border border-border/50 bg-background/50 text-foreground/90 focus:border-violet-500/40"
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex flex-col gap-1.5">
-                        <label htmlFor="ssh-key-input-inline" className="text-[8px] font-black uppercase tracking-wider text-muted-foreground/60">
-                          SSH Private Key
-                        </label>
-                        <textarea
-                          id="ssh-key-input-inline"
-                          value={sshKey}
-                          onChange={(e) => setSshKey(e.target.value)}
-                          placeholder="Paste your SSH Private Key here..."
-                          className="rounded-lg min-h-[100px] p-3 font-mono text-[11px] border border-border/50 bg-background/50 text-foreground/90 focus:border-violet-500/40 focus:outline-none focus:ring-1 focus:ring-violet-500/20 resize-y"
-                        />
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                <Button
-                  id="scan-repo-btn-inline"
-                  onClick={handleScan}
-                  disabled={isScanning || !!urlError || !repoUrl}
-                  className="w-full h-9 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
-                >
-                  {isScanning ? <><Loader2 className="w-3 h-3 animate-spin" /> Ingesting...</> : <><Search className="w-3 h-3" /> Scan Repository</>}
-                </Button>
-              </div>
-
-              <div className="flex items-center justify-between px-1 shrink-0">
-                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
-                  Repository Scans
-                </span>
-                <span className="text-[9px] text-muted-foreground/60 font-semibold tracking-wider uppercase">
-                  Recent ({jobs.length})
-                </span>
-              </div>
-
-              <div className="flex-1 min-h-0 overflow-hidden flex flex-col">
-                <JobsPanel
-                  jobs={jobs}
-                  selectedJobId={selectedJobId}
-                  onSelectJob={setSelectedJobId}
-                  onDeleteJob={removeJob}
-                  jobType="repo-scan"
-                  embedded={true}
+        {/* Right Panel: Pipeline + Results */}
+        <div className="flex-grow flex flex-col h-full overflow-hidden bg-background">
+          <ScrollArea className="flex-grow">
+            <div className="w-full p-6">
+              {selectedJob ? (
+                <UnifiedPipelineView
+                  job={selectedJob}
+                  steps={REPO_SCAN_STEPS}
+                  result={selectedResult}
+                  onResultRender={renderRepoScanResult}
+                  onCancel={handleCancelJob}
                 />
-              </div>
-            </div>
-          </ResizablePanel>
-
-          <ResizableHandle withHandle />
-
-          {/* Right Panel: Pipeline + Results */}
-          <ResizablePanel defaultSize={70} className="flex flex-col h-full overflow-hidden bg-background">
-            <ScrollArea className="flex-grow">
-              <div className="w-full p-6">
-                {selectedJob ? (
-                  <UnifiedPipelineView
-                    job={selectedJob}
-                    steps={REPO_SCAN_STEPS}
-                    result={selectedResult}
-                    onResultRender={renderRepoScanResult}
-                    onCancel={handleCancelJob}
-                  />
-                ) : (
-                  <div className="h-[60vh] flex flex-col items-center justify-center text-center gap-4">
-                    <div className="w-16 h-16 rounded-2xl bg-violet-500/5 border border-violet-500/10 flex items-center justify-center">
-                      <Activity className="w-7 h-7 text-violet-500/30" />
-                    </div>
-                    <div>
-                      <h3 className="text-sm font-black uppercase tracking-wider text-muted-foreground/45">No Scan Selected</h3>
-                      <p className="text-xs text-muted-foreground/35 mt-1">
-                        Select a repository scan job from the panel or run a new scan.
-                      </p>
-                    </div>
+              ) : (
+                <div className="h-[50vh] flex flex-col items-center justify-center text-center gap-4">
+                  <div className="w-16 h-16 rounded-2xl bg-violet-500/5 border border-violet-500/10 flex items-center justify-center">
+                    <Activity className="w-7 h-7 text-violet-500/30" />
                   </div>
-                )}
-              </div>
-            </ScrollArea>
-          </ResizablePanel>
-        </ResizablePanelGroup>
+                  <div>
+                    <h3 className="text-sm font-black uppercase tracking-wider text-muted-foreground/45">No Scan Selected</h3>
+                    <p className="text-xs text-muted-foreground/35 mt-1">
+                      Select a repository scan job from the panel or run a new scan.
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </ScrollArea>
+        </div>
       </div>
     );
   }
