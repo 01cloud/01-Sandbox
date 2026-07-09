@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.6.15](https://github.com/01cloud/01-Sandbox/compare/v0.6.14...v0.6.15) (2026-07-09)
+
+
+### 🚀 New Features
+
+* integrate repo scanner as inline tab in developer dashboard ([4541b19](https://github.com/01cloud/01-Sandbox/commit/4541b19d4f2a2099c8633e4b27d705d8a3782390))
+
+
+### 🐛 Bug Fixes
+
+* scrollbar in jobpanel ([269ebec](https://github.com/01cloud/01-Sandbox/commit/269ebecf84f6751e8ef90e593497a969af864e88))
+* scrollbar in jobpanel ([983a913](https://github.com/01cloud/01-Sandbox/commit/983a913a7f77f9b8c2bfba8b243ed4949d016e4d))
+* scrollbar in jobpanel ([c4927f3](https://github.com/01cloud/01-Sandbox/commit/c4927f334ef75a2a621a38a0214263f56f345640))
+* ui enhancement ([cefed01](https://github.com/01cloud/01-Sandbox/commit/cefed015f95210b36457f1dfa178329c6ffc968b))
+* ui enhancement ([4eabffe](https://github.com/01cloud/01-Sandbox/commit/4eabffedfd67a3e98f51c0cb5842b89c69e8b838))
+* ui enhancement and backend enhancement ([5448a0b](https://github.com/01cloud/01-Sandbox/commit/5448a0baa777bd7293f266ec9a164406793686de))
+
+
+### 📖 Documentation
+
+* add details on scan-jobs payload format and subPath mechanics ([bc46af6](https://github.com/01cloud/01-Sandbox/commit/bc46af6ab5fe23bfe7a412b5694d64160e2292e3))
+* add Summary - Overview section at top of document ([ad2ce09](https://github.com/01cloud/01-Sandbox/commit/ad2ce095f659aacb0015bd25796d307ca854f4ad))
+* clarify worker as consumer in prefetch doc ([e3479e5](https://github.com/01cloud/01-Sandbox/commit/e3479e54daed0db28eac616dd2f29e8fb608a1cf))
+* generate RELEASE.md for v0.6.14 [skip ci] ([a38bf26](https://github.com/01cloud/01-Sandbox/commit/a38bf262658860f05c388a26d4f8b4e987de7acc))
+* **readme:** update the readme file ([1d4342b](https://github.com/01cloud/01-Sandbox/commit/1d4342b8709198e2ac120a6e705684f961771344))
+* **readme:** update the readme file ([06f61d6](https://github.com/01cloud/01-Sandbox/commit/06f61d6c93ec4581ff3a26a4765dc485f6dd97c3))
+* **readme:** update the readme file ([38de8ca](https://github.com/01cloud/01-Sandbox/commit/38de8cad2f687714b48896f5c96c88103b015407))
+* **readme:** update the readme file ([5d0d131](https://github.com/01cloud/01-Sandbox/commit/5d0d131540e68d84e312593b1bc730f103edf012))
+* **readme:** update the readme file ([fee5819](https://github.com/01cloud/01-Sandbox/commit/fee58199ed47d2c288f2a9aa203d3a36521bf6f4))
+* **repo-scanner:** document local workspace deletion guarantee ([004b74d](https://github.com/01cloud/01-Sandbox/commit/004b74d09c503c5629dd221ae0a29283b13abe48))
+* **repo-scanner:** integrate pillars into architecture overview ([c5c279c](https://github.com/01cloud/01-Sandbox/commit/c5c279c1deb7be305c2edcc8b62f9e54bb3abc1c))
+* **repo-scanner:** restructure summary execution sequence ([b237970](https://github.com/01cloud/01-Sandbox/commit/b23797022e029ff759c1e4a938ca95f977ebf32a))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.14 [skip ci] ([717ccea](https://github.com/01cloud/01-Sandbox/commit/717ccea8b9f92f30667c25774eff9550e9a1a60b))
+
 ## [0.6.14](https://github.com/01cloud/01-Sandbox/compare/v0.6.13...v0.6.14) (2026-07-07)
 
 
