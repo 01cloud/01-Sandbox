@@ -85,14 +85,70 @@ class AppState:
                 self.use_redis = False
 
     def get_db_conn(self):
-        conn = psycopg2.connect(
-            host=os.environ.get("PG_HOST"),
-            port=os.environ.get("PG_PORT"),
-            user=os.environ.get("PG_USER"),
-            password=os.environ.get("PG_PASSWORD"),
-            dbname=os.environ.get("PG_DATABASE"),
-        )
-        return InstrumentedConnection(conn)
+        if os.environ.get("PG_HOST"):
+            try:
+                conn = psycopg2.connect(
+                    host=os.environ.get("PG_HOST"),
+                    port=os.environ.get("PG_PORT"),
+                    user=os.environ.get("PG_USER"),
+                    password=os.environ.get("PG_PASSWORD"),
+                    dbname=os.environ.get("PG_DATABASE"),
+                )
+                return InstrumentedConnection(conn)
+            except Exception as e:
+                print(
+                    f"[db] Failed to connect to PostgreSQL: {e}. Falling back to SQLite."
+                )
+
+        import sqlite3
+
+        class SQLiteCursor:
+            def __init__(self, cursor):
+                self._cursor = cursor
+
+            def execute(self, query, params=None):
+                query = query.replace("%s", "?")
+                if params is not None:
+                    self._cursor.execute(query, params)
+                else:
+                    self._cursor.execute(query)
+
+            def fetchone(self):
+                row = self._cursor.fetchone()
+                if row is None:
+                    return None
+                return row
+
+            def fetchall(self):
+                return self._cursor.fetchall()
+
+            @property
+            def rowcount(self):
+                return self._cursor.rowcount
+
+            def close(self):
+                self._cursor.close()
+
+        class SQLiteConnection:
+            def __init__(self, conn):
+                self._conn = conn
+
+            def cursor(self, cursor_factory=None):
+                self._conn.row_factory = sqlite3.Row
+                return SQLiteCursor(self._conn.cursor())
+
+            def commit(self):
+                self._conn.commit()
+
+            def rollback(self):
+                self._conn.rollback()
+
+            def close(self):
+                self._conn.close()
+
+        db_path = os.environ.get("SQLITE_DB_PATH", "/tmp/test_apikeys.db")
+        sqlite_conn = sqlite3.connect(db_path)
+        return SQLiteConnection(sqlite_conn)
 
     def init_db(self):
         conn = self.get_db_conn()
@@ -121,6 +177,18 @@ class AppState:
                 is_revoked INTEGER DEFAULT 0,
                 prefix TEXT,
                 expiry_notification_sent INTEGER DEFAULT 0
+            )
+        """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_subscriptions (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                backend_id TEXT NOT NULL,
+                status TEXT DEFAULT 'active',
+                created_at TEXT,
+                CONSTRAINT unique_user_backend UNIQUE (user_id, backend_id)
             )
         """
         )

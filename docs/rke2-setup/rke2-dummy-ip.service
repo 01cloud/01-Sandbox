@@ -1,0 +1,16 @@
+[Unit]
+Description=RKE2 Dummy Interface with Static IP
+After=network.target
+Before=rke2-server.service rke2-agent.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=-/sbin/ip link delete dev rke2-dummy
+ExecStart=/sbin/ip link add dev rke2-dummy type dummy
+ExecStart=/sbin/ip address add 192.168.99.1/24 dev rke2-dummy
+ExecStart=/sbin/ip link set dev rke2-dummy up
+ExecStop=/sbin/ip link delete dev rke2-dummy
+
+[Install]
+WantedBy=multi-user.target

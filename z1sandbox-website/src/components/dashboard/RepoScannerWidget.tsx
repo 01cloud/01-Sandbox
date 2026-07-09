@@ -19,6 +19,7 @@ interface RepoScannerWidgetProps {
   authToken?: string;
   inline?: boolean;
   onSwitchTab?: (tab: string) => void;
+  backendId?: string;
 }
 
 const REPO_SCAN_STEPS = [
@@ -37,7 +38,7 @@ const LANG_COLORS = [
 
 const GITHUB_PATTERN = /^https:\/\/github\.com\/[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+\/?$/;
 
-export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline = false, onSwitchTab }: RepoScannerWidgetProps) {
+export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline = false, onSwitchTab, backendId = "Z1_SANDBOX" }: RepoScannerWidgetProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [repoUrl, setRepoUrl] = useState("");
   const [urlError, setUrlError] = useState("");
@@ -207,7 +208,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
 
       for (const url of urls) {
         try {
-          const bodyPayload: any = { repo_url: url };
+          const bodyPayload: any = { repo_url: url, backend_id: backendId };
           if (requiresAuth) {
             if (authMethod === "token" && gitToken.trim()) {
               bodyPayload.git_token = gitToken.trim();
@@ -545,7 +546,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
 
   if (inline) {
     return (
-      <div className="w-full h-[78vh] rounded-[2.5rem] border border-border/50 bg-background/30 backdrop-blur-xl flex flex-col overflow-hidden p-0 shadow-2xl">
+      <div className="w-full h-[calc(100vh-220px)] min-h-[680px] rounded-[2.5rem] border border-border/50 bg-background/30 backdrop-blur-xl flex flex-col overflow-hidden p-0 shadow-2xl animate-in fade-in duration-500">
         {/* ── Header ── */}
         <div className="px-8 py-5 border-b border-border/50 bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
           <div className="flex items-center gap-4">
@@ -553,7 +554,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
               <Github className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-lg font-black tracking-tight text-foreground">GitHub Repository Scanner</h2>
+              <h2 className="text-2xl font-display font-black tracking-tight text-foreground">GitHub Repository Scanner</h2>
             </div>
           </div>
         </div>
@@ -561,7 +562,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
         {/* ── Two-Column Layout ── */}
         <div className="flex-1 flex overflow-hidden">
           {/* Left Sidebar: Input + Scans */}
-          <div className="w-[310px] shrink-0 flex flex-col h-full overflow-hidden p-4 space-y-4 border-r border-border/40">
+          <div className="w-[360px] shrink-0 flex flex-col h-full overflow-hidden p-4 space-y-4 border-r border-border/40">
             {/* Box 1: REPOSITORY URL Input & Button */}
             <div className="rounded-[1.25rem] border border-border/50 bg-card p-4 flex flex-col gap-4 shadow-sm shrink-0">
               <div className="flex flex-col gap-2">
@@ -661,9 +662,9 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                 id="scan-repo-btn-inline"
                 onClick={handleScan}
                 disabled={isScanning || !!urlError || !repoUrl}
-                className="w-full h-10 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(139,92,246,0.15)] transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
+                className="w-full h-9 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
               >
-                {isScanning ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Ingesting...</> : <><Search className="w-3.5 h-3.5" /> Scan Repository</>}
+                {isScanning ? <><Loader2 className="w-3 h-3 animate-spin" /> Ingesting...</> : <><Search className="w-3 h-3" /> Scan Repository</>}
               </Button>
             </div>
 
@@ -764,7 +765,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                 <Github className="w-5 h-5" />
               </div>
               <div>
-                <DialogTitle className="text-lg font-black tracking-tight text-foreground">GitHub Repository Scanner</DialogTitle>
+                <DialogTitle className="text-2xl font-display font-black tracking-tight text-foreground">GitHub Repository Scanner</DialogTitle>
               </div>
             </div>
           </DialogHeader>
@@ -773,7 +774,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
           <div className="flex-1 flex overflow-hidden">
 
             {/* Left Sidebar: Input + Scans */}
-            <div className="w-[310px] shrink-0 flex flex-col h-full overflow-hidden p-4 space-y-4">
+            <div className="w-[360px] shrink-0 flex flex-col h-full overflow-hidden p-4 space-y-4">
 
               {/* Box 1: REPOSITORY URL Input & Button */}
               <div className="rounded-[1.25rem] border border-border bg-card p-4 flex flex-col gap-4 shadow-sm shrink-0">
@@ -880,9 +881,9 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                   id="scan-repo-btn"
                   onClick={handleScan}
                   disabled={isScanning || !!urlError || !repoUrl}
-                  className="w-full h-10 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-[0_0_20px_rgba(139,92,246,0.15)] transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
+                  className="w-full h-9 rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all disabled:opacity-40 disabled:shadow-none shrink-0 uppercase tracking-wider"
                 >
-                  {isScanning ? <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Ingesting...</> : <><Search className="w-3.5 h-3.5" /> Scan Repository</>}
+                  {isScanning ? <><Loader2 className="w-3 h-3 animate-spin" /> Ingesting...</> : <><Search className="w-3 h-3" /> Scan Repository</>}
                 </Button>
               </div>
 

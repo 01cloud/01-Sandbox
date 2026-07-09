@@ -34,6 +34,10 @@ class RepoScanRequest(BaseModel):
         None,
         description="Optional SSH Private Key (deploy key) for private SSH repositories",
     )
+    backend_id: Optional[str] = Field(
+        "Z1_SANDBOX",
+        description="Target backend for scan execution gating",
+    )
 
     @validator("repo_url")
     def strip_whitespace(cls, v: str) -> str:

@@ -277,7 +277,7 @@ async def test_validate_token_identity_mismatch(mock_get_header, mock_decode):
             "user_a",
             "user_a@example.com",
             "2026-07-07T12:00:00Z",
-            "2026-07-08T12:00:00Z",
+            "2036-07-08T12:00:00Z",
             "ci_123",
         ),
     )
@@ -328,7 +328,7 @@ async def test_validate_token_revoked_key(mock_get_header, mock_decode):
             "user_a",
             "user_a@example.com",
             "2026-07-07T12:00:00Z",
-            "2026-07-08T12:00:00Z",
+            "2036-07-08T12:00:00Z",
             "ci_rev",
         ),
     )

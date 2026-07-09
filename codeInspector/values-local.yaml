@@ -1,0 +1,45 @@
+# Local development overrides for codeInspector Helm deployment
+# To deploy: helm upgrade --install codeinspector ./codeInspector -f ./codeInspector/values.yaml -f ./codeInspector/values-local.yaml
+
+apiServer:
+  sealedSecrets:
+    enabled: false
+  configMap:
+    AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com"
+    AUTH0_AUDIENCE: "https://code-inspector-api"
+  deployment:
+    image:
+      repository: 199012118961/01sandbox-api
+      tag: "dev"
+
+opensandbox:
+  controller:
+    image:
+      repository: 199012118961/01sandbox-opensandbox-controller
+      tag: "dev"
+  server:
+    sandboxImage: "199012118961/01sandbox-codeinterpreter:dev"
+    image:
+      repository: 199012118961/01sandbox-opensandbox-server
+      tag: "dev"
+
+metallb:
+  enabled: true
+  ipAddressPool:
+    addresses:
+      - 10.0.8.9-10.0.8.9
+
+agentgateway:
+  enabled: true
+  httproute:
+    hostnames:
+      - api-sandbox.01security.com
+      - 10.0.8.9
+      - localhost
+      - 127.0.0.1
+  gateway:
+    addresses:
+      - value: 10.0.8.9
+
+sealed-secrets:
+  enabled: false

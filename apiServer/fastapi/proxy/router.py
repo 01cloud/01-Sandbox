@@ -22,6 +22,63 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from sandboxes.models import ScanJobRequest, ScanJobResponse
 
 
+async def check_backend_subscription(backend_id: str, user_data: dict, state):
+    user_id = user_data.get("sub")
+    if not user_id:
+        return
+
+    b_id_upper = backend_id.upper()
+    if b_id_upper.replace("_", "").replace("-", "") in (
+        "01SBX",
+        "Z1SANDBOX",
+        "OPENSANDBOX",
+        "Z1_SANDBOX",
+    ):
+        b_id_normalized = "Z1_SANDBOX"
+    else:
+        b_id_normalized = b_id_upper
+
+    # 1. Scope restriction for API keys
+    token_backend = user_data.get("backend")
+    if token_backend:
+        token_b_upper = token_backend.upper()
+        if token_b_upper.replace("_", "").replace("-", "") in (
+            "01SBX",
+            "Z1SANDBOX",
+            "OPENSANDBOX",
+            "Z1_SANDBOX",
+        ):
+            token_b_normalized = "Z1_SANDBOX"
+        else:
+            token_b_normalized = token_b_upper
+
+        if token_b_normalized != b_id_normalized:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"API Key is scoped to backend '{token_backend}', but requested '{backend_id}'.",
+            )
+
+    # 2. Universal accessibility check for the default sandbox
+    if b_id_normalized == "Z1_SANDBOX":
+        return
+
+    # 3. Active subscription database validation
+    conn = state.get_db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT status FROM user_subscriptions WHERE LOWER(user_id) = LOWER(%s) AND backend_id = %s",
+        (user_id, b_id_normalized),
+    )
+    row = cursor.fetchone()
+    conn.close()
+
+    if not row or row[0] != "active":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Subscription to backend '{backend_id}' is required.",
+        )
+
+
 def get_proxy_router(state, validate_token: Callable) -> APIRouter:
     router = APIRouter()
 
@@ -204,6 +261,7 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
         Intercepts proxy requests to scan-jobs to enforce background async execution
         with full job-tracker lifecycle (QUEUED → PROVISIONING → SCANNING → DONE).
         """
+        await check_backend_subscription(backend_id, user_data, state)
         import datetime
 
         job_id = str(uuid.uuid4())
@@ -519,15 +577,19 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
         methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         tags=["Proxy Backend"],
         summary="Dynamic Versioned Proxy Request",
-        dependencies=[Depends(validate_token)],
     )
     async def dynamic_versioned_proxy(
-        version: str, backend_id: str, proxy_path: str, request: Request
+        version: str,
+        backend_id: str,
+        proxy_path: str,
+        request: Request,
+        user_data: dict = Depends(validate_token),
     ):
         """
         Catch-all for URLs like /api/v1/01sbx/scan-jobs
         Funnels directly to the backend while preserving the full path.
         """
+        await check_backend_subscription(backend_id, user_data, state)
         full_proxy_path = f"/api/{version}/{backend_id}/{proxy_path}"
         return await _do_proxy(backend_id, full_proxy_path, request)
 
@@ -536,12 +598,17 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
         methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
         tags=["Proxy Backend"],
         summary="Legacy Dynamic Proxy Request",
-        dependencies=[Depends(validate_token)],
     )
-    async def dynamic_proxy(backend_id: str, proxy_path: str, request: Request):
+    async def dynamic_proxy(
+        backend_id: str,
+        proxy_path: str,
+        request: Request,
+        user_data: dict = Depends(validate_token),
+    ):
         """
         Legacy support for /api/z1sandbox/docs style URLs
         """
+        await check_backend_subscription(backend_id, user_data, state)
         full_proxy_path = f"/api/{backend_id}/{proxy_path}"
         return await _do_proxy(backend_id, full_proxy_path, request)
 

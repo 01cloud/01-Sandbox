@@ -39,14 +39,16 @@ export function JobsPanel({
         : "w-[320px] shrink-0 border-r border-border/50 bg-muted/10 animate-in slide-in-from-left duration-300"
     )}>
       {/* Header */}
-      <div className={cn("flex flex-col gap-1 shrink-0", embedded ? "p-4 pb-2 border-b border-border/15" : "p-5 border-b border-border/50")}>
-        <h3 className={cn("text-sm font-black uppercase tracking-wider", embedded ? "text-white/80" : "text-foreground")}>
-          {jobType === "repo-scan" ? "Repository Scans" : "Quick Scans"}
-        </h3>
-        <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">
-          Recent Executions ({jobs.length})
-        </p>
-      </div>
+      {!embedded && (
+        <div className="p-5 border-b border-border/50 shrink-0">
+          <h3 className="text-sm font-black uppercase tracking-wider text-foreground">
+            {jobType === "repo-scan" ? "Repository Scans" : "Quick Scans"}
+          </h3>
+          <p className="text-[10px] font-bold text-muted-foreground/50 uppercase tracking-wider">
+            Recent Executions ({jobs.length})
+          </p>
+        </div>
+      )}
 
       {/* Scrollable list of jobs */}
       <ScrollArea className="flex-1">
@@ -179,7 +181,7 @@ export function JobsPanel({
 
                   {/* Expanded language statuses for selected repository scans */}
                   {isSelected && jobType === "repo-scan" && job.detail?.languages && Object.keys(job.detail.languages).length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-border/20 flex flex-col gap-2 bg-muted/30 rounded-lg p-2.5">
+                    <div className="mt-3 pt-3 border-t border-border/20 flex flex-col gap-2 bg-muted/30 rounded-lg p-2">
                       <p className="text-[9px] font-black uppercase tracking-wider text-muted-foreground mb-1">
                         Language Pipeline
                       </p>
@@ -188,7 +190,7 @@ export function JobsPanel({
                           const statusStr = typeof status === "string" ? status : "DONE";
                           const isPending = statusStr === "PENDING";
                           const isScanningLang = statusStr === "SCANNING";
-                          const isDone = statusStr === "DONE";
+                          const isDone = statusStr === "DONE" || statusStr === "COMPLETE";
                           const isFailed = statusStr === "FAILED";
 
                           return (
@@ -204,7 +206,7 @@ export function JobsPanel({
                                 )}
                               >
                                 {isScanningLang && <Loader2 className="w-2.5 h-2.5 animate-spin shrink-0" />}
-                                {statusStr === "PENDING" ? "Pending" : statusStr === "SCANNING" ? "Scanning" : statusStr === "DONE" ? "Complete" : "Failed"}
+                                {isPending ? "Pending" : isScanningLang ? "Scanning" : isDone ? "Complete" : "Failed"}
                               </span>
                             </div>
                           );
