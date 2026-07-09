@@ -91,7 +91,10 @@ async def list_jobs(job_type: str, user_data: dict = Depends(validate_token)):
                 if metadata.get("user_id") != user_id:
                     continue
 
-                status = r.get(key)
+                status_val = r.get(key)
+                status = (
+                    status_val.decode() if isinstance(status_val, bytes) else status_val
+                )
                 events_len = r.llen(f"job:{job_id}:events")
 
                 # Fetch last event for message if available

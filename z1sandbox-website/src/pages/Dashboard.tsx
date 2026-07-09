@@ -66,6 +66,7 @@ import { Separator } from "@/components/ui/separator";
 import SecurityScanner from "@/components/dashboard/SecurityScanner";
 import RepoScannerWidget from "@/components/dashboard/RepoScannerWidget";
 import ThemeToggle from "@/components/ThemeToggle";
+import { InlineApiKeyPanel } from "@/components/dashboard/InlineApiKeyPanel";
 // import QueueMonitorWidget from "@/components/dashboard/QueueMonitorWidget";
 
 interface APIKey {
@@ -725,6 +726,7 @@ const Dashboard = () => {
 
             <div className="flex items-center gap-2">
               <ThemeToggle />
+              <InlineApiKeyPanel backendId={selectedBackend.id} />
               <Button
                 onClick={() => bindAndVisit(selectedBackend.id, selectedBackend.documentationUrl)}
                 variant="outline"
