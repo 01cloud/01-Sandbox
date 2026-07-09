@@ -28,3 +28,4 @@ __pycache__/
 *.pyc
 
 node_modules
+sandbox_api_logs.txt

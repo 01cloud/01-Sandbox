@@ -182,13 +182,18 @@ class ScannerOrchestrator:
         # return ["semgrep", "gitleaks", "trivy", "bandit", "yamllint", "kubelinter", "kubeconform", "kubescore"]
 
     def run_command(
-        self, cmd: List[str], tool_name: str, cwd: str = None
+        self, cmd: List[str], tool_name: str, cwd: str = None, timeout: float = 120.0
     ) -> Dict[str, Any]:
         """Runs a scanning command and returns its exit code and summary."""
         logging.info(f" Running {tool_name} scan...")
         try:
             process = subprocess.run(
-                cmd, capture_output=True, text=True, check=False, cwd=cwd
+                cmd,
+                capture_output=True,
+                text=True,
+                check=False,
+                cwd=cwd,
+                timeout=timeout,
             )
             return {
                 "exit_code": process.returncode,
@@ -199,6 +204,14 @@ class ScannerOrchestrator:
         except FileNotFoundError:
             logging.warning(f" {tool_name} not found on the PATH.")
             return {"status": "NOT_FOUND"}
+        except subprocess.TimeoutExpired as e:
+            logging.error(f" {tool_name} scan timed out after {timeout}s.")
+            return {
+                "status": "ERROR",
+                "error": f"Scan timed out after {timeout} seconds.",
+                "stdout": e.stdout if e.stdout else "",
+                "stderr": e.stderr if e.stderr else "",
+            }
         except Exception as e:
             logging.error(f" Error running {tool_name}: {str(e)}")
             return {"status": "ERROR", "error": str(e)}
@@ -635,6 +648,8 @@ class ScannerOrchestrator:
             "--severity",
             "CRITICAL,HIGH,MEDIUM,LOW",
             "--quiet",
+            "--skip-db-update",
+            "--skip-java-db-update",
             self.target_dir,
         ]
         res = self.run_command(cmd, "Trivy")

@@ -284,7 +284,7 @@ async def _run_scan_pipeline(
                         percentage=pct(len(files)),
                         parent_job_id=job_id,
                     ),
-                    timeout=600.0,
+                    timeout=950.0,
                 )
             except Exception as e:
                 async with progress_lock:
@@ -687,6 +687,12 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
         """
         Validates a repository URL and enqueues a full scan job.
         """
+        from proxy.router import check_backend_subscription
+
+        await check_backend_subscription(
+            req.backend_id or "Z1_SANDBOX", user_data, app_state
+        )
+
         owner, repo = parse_github_url(req.repo_url)
 
         job_id = str(uuid.uuid4())

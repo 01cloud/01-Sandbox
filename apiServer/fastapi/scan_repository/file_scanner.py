@@ -266,6 +266,7 @@ async def _submit_scan_job(
 
     payload: dict = {
         "files": files_dict,
+        "timeout": 900,  # 15 minutes sandbox lifetime timeout
         "metadata": {
             "job_id": child_job_id,
         },
@@ -281,7 +282,7 @@ async def _submit_scan_job(
     t0 = time.monotonic()
 
     try:
-        async with httpx.AsyncClient(timeout=600.0) as client:
+        async with httpx.AsyncClient(timeout=950.0) as client:
             resp = await client.post(url, json=payload, headers=opensandbox_headers())
             elapsed = time.monotonic() - t0
             print(
@@ -315,14 +316,14 @@ async def _submit_scan_job(
             return report
     except httpx.HTTPStatusError as exc:
         elapsed = time.monotonic() - t0
-        print(
-            f"{_TAG}   ✗ scan-jobs HTTP error after {elapsed:.2f}s: {exc.response.status_code} — {exc.response.text[:200]}"
-        )
-        return {}
+        err_msg = f"Scan job failed on sandbox server: HTTP {exc.response.status_code} — {exc.response.text[:200]}"
+        print(f"{_TAG}   ✗ {err_msg}")
+        raise RuntimeError(err_msg) from exc
     except Exception as exc:
         elapsed = time.monotonic() - t0
-        print(f"{_TAG}   ✗ scan-jobs submission error after {elapsed:.2f}s: {exc}")
-        return {}
+        err_msg = f"Scan job failed to execute: {str(exc)}"
+        print(f"{_TAG}   ✗ {err_msg}")
+        raise RuntimeError(err_msg) from exc
 
 
 def _log_tool_execution(

@@ -9,6 +9,10 @@ This main entrypoint is now a lightweight wire-up file.
 All domain-specific logic has been modularized into separate packages.
 """
 
+from dotenv import load_dotenv
+
+load_dotenv()  # Load .env for local development (AUTH0_DOMAIN, etc.)
+
 from api_keys import get_api_keys_router
 from auth import validate_token
 
@@ -67,6 +71,9 @@ app.middleware("http")(cookie_auth_redirect_middleware)
 register_docs_routes(app)
 
 # Register domain-specific routers
+from subscriptions.router import get_subscriptions_router
+
+app.include_router(get_subscriptions_router(state, validate_token))
 app.include_router(get_health_router(state, validate_token))
 app.include_router(get_api_keys_router(state, validate_token))
 app.include_router(get_sandboxes_router(state, validate_token))

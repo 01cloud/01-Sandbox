@@ -124,6 +124,7 @@ describe("Auth0 Configuration & Initialization Tests", () => {
       VITE_AUTH0_DOMAIN: "fallback-test-domain.auth0.com",
       VITE_AUTH0_CLIENT_ID: "fallback-test-client-id",
     };
+    vi.stubEnv("VITE_AUTH0_AUDIENCE", "");
 
     render(
       <BrowserRouter>

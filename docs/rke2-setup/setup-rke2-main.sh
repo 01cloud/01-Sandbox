@@ -326,13 +326,7 @@ write_config_server_init() {
   step "5/5  Writing configs (server init)"
 
   local node_ip
-  if ip addr show dev rke2-dummy &>/dev/null; then
-    node_ip=$(ip -o -4 addr show dev rke2-dummy | awk '{print $4}' | cut -d/ -f1 | head -n1)
-    info "Detected virtual dummy interface: using node IP ${node_ip}"
-  else
-    node_ip=$(hostname -I | awk '{print $1}')
-    info "Using detected host IP: ${node_ip}"
-  fi
+  node_ip=$(hostname -I | awk '{print $1}')
 
   mkdir -p /etc/rancher/rke2
   mkdir -p /var/lib/rancher/rke2/server/manifests
@@ -341,10 +335,6 @@ write_config_server_init() {
 # ── RKE2 Server — cluster init ───────────────────────────────────────────────
 cluster-init: true
 write-kubeconfig-mode: "0644"
-
-node-ip: "${node_ip}"
-node-external-ip: "${node_ip}"
-advertise-address: "${node_ip}"
 
 cni: cilium
 disable-kube-proxy: true
@@ -405,13 +395,7 @@ write_config_server_join() {
   step "5/5  Writing configs (server join → ${server_ip})"
 
   local node_ip
-  if ip addr show dev rke2-dummy &>/dev/null; then
-    node_ip=$(ip -o -4 addr show dev rke2-dummy | awk '{print $4}' | cut -d/ -f1 | head -n1)
-    info "Detected virtual dummy interface: using node IP ${node_ip}"
-  else
-    node_ip=$(hostname -I | awk '{print $1}')
-    info "Using detected host IP: ${node_ip}"
-  fi
+  node_ip=$(hostname -I | awk '{print $1}')
 
   mkdir -p /etc/rancher/rke2
 
@@ -420,10 +404,6 @@ write_config_server_join() {
 server: "https://${server_ip}:9345"
 token: "${token}"
 write-kubeconfig-mode: "0644"
-
-node-ip: "${node_ip}"
-node-external-ip: "${node_ip}"
-advertise-address: "${node_ip}"
 
 cni: cilium
 disable-kube-proxy: true

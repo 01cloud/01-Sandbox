@@ -103,19 +103,16 @@ async def validate_token(request: Request):
 
     path = request.url.path
 
-    # Bypass validation for public documentation, spec, status, result, and report routes
-    if (
-        path.endswith(
-            (
-                "/docs",
-                "/redoc",
-                "/openapi.json",
-                "/status",
-                "/result",
-                "/report",
-            )
+    # Bypass validation for public documentation, spec, status, health, and report routes
+    if path.endswith(
+        (
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/status",
+            "/report",
+            "/health",
         )
-        or "/scan-status/" in path
     ):
         # We only rate limit the "View Documentation" HTML page actions (docs, redoc) - NOT openapi.json spec!
         if path.endswith(("/docs", "/redoc")):

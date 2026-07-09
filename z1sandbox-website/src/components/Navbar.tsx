@@ -1,7 +1,8 @@
-import { useState } from "react";
-import { Menu, X, LogIn, LogOut, LayoutDashboard, User } from "lucide-react";
+import { useState, useEffect } from "react";
+import { Menu, X, LogIn, LogOut, LayoutDashboard, User, Settings } from "lucide-react";
 import { useAuth0 } from "@auth0/auth0-react";
 import ThemeToggle from "./ThemeToggle";
+import UserSettingsDialog from "./UserSettingsDialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -22,15 +23,43 @@ const links = [
 
 const Navbar = () => {
   const [open, setOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [isVisible, setIsVisible] = useState(true);
+  const [lastScrollY, setLastScrollY] = useState(0);
   const { loginWithRedirect, logout, isAuthenticated, user, isLoading, error } = useAuth0();
 
   if (error) {
     console.error("Auth0 Error:", error);
   }
 
+  useEffect(() => {
+    const handleScroll = () => {
+      if (open) return;
+      const currentScrollY = window.scrollY;
+
+      // If we are near the top, always show the navbar
+      if (currentScrollY < 50) {
+        setIsVisible(true);
+      } else {
+        // If scrolling down, hide navbar. If scrolling up, show navbar.
+        if (currentScrollY > lastScrollY) {
+          setIsVisible(false);
+        } else {
+          setIsVisible(true);
+        }
+      }
+      setLastScrollY(currentScrollY);
+    };
+
+    window.addEventListener("scroll", handleScroll, { passive: true });
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, [lastScrollY, open]);
+
 
   return (
-    <nav className="fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[min(1200px,calc(100%-2rem))] sm:w-[min(1200px,calc(100%-3rem))] transition-all duration-300">
+    <nav className={`fixed top-6 left-1/2 -translate-x-1/2 z-50 w-[min(1200px,calc(100%-2rem))] sm:w-[min(1200px,calc(100%-3rem))] transition-all duration-300 ${
+      isVisible ? "translate-y-0 opacity-100" : "-translate-y-24 opacity-0 pointer-events-none"
+    }`}>
       <div className={`relative border border-white/10 bg-background/60 backdrop-blur-2xl shadow-[0_8px_32px_-12px_rgba(0,0,0,0.5)] transition-all duration-500 overflow-hidden ${open ? 'rounded-[2.5rem]' : 'rounded-full'}`}>
         <div className="absolute inset-0 bg-gradient-to-tr from-primary/5 via-transparent to-white/5 pointer-events-none" />
         <div className="px-6 sm:px-8 flex items-center justify-between h-16 sm:h-18">
@@ -89,6 +118,13 @@ const Navbar = () => {
                           Management Console
                         </a>
                       </DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="rounded-xl px-3 py-3 focus:bg-primary/10 focus:text-primary font-bold cursor-pointer flex items-center gap-3"
+                        onClick={() => setIsSettingsOpen(true)}
+                      >
+                        <Settings className="w-4 h-4" />
+                        Settings
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator className="bg-border/50 mx-2" />
                       <DropdownMenuItem
                         className="rounded-xl px-3 py-3 focus:bg-destructive/10 focus:text-destructive font-bold cursor-pointer text-destructive/80"
@@ -146,20 +182,33 @@ const Navbar = () => {
                 {!isLoading && (
                   <>
                     {isAuthenticated ? (
-                      <a
-                        href="/dashboard"
-                        onClick={() => setOpen(false)}
-                        className="w-full py-4 px-6 flex items-center justify-between text-base font-bold text-foreground rounded-2xl border border-border/50 bg-secondary/20"
-                      >
-                        <div className="flex items-center gap-3">
-                          <Avatar className="w-8 h-8">
-                            <AvatarImage src={user?.picture} />
-                            <AvatarFallback><User className="w-4 h-4" /></AvatarFallback>
-                          </Avatar>
-                          <span>Dashboard</span>
-                        </div>
-                        <LayoutDashboard className="w-5 h-5 text-muted-foreground" />
-                      </a>
+                      <>
+                        <a
+                          href="/dashboard"
+                          onClick={() => setOpen(false)}
+                          className="w-full py-4 px-6 flex items-center justify-between text-base font-bold text-foreground rounded-2xl border border-border/50 bg-secondary/20"
+                        >
+                          <div className="flex items-center gap-3">
+                            <Avatar className="w-8 h-8">
+                              <AvatarImage src={user?.picture} />
+                              <AvatarFallback><User className="w-4 h-4" /></AvatarFallback>
+                            </Avatar>
+                            <span>Dashboard</span>
+                          </div>
+                          <LayoutDashboard className="w-5 h-5 text-muted-foreground" />
+                        </a>
+                        <button
+                          onClick={() => { setOpen(false); setIsSettingsOpen(true); }}
+                          className="w-full py-4 px-6 flex items-center justify-between text-base font-bold text-foreground rounded-2xl border border-border/50 bg-secondary/20"
+                        >
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 rounded-full border border-border/50 flex items-center justify-center bg-muted">
+                              <Settings className="w-4 h-4 text-muted-foreground" />
+                            </div>
+                            <span>Settings</span>
+                          </div>
+                        </button>
+                      </>
                     ) : (
                       <button
                         onClick={() => { loginWithRedirect(); setOpen(false); }}
@@ -191,6 +240,7 @@ const Navbar = () => {
           </div>
         </div>
       </div>
+      <UserSettingsDialog isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </nav>
   );
 };

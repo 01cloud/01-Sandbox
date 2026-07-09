@@ -10,7 +10,10 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
-  Shield
+  Shield,
+  Copy,
+  Terminal,
+  Code2
 } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Button } from "@/components/ui/button";
@@ -37,6 +40,8 @@ interface SecurityScannerProps {
   backend: string;
   baseUrl: string;
   apiKey: string;
+  inline?: boolean;
+  onSwitchTab?: (tab: string) => void;
 }
 
 const QUICK_SCAN_STEPS = [
@@ -46,9 +51,101 @@ const QUICK_SCAN_STEPS = [
   { key: "DONE", label: "Scan Completed" },
 ];
 
-const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: SecurityScannerProps) => {
+const CODE_TEMPLATES = [
+  {
+    name: "Python (SQLi)",
+    lang: "py",
+    icon: "🐍",
+    code: `# Python SQL Injection & Unsafe Eval Example
+import sqlite3
+
+def get_user_data(username):
+    # INSECURE: direct SQL concatenation
+    query = f"SELECT * FROM users WHERE name = '{username}'"
+    conn = sqlite3.connect("database.db")
+    cursor = conn.cursor()
+    cursor.execute(query)
+    return cursor.fetchall()
+
+def execute_config(user_code):
+    # DANGEROUS: arbitrary code execution
+    return eval(user_code)
+`
+  },
+  {
+    name: "Go (Secret Leak)",
+    lang: "go",
+    icon: "🐹",
+    code: `package main
+
+import (
+	"fmt"
+	"net/http"
+)
+
+// INSECURE: hardcoded sensitive tokens
+const AWS_ACCESS_KEY = "AKIAIOSFODNN7EXAMPLE" //gitleaks:allow
+const SLACK_WEBHOOK = "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX" //gitleaks:allow
+
+func main() {
+	fmt.Println("Starting AWS connection check...")
+	http.Post(AWS_WEBHOOK, "application/json", nil)
+}
+`
+  },
+  {
+    name: "Kubernetes (Insecure)",
+    lang: "k8s",
+    icon: "☸️",
+    code: `# Insecure Kubernetes Pod Deployment configuration
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vulnerable-web-pod
+spec:
+  containers:
+  - name: web-server
+    image: nginx:latest
+    securityContext:
+      # INSECURE: running as privileged container
+      privileged: true
+      runAsNonRoot: false
+    ports:
+    - containerPort: 80
+`
+  },
+  {
+    name: "Shell (Injection)",
+    lang: "sh",
+    icon: "🐚",
+    code: `#!/bin/bash
+# Shell Script Command Injection Vulnerability
+
+read -p "Enter server hostname: " hostname
+
+# INSECURE: direct variable expansion in eval/execution
+ping -c 3 $hostname
+eval "echo Logs processed for host: $hostname"
+`
+  }
+];
+
+const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = false, onSwitchTab }: SecurityScannerProps) => {
   const [code, setCode] = useState("# Simple Code Example\ndef greet(name):\n    return f\"Hello, {name}!\"\n\nprint(greet(\"User\"))");
   const [isScanning, setIsScanning] = useState(false);
+
+  const getFilename = (lang: string) => {
+    switch (lang) {
+      case "py": return "main.py";
+      case "go": return "main.go";
+      case "js": return "index.js";
+      case "k8s": return "pod.yaml";
+      case "yaml": return "config.yaml";
+      case "sh": return "script.sh";
+      case "json": return "data.json";
+      default: return "snippet.txt";
+    }
+  };
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [expandedLang, setExpandedLang] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"dashboard" | "telemetry">("dashboard");
@@ -317,38 +414,42 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
 
     const chartData = langEntries.map(([lang, r]) => ({
       name: lang,
-      "%": r && typeof r.percentage === "number" ? parseFloat(r.percentage.toFixed(1)) : 0,
+      value: r && typeof r.percentage === "number" ? parseFloat(r.percentage.toFixed(1)) : 0,
     }));
 
     return (
       <div className="space-y-7 animate-in fade-in duration-500">
-        <div className={cn(
-          "rounded-[2rem] border p-7 flex flex-wrap items-center gap-6 shadow-sm",
-          totalFindings === 0
-            ? "border-emerald-500/20 bg-emerald-500/5 text-emerald-400"
-            : "border-destructive/20 bg-destructive/5 text-destructive"
-        )}>
-          {totalFindings === 0 ? (
-            <CheckCircle2 className="w-7 h-7 text-emerald-500" />
-          ) : (
-            <AlertCircle className="w-7 h-7 text-destructive" />
-          )}
-          <div className="flex-1 min-w-0">
-            <h2 className="text-2xl font-black tracking-tight text-foreground">
-              {totalFindings === 0 ? "SCAN VERDICT: SECURE" : "VULNERABILITIES DETECTED"}
-            </h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              Detected by <span className="font-bold text-violet-500">Unified Ingestion Pipeline</span>
-              {" · "}{filesScanned.length} files scanned{" · "}{code.split('\n').length} lines of code
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Badge variant="outline" className="bg-violet-500/10 text-violet-500 border-violet-500/20 font-bold">
-              {langEntries.length} {langEntries.length === 1 ? "Language" : "Languages"}
-            </Badge>
-            <Badge variant="outline" className={cn("font-bold", totalFindings === 0 ? "bg-emerald-500/10 text-emerald-500 border-emerald-500/20" : "bg-orange-500/10 text-orange-500 border-orange-500/20")}>
-              {totalFindings} Findings
-            </Badge>
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
+          <div className="flex flex-wrap items-center gap-4">
+            <div className={cn(
+              "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border",
+              totalFindings === 0
+                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
+                : "bg-red-500/10 border-red-500/20 text-red-500"
+            )}>
+              {totalFindings === 0 ? (
+                <CheckCircle2 className="w-5 h-5" />
+              ) : (
+                <AlertCircle className="w-5 h-5" />
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-black text-base text-foreground">
+                {totalFindings === 0 ? "SCAN VERDICT: SECURE" : "VULNERABILITIES DETECTED"}
+              </p>
+              <p className="text-[11px] text-muted-foreground mt-0.5">
+                Detected by <span className="font-semibold text-violet-500">Unified Ingestion Pipeline</span>
+                {" · "}{filesScanned.length} files scanned{" · "}{code.split('\n').length} lines of code
+              </p>
+            </div>
+            <div className="flex gap-2 flex-wrap">
+              <Badge variant="outline" className="bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/25 font-bold text-xs px-3 py-1">
+                {langEntries.length} {langEntries.length === 1 ? "Language" : "Languages"}
+              </Badge>
+              <Badge variant="outline" className={cn("font-bold text-xs px-3 py-1", totalFindings === 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25" : "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/25")}>
+                {totalFindings} Findings
+              </Badge>
+            </div>
           </div>
         </div>
 
@@ -383,19 +484,55 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
         {activeTab === "dashboard" ? (
           <div className="space-y-7 animate-in fade-in duration-300">
             {chartData.length > 0 && (
-              <div className="rounded-[2rem] border border-border/50 bg-background/50 p-8 shadow-sm">
-                <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-6">Language Distribution</h3>
-                <div className="h-[200px]">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={chartData} layout="vertical" margin={{ left: 90, right: 40 }}>
-                      <XAxis type="number" domain={[0, 100]} tickFormatter={v => `${v}%`} tick={{ fontSize: 10 }} />
-                      <YAxis type="category" dataKey="name" width={90} tick={{ fontSize: 11, fontWeight: 700 }} />
-                      <Tooltip formatter={(v: any) => [`${v}%`, "Share"]} />
-                      <Bar dataKey="%" radius={[0, 8, 8, 0]} maxBarSize={28}>
-                        {chartData.map((_, i) => <Cell key={i} fill={LANG_COLORS[i % LANG_COLORS.length]} />)}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
+              <div className="rounded-[2rem] border border-border bg-card p-6 shadow-sm">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
+                    Language Distribution
+                  </h3>
+                  <span className="text-[10px] text-muted-foreground/60">
+                    by % of codebase
+                  </span>
+                </div>
+
+                {/* Thinner stacked horizontal color bar */}
+                <div className="h-1.5 rounded-full overflow-hidden flex mb-4 border border-border/10 bg-muted/20">
+                  {chartData.map((d, i) => (
+                    <div
+                      key={d.name}
+                      className="h-full transition-all duration-500 hover:brightness-110 relative group"
+                      style={{
+                        width: `${Math.max(d.value, 1)}%`,
+                        backgroundColor: LANG_COLORS[i % LANG_COLORS.length],
+                      }}
+                      title={`${d.name}: ${d.value}%`}
+                    >
+                      <div className="absolute -top-8 left-1/2 -translate-x-1/2 bg-background border border-border/50 rounded-md px-2 py-0.5 text-[9px] font-bold opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-10 shadow-lg pointer-events-none">
+                        {d.name}: {d.value}%
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Grid legend list with file count and percentage (no individual bars) */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5 pt-2">
+                  {chartData.map((d, i) => {
+                    const langInfo = syntheticLangs[d.name];
+                    return (
+                      <div key={d.name} className="flex items-center justify-between text-xs py-1 border-b border-border/10">
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className="w-2 h-2 rounded-full shrink-0"
+                            style={{ backgroundColor: LANG_COLORS[i % LANG_COLORS.length] }}
+                          />
+                          <span className="font-bold text-foreground/90 truncate">{d.name}</span>
+                        </div>
+                        <div className="flex items-center gap-2 text-right shrink-0">
+                          <span className="text-[10px] text-muted-foreground/60">{langInfo?.file_count || 0} files</span>
+                          <span className="font-semibold text-foreground/80">{d.value}%</span>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
@@ -424,104 +561,110 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
                 return (
                   <div key={lang} className="rounded-2xl border border-border/50 bg-background/40 overflow-hidden shadow-sm">
                     <button
-                      className="w-full p-5 flex items-center gap-4 text-left hover:bg-muted/10 transition-colors"
+                      className="w-full p-4 flex items-center justify-between text-left hover:bg-muted/10 transition-colors"
                       onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
                     >
-                      <span className="w-3 h-3 rounded-full" style={{ background: LANG_COLORS[i % LANG_COLORS.length] }} />
-                      <span className="font-black text-base flex-1">{lang}</span>
-                      <div className="flex items-center gap-6 text-right mr-2">
-                        <div>
-                          <p className="text-[10px] text-muted-foreground">Files</p>
-                          <p className="font-black text-sm">{info.file_count}</p>
-                        </div>
-                        <div>
-                          <p className="text-[10px] text-muted-foreground mb-0.5">Severity</p>
+                      <div className="flex items-center gap-3">
+                        <span
+                          className="w-3 h-3 rounded-sm shrink-0 shadow-sm"
+                          style={{ background: LANG_COLORS[i % LANG_COLORS.length] }}
+                        />
+                        <span className="font-bold text-sm text-foreground">{lang}</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-right">
+                        <div className="flex flex-col items-end gap-1.5">
+                          <div className="flex items-center gap-2 text-[10px] text-muted-foreground/60">
+                            <span>{info.file_count} files</span>
+                            <span>·</span>
+                            <span>{info.percentage?.toFixed(1)}%</span>
+                          </div>
                           <div className="flex gap-1 items-center">
-                            {sevCounts.critical > 0 && (
-                              <Badge className="h-4 px-1 text-[8px] bg-red-600/25 hover:bg-red-600/25 text-red-500 border border-red-500/35 font-extrabold rounded-md">
-                                C:{sevCounts.critical}
+                            {info.findings.length === 0 ? (
+                              <Badge className="h-5 px-2 text-[9px] bg-emerald-500/10 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold rounded-md">
+                                SECURE
                               </Badge>
-                            )}
-                            {sevCounts.high > 0 && (
-                              <Badge className="h-4 px-1 text-[8px] bg-orange-500/20 hover:bg-orange-500/20 text-orange-500 border border-orange-500/30 font-extrabold rounded-md">
-                                H:{sevCounts.high}
-                              </Badge>
-                            )}
-                            {sevCounts.medium > 0 && (
-                              <Badge className="h-4 px-1 text-[8px] bg-yellow-500/20 hover:bg-yellow-500/20 text-yellow-500 border border-yellow-500/30 font-extrabold rounded-md">
-                                M:{sevCounts.medium}
-                              </Badge>
-                            )}
-                            {sevCounts.low > 0 && (
-                              <Badge className="h-4 px-1 text-[8px] bg-blue-500/20 hover:bg-blue-500/20 text-blue-500 border border-blue-500/30 font-extrabold rounded-md">
-                                L:{sevCounts.low}
-                              </Badge>
-                            )}
-                            {sevCounts.info > 0 && (
-                              <Badge className="h-4 px-1 text-[8px] bg-slate-500/20 hover:bg-slate-500/20 text-slate-400 border border-slate-500/30 font-extrabold rounded-md">
-                                I:{sevCounts.info}
-                              </Badge>
-                            )}
-                            {sevCounts.critical === 0 && sevCounts.high === 0 && sevCounts.medium === 0 && sevCounts.low === 0 && sevCounts.info === 0 && (
-                              <span className="text-[10px] font-black text-emerald-500 uppercase tracking-wider">
-                                Secure
-                              </span>
+                            ) : (
+                              <>
+                                {sevCounts.critical > 0 && (
+                                  <Badge className="h-4.5 px-1.5 text-[8px] bg-red-500/10 hover:bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 font-extrabold rounded-md">
+                                    C:{sevCounts.critical}
+                                  </Badge>
+                                )}
+                                {sevCounts.high > 0 && (
+                                  <Badge className="h-4.5 px-1.5 text-[8px] bg-orange-500/10 hover:bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 font-extrabold rounded-md">
+                                    H:{sevCounts.high}
+                                  </Badge>
+                                )}
+                                {sevCounts.medium > 0 && (
+                                  <Badge className="h-4.5 px-1.5 text-[8px] bg-yellow-500/10 hover:bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20 font-extrabold rounded-md">
+                                    M:{sevCounts.medium}
+                                  </Badge>
+                                )}
+                                {sevCounts.low > 0 && (
+                                  <Badge className="h-4.5 px-1.5 text-[8px] bg-blue-500/10 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-extrabold rounded-md">
+                                    L:{sevCounts.low}
+                                  </Badge>
+                                )}
+                                {sevCounts.info > 0 && (
+                                  <Badge className="h-4.5 px-1.5 text-[8px] bg-slate-500/10 hover:bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20 font-extrabold rounded-md">
+                                    I:{sevCounts.info}
+                                  </Badge>
+                                )}
+                              </>
                             )}
                           </div>
                         </div>
-                        <div>
-                          <p className="text-[10px] text-muted-foreground">Share</p>
-                          <p className="font-black text-sm">{info.percentage.toFixed(1)}%</p>
-                        </div>
+                        {info.findings.length > 0 && (
+                          <Badge variant="outline" className="text-[9px] font-black bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/20 py-0">
+                            {info.findings.length}
+                          </Badge>
+                        )}
+                        {expandedLang === lang ? <ChevronUp className="w-4 h-4 text-muted-foreground/60" /> : <ChevronDown className="w-4 h-4 text-muted-foreground/60" />}
                       </div>
-                      {info.findings.length > 0 ? (
-                        expandedLang === lang ? <ChevronUp className="w-4 h-4 text-muted-foreground" /> : <ChevronDown className="w-4 h-4 text-muted-foreground" />
-                      ) : null}
                     </button>
 
                     {expandedLang === lang && (
-                      <div className="border-t border-border/50">
+                      <div className="border-t border-border bg-muted/40">
                         {info.findings.length === 0 ? (
-                          <div className="p-5 flex items-center gap-2 text-muted-foreground/60">
-                            <Shield className="w-4 h-4" />
-                            <span className="text-xs font-semibold">No security findings for this language</span>
+                          <div className="p-4 text-xs font-semibold text-muted-foreground/50 text-center">
+                            No security findings for this language
                           </div>
                         ) : (
-                          <div className="overflow-y-auto p-5 space-y-3 max-h-[520px]">
+                          <div className="overflow-y-auto p-4 space-y-2.5 max-h-[350px]">
                             {info.findings.map((f: any, fi: number) => {
                               const sev = f.severity?.toUpperCase() ?? "INFO";
                               const sevColor =
-                                sev === "CRITICAL" ? "border-red-500/60 bg-red-500/5" :
-                                  sev === "HIGH" ? "border-orange-500/60 bg-orange-500/5" :
-                                    sev === "MEDIUM" ? "border-yellow-500/60 bg-yellow-500/5" :
-                                      sev === "LOW" ? "border-blue-500/60 bg-blue-500/5" :
-                                        "border-border/50 bg-muted/10";
+                                sev === "CRITICAL" ? "border-red-500/20 bg-red-500/10 dark:bg-red-500/5 text-red-950 dark:text-red-100" :
+                                sev === "HIGH"     ? "border-orange-500/20 bg-orange-500/10 dark:bg-orange-500/5 text-orange-950 dark:text-orange-100" :
+                                sev === "MEDIUM"   ? "border-yellow-500/20 bg-yellow-500/10 dark:bg-yellow-500/5 text-yellow-950 dark:text-yellow-100" :
+                                sev === "LOW"      ? "border-blue-500/20 bg-blue-500/10 dark:bg-blue-500/5 text-blue-950 dark:text-blue-100" :
+                                                     "border-border bg-card text-foreground";
                               const badgeColor =
-                                sev === "CRITICAL" ? "bg-red-500/15 text-red-500 border-red-500/30" :
-                                  sev === "HIGH" ? "bg-orange-500/15 text-orange-500 border-orange-500/30" :
-                                    sev === "MEDIUM" ? "bg-yellow-500/15 text-yellow-600 border-yellow-500/30" :
-                                      sev === "LOW" ? "bg-blue-500/15 text-blue-500 border-blue-500/30" :
-                                        "bg-muted text-muted-foreground border-border";
+                                sev === "CRITICAL" ? "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30" :
+                                sev === "HIGH"     ? "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/30" :
+                                sev === "MEDIUM"   ? "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 border-yellow-500/30" :
+                                sev === "LOW"      ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30" :
+                                                     "bg-muted text-muted-foreground border-border";
                               return (
-                                <div key={fi} className={cn("p-4 rounded-xl border", sevColor)}>
+                                <div key={fi} className={cn("p-3 rounded-lg border text-[11px] transition-all", sevColor)}>
                                   <div className="flex items-center gap-2 mb-1.5 flex-wrap">
                                     <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide", badgeColor)}>
                                       {sev}
                                     </Badge>
-                                    <span className="text-[10px] font-bold text-muted-foreground">{f.tool}</span>
+                                    <span className="text-[9px] font-bold text-muted-foreground/60">{f.tool}</span>
                                     {f.line && (
-                                      <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">L:{f.line}</span>
+                                      <span className="text-[9px] font-mono text-muted-foreground/45 ml-auto">L:{f.line}</span>
                                     )}
                                   </div>
-                                  <p className="text-sm font-semibold leading-snug">{f.issue}</p>
+                                  <p className="text-[11px] font-semibold leading-normal">{f.issue}</p>
                                   {f.file && (
                                     <div className="flex items-center gap-1.5 mt-2">
                                       <FileCode className="w-3 h-3 text-muted-foreground/40 shrink-0" />
-                                      <p className="text-[10px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
+                                      <p className="text-[9px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
                                     </div>
                                   )}
                                   {f.remediation && (
-                                    <p className="text-[10px] text-muted-foreground/60 mt-1.5 leading-relaxed">{f.remediation}</p>
+                                    <p className="text-[9px] text-muted-foreground/60 mt-1.5 leading-relaxed">{f.remediation}</p>
                                   )}
                                 </div>
                               );
@@ -537,7 +680,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
           </div>
         ) : (
           /* Developer split view: Report vs Insights */
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[550px] animate-in fade-in duration-300">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[700px] animate-in fade-in duration-300">
             {/* JSON Telemetry */}
             <section className="flex flex-col gap-3 overflow-hidden">
               <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
@@ -620,18 +763,510 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
     );
   };
 
+  const bodyContent = (
+    <div className="flex-1 overflow-y-auto p-6 sm:p-10 w-full max-w-7xl mx-auto">
+      <div className="grid grid-cols-1 lg:grid-cols-[460px_1fr] gap-8 items-start">
+
+        {/* Left Column (Input & Status Stepper) */}
+        <div className="lg:sticky lg:top-0 flex flex-col gap-6">
+          <div className="rounded-[2rem] border border-border/50 bg-background/50 backdrop-blur-sm p-8 flex flex-col gap-5 shadow-xl shadow-primary/5">
+            <div className="flex flex-col gap-4">
+              {/* Quick Templates */}
+              <div className="flex flex-col gap-2">
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground block">
+                  Quick Templates
+                </span>
+                <div className="flex flex-wrap gap-1.5">
+                  {CODE_TEMPLATES.map((tmpl) => (
+                    <button
+                      key={tmpl.name}
+                      type="button"
+                      disabled={isScanning}
+                      onClick={() => setCode(tmpl.code)}
+                      className={cn(
+                        "px-2.5 py-1.5 rounded-lg border border-border/50 bg-background/50 hover:bg-secondary/40 text-[10px] font-bold text-muted-foreground hover:text-foreground transition-all flex items-center gap-1.5",
+                        detectLanguage(code) === tmpl.lang ? "border-violet-500/30 bg-violet-500/5 text-violet-500" : ""
+                      )}
+                    >
+                      <span className="text-xs">{tmpl.icon}</span>
+                      {tmpl.name}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Source Ingestion Header / IDE Window mockup */}
+              <div className="flex flex-col gap-1.5 mt-2">
+                <div className="flex items-center justify-between text-muted-foreground">
+                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground block">
+                    Source Ingestion
+                  </label>
+                </div>
+
+                <div className="relative h-[380px] rounded-2xl bg-[#0b0e14] border border-border/60 overflow-hidden flex flex-col focus-within:ring-2 focus-within:ring-violet-500/25 transition-all shadow-lg shadow-black/10">
+                  {/* Editor Window Header Tab */}
+                  <div className="flex items-center justify-between px-4 py-2.5 bg-[#111622] border-b border-border/30 select-none">
+                    <div className="flex items-center gap-3">
+                      <div className="flex gap-1.5">
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
+                        <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
+                      </div>
+                      <div className="h-3 w-px bg-zinc-800 mx-1" />
+                      <span className="font-mono text-[11px] text-zinc-400 flex items-center gap-1.5">
+                        <FileCode className="w-3.5 h-3.5 text-violet-400" />
+                        {getFilename(detectLanguage(code))}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-[9px] font-black tracking-wider uppercase text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                        {detectLanguage(code).toUpperCase()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Editor Body */}
+                  <textarea
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    className="flex-1 bg-transparent p-5 font-mono text-xs text-zinc-100 focus:outline-none resize-none leading-relaxed focus:ring-0 overflow-y-auto selection:bg-violet-500/30 caret-violet-500"
+                    spellCheck="false"
+                    placeholder="# Paste code here..."
+                    disabled={isScanning}
+                  />
+                </div>
+              </div>
+
+              <Button
+                onClick={runScan}
+                disabled={isScanning || !code.trim()}
+                className="h-9 w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all active:scale-[0.98] mt-2 uppercase tracking-wider"
+              >
+                {isScanning ? (
+                  <>
+                    <LoadingSpinner size="sm" className="text-current" />
+                    <span>Scanning Snippet...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5 fill-current" />
+                    EXECUTE AUDIT
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+
+          {selectedJob && (
+            <div className="rounded-[2rem] border border-border/50 bg-background/50 backdrop-blur-sm p-8 flex flex-col gap-4 shadow-xl shadow-primary/5 animate-in fade-in slide-in-from-top-3 duration-300">
+              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
+              <div className="flex flex-col gap-1">
+                {QUICK_SCAN_STEPS.map((step, i) => {
+                  const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
+                  const isError = selectedJob.status === "ERROR";
+                  const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
+                  const isActive = step.key === selectedJob.status && !isError;
+                  return (
+                     <div key={step.key} className={cn("flex items-center gap-3 py-2.5 px-3 rounded-xl transition-all", isActive ? "bg-violet-500/8" : "")}>
+                       <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 border-2 transition-all",
+                         isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
+                           isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
+                             isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
+                               "border-border text-muted-foreground/30")}>
+                         {isDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : isActive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>{i + 1}</span>}
+                       </div>
+                       <span className={cn("text-xs font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/40")}>
+                         {step.label}
+                       </span>
+                     </div>
+                  );
+                })}
+              </div>
+              <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
+                <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
+              </div>
+              {selectedJob.stepMessage && <p className="text-[11px] text-muted-foreground">{selectedJob.stepMessage}</p>}
+            </div>
+          )}
+        </div>
+
+        {/* Right Column (Results & Telemetry Stream) */}
+        <div className="min-h-[620px]">
+          {/* Ready state */}
+          {!selectedJob && (
+            <div className="h-[600px] rounded-[2.5rem] border border-border/40 bg-card/10 backdrop-blur-sm p-8 flex flex-col justify-between overflow-hidden shadow-inner relative animate-in fade-in duration-500">
+              {/* Decorative top-right glow */}
+              <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full bg-violet-500/10 blur-3xl" />
+
+              {/* Top Section: Header */}
+              <div className="flex flex-col items-center text-center mt-12">
+                <div className="p-4 rounded-3xl bg-violet-500/10 border border-violet-500/20 text-violet-500 mb-5 relative">
+                  <div className="absolute inset-0 rounded-3xl bg-violet-500/5 animate-ping" />
+                  <ShieldCheck className="w-10 h-10 relative z-10" />
+                </div>
+                <h3 className="font-display font-black text-2xl tracking-tight text-foreground">
+                  Security Sandbox Environment
+                </h3>
+                <p className="text-sm text-muted-foreground mt-2 max-w-md leading-relaxed">
+                  Submit code snippets to trigger isolated Kubernetes sandbox workloads for static analysis, secret checking, and dependency verification.
+                </p>
+              </div>
+
+              {/* Middle Section: Feature Grid */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-8">
+                <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
+                  <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 w-fit border border-emerald-500/20">
+                    <Activity className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Isolated Sandboxes</h4>
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
+                      Every code audit runs in a dedicated micro-pod sandbox.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
+                  <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500 w-fit border border-indigo-500/20">
+                    <FileCode className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Multi-Language</h4>
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
+                      Auto-detects Python, Go, JavaScript, YAML, and Kubernetes resource files.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
+                  <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500 w-fit border border-amber-500/20">
+                    <Zap className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Deep Inspections</h4>
+                    <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
+                      Leverages Bandit, GoSec, ESLint, KubeLinter, and regex-based secret scans.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Bottom Section: Footer/Status */}
+              <div className="border-t border-border/30 pt-5 flex items-center justify-between text-muted-foreground/60 text-[10px] font-bold uppercase tracking-widest mt-auto">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] animate-pulse" />
+                  Scanner Engine Active
+                </div>
+                <div>
+                  v1.2.0-Alpha
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Ingress / Scanning active state */}
+          {selectedJob && selectedJob.status !== "DONE" && selectedJob.status !== "ERROR" && (
+            <div className="max-w-5xl mx-auto w-full">
+              <UnifiedPipelineView
+                job={selectedJob}
+                steps={QUICK_SCAN_STEPS}
+                result={selectedResult}
+                onResultRender={renderQuickScanResult}
+                onCancel={handleCancelJob}
+              />
+            </div>
+          )}
+
+          {/* Error state */}
+          {selectedJob && selectedJob.status === "ERROR" && (
+            <div className="rounded-[2rem] border-2 border-destructive/20 bg-destructive/5 p-10 flex flex-col gap-6">
+              <div className="flex items-center gap-4 text-destructive">
+                <AlertCircle className="w-10 h-10" />
+                <h2 className="text-2xl font-black tracking-tight">Scan Failed</h2>
+              </div>
+              <p className="font-mono text-sm text-destructive/80 bg-black/5 rounded-2xl p-6 border border-destructive/10 leading-relaxed">
+                {selectedJob.stepMessage || "An unexpected error occurred during sandbox execution."}
+              </p>
+            </div>
+          )}
+
+          {/* Finished / Done state */}
+          {selectedJob && selectedJob.status === "DONE" && selectedResult && (
+            <div className="max-w-5xl mx-auto w-full">
+              {renderQuickScanResult(selectedResult)}
+            </div>
+          )}
+        </div>
+
+      </div>
+    </div>
+  );
+
+  if (inline) {
+    return (
+      <div className="w-full h-[calc(100vh-220px)] min-h-[680px] rounded-[2.5rem] border border-border/50 bg-background/30 backdrop-blur-xl flex flex-col overflow-hidden p-0 shadow-2xl animate-in fade-in duration-500">
+        {/* Top Header */}
+        <div className="px-8 py-5 border-b border-border/50 bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
+          <div className="flex items-center gap-4">
+            <div className="p-3 rounded-2xl bg-violet-500/10 border border-violet-500/20 text-violet-500 shrink-0">
+              <ShieldCheck className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-2xl font-display font-black tracking-tight text-foreground">
+                Quick Security Scanner
+              </h2>
+              <p className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.25em] flex items-center gap-2 mt-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] animate-pulse" />
+                Cluster Node: {backend}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── Two-Column Layout ── */}
+        <div className="flex-1 flex overflow-hidden">
+          {/* Left Sidebar: Input & Status */}
+          <div className="w-[420px] shrink-0 flex flex-col h-full overflow-y-auto p-5 space-y-4 border-r border-border/40 bg-background/5">
+            {/* Quick Templates */}
+            <div className="flex flex-col gap-2">
+              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 block">
+                Quick Templates
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {CODE_TEMPLATES.map((tmpl) => (
+                  <button
+                    key={tmpl.name}
+                    type="button"
+                    disabled={isScanning}
+                    onClick={() => setCode(tmpl.code)}
+                    className={cn(
+                      "px-2.5 py-1.5 rounded-lg border border-border/50 bg-background/50 hover:bg-secondary/40 text-[10px] font-bold text-muted-foreground hover:text-foreground transition-all flex items-center gap-1.5",
+                      detectLanguage(code) === tmpl.lang ? "border-violet-500/30 bg-violet-500/5 text-violet-500" : ""
+                    )}
+                  >
+                    <span className="text-xs">{tmpl.icon}</span>
+                    {tmpl.name}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Source Ingestion */}
+            <div className="flex flex-col gap-2">
+              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 block">
+                Source Ingestion
+              </label>
+
+              <div className="relative h-[340px] rounded-2xl bg-[#0b0e14] border border-border/60 overflow-hidden flex flex-col focus-within:ring-2 focus-within:ring-violet-500/25 transition-all shadow-lg shadow-black/10">
+                {/* Editor Window Header Tab */}
+                <div className="flex items-center justify-between px-4 py-2.5 bg-[#111622] border-b border-border/30 select-none">
+                  <div className="flex items-center gap-3">
+                    <div className="flex gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#27c93f]" />
+                    </div>
+                    <div className="h-3 w-px bg-zinc-800 mx-1" />
+                    <span className="font-mono text-[11px] text-zinc-400 flex items-center gap-1.5">
+                      <FileCode className="w-3.5 h-3.5 text-violet-400" />
+                      {getFilename(detectLanguage(code))}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-3">
+                    <span className="font-mono text-[9px] font-black tracking-wider uppercase text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
+                      {detectLanguage(code).toUpperCase()}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Editor Body */}
+                <textarea
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  className="flex-1 bg-transparent p-5 font-mono text-xs text-zinc-100 focus:outline-none resize-none leading-relaxed focus:ring-0 overflow-y-auto selection:bg-violet-500/30 caret-violet-500"
+                  spellCheck="false"
+                  placeholder="# Paste code here..."
+                  disabled={isScanning}
+                />
+              </div>
+            </div>
+
+            <Button
+              onClick={runScan}
+              disabled={isScanning || !code.trim()}
+              className="h-9 w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all active:scale-[0.98] shrink-0 uppercase tracking-wider"
+            >
+              {isScanning ? (
+                <>
+                  <LoadingSpinner size="sm" className="text-current" />
+                  <span>Scanning Snippet...</span>
+                </>
+              ) : (
+                <>
+                  <Zap className="w-3.5 h-3.5 fill-current" />
+                  EXECUTE AUDIT
+                </>
+              )}
+            </Button>
+
+            {/* Stepper inside sidebar for selectedJob */}
+            {selectedJob && (
+              <div className="rounded-2xl border border-border/50 bg-background/50 p-4 flex flex-col gap-4 shadow-sm animate-in fade-in slide-in-from-top-3 duration-300">
+                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
+                <div className="flex flex-col gap-1">
+                  {QUICK_SCAN_STEPS.map((step, i) => {
+                    const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
+                    const isError = selectedJob.status === "ERROR";
+                    const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
+                    const isActive = step.key === selectedJob.status && !isError;
+                    return (
+                      <div key={step.key} className={cn("flex items-center gap-2.5 py-1.5 px-2 rounded-lg transition-all", isActive ? "bg-violet-500/8" : "")}>
+                        <div className={cn("w-4.5 h-4.5 rounded-full flex items-center justify-center shrink-0 border-2 text-[9px] transition-all",
+                          isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
+                            isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
+                              isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
+                                "border-border text-muted-foreground/35")}>
+                          {isDone ? <CheckCircle2 className="w-2.5 h-2.5" /> : isActive ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <span>{i + 1}</span>}
+                        </div>
+                        <span className={cn("text-[10px] font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/45")}>
+                          {step.label}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="h-1 rounded-full bg-muted/50 overflow-hidden">
+                  <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
+                </div>
+                {selectedJob.stepMessage && <p className="text-[10px] text-muted-foreground">{selectedJob.stepMessage}</p>}
+              </div>
+            )}
+          </div>
+
+          {/* Right Column: Results & Telemetry */}
+          <div className="flex-1 overflow-y-auto p-6 bg-background/5">
+            {/* Ready state */}
+            {!selectedJob && (
+              <div className="h-full rounded-[2rem] border border-border/40 bg-card/15 p-8 flex flex-col justify-between overflow-hidden shadow-inner relative animate-in fade-in duration-500">
+                {/* Decorative top-right glow */}
+                <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full bg-violet-500/10 blur-3xl" />
+
+                {/* Top Section: Header */}
+                <div className="flex flex-col items-center text-center mt-12">
+                  <div className="p-4 rounded-3xl bg-violet-500/10 border border-violet-500/20 text-violet-500 mb-5 relative">
+                    <div className="absolute inset-0 rounded-3xl bg-violet-500/5 animate-ping" />
+                    <ShieldCheck className="w-10 h-10 relative z-10" />
+                  </div>
+                  <h3 className="font-display font-black text-2xl tracking-tight text-foreground">
+                    Security Sandbox Environment
+                  </h3>
+                  <p className="text-sm text-muted-foreground mt-2 max-w-md leading-relaxed">
+                    Submit code snippets to trigger isolated Kubernetes sandbox workloads for static analysis, secret checking, and dependency verification.
+                  </p>
+                </div>
+
+                {/* Middle Section: Feature Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-8">
+                  <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
+                    <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 w-fit border border-emerald-500/20">
+                      <Activity className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Isolated Sandboxes</h4>
+                      <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
+                        Every code audit runs in a dedicated micro-pod sandbox.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
+                    <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500 w-fit border border-indigo-500/20">
+                      <FileCode className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Multi-Language</h4>
+                      <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
+                        Auto-detects Python, Go, JavaScript, YAML, and Kubernetes resource files.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
+                    <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500 w-fit border border-amber-500/20">
+                      <Zap className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-black uppercase tracking-wider text-foreground">Deep Inspections</h4>
+                      <p className="text-[11px] text-muted-foreground mt-1 leading-normal">
+                        Leverages Bandit, GoSec, ESLint, KubeLinter, and regex-based secret scans.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Bottom Section: Footer/Status */}
+                <div className="border-t border-border/30 pt-5 flex items-center justify-between text-muted-foreground/60 text-[10px] font-bold uppercase tracking-widest mt-auto">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] animate-pulse" />
+                    Scanner Engine Active
+                  </div>
+                  <div>
+                    v1.2.0-Alpha
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Ingress / Scanning active state */}
+            {selectedJob && selectedJob.status !== "DONE" && selectedJob.status !== "ERROR" && (
+              <div className="max-w-5xl mx-auto w-full">
+                <UnifiedPipelineView
+                  job={selectedJob}
+                  steps={QUICK_SCAN_STEPS}
+                  result={selectedResult}
+                  onResultRender={renderQuickScanResult}
+                  onCancel={handleCancelJob}
+                />
+              </div>
+            )}
+
+            {/* Error state */}
+            {selectedJob && selectedJob.status === "ERROR" && (
+              <div className="rounded-[2rem] border-2 border-destructive/20 bg-destructive/5 p-10 flex flex-col gap-6">
+                <div className="flex items-center gap-4 text-destructive">
+                  <AlertCircle className="w-10 h-10" />
+                  <h2 className="text-2xl font-black tracking-tight">Scan Failed</h2>
+                </div>
+                <p className="font-mono text-sm text-destructive/80 bg-black/5 rounded-2xl p-6 border border-destructive/10 leading-relaxed">
+                  {selectedJob.stepMessage || "An unexpected error occurred during sandbox execution."}
+                </p>
+              </div>
+            )}
+
+            {/* Finished / Done state */}
+            {selectedJob && selectedJob.status === "DONE" && selectedResult && (
+              <div className="max-w-5xl mx-auto w-full">
+                {renderQuickScanResult(selectedResult)}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Dialog open={isOpen} onOpenChange={(open) => !open && onClose()}>
-      <DialogContent className="max-w-[100vw] w-screen h-screen m-0 p-0 overflow-hidden border-none bg-background flex flex-col rounded-none">
+      <DialogContent className="max-w-[1240px] w-[95vw] h-[90vh] rounded-3xl border border-border bg-background flex flex-col overflow-hidden p-0 shadow-2xl">
 
         {/* Top Header */}
         <DialogHeader className="px-8 py-5 border-b bg-muted/20 flex flex-row items-center justify-between space-y-0 shrink-0">
           <div className="flex items-center gap-4">
             <div className="p-3 rounded-2xl bg-violet-500/10 border border-violet-500/20 text-violet-500 shrink-0">
-              <ShieldCheck className="w-7 h-7" />
+              <ShieldCheck className="w-5 h-5" />
             </div>
             <div>
-              <DialogTitle className="text-xl font-display font-black tracking-tight uppercase leading-none">
+              <DialogTitle className="text-2xl font-display font-black tracking-tight text-foreground">
                 Quick Security Scanner
               </DialogTitle>
               <DialogDescription className="text-[10px] font-bold text-muted-foreground uppercase tracking-[0.25em] flex items-center gap-2 mt-1.5">
@@ -648,136 +1283,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey }: Security
           </button>
         </DialogHeader>
 
-        {/* Two-Column Grid Body */}
-        <div className="flex-1 overflow-y-auto p-6 sm:p-10 w-full max-w-7xl mx-auto">
-          <div className="grid grid-cols-1 lg:grid-cols-[400px_1fr] gap-8 items-start">
-
-            {/* Left Column (Input & Status Stepper) */}
-            <div className="lg:sticky lg:top-0 flex flex-col gap-6">
-              <div className="rounded-[2rem] border border-border/50 bg-background/50 backdrop-blur-sm p-8 flex flex-col gap-5 shadow-xl shadow-primary/5">
-                <div className="flex flex-col gap-4">
-                  <div className="flex items-center justify-between text-muted-foreground">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground block">
-                      Source Ingestion
-                    </label>
-                    <Badge variant="outline" className="rounded-md font-mono text-[9px] font-bold px-2 py-0">
-                      {detectLanguage(code).toUpperCase()}
-                    </Badge>
-                  </div>
-
-                  <div className="relative h-[300px] rounded-2xl bg-card border border-border/50 overflow-hidden focus-within:ring-2 focus-within:ring-violet-500/25 transition-all">
-                    <textarea
-                      value={code}
-                      onChange={(e) => setCode(e.target.value)}
-                      className="w-full h-full bg-transparent p-5 font-mono text-xs focus:outline-none resize-none leading-relaxed focus:ring-0"
-                      spellCheck="false"
-                      placeholder="# Paste code here..."
-                      disabled={isScanning}
-                    />
-                  </div>
-
-                  <Button
-                    onClick={runScan}
-                    disabled={isScanning || !code.trim()}
-                    className="h-12 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-bold text-sm flex items-center justify-center gap-2 shadow-lg shadow-violet-600/20 transition-all active:scale-[0.98]"
-                  >
-                    {isScanning ? (
-                      <>
-                        <LoadingSpinner size="sm" className="text-current" />
-                        <span>Scanning...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Zap className="w-4 h-4 fill-current" />
-                        EXECUTE AUDIT
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-
-              {selectedJob && (
-                <div className="rounded-[2rem] border border-border/50 bg-background/50 backdrop-blur-sm p-8 flex flex-col gap-4 shadow-xl shadow-primary/5 animate-in fade-in slide-in-from-top-3 duration-300">
-                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
-                  <div className="flex flex-col gap-1">
-                    {QUICK_SCAN_STEPS.map((step, i) => {
-                      const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
-                      const isError = selectedJob.status === "ERROR";
-                      const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
-                      const isActive = step.key === selectedJob.status && !isError;
-                      return (
-                        <div key={step.key} className={cn("flex items-center gap-3 py-2.5 px-3 rounded-xl transition-all", isActive ? "bg-violet-500/8" : "")}>
-                          <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 border-2 transition-all",
-                            isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
-                              isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
-                                isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
-                                  "border-border text-muted-foreground/30")}>
-                            {isDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : isActive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>{i + 1}</span>}
-                          </div>
-                          <span className={cn("text-xs font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/40")}>
-                            {step.label}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
-                    <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
-                  </div>
-                  {selectedJob.stepMessage && <p className="text-[11px] text-muted-foreground">{selectedJob.stepMessage}</p>}
-                </div>
-              )}
-            </div>
-
-            {/* Right Column (Results & Telemetry Stream) */}
-            <div className="min-h-[500px]">
-              {/* Ready state */}
-              {!selectedJob && (
-                <div className="h-[480px] rounded-[2rem] border border-dashed border-border/50 flex flex-col items-center justify-center text-center gap-5 bg-muted/5">
-                  <ShieldCheck className="w-12 h-12 text-muted-foreground/30 animate-pulse" />
-                  <div>
-                    <p className="font-black uppercase tracking-widest text-sm text-foreground">Ready to Scan</p>
-                    <p className="text-xs text-muted-foreground mt-1.5">Input your code snippet on the left and click Execute Audit to begin security validation.</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Ingress / Scanning active state */}
-              {selectedJob && selectedJob.status !== "DONE" && selectedJob.status !== "ERROR" && (
-                <div className="max-w-5xl mx-auto w-full">
-                  <UnifiedPipelineView
-                    job={selectedJob}
-                    steps={QUICK_SCAN_STEPS}
-                    result={selectedResult}
-                    onResultRender={renderQuickScanResult}
-                    onCancel={handleCancelJob}
-                  />
-                </div>
-              )}
-
-              {/* Error state */}
-              {selectedJob && selectedJob.status === "ERROR" && (
-                <div className="rounded-[2rem] border-2 border-destructive/20 bg-destructive/5 p-10 flex flex-col gap-6">
-                  <div className="flex items-center gap-4 text-destructive">
-                    <AlertCircle className="w-10 h-10" />
-                    <h2 className="text-2xl font-black tracking-tight">Scan Failed</h2>
-                  </div>
-                  <p className="font-mono text-sm text-destructive/80 bg-black/5 rounded-2xl p-6 border border-destructive/10 leading-relaxed">
-                    {selectedJob.stepMessage || "An unexpected error occurred during sandbox execution."}
-                  </p>
-                </div>
-              )}
-
-              {/* Finished / Done state */}
-              {selectedJob && selectedJob.status === "DONE" && selectedResult && (
-                <div className="max-w-5xl mx-auto w-full">
-                  {renderQuickScanResult(selectedResult)}
-                </div>
-              )}
-            </div>
-
-          </div>
-        </div>
+        {bodyContent}
 
       </DialogContent>
     </Dialog>

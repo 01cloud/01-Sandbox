@@ -1,2 +1,4 @@
 codeInspector/charts/sealed-secrets/values.yaml:private-key:515
 codeInspector/charts/sealed-secrets/README.md:private-key:144
+z1sandbox-website/src/components/dashboard/SecurityScanner.tsx:aws-access-token:87
+z1sandbox-website/src/components/dashboard/SecurityScanner.tsx:slack-webhook-url:88

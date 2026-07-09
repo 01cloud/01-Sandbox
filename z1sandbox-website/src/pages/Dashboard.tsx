@@ -24,7 +24,8 @@ import {
   FileCode,
   Square,
   Activity,
-  Github
+  Github,
+  Lock
 } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Button } from "@/components/ui/button";
@@ -102,10 +103,6 @@ const Dashboard = () => {
   const [keys, setKeys] = useState<APIKey[]>([]);
   const [authToken, setAuthToken] = useState<string>("");
   const [isLoading, setIsLoading] = useState(true);
-  const [isCreating, setIsCreating] = useState(false);
-  const [newKey, setNewKey] = useState<{ id: string; key: string; status?: string } | null>(null);
-  const [form, setForm] = useState({ name: "", backend: "Z1_SANDBOX", ttl: "never", ttlValue: "1" });
-  const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState("apps");
 
   // --- DEVELOPER TESTING MODE STATES & FUNCTIONS ---
@@ -405,8 +402,38 @@ const Dashboard = () => {
   });
 
   const [backends, setBackends] = useState<any[]>([]);
+  const [selectedBackend, setSelectedBackend] = useState<any | null>(null);
+  const [subscribingApp, setSubscribingApp] = useState<any | null>(null);
+  const [isSubscribing, setIsSubscribing] = useState(false);
 
   const fetchBackends = async () => {
+    try {
+      let headers: any = {};
+      if (isAuthenticated) {
+        try {
+          const token = await getAccessTokenSilently();
+          headers["Authorization"] = `Bearer ${token}`;
+        } catch (err) {
+          console.error("Error obtaining token for backends fetch:", err);
+        }
+      }
+      const response = await fetch(`${API_BASE_URL}/v1/backends`, { headers });
+      if (response.ok) {
+        const data = await response.json();
+        setBackends(data);
+        // Sync selectedBackend if it's currently open
+        if (selectedBackend) {
+          const updated = data.find((b: any) => b.id === selectedBackend.id);
+          if (updated) {
+            setSelectedBackend(updated);
+          }
+        }
+        return;
+      }
+    } catch (e) {
+      console.error("Failed to load backends config from API, falling back to environment:", e);
+    }
+
     try {
       const envBackendsJson = (window as any)._env_?.VITE_DASHBOARD_BACKENDS_JSON || import.meta.env.VITE_DASHBOARD_BACKENDS_JSON;
 
@@ -426,7 +453,8 @@ const Dashboard = () => {
           return {
             ...b,
             baseUrl: defaultBase,
-            documentationUrl: b.documentationUrl || `${defaultBase}/docs`
+            documentationUrl: b.documentationUrl || `${defaultBase}/docs`,
+            isSubscribed: b.id === "Z1_SANDBOX"
           };
         });
         setBackends(processed);
@@ -445,18 +473,35 @@ const Dashboard = () => {
   const fetchKeys = async () => {
     try {
       setIsLoading(true);
-      const token = await getAccessTokenSilently();
-      setAuthToken(token);
+      let token = "";
+      try {
+        token = await getAccessTokenSilently();
+        setAuthToken(token);
+      } catch (err) {
+        console.warn("Auth0 not authenticated, using local mock keys:", err);
+      }
+
+      if (!token) {
+        const stored = localStorage.getItem("local_mock_api_keys");
+        if (stored) {
+          setKeys(JSON.parse(stored));
+        } else {
+          setKeys([]);
+        }
+        return;
+      }
+
       const response = await fetch(`${API_BASE_URL}/v1/api-keys`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await response.json();
-      if (data.keys) {
-        setKeys(data.keys.filter((k: APIKey) => !k.is_revoked));
+      if (response.ok) {
+        const data = await response.json();
+        if (data.keys) {
+          setKeys(data.keys.filter((k: APIKey) => !k.is_revoked));
+        }
       }
     } catch (error) {
       console.error("Error fetching keys:", error);
-      toast.error("Failed to fetch API keys");
     } finally {
       setIsLoading(false);
     }
@@ -464,85 +509,57 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchBackends();
-    if (isAuthenticated) {
-      fetchKeys();
-    }
+    fetchKeys();
   }, [isAuthenticated]);
 
-  const handleCreateKey = async () => {
-    // 1. Sanitize using lightweight DOMPurify to strip any HTML/Script tags
-    const sanitizedName = DOMPurify.sanitize(form.name).trim();
-
-    if (!sanitizedName) {
-      toast.error("Please enter a valid key name");
-      return;
-    }
-
-    // 2. Enforce strict character whitelist
-    const safeNameRegex = /^[a-zA-Z0-9\s\-_]+$/;
-    if (!safeNameRegex.test(sanitizedName)) {
-      toast.error("Invalid key name. Only alphanumeric characters, spaces, hyphens and underscores are allowed.");
-      return;
-    }
-
-    try {
-      setIsCreating(true);
-      const token = await getAccessTokenSilently();
-
-      let ttl_hours = -1;
-      const val = parseInt(form.ttlValue);
-      if (form.ttl === "minutes") ttl_hours = val / 60;
-      else if (form.ttl === "hours") ttl_hours = val;
-      else if (form.ttl === "days") ttl_hours = val * 24;
-      else if (form.ttl === "months") ttl_hours = val * 24 * 30;
-      else if (form.ttl === "years") ttl_hours = val * 24 * 365;
-
-      const response = await fetch(`${API_BASE_URL}/v1/api-keys`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          name: sanitizedName,
-          backend: form.backend,
-          ttl_hours,
-          user_email: user?.email,
-        }),
-      });
-
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || "Failed to create key");
-
-      setNewKey({ id: data.api_key_id, key: data.api_key, status: data.status });
-      localStorage.setItem(`bound_key_${data.api_key_id}`, data.api_key);
+  useEffect(() => {
+    const handleKeysChanged = () => {
       fetchKeys();
-      toast.success("API Key generated successfully!");
-    } catch (error: any) {
-      toast.error(error.message);
-    } finally {
-      setIsCreating(false);
-    }
-  };
+    };
+    window.addEventListener('api-keys-changed', handleKeysChanged);
+    return () => {
+      window.removeEventListener('api-keys-changed', handleKeysChanged);
+    };
+  }, [isAuthenticated]);
 
-  const handleRevokeKey = async (id: string) => {
-    try {
-      const token = await getAccessTokenSilently();
-      await fetch(`${API_BASE_URL}/v1/api-keys/${id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setKeys(keys.filter((k) => k.id !== id));
-      toast.info("Key revoked successfully");
-    } catch (error) {
-      toast.error("Failed to revoke key");
+  useEffect(() => {
+    if (selectedBackend) {
+      document.body.classList.add("hide-navbar");
+    } else {
+      document.body.classList.remove("hide-navbar");
     }
-  };
+    return () => {
+      document.body.classList.remove("hide-navbar");
+    };
+  }, [selectedBackend]);
 
-  const copyToClipboard = (text: string) => {
-    navigator.clipboard.writeText(text);
-    toast.success("Copied to clipboard");
-  };
+  useEffect(() => {
+    if (backends.length > 0 && !scannerConfig.baseUrl) {
+      const defaultApp = backends.find(b => b.baseUrl) || backends[0];
+      if (defaultApp && defaultApp.baseUrl) {
+        const backend = defaultApp.id;
+        const baseUrl = defaultApp.baseUrl;
+        const backendKeys = keys.filter(k => k.backend === backend);
+        let foundKey = "";
+        for (const k of backendKeys) {
+          const saved = localStorage.getItem(`bound_key_${k.id}`);
+          if (saved) {
+            foundKey = saved;
+            break;
+          }
+        }
+        const keyToUse = foundKey || authToken;
+        setScannerConfig({
+          isOpen: false,
+          backend,
+          baseUrl,
+          apiKey: keyToUse
+        });
+      }
+    }
+  }, [backends, keys, authToken, scannerConfig.baseUrl]);
+
+
 
   const handleQuickScan = (backend: string, baseUrl: string) => {
     // Find the latest active key for this backend from localStorage
@@ -565,11 +582,12 @@ const Dashboard = () => {
     }
 
     setScannerConfig({
-      isOpen: true,
+      isOpen: false,
       backend,
       baseUrl,
       apiKey: keyToUse
     });
+    setActiveTab("quick-scan");
   };
 
   const bindAndVisit = async (backend: string, url: string) => {
@@ -607,44 +625,162 @@ const Dashboard = () => {
     </div>
   );
 
+  const handleSubscribe = async () => {
+    if (!subscribingApp) return;
+    try {
+      setIsSubscribing(true);
+      let token = "";
+      try {
+        token = await getAccessTokenSilently();
+      } catch (err) {
+        console.warn("Auth0 not authenticated, using local mock subscription:", err);
+      }
+
+      if (!token) {
+        // Mock subscription for local dev without auth
+        setBackends(prev =>
+          prev.map(b => (b.id === subscribingApp.id ? { ...b, isSubscribed: true } : b))
+        );
+        toast.success(`Successfully subscribed to ${subscribingApp.name}!`);
+        setSubscribingApp(null);
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/v1/subscriptions`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`
+        },
+        body: JSON.stringify({ backend_id: subscribingApp.id })
+      });
+      if (response.ok) {
+        toast.success(`Successfully subscribed to ${subscribingApp.name}!`);
+        await fetchBackends();
+        setSubscribingApp(null);
+      } else {
+        const err = await response.json();
+        throw new Error(err.detail || "Failed to subscribe");
+      }
+    } catch (e: any) {
+      toast.error(e.message);
+    } finally {
+      setIsSubscribing(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen pt-32 pb-20 px-6 sm:px-8 max-w-7xl mx-auto">
-      <header className="mb-12">
-        <div className="flex items-center gap-3 mb-4">
-          <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
-            <LayoutDashboard className="w-6 h-6" />
+    <div className={cn(
+      "min-h-screen px-6 sm:px-8 mx-auto transition-all duration-300",
+      selectedBackend ? "max-w-none w-full pt-10 pb-6" : "max-w-7xl pt-32 pb-20"
+    )}>
+      {!selectedBackend && (
+        <header className="mb-12">
+          <div className="flex items-center gap-3 mb-4">
+            <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
+              <LayoutDashboard className="w-6 h-6" />
+            </div>
+            <h1 className="text-4xl font-display font-black tracking-tight">Developer Dashboard</h1>
           </div>
-          <h1 className="text-4xl font-display font-black tracking-tight">Developer Dashboard</h1>
+          <p className="text-muted-foreground text-lg max-w-2xl">
+            Securely manage your API integrations, track sandbox activity, and scale your intelligence infrastructure.
+          </p>
+        </header>
+      )}
+
+      {selectedBackend ? (
+        // Consolidated Workspace Drawer/Console per Backend
+        <div className="space-y-8 animate-in fade-in duration-300">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-border/40 pb-6 gap-4">
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setSelectedBackend(null)}
+                className="h-9 rounded-xl border border-border/50 hover:bg-secondary/30 text-muted-foreground hover:text-foreground font-bold flex items-center gap-1.5"
+              >
+                <ChevronRight className="w-4 h-4 rotate-180" />
+                Back
+              </Button>
+              <Separator orientation="vertical" className="h-6" />
+              <div className="flex items-center gap-3">
+                <div className={cn(
+                  "p-2 rounded-xl border bg-primary/10 text-primary border-primary/20"
+                )}>
+                  {selectedBackend.icon === "terminal" ? <Terminal className="w-5 h-5" /> : <Box className="w-5 h-5" />}
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-3xl font-display font-black tracking-tight">{selectedBackend.name}</h2>
+                    <Badge variant="outline" className="bg-emerald-500/10 text-emerald-500 border-emerald-500/20 text-[9px] font-black uppercase py-0">Subscribed</Badge>
+                  </div>
+                  <p className="text-sm text-muted-foreground mt-1">{selectedBackend.description}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Button
+                onClick={() => bindAndVisit(selectedBackend.id, selectedBackend.documentationUrl)}
+                variant="outline"
+                className="rounded-xl font-bold h-9 text-xs flex items-center gap-1.5 border-border/50 hover:bg-secondary/20"
+              >
+                View Docs
+                <ExternalLinkIcon className="w-3.5 h-3.5 opacity-55" />
+              </Button>
+            </div>
+          </div>
+
+          <Tabs defaultValue="quick" className="space-y-6">
+            <TabsList className="bg-secondary/30 p-1.5 rounded-2xl border border-border/50 h-auto gap-1 flex-nowrap overflow-x-auto no-scrollbar justify-start">
+              <TabsTrigger value="quick" className="rounded-xl px-5 py-2.5 text-xs font-bold data-[state=active]:bg-background">Quick Scanner</TabsTrigger>
+              <TabsTrigger value="repo" className="rounded-xl px-5 py-2.5 text-xs font-bold data-[state=active]:bg-background">Repository Scanner</TabsTrigger>
+            </TabsList>
+
+
+            <TabsContent value="quick" className="animate-in fade-in-50 duration-300">
+              <SecurityScanner
+                isOpen={false}
+                onClose={() => {}}
+                backend={selectedBackend.id}
+                baseUrl={selectedBackend.baseUrl}
+                apiKey={
+                  (() => {
+                    const backendKeys = keys.filter(k => k.backend === selectedBackend.id);
+                    let foundKey = "";
+                    for (const k of backendKeys) {
+                      const saved = localStorage.getItem(`bound_key_${k.id}`);
+                      if (saved) return saved;
+                    }
+                    return authToken;
+                  })()
+                }
+                inline={true}
+                onSwitchTab={setActiveTab}
+              />
+            </TabsContent>
+
+            <TabsContent value="repo" className="animate-in fade-in-50 duration-300">
+              <RepoScannerWidget
+                apiBaseUrl={API_BASE_URL}
+                keys={keys}
+                authToken={authToken}
+                inline={true}
+                onSwitchTab={setActiveTab}
+                backendId={selectedBackend.id}
+              />
+            </TabsContent>
+          </Tabs>
         </div>
-        <p className="text-muted-foreground text-lg max-w-2xl">
-          Securely manage your API integrations, track sandbox activity, and scale your intelligence infrastructure.
-        </p>
-      </header>
-
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-8">
-        <TabsList className="bg-secondary/30 p-1.5 rounded-2xl border border-border/50 h-auto gap-1 flex-nowrap overflow-x-auto no-scrollbar justify-start sm:justify-center">
-          <TabsTrigger value="apps" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
-            <Box className="w-4 h-4" />
-            Applications
-          </TabsTrigger>
-          <TabsTrigger value="scanner" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
-            <Github className="w-4 h-4" />
-            Repository Scanner
-          </TabsTrigger>
-          <TabsTrigger value="apis" className="rounded-xl px-6 py-2.5 data-[state=active]:bg-background data-[state=active]:shadow-sm font-semibold flex items-center gap-2 whitespace-nowrap">
-            <Key className="w-4 h-4" />
-            API Management
-          </TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="apps" className="animate-in fade-in-50 slide-in-from-bottom-5 duration-500">
+      ) : (
+        // Standard Applications View (with locks)
+        <div className="space-y-8 animate-in fade-in-50 duration-500">
           <div className="mb-8 flex items-center justify-between p-6 rounded-[2rem] bg-secondary/15 border border-border/40 backdrop-blur-sm shadow-xl shadow-primary/5 transition-all">
             <div>
               <h3 className="text-lg font-black tracking-tight flex items-center gap-2">
                 <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
                 Developer Ingestion & Testing Mode
               </h3>
-              {/* <p className="text-sm text-muted-foreground mt-1">Unlock raw file batching, automatic K8s YAML multi-document parsing, and bulk cooldowned automated testing.</p> */}
             </div>
             <button
               onClick={() => {
@@ -673,7 +809,10 @@ const Dashboard = () => {
                 const colorClass = app.color === "indigo" ? "bg-indigo-500/10 text-indigo-500 border-indigo-500/20" : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
 
                 return (
-                  <Card key={app.id} className="group relative overflow-hidden rounded-[2rem] border-border/50 bg-background/50 backdrop-blur-sm transition-all hover:border-primary/50 hover:shadow-2xl hover:shadow-primary/5">
+                  <Card key={app.id} className={cn(
+                    "group relative overflow-hidden rounded-[2rem] border-border/50 bg-background/50 backdrop-blur-sm transition-all hover:border-primary/50 hover:shadow-2xl hover:shadow-primary/5",
+                    !app.isSubscribed ? "opacity-90 border-zinc-800/80" : ""
+                  )}>
                     <CardHeader className="p-8 pb-4">
                       <div className="flex items-center gap-3 mb-4">
                         <div className={cn("p-3 rounded-2xl border", colorClass)}>
@@ -686,24 +825,34 @@ const Dashboard = () => {
                       </CardDescription>
                     </CardHeader>
                     <CardContent className="px-8 pb-8 flex flex-col gap-3 min-h-[140px] justify-end">
-                      {app.baseUrl && (
+                      {app.isSubscribed ? (
+                        <>
+                          <Button
+                            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all"
+                            onClick={() => setSelectedBackend(app)}
+                          >
+                            <Box className="w-4 h-4" />
+                            Open Console
+                          </Button>
+                          <Button
+                            className="w-full bg-white/5 hover:bg-white/10 text-foreground border border-border/50 rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all"
+                            onClick={() => bindAndVisit(app.id, app.documentationUrl)}
+                          >
+                            View Documentation
+                            <ExternalLinkIcon className="w-4 h-4 opacity-50" />
+                          </Button>
+                        </>
+                      ) : (
                         <Button
-                          className="w-full bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-2xl h-12 font-bold flex items-center gap-2 transition-all"
-                          onClick={() => handleQuickScan(app.id, app.baseUrl)}
+                          className="w-full bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all animate-pulse"
+                          onClick={() => setSubscribingApp(app)}
                         >
-                          <Search className="w-4 h-4" />
-                          Quick Scan
+                          <Lock className="w-4 h-4" />
+                          Subscribe & Unlock
                         </Button>
                       )}
-                      <Button
-                        className="w-full bg-white/5 hover:bg-white/10 text-foreground border border-border/50 rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all"
-                        onClick={() => bindAndVisit(app.id, app.documentationUrl)}
-                      >
-                        {app.id === "OPEN_SANDBOX" ? "Go to Application" : "View Documentation"}
-                        <ExternalLinkIcon className="w-4 h-4 opacity-50" />
-                      </Button>
 
-                      {devMode && app.baseUrl && (
+                      {app.isSubscribed && devMode && app.baseUrl && (
                         <div className="mt-6 pt-6 border-t border-border/40 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300">
                           <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">
                             RAW INGESTION ENGINE
@@ -849,9 +998,6 @@ const Dashboard = () => {
                   </Card>
                 );
               })}
-
-              {/* GitHub Repository Scanner Widget */}
-              <RepoScannerWidget apiBaseUrl={API_BASE_URL} keys={keys} authToken={authToken} onSwitchTab={setActiveTab} />
             </div>
 
             {/* Sticky Right-Side Telemetry log reader panel */}
@@ -970,294 +1116,377 @@ const Dashboard = () => {
               )}
             </div>
           </div>
-        </TabsContent>
+        </div>
+      )}
 
-        <TabsContent value="scanner" className="animate-in fade-in-50 slide-in-from-bottom-5 duration-500">
-          <RepoScannerWidget apiBaseUrl={API_BASE_URL} keys={keys} authToken={authToken} inline={true} onSwitchTab={setActiveTab} />
-        </TabsContent>
+      {/* Subscription Dialog Modal */}
+      <Dialog open={!!subscribingApp} onOpenChange={(open) => !open && setSubscribingApp(null)}>
+        <DialogContent className="rounded-3xl border-border/50 bg-background/95 backdrop-blur-md max-w-sm">
+          <DialogHeader className="items-center text-center">
+            <div className="p-4 rounded-full bg-primary/10 border border-primary/20 text-primary mb-4">
+              <ShieldCheck className="w-10 h-10 animate-pulse" />
+            </div>
+            <DialogTitle className="font-black text-2xl tracking-tight">Unlock {subscribingApp?.name}</DialogTitle>
+            <DialogDescription className="text-muted-foreground text-xs max-w-xs mt-2">
+              Subscribe now to deploy production security pipelines and sandboxes for code validation.
+            </DialogDescription>
+          </DialogHeader>
 
-        <TabsContent value="apis" className="animate-in fade-in-50 slide-in-from-bottom-5 duration-500">
-          <Card className="rounded-[2.5rem] border-border/50 bg-background/30 backdrop-blur-xl overflow-hidden">
-            <CardHeader className="p-8 border-b border-border/50 flex flex-row items-center justify-between flex-wrap gap-4 bg-muted/20">
-              <div>
-                <CardTitle className="text-2xl font-black flex items-center gap-3">
-                  Active Service Keys
-                  <Badge variant="outline" className={`rounded-full px-3 py-1 text-xs font-bold font-mono ${keys.length >= 5 ? 'bg-destructive/5 text-destructive border-destructive/20' : 'bg-emerald-500/5 text-emerald-500 border-emerald-500/20'}`}>
-                    {keys.length} / 5 KEYS USED
-                  </Badge>
-                </CardTitle>
-                <CardDescription className="text-base mt-2">Manage your production and development access tokens.</CardDescription>
+          <div className="bg-zinc-950/40 border border-white/5 rounded-2xl p-4 my-4 space-y-3 font-medium text-xs">
+            <div className="flex justify-between items-center text-muted-foreground">
+              <span>Subscription Tier:</span>
+              <span className="text-foreground font-bold">Sandbox Pro</span>
+            </div>
+            <div className="flex justify-between items-center text-muted-foreground">
+              <span>Billing Cycle:</span>
+              <span className="text-foreground font-bold">Monthly Recurring</span>
+            </div>
+            <Separator className="border-white/5" />
+            <div className="flex justify-between items-center text-sm font-bold">
+              <span>Total Price:</span>
+              <span className="text-primary font-black">$49.00 / mo</span>
+            </div>
+          </div>
+
+          <DialogFooter className="flex flex-col gap-2 sm:flex-col">
+            <Button
+              className="w-full bg-primary hover:bg-primary/95 text-primary-foreground font-bold h-11 rounded-xl"
+              onClick={handleSubscribe}
+              disabled={isSubscribing}
+            >
+              {isSubscribing ? "Processing Transaction..." : "Confirm & Subscribe"}
+            </Button>
+            <Button
+              variant="ghost"
+              className="w-full h-11 rounded-xl font-semibold text-muted-foreground hover:bg-secondary/20"
+              onClick={() => setSubscribingApp(null)}
+            >
+              Cancel
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+};
+
+// Sub-component for managing keys per backend
+interface BackendKeysManagementProps {
+  backendId: string;
+  API_BASE_URL: string;
+  keys: any[];
+  onRefresh: () => void;
+  getAccessTokenSilently: any;
+}
+
+const BackendKeysManagement = ({
+  backendId,
+  API_BASE_URL,
+  keys,
+  onRefresh,
+  getAccessTokenSilently
+}: BackendKeysManagementProps) => {
+  const [name, setName] = useState("");
+  const [ttl, setTtl] = useState("days");
+  const [ttlValue, setTtlValue] = useState("30");
+  const [isCreating, setIsCreating] = useState(false);
+  const [newKey, setNewKey] = useState<any | null>(null);
+  const [keyToDelete, setKeyToDelete] = useState<string | null>(null);
+
+  const filteredKeys = keys.filter(k => k.backend === backendId);
+
+  const handleCreateKey = async () => {
+    const sanitizedName = name.trim();
+    if (!sanitizedName) {
+      toast.error("Please enter a valid key name");
+      return;
+    }
+
+    try {
+      setIsCreating(true);
+      let token = "";
+      try {
+        token = await getAccessTokenSilently();
+      } catch (err) {
+        console.warn("Auth0 not authenticated, using local mock key creation:", err);
+      }
+
+      let ttl_seconds: number | null = null;
+      if (ttl !== "never") {
+        const val = parseInt(ttlValue);
+        if (isNaN(val) || val <= 0) {
+          toast.error("TTL must be a positive integer");
+          return;
+        }
+
+        const multipliers: Record<string, number> = {
+          minutes: 60,
+          hours: 3600,
+          days: 86400,
+          months: 2592000,
+          years: 31536000,
+        };
+        ttl_seconds = val * multipliers[ttl];
+      }
+
+      if (!token) {
+        // Local mock API key generation
+        const mockKeyId = "key_" + Math.random().toString(36).substr(2, 9);
+        const mockKeyValue = "z1_" + Math.random().toString(36).substr(2, 24);
+        const mockKeyObj = {
+          id: mockKeyId,
+          name: sanitizedName,
+          backend: backendId,
+          prefix: "z1_mock",
+          created_at: new Date().toISOString(),
+          expires_at: ttl === "never" ? "Never" : new Date(Date.now() + (ttl_seconds || 0) * 1000).toISOString(),
+          is_revoked: false,
+        };
+
+        const stored = localStorage.getItem("local_mock_api_keys");
+        const currentList = stored ? JSON.parse(stored) : [];
+        currentList.push(mockKeyObj);
+        localStorage.setItem("local_mock_api_keys", JSON.stringify(currentList));
+        localStorage.setItem(`bound_key_${mockKeyId}`, mockKeyValue);
+
+        setNewKey({
+          api_key_id: mockKeyId,
+          api_key: mockKeyValue,
+          name: sanitizedName,
+          expires_at: mockKeyObj.expires_at,
+        });
+
+        onRefresh();
+        setName("");
+        toast.success("API Key generated successfully (Local Dev)!");
+        window.dispatchEvent(new Event("api-keys-changed"));
+        return;
+      }
+
+      const response = await fetch(`${API_BASE_URL}/v1/api-keys`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: sanitizedName,
+          backend: backendId,
+          ttl_seconds,
+        }),
+      });
+
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail || "Failed to generate key");
+      }
+
+      const data = await response.json();
+      setNewKey(data);
+      localStorage.setItem(`bound_key_${data.api_key_id}`, data.api_key);
+
+      onRefresh();
+      setName("");
+      toast.success("API Key generated successfully!");
+      window.dispatchEvent(new Event("api-keys-changed"));
+    } catch (error: any) {
+      toast.error(error.message);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const handleRevokeKey = async (id: string) => {
+    try {
+      let token = "";
+      try {
+        token = await getAccessTokenSilently();
+      } catch (err) {
+        // Fallback
+      }
+
+      if (!token) {
+        const stored = localStorage.getItem("local_mock_api_keys");
+        if (stored) {
+          const currentList = JSON.parse(stored);
+          const updatedList = currentList.filter((k: any) => k.id !== id);
+          localStorage.setItem("local_mock_api_keys", JSON.stringify(updatedList));
+        }
+        toast.info("Mock key revoked successfully (Local Dev)");
+        onRefresh();
+        window.dispatchEvent(new Event("api-keys-changed"));
+        return;
+      }
+
+      await fetch(`${API_BASE_URL}/v1/api-keys/${id}`, {
+        method: "DELETE",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      toast.info("Key revoked successfully");
+      onRefresh();
+      window.dispatchEvent(new Event("api-keys-changed"));
+    } catch (error) {
+      toast.error("Failed to revoke key");
+    }
+  };
+
+  return (
+    <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+      {/* Create Key Card */}
+      <Card className="bg-secondary/5 border-border/30 p-6 rounded-2xl flex flex-col justify-between h-fit">
+        <div className="space-y-4">
+          <h3 className="font-bold text-base flex items-center gap-2">
+            <Key className="w-4 h-4 text-primary" />
+            Generate Service Key
+          </h3>
+          <p className="text-xs text-muted-foreground leading-relaxed">
+            Create API keys to integrate and authenticate your CLI tool or CI/CD pipelines directly with this backend.
+          </p>
+
+          <div className="space-y-3">
+            <div className="space-y-1">
+              <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Key Name</label>
+              <Input
+                placeholder="e.g. Jenkins Scan Pipeline"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                className="bg-background/50 border-border/50 rounded-xl"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Expiration</label>
+                <Select value={ttl} onValueChange={setTtl}>
+                  <SelectTrigger className="bg-background/50 border-border/50 rounded-xl">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="minutes">Minutes</SelectItem>
+                    <SelectItem value="hours">Hours</SelectItem>
+                    <SelectItem value="days">Days</SelectItem>
+                    <SelectItem value="never">Never</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
-              <Dialog onOpenChange={(open) => { if (!open) setNewKey(null); }}>
-                <DialogTrigger asChild>
-                  <Button className="rounded-2xl h-12 px-6 font-bold flex items-center gap-2 shadow-lg shadow-primary/10">
-                    <Plus className="w-5 h-5" />
-                    Generate New Key
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-md rounded-[2.5rem] border-border/50 p-8">
-                  <DialogHeader className="mb-6">
-                    <DialogTitle className="text-2xl font-black">Generate API Key</DialogTitle>
-                    <DialogDescription className="text-base">
-                      Assign a specific backend and TTL for your new security identity.
-                    </DialogDescription>
-                  </DialogHeader>
-
-                  {newKey ? (
-                    <div className="space-y-6">
-                      <div className="p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-500 flex items-start gap-4">
-                        <CheckCircle2 className="w-5 h-5 mt-0.5 shrink-0" />
-                        <div className="text-sm font-medium">
-                          {newKey.status || "Key generated successfully. Copy it now, as it won't be shown again."}
-                        </div>
-                      </div>
-                      <div
-                        className="group relative p-6 rounded-2xl bg-zinc-950 text-emerald-400 font-mono text-sm break-all cursor-pointer hover:bg-zinc-900 transition-colors border border-white/5"
-                        onClick={() => copyToClipboard(newKey.key)}
-                      >
-                        {newKey.key}
-                        <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Copy className="w-4 h-4 text-emerald-400/50" />
-                        </div>
-                      </div>
-                      <Button className="w-full rounded-2xl h-12 font-bold" onClick={() => copyToClipboard(newKey.key)}>
-                        Copy to Clipboard
-                      </Button>
-                    </div>
-                  ) : (
-                    <div className="space-y-6">
-                      <div className="space-y-2">
-                        <label className="text-xs font-black uppercase tracking-widest text-muted-foreground px-1">Key Name</label>
-                        <Input
-                          placeholder="e.g. Production Scanner"
-                          className="rounded-xl h-12 border-border/50 focus-visible:ring-primary/20"
-                          value={form.name}
-                          onChange={(e) => setForm({ ...form, name: e.target.value })}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-black uppercase tracking-widest text-muted-foreground px-1">Target Backend</label>
-                        <Select value={form.backend} onValueChange={(val) => setForm({ ...form, backend: val })}>
-                          <SelectTrigger className="rounded-xl h-12 border-border/50">
-                            <SelectValue placeholder="Select Backend" />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-xl border-border/50">
-                            <SelectItem value="Z1_SANDBOX">Z1 Sandbox</SelectItem>
-                            <SelectItem value="OPEN_SANDBOX">OpenSandbox</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-xs font-black uppercase tracking-widest text-muted-foreground px-1">Time to Live</label>
-                        <div className="flex gap-3">
-                          <div className="flex-[0.4]">
-                            <Input
-                              type="number"
-                              min="1"
-                              className="rounded-xl h-12 border-border/50 focus-visible:ring-primary/20"
-                              value={form.ttlValue}
-                              onChange={(e) => setForm({ ...form, ttlValue: e.target.value })}
-                              disabled={form.ttl === "never"}
-                            />
-                          </div>
-                          <div className="flex-[0.6]">
-                            <Select value={form.ttl} onValueChange={(val) => setForm({ ...form, ttl: val })}>
-                              <SelectTrigger className="rounded-xl h-12 border-border/50">
-                                <SelectValue placeholder="Unit" />
-                              </SelectTrigger>
-                              <SelectContent className="rounded-xl border-border/50">
-                                <SelectItem value="minutes">Minutes</SelectItem>
-                                <SelectItem value="hours">Hours</SelectItem>
-                                <SelectItem value="days">Days</SelectItem>
-                                <SelectItem value="months">Months</SelectItem>
-                                <SelectItem value="years">Years</SelectItem>
-                                <SelectItem value="never">Never Expire</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      </div>
-                      {keys.length >= 5 && (
-                        <div className="p-4 rounded-2xl bg-destructive/5 border border-destructive/20 text-destructive text-sm font-bold flex items-center gap-3">
-                          <ShieldCheck className="w-5 h-5" />
-                          <span>You have reached the limit of 5 API keys. Please delete an existing key to create a new one.</span>
-                        </div>
-                      )}
-
-                      <DialogFooter className="mt-8 pt-6 border-t border-border/50">
-                        <Button
-                          className="w-full rounded-2xl h-12 font-bold"
-                          disabled={isCreating || keys.length >= 5}
-                          onClick={handleCreateKey}
-                        >
-                          {isCreating ? (
-                            <div className="flex items-center gap-2">
-                              <LoadingSpinner size="sm" className="text-current" />
-                              <span className="uppercase tracking-widest text-[10px]">Generating...</span>
-                            </div>
-                          ) : keys.length >= 5 ? (
-                            "Limit Reached"
-                          ) : (
-                            "Generate Key"
-                          )}
-                        </Button>
-                      </DialogFooter>
-                    </div>
-                  )}
-                </DialogContent>
-              </Dialog>
-            </CardHeader>
-            <CardContent className="p-0">
-              {isLoading ? (
-                <div className="p-20 flex flex-col items-center justify-center text-center space-y-6">
-                  <LoadingSpinner className="text-primary/40" />
-                  <p className="text-[10px] text-muted-foreground font-black uppercase tracking-[0.2em] opacity-60 animate-pulse">Synchronizing Tokens...</p>
-                </div>
-              ) : keys.length === 0 ? (
-                <div className="p-20 flex flex-col items-center gap-6 text-center">
-                  <div className="p-6 rounded-full bg-muted/10 text-muted-foreground border border-border/30">
-                    <Key className="w-12 h-12 opacity-20" />
-                  </div>
-                  <div className="max-w-xs">
-                    <p className="font-bold text-lg mb-1">No API keys found</p>
-                    <p className="text-sm text-muted-foreground">Generate your first key to start interacting with the security backends.</p>
-                  </div>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 gap-4 p-2">
-                  {keys.map((key) => (
-                    <div
-                      key={key.id}
-                      className="group relative p-5 rounded-[2rem] bg-card/30 border border-border/40 hover:border-primary/30 transition-all duration-500 hover:shadow-2xl hover:shadow-primary/5 overflow-hidden"
-                    >
-                      <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
-
-                      <div className="relative flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-                        <div className="flex items-start gap-5 flex-1">
-                          <div className="mt-1 p-3.5 rounded-2xl bg-primary/10 text-primary border border-primary/20 shadow-inner group-hover:scale-110 transition-transform duration-500">
-                            <ShieldCheck className="w-6 h-6" />
-                          </div>
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-3">
-                              <h3 className="font-display font-black text-xl tracking-tight">{key.name}</h3>
-                              <Badge variant="outline" className="rounded-lg bg-primary/5 border-primary/20 text-[10px] font-black uppercase tracking-widest px-2 py-0.5">
-                                {key.backend}
-                              </Badge>
-                            </div>
-                            <div className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground/70">
-                              <div className="flex items-center gap-1.5">
-                                <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" />
-                                <span className="font-mono">ID: {key.id.substring(0, 12)}...</span>
-                              </div>
-                              <div className="flex items-center gap-1.5">
-                                <Clock className="w-3.5 h-3.5" />
-                                <span>Created {new Date(key.created_at).toLocaleDateString()}</span>
-                              </div>
-                              <div className="flex items-center gap-1.5 ml-1 pl-4 border-l border-border/30">
-                                <Calendar className="w-3.5 h-3.5" />
-                                <span>
-                                  {(() => {
-                                    const exp = new Date(key.expires_at);
-                                    const now = new Date();
-                                    const diffMs = exp.getTime() - now.getTime();
-
-                                    if (diffMs <= 0) return "Expired";
-
-                                    const diffYears = exp.getFullYear() - now.getFullYear();
-                                    if (diffYears > 50) return "Never Expires";
-
-                                    const diffSeconds = Math.floor(diffMs / 1000);
-                                    const diffMinutes = Math.floor(diffSeconds / 60);
-                                    const diffHours = Math.floor(diffMinutes / 60);
-                                    const diffDays = Math.floor(diffHours / 24);
-
-                                    if (diffDays >= 365) {
-                                      const years = Math.floor(diffDays / 365);
-                                      return `Expires in ${years} year${years > 1 ? 's' : ''}`;
-                                    }
-                                    if (diffDays >= 30) {
-                                      const months = Math.floor(diffDays / 30);
-                                      return `Expires in ${months} month${months > 1 ? 's' : ''}`;
-                                    }
-                                    if (diffDays > 0) {
-                                      return `Expires in ${diffDays} day${diffDays > 1 ? 's' : ''}`;
-                                    }
-                                    if (diffHours > 0) {
-                                      return `Expires in ${diffHours} hour${diffHours > 1 ? 's' : ''}`;
-                                    }
-                                    if (diffMinutes > 0) {
-                                      return `Expires in ${diffMinutes} minute${diffMinutes > 1 ? 's' : ''}`;
-                                    }
-                                    return "Expiring soon";
-                                  })()}
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center">
-                          <Button
-                            variant="outline"
-                            className="h-11 px-4 rounded-xl border-border/50 hover:bg-destructive/10 hover:text-destructive hover:border-destructive/30 transition-all active:scale-95 flex items-center gap-2 font-bold text-xs uppercase tracking-wider"
-                            onClick={() => setKeyToDelete(key.id)}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                            Delete
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
+              {ttl !== "never" && (
+                <div className="space-y-1">
+                  <label className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Value</label>
+                  <Input
+                    type="number"
+                    value={ttlValue}
+                    onChange={e => setTtlValue(e.target.value)}
+                    className="bg-background/50 border-border/50 rounded-xl"
+                  />
                 </div>
               )}
-            </CardContent>
-            <CardFooter className="p-8 border-t border-border/50 bg-muted/10">
-              {/* <p className="text-xs text-muted-foreground font-medium flex items-center gap-2">
-                <ShieldCheck className="w-3.5 h-3.5" />
-                Your security keys are encrypted with AES-256-GCM. Never share your production keys.
-              </p> */}
-            </CardFooter>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      <SecurityScanner
-        isOpen={scannerConfig.isOpen}
-        onClose={() => setScannerConfig(prev => ({ ...prev, isOpen: false }))}
-        backend={scannerConfig.backend}
-        baseUrl={scannerConfig.baseUrl}
-        apiKey={scannerConfig.apiKey}
-      />
-
-      <AlertDialog open={!!keyToDelete} onOpenChange={(open) => !open && setKeyToDelete(null)}>
-        <AlertDialogContent className="rounded-[2.5rem] border-border/50 p-8 bg-background/95 backdrop-blur-xl">
-          <AlertDialogHeader>
-            <div className="w-16 h-16 rounded-[2rem] bg-destructive/10 text-destructive flex items-center justify-center mb-6 mx-auto sm:mx-0">
-              <Trash2 className="w-8 h-8" />
             </div>
-            <AlertDialogTitle className="text-2xl font-black">Revoke API Key?</AlertDialogTitle>
-            <AlertDialogDescription className="text-base text-muted-foreground">
-              This action is permanent. Any systems or scripts currently using this key will immediately lose access to the security backends.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter className="mt-8 gap-3">
-            <AlertDialogCancel className="rounded-2xl h-12 font-bold border-border/50">Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="rounded-2xl h-12 font-bold bg-destructive hover:bg-destructive/90 text-destructive-foreground shadow-lg shadow-destructive/20"
-              onClick={() => {
-                if (keyToDelete) {
-                  handleRevokeKey(keyToDelete);
-                  setKeyToDelete(null);
-                }
-              }}
-            >
-              Confirm Revocation
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          </div>
+        </div>
+
+        <Button
+          onClick={handleCreateKey}
+          disabled={isCreating}
+          className="w-full mt-6 bg-primary hover:bg-primary/95 text-primary-foreground font-bold h-10 rounded-xl"
+        >
+          {isCreating ? "Generating Key..." : "Generate Key"}
+        </Button>
+      </Card>
+
+      {/* Active Keys List Card */}
+      <Card className="lg:col-span-2 bg-secondary/5 border-border/30 p-6 rounded-2xl flex flex-col min-h-[300px]">
+        <div className="flex items-center justify-between pb-4 border-b border-border/30 mb-4">
+          <h3 className="font-bold text-base flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-primary" />
+            Active Service Keys
+          </h3>
+          <Badge variant="outline" className="bg-primary/5 text-primary border-primary/20">
+            {filteredKeys.length} Keys
+          </Badge>
+        </div>
+
+        {newKey && (
+          <div className="mb-6 p-4 rounded-xl bg-indigo-500/10 border border-indigo-500/20 text-xs text-foreground animate-in zoom-in-95 duration-200">
+            <div className="font-black text-indigo-400 uppercase tracking-widest text-[9px] mb-1">
+              Secret Key Generated - Copy it now!
+            </div>
+            <p className="text-muted-foreground mb-3">For security, you won't be able to see this secret key again.</p>
+            <div className="flex items-center gap-2 bg-zinc-950 p-2.5 rounded-lg border border-white/5 font-mono text-[11px] select-all">
+              <span className="truncate flex-1 text-zinc-200">{newKey.api_key}</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="h-8 w-8 p-0 rounded-lg"
+                onClick={() => {
+                  navigator.clipboard.writeText(newKey.api_key);
+                  toast.success("Secret key copied!");
+                }}
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        <ScrollArea className="flex-1 max-h-[350px]">
+          {filteredKeys.length === 0 ? (
+            <div className="h-[200px] flex flex-col items-center justify-center text-center opacity-35">
+              <Key className="w-10 h-10 text-muted-foreground mb-2" />
+              <p className="text-xs font-bold uppercase tracking-wider">No active service keys</p>
+              <p className="text-[10px] text-muted-foreground mt-1">Generate a key to get started</p>
+            </div>
+          ) : (
+            <div className="space-y-3 pr-2">
+              {filteredKeys.map((key) => (
+                <div key={key.id} className="p-4 rounded-xl border border-border/40 bg-zinc-950/20 flex items-center justify-between hover:bg-zinc-950/40 transition-all">
+                  <div className="space-y-1 max-w-[70%]">
+                    <h4 className="font-bold text-xs truncate">{key.name}</h4>
+                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground font-mono">
+                      <span>Prefix: {key.prefix}...</span>
+                      <span>Expires: {key.expires_at ? new Date(key.expires_at).toLocaleDateString() : "Never"}</span>
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-8 text-xs font-bold text-destructive hover:bg-destructive/10 rounded-lg"
+                    onClick={() => setKeyToDelete(key.id)}
+                  >
+                    Revoke
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </ScrollArea>
+
+        {/* Delete Confirmation Alert */}
+        <AlertDialog open={!!keyToDelete} onOpenChange={(open) => !open && setKeyToDelete(null)}>
+          <AlertDialogContent className="rounded-3xl border-border/50 bg-background/95 backdrop-blur-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle className="font-black text-xl tracking-tight">Revoke Service Key?</AlertDialogTitle>
+              <AlertDialogDescription className="text-muted-foreground">
+                This action is permanent and cannot be undone. Any integrations or scripts using this key will immediately fail to authenticate.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter className="gap-2">
+              <AlertDialogCancel className="rounded-xl font-bold h-11 border-border/50">Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="rounded-xl font-bold h-11 bg-rose-600 hover:bg-rose-500 text-white"
+                onClick={() => {
+                  if (keyToDelete) {
+                    handleRevokeKey(keyToDelete);
+                    setKeyToDelete(null);
+                  }
+                }}
+              >
+                Revoke Key
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </Card>
     </div>
   );
 };

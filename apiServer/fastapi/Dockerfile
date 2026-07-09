@@ -71,6 +71,8 @@ COPY proxy/ ./proxy/
 COPY health/ ./health/
 COPY ratelimit/ ./ratelimit/
 COPY services/ ./services/
+COPY subscriptions/ ./subscriptions/
+
 
 # Switch to non-root user
 USER appuser

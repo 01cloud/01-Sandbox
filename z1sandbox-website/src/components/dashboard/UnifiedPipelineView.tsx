@@ -70,7 +70,7 @@ function generateLiveLogs(job: GenericJob) {
     logs.push(`[REPORTER] Consolidated stats: Critical:${critical} | High:${high} | Med:${med} | Low:${low}`);
   }
 
-  if (job.status === "DONE") {
+  if (job.status === "DONE" || job.status === "COMPLETE") {
     logs.push(`[SYSTEM] All scans finished. Sandbox environment successfully reclaimed.`);
     logs.push(`[SYSTEM] Execution summary exported.`);
   } else if (job.status === "ERROR") {
@@ -111,7 +111,7 @@ export function UnifiedPipelineView({
       "CLONING": "3.8s",
       "DETECTING": "2.1s",
     };
-    if (stepKey === "SCANNING" && ["DONE", "ERROR"].includes(job.status)) {
+    if (stepKey === "SCANNING" && ["DONE", "COMPLETE", "ERROR"].includes(job.status)) {
       return "24.5s";
     }
     return durations[stepKey] || "";
@@ -119,7 +119,7 @@ export function UnifiedPipelineView({
 
   // When the scan is completed, hide the pipeline timeline/progress entirely
   // and directly render the final security report inside the same screen.
-  if (job.status === "DONE" && result) {
+  if ((job.status === "DONE" || job.status === "COMPLETE") && result) {
     return (
       <div className="animate-in fade-in duration-500">
         {onResultRender(result)}
@@ -159,7 +159,7 @@ export function UnifiedPipelineView({
             <div className="flex flex-col gap-3">
               {steps.map((step, idx) => {
                 const isFailedStep = currentStep === "ERROR" && idx === Math.max(0, activeIdx);
-                const isDone = currentStep === "DONE" || (activeIdx !== -1 && idx < activeIdx);
+                const isDone = currentStep === "DONE" || currentStep === "COMPLETE" || (activeIdx !== -1 && idx < activeIdx);
                 const isActive = idx === activeIdx && !isFailedStep && !isRetrying;
                 const isActiveRetry = isRetrying && idx === activeIdx;
                 const isPending = !isDone && !isActive && !isActiveRetry && !isFailedStep;
@@ -167,7 +167,7 @@ export function UnifiedPipelineView({
                 // Determine if we should show the live terminal log under this step
                 const showTerminal =
                   (step.key === "SCANNING") &&
-                  ((isActive) || (currentIdx > idx) || (currentStep === "DONE") || (currentStep === "ERROR"));
+                  ((isActive) || (currentIdx > idx) || (currentStep === "DONE") || (currentStep === "COMPLETE") || (currentStep === "ERROR"));
 
                 return (
                   <div key={step.key} className="flex items-start gap-4 relative">
@@ -260,7 +260,7 @@ export function UnifiedPipelineView({
                           <div className="flex items-center justify-between text-zinc-500 text-[9px] border-b border-zinc-800/50 pb-1.5 mb-1.5 shrink-0">
                             <span>SANDBOX WORKSPACE TERMINAL</span>
                             <span className="flex items-center gap-1.5">
-                              {!["DONE", "ERROR"].includes(job.status) && (
+                              {!["DONE", "COMPLETE", "ERROR"].includes(job.status) && (
                                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
                               )}
                               LIVE STREAM
@@ -301,7 +301,7 @@ export function UnifiedPipelineView({
                 job.status === "ERROR" && "text-destructive",
                 job.status === "CANCELLED" && "text-orange-500",
                 job.status === "RETRYING" && "text-amber-500",
-                !["DONE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "text-foreground"
+                !["DONE", "COMPLETE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "text-foreground"
               )}
             >
               {job.progress}%
@@ -314,18 +314,18 @@ export function UnifiedPipelineView({
               <div
                 className={cn(
                   "absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out",
-                  job.status === "DONE" && "bg-emerald-500",
+                  (job.status === "DONE" || job.status === "COMPLETE") && "bg-emerald-500",
                   job.status === "ERROR" && "bg-destructive",
                   job.status === "CANCELLED" && "bg-orange-500",
                   job.status === "RETRYING" && "bg-amber-500",
-                  !["DONE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "bg-violet-600"
+                  !["DONE", "COMPLETE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "bg-violet-600"
                 )}
                 style={{ width: `${Math.min(job.progress, 100)}%` }}
               />
             </div>
 
             {/* Cancel Scan action button inside the frame */}
-            {!["DONE", "ERROR", "CANCELLED"].includes(job.status) && onCancel && (
+            {!["DONE", "COMPLETE", "ERROR", "CANCELLED"].includes(job.status) && onCancel && (
               <button
                 onClick={() => onCancel(job.job_id)}
                 className="px-3.5 py-1 bg-destructive/15 hover:bg-destructive/25 text-destructive border border-destructive/20 rounded-md font-bold text-[9px] uppercase tracking-wider transition-all active:scale-[0.97] shrink-0"
