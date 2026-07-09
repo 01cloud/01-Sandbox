@@ -7,5 +7,6 @@ window._env_ = {
   VITE_AUTH0_CLIENT_ID: "",
   VITE_AUTH0_AUDIENCE: "",
   VITE_API_BASE_URL: "",
-  VITE_DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"/api/v1/01sbx","documentationUrl":"/api/v1/01sbx/docs"},{"id":"AWS_VPC_SANDBOX","name":"AWS VPC Sandbox","description":"Enterprise-grade isolated AWS VPC sandbox backend.","icon":"box","color":"emerald","baseUrl":"/api/v1/awsvpc","documentationUrl":"/api/v1/awsvpc/docs"}]'
+  VITE_DASHBOARD_BACKENDS_JSON: "",
+  VITE_ENABLE_DEV_MODE: ""
 };

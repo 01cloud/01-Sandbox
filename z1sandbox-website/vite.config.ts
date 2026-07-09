@@ -27,6 +27,20 @@ export default defineConfig(({ mode }) => {
           proxyTimeout: 900000,
           timeout: 900000
         },
+        '/health': {
+          target: backendUrl,
+          changeOrigin: true,
+          headers: proxyHeaders,
+          proxyTimeout: 900000,
+          timeout: 900000
+        },
+        '/grafana': {
+          target: backendUrl,
+          changeOrigin: true,
+          headers: proxyHeaders,
+          proxyTimeout: 900000,
+          timeout: 900000
+        },
         '/config': {
           target: backendUrl,
           changeOrigin: true,

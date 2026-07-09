@@ -57,7 +57,7 @@ export function JobsPanel({
             No recent scans
           </div>
         ) : (
-          <div className="p-3.5 space-y-2">
+          <div className="divide-y divide-border/10">
             {jobs.map((job) => {
               const isSelected = job.job_id === selectedJobId;
               const isActive = !["DONE", "ERROR"].includes(job.status);
@@ -76,8 +76,8 @@ export function JobsPanel({
                 <div
                   key={job.job_id}
                   className={cn(
-                    "group relative rounded-xl border border-border/40 bg-card/40 hover:bg-card hover:border-violet-500/30 transition-all duration-200 cursor-pointer overflow-hidden p-3.5 flex flex-col gap-1.5",
-                    isSelected && "border-violet-500/60 bg-violet-500/5 shadow-md shadow-violet-500/5 hover:bg-violet-500/5 hover:border-violet-500/60"
+                    "group relative border-l-2 border-l-transparent hover:bg-muted/20 transition-all duration-200 cursor-pointer p-4 flex flex-col gap-1.5",
+                    isSelected && (jobType === "repo-scan" ? "border-l-violet-500 bg-violet-500/[0.03]" : "border-l-blue-500 bg-blue-500/[0.03]")
                   )}
                   onClick={() => onSelectJob(job.job_id)}
                 >
@@ -87,7 +87,7 @@ export function JobsPanel({
                       className={cn(
                         "p-1.5 rounded-lg border text-muted-foreground",
                         jobType === "repo-scan" ? "bg-violet-500/10 border-violet-500/10 text-violet-400" : "bg-blue-500/10 border-blue-500/10 text-blue-400",
-                        isSelected && "border-violet-500/20"
+                        isSelected && (jobType === "repo-scan" ? "border-violet-500/20" : "border-blue-500/20")
                       )}
                     >
                       {jobType === "repo-scan" ? (
@@ -119,7 +119,7 @@ export function JobsPanel({
                   </div>
 
                   {/* Status row */}
-                  <div className="flex items-center gap-1.5 mt-1 border-t border-border/20 pt-2.5">
+                  <div className="flex items-center gap-1.5 mt-1 border-t border-border/10 pt-2.5">
                     {isDone ? (
                       <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
                     ) : isError ? (
@@ -136,7 +136,7 @@ export function JobsPanel({
                         isDone && "text-emerald-500",
                         isError && "text-destructive",
                         isCancelled && "text-orange-500",
-                        isActive && !isCancelled && "text-violet-400"
+                        isActive && !isCancelled && (jobType === "repo-scan" ? "text-violet-400" : "text-blue-400")
                       )}
                     >
                       {isActive ? `${job.status} (${job.progress}%)` : job.status}
@@ -181,7 +181,7 @@ export function JobsPanel({
 
                   {/* Expanded language statuses for selected repository scans */}
                   {isSelected && jobType === "repo-scan" && job.detail?.languages && Object.keys(job.detail.languages).length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-border/20 flex flex-col gap-2 bg-muted/30 rounded-lg p-2">
+                    <div className="mt-3 pt-3 border-t border-border/10 flex flex-col gap-2">
                       <p className="text-[9px] font-black uppercase tracking-wider text-muted-foreground mb-1">
                         Language Pipeline
                       </p>

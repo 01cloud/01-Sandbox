@@ -65,6 +65,7 @@ import {
 import { Separator } from "@/components/ui/separator";
 import SecurityScanner from "@/components/dashboard/SecurityScanner";
 import RepoScannerWidget from "@/components/dashboard/RepoScannerWidget";
+import ThemeToggle from "@/components/ThemeToggle";
 // import QueueMonitorWidget from "@/components/dashboard/QueueMonitorWidget";
 
 interface APIKey {
@@ -83,6 +84,7 @@ const Dashboard = () => {
   // baseUrl (works in production where baseUrl is an absolute URL like
   // "https://api-sandbox.01security.com/api/v1/01sbx") → "" (local dev, same origin).
   const API_BASE_URL = (() => {
+    if (import.meta.env.DEV) return "";
     const explicit = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL;
     if (explicit) return explicit;
     try {
@@ -106,6 +108,11 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState("apps");
 
   // --- DEVELOPER TESTING MODE STATES & FUNCTIONS ---
+  const enableDevModeEnv = (window as any)._env_?.VITE_ENABLE_DEV_MODE
+    ? (window as any)._env_?.VITE_ENABLE_DEV_MODE
+    : import.meta.env.VITE_ENABLE_DEV_MODE;
+  const enableDevMode = enableDevModeEnv !== "false";
+
   const [devMode, setDevMode] = useState(false);
   const [bulkQueue, setBulkQueue] = useState<{ name: string; content: string; lang: string }[]>([]);
   const [isBulkScanning, setIsBulkScanning] = useState(false);
@@ -117,9 +124,6 @@ const Dashboard = () => {
     errorMsg?: string;
     report?: any;
   }[]>([]);
-  const [selectedBulkLogName, setSelectedBulkLogName] = useState<string | null>(null);
-  const selectedBulkLog = bulkScanLogs.find(log => log.name === selectedBulkLogName) || null;
-  const [detailTab, setDetailTab] = useState<"insights" | "raw">("insights");
   const [rateLimitCountdown, setRateLimitCountdown] = useState<number | null>(null);
   const bulkScanCancelledRef = useRef(false);
 
@@ -680,7 +684,7 @@ const Dashboard = () => {
             <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
               <LayoutDashboard className="w-6 h-6" />
             </div>
-            <h1 className="text-4xl font-display font-black tracking-tight">Developer Dashboard</h1>
+            <h1 className="text-4xl font-display font-black tracking-tight">01 Sandbox Dashboard</h1>
           </div>
           <p className="text-muted-foreground text-lg max-w-2xl">
             Securely manage your API integrations, track sandbox activity, and scale your intelligence infrastructure.
@@ -720,6 +724,7 @@ const Dashboard = () => {
             </div>
 
             <div className="flex items-center gap-2">
+              <ThemeToggle />
               <Button
                 onClick={() => bindAndVisit(selectedBackend.id, selectedBackend.documentationUrl)}
                 variant="outline"
@@ -741,7 +746,7 @@ const Dashboard = () => {
             <TabsContent value="quick" className="animate-in fade-in-50 duration-300">
               <SecurityScanner
                 isOpen={false}
-                onClose={() => {}}
+                onClose={() => { }}
                 backend={selectedBackend.id}
                 baseUrl={selectedBackend.baseUrl}
                 apiKey={
@@ -775,346 +780,220 @@ const Dashboard = () => {
       ) : (
         // Standard Applications View (with locks)
         <div className="space-y-8 animate-in fade-in-50 duration-500">
-          <div className="mb-8 flex items-center justify-between p-6 rounded-[2rem] bg-secondary/15 border border-border/40 backdrop-blur-sm shadow-xl shadow-primary/5 transition-all">
-            <div>
-              <h3 className="text-lg font-black tracking-tight flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
-                Developer Ingestion & Testing Mode
-              </h3>
-            </div>
-            <button
-              onClick={() => {
-                setDevMode(!devMode);
-                setBulkQueue([]);
-                setBulkScanLogs([]);
-              }}
-              className={cn(
-                "relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none bg-zinc-800",
-                devMode ? "bg-indigo-600 shadow-[0_0_12px_rgba(99,102,241,0.4)]" : "bg-zinc-800"
-              )}
-            >
-              <span
+          {enableDevMode && (
+            <div className="mb-8 flex items-center justify-between p-6 rounded-[2rem] bg-secondary/15 border border-border/40 backdrop-blur-sm shadow-xl shadow-primary/5 transition-all">
+              <div>
+                <h3 className="text-lg font-black tracking-tight flex items-center gap-2">
+                  <span className="w-2.5 h-2.5 rounded-full bg-indigo-500 animate-pulse shadow-[0_0_8px_rgba(99,102,241,0.6)]" />
+                  Developer Ingestion & Testing Mode
+                </h3>
+              </div>
+              <button
+                onClick={() => {
+                  setDevMode(!devMode);
+                  setBulkQueue([]);
+                  setBulkScanLogs([]);
+                }}
                 className={cn(
-                  "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-300 ease-in-out mt-0.5",
-                  devMode ? "translate-x-5" : "translate-x-0.5"
+                  "relative inline-flex h-7 w-12 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-300 ease-in-out focus:outline-none bg-zinc-800",
+                  devMode ? "bg-indigo-600 shadow-[0_0_12px_rgba(99,102,241,0.4)]" : "bg-zinc-800"
                 )}
-              />
-            </button>
-          </div>
+              >
+                <span
+                  className={cn(
+                    "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-300 ease-in-out mt-0.5",
+                    devMode ? "translate-x-5" : "translate-x-0.5"
+                  )}
+                />
+              </button>
+            </div>
+          )}
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-stretch">
-            <div className="space-y-6 h-full flex flex-col">
-              {backends.map((app) => {
-                const IconComponent = app.icon === "terminal" ? Terminal : (app.icon === "box" ? Box : Code);
-                const colorClass = app.color === "indigo" ? "bg-indigo-500/10 text-indigo-500 border-indigo-500/20" : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 items-start">
+            {backends.map((app) => {
+              const IconComponent = app.icon === "terminal" ? Terminal : (app.icon === "box" ? Box : Code);
+              const colorClass = app.color === "indigo" ? "bg-indigo-500/10 text-indigo-500 border-indigo-500/20" : "bg-emerald-500/10 text-emerald-500 border-emerald-500/20";
 
-                return (
-                  <Card key={app.id} className={cn(
-                    "group relative overflow-hidden rounded-[2rem] border-border/50 bg-background/50 backdrop-blur-sm transition-all hover:border-primary/50 hover:shadow-2xl hover:shadow-primary/5",
-                    !app.isSubscribed ? "opacity-90 border-zinc-800/80" : ""
-                  )}>
-                    <CardHeader className="p-8 pb-4">
-                      <div className="flex items-center gap-3 mb-4">
-                        <div className={cn("p-3 rounded-2xl border", colorClass)}>
-                          <IconComponent className="w-6 h-6" />
-                        </div>
-                        <CardTitle className="text-2xl font-black">{app.name}</CardTitle>
+              return (
+                <Card key={app.id} className={cn(
+                  "group relative overflow-hidden rounded-[2rem] border-border/50 bg-background/50 backdrop-blur-sm transition-all hover:border-primary/50 hover:shadow-2xl hover:shadow-primary/5",
+                  !app.isSubscribed ? "opacity-90 border-zinc-800/80" : ""
+                )}>
+                  <CardHeader className="p-8 pb-4">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className={cn("p-3 rounded-2xl border", colorClass)}>
+                        <IconComponent className="w-6 h-6" />
                       </div>
-                      <CardDescription className="text-base text-muted-foreground">
-                        {app.description}
-                      </CardDescription>
-                    </CardHeader>
-                    <CardContent className="px-8 pb-8 flex flex-col gap-3 min-h-[140px] justify-end">
-                      {app.isSubscribed ? (
-                        <>
-                          <Button
-                            className="w-full bg-primary hover:bg-primary/90 text-primary-foreground rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all"
-                            onClick={() => setSelectedBackend(app)}
-                          >
-                            <Box className="w-4 h-4" />
-                            Open Console
-                          </Button>
-                          <Button
-                            className="w-full bg-white/5 hover:bg-white/10 text-foreground border border-border/50 rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all"
-                            onClick={() => bindAndVisit(app.id, app.documentationUrl)}
-                          >
-                            View Documentation
-                            <ExternalLinkIcon className="w-4 h-4 opacity-50" />
-                          </Button>
-                        </>
-                      ) : (
+                      <CardTitle className="text-2xl font-black">{app.name}</CardTitle>
+                    </div>
+                    <CardDescription className="text-base text-muted-foreground">
+                      {app.description}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="px-8 pb-8 flex flex-col gap-3 min-h-[140px] justify-end">
+                    {app.isSubscribed ? (
+                      <>
                         <Button
-                          className="w-full bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all animate-pulse"
-                          onClick={() => setSubscribingApp(app)}
+                          className="w-full bg-primary hover:bg-primary/90 text-primary-foreground rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all"
+                          onClick={() => setSelectedBackend(app)}
                         >
-                          <Lock className="w-4 h-4" />
-                          Subscribe & Unlock
+                          <Box className="w-4 h-4" />
+                          Open Console
                         </Button>
-                      )}
+                        <Button
+                          className="w-full bg-white/5 hover:bg-white/10 text-foreground border border-border/50 rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all"
+                          onClick={() => bindAndVisit(app.id, app.documentationUrl)}
+                        >
+                          View Documentation
+                          <ExternalLinkIcon className="w-4 h-4 opacity-50" />
+                        </Button>
+                      </>
+                    ) : (
+                      <Button
+                        className="w-full bg-primary/10 hover:bg-primary/20 text-primary border border-primary/20 rounded-2xl h-12 font-bold flex items-center justify-center gap-2 transition-all animate-pulse"
+                        onClick={() => setSubscribingApp(app)}
+                      >
+                        <Lock className="w-4 h-4" />
+                        Subscribe & Unlock
+                      </Button>
+                    )}
 
-                      {app.isSubscribed && devMode && app.baseUrl && (
-                        <div className="mt-6 pt-6 border-t border-border/40 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300">
-                          <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">
-                            RAW INGESTION ENGINE
-                          </label>
+                    {app.isSubscribed && devMode && app.baseUrl && (
+                      <div className="mt-6 pt-6 border-t border-border/40 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300">
+                        <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400">
+                          RAW INGESTION ENGINE
+                        </label>
 
-                          <div
-                            onDragOver={(e) => e.preventDefault()}
-                            onDrop={(e) => {
-                              e.preventDefault();
-                              if (e.dataTransfer.files) {
-                                processFiles(e.dataTransfer.files);
+                        <div
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            if (e.dataTransfer.files) {
+                              processFiles(e.dataTransfer.files);
+                            }
+                          }}
+                          onClick={() => document.getElementById(`dev-upload-${app.id}`)?.click()}
+                          className="p-8 rounded-2xl border border-dashed border-border/70 hover:border-indigo-500/50 hover:bg-indigo-500/5 bg-secondary/5 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 relative group overflow-hidden"
+                        >
+                          <input
+                            type="file"
+                            multiple
+                            id={`dev-upload-${app.id}`}
+                            className="hidden"
+                            onChange={(e) => {
+                              if (e.target.files) {
+                                processFiles(e.target.files);
                               }
                             }}
-                            onClick={() => document.getElementById(`dev-upload-${app.id}`)?.click()}
-                            className="p-8 rounded-2xl border border-dashed border-border/70 hover:border-indigo-500/50 hover:bg-indigo-500/5 bg-secondary/5 flex flex-col items-center justify-center gap-3 cursor-pointer transition-all duration-300 relative group overflow-hidden"
-                          >
-                            <input
-                              type="file"
-                              multiple
-                              id={`dev-upload-${app.id}`}
-                              className="hidden"
-                              onChange={(e) => {
-                                if (e.target.files) {
-                                  processFiles(e.target.files);
-                                }
-                              }}
-                            />
-                            <UploadCloud className="w-10 h-10 text-muted-foreground group-hover:text-indigo-400 group-hover:scale-110 transition-all duration-300" />
-                            <div className="text-center">
-                              <p className="text-sm font-bold text-foreground">Drag & drop files or click to import</p>
-                              <p className="text-[11px] text-muted-foreground mt-1">Supported: .yaml, .py, .go, .js, .sh</p>
-                            </div>
+                          />
+                          <UploadCloud className="w-10 h-10 text-muted-foreground group-hover:text-indigo-400 group-hover:scale-110 transition-all duration-300" />
+                          <div className="text-center">
+                            <p className="text-sm font-bold text-foreground">Drag & drop files or click to import</p>
+                            <p className="text-[11px] text-muted-foreground mt-1">Supported: .yaml, .py, .go, .js, .sh</p>
                           </div>
-
-                          {bulkQueue.length > 0 && (
-                            <div className="flex flex-col gap-3">
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold text-muted-foreground">{bulkQueue.length} Targets Loaded</span>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  className="h-8 text-xs font-bold text-destructive hover:bg-destructive/10"
-                                  onClick={() => {
-                                    setBulkQueue([]);
-                                    setBulkScanLogs([]);
-                                  }}
-                                >
-                                  Clear All
-                                </Button>
-                              </div>
-
-                              <div className="flex gap-2 w-full animate-in fade-in duration-200">
-                                <Button
-                                  onClick={() => runBulkSecurityAudit(app.id, app.baseUrl)}
-                                  disabled={isBulkScanning}
-                                  className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl h-11 font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 transition-all disabled:opacity-90 disabled:cursor-not-allowed"
-                                >
-                                  {isBulkScanning ? (
-                                    <>
-                                      <RefreshCw className="w-4 h-4 animate-spin mr-2" />
-                                      Scanning Queue... {rateLimitCountdown ? `[ Retry in ${rateLimitCountdown}s ]` : ''}
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Play className="w-4 h-4 fill-current mr-2" />
-                                      Run Bulk Scan (2s Cooldown)
-                                    </>
-                                  )}
-                                </Button>
-
-                                {isBulkScanning && (
-                                  <Button
-                                    type="button"
-                                    onClick={stopBulkSecurityAudit}
-                                    className="bg-rose-600 hover:bg-rose-500 text-white rounded-2xl h-11 px-4 font-bold flex items-center justify-center gap-2 shadow-lg transition-all animate-in zoom-in duration-200"
-                                  >
-                                    <Square className="w-4 h-4 fill-current" />
-                                    Stop
-                                  </Button>
-                                )}
-                              </div>
-
-                              {/* Telemetry Console widget */}
-                              <div className="bg-zinc-950 rounded-2xl border border-white/5 p-4 max-h-[220px] overflow-y-auto custom-scrollbar font-mono text-[11px] leading-relaxed flex flex-col gap-2">
-                                <div className="pb-2 border-b border-white/5 flex items-center justify-between text-[10px] text-muted-foreground">
-                                  <span>INGESTION STREAM</span>
-                                  <span>STATUS</span>
-                                </div>
-                                {bulkScanLogs.map((log, idx) => {
-                                  let statusIcon = "⚪";
-                                  let statusColor = "text-muted-foreground";
-                                  if (log.status === "scanning") {
-                                    statusIcon = "🟡 Ingesting...";
-                                    statusColor = "text-amber-400 animate-pulse";
-                                  } else if (log.status === "clean") {
-                                    statusIcon = "✅ SECURE";
-                                    statusColor = "text-emerald-400 font-bold";
-                                  } else if (log.status === "risks") {
-                                    statusIcon = `🛑 VULN [${log.findingsCount || 0} risks]`;
-                                    statusColor = "text-red-400 font-bold";
-                                  } else if (log.status === "429") {
-                                    statusIcon = "⚠️ LIMIT (429)";
-                                    statusColor = "text-yellow-500 font-bold animate-pulse";
-                                  } else if (log.status === "401") {
-                                    statusIcon = "❌ BAD KEY (401)";
-                                    statusColor = "text-rose-500 font-bold";
-                                  } else if (log.status === "error") {
-                                    statusIcon = "❌ FAULT";
-                                    statusColor = "text-rose-500 font-bold";
-                                  }
-
-                                  const isInteractive = ["clean", "risks", "error"].includes(log.status);
-
-                                  return (
-                                    <div
-                                      key={idx}
-                                      onClick={() => {
-                                        if (isInteractive) {
-                                          setSelectedBulkLogName(log.name);
-                                        }
-                                      }}
-                                      className={cn(
-                                        "flex items-center justify-between py-1.5 border-b border-white/5 last:border-0 transition-all",
-                                        isInteractive ? "cursor-pointer hover:bg-white/5 px-2 rounded-lg" : ""
-                                      )}
-                                    >
-                                      <div className="flex items-center gap-2 truncate max-w-[65%]">
-                                        <FileCode className="w-3.5 h-3.5 opacity-40 shrink-0" />
-                                        <span className="truncate text-zinc-300">{log.name}</span>
-                                      </div>
-                                      <span className={cn("text-[10px] shrink-0 font-bold", statusColor)}>
-                                        {statusIcon}
-                                      </span>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          )}
                         </div>
-                      )}
-                    </CardContent>
-                  </Card>
-                );
-              })}
-            </div>
 
-            {/* Sticky Right-Side Telemetry log reader panel */}
-            <div className="w-full h-full min-h-[400px] relative">
-              {selectedBulkLog ? (
-                <Card className="absolute inset-0 rounded-[2.5rem] border-border/50 bg-background/30 backdrop-blur-xl p-8 flex flex-col gap-6 animate-in fade-in slide-in-from-right-4 duration-500 overflow-hidden">
-                  <div className="flex flex-col gap-1.5 border-b border-border/50 pb-6 shrink-0">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-xl font-black truncate max-w-[70%] tracking-tight text-zinc-100 flex items-center gap-2">
-                        <span className={cn(
-                          "w-2.5 h-2.5 rounded-full animate-pulse shadow-md shrink-0",
-                          selectedBulkLog.status === "clean" ? "bg-emerald-500 shadow-emerald-500/50" : "bg-destructive shadow-destructive/50"
-                        )} />
-                        <span className="truncate">{selectedBulkLog.name}</span>
-                      </h3>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 text-xs font-bold text-muted-foreground hover:text-foreground hover:bg-white/5 rounded-xl px-3 shrink-0"
-                        onClick={() => setSelectedBulkLogName(null)}
-                      >
-                        Close
-                      </Button>
-                    </div>
-                    <span className="text-[10px] font-black text-muted-foreground uppercase tracking-widest mt-1">
-                      Security Ingestion Archive Node
-                    </span>
-                  </div>
+                        {bulkQueue.length > 0 && (
+                          <div className="flex flex-col gap-3">
+                            <div className="flex items-center justify-between">
+                              <span className="text-xs font-bold text-muted-foreground">{bulkQueue.length} Targets Loaded</span>
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 text-xs font-bold text-destructive hover:bg-destructive/10"
+                                onClick={() => {
+                                  setBulkQueue([]);
+                                  setBulkScanLogs([]);
+                                }}
+                              >
+                                Clear All
+                              </Button>
+                            </div>
 
-                  <Tabs value={detailTab} onValueChange={(val: any) => setDetailTab(val)} className="w-full flex-1 flex flex-col overflow-hidden min-h-0">
-                    <TabsList className="grid grid-cols-2 rounded-xl bg-zinc-950/50 border border-white/5 p-1 shrink-0">
-                      <TabsTrigger value="insights" className="rounded-lg py-2 text-xs font-bold data-[state=active]:bg-background">Vulnerabilities</TabsTrigger>
-                      <TabsTrigger value="raw" className="rounded-lg py-2 text-xs font-bold data-[state=active]:bg-background">Raw Telemetry</TabsTrigger>
-                    </TabsList>
+                            <div className="flex gap-2 w-full animate-in fade-in duration-200">
+                              <Button
+                                onClick={() => runBulkSecurityAudit(app.id, app.baseUrl)}
+                                disabled={isBulkScanning}
+                                className="flex-1 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl h-11 font-bold flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/10 transition-all disabled:opacity-90 disabled:cursor-not-allowed"
+                              >
+                                {isBulkScanning ? (
+                                  <>
+                                    <RefreshCw className="w-4 h-4 animate-spin mr-2" />
+                                    Scanning Queue... {rateLimitCountdown ? `[ Retry in ${rateLimitCountdown}s ]` : ''}
+                                  </>
+                                ) : (
+                                  <>
+                                    <Play className="w-4 h-4 fill-current mr-2" />
+                                    Run Bulk Scan (2s Cooldown)
+                                  </>
+                                )}
+                              </Button>
 
-                    <TabsContent value="insights" className="flex-1 mt-4 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
-                      <ScrollArea className="flex-1 pr-2">
-                        {(() => {
-                          const report = selectedBulkLog.report?.report || selectedBulkLog.report || {};
-                          const findings = Array.isArray(report)
-                            ? report
-                            : (report.findings || report.findings_list || []);
+                              {isBulkScanning && (
+                                <Button
+                                  type="button"
+                                  onClick={stopBulkSecurityAudit}
+                                  className="bg-rose-600 hover:bg-rose-500 text-white rounded-2xl h-11 px-4 font-bold flex items-center justify-center gap-2 shadow-lg transition-all animate-in zoom-in duration-200"
+                                >
+                                  <Square className="w-4 h-4 fill-current" />
+                                  Stop
+                                </Button>
+                              )}
+                            </div>
 
-                          if (findings.length === 0) {
-                            return (
-                              <div className="h-[300px] flex flex-col items-center justify-center text-center opacity-30">
-                                <ShieldCheck className="w-12 h-12 text-emerald-500 mb-3 animate-pulse" />
-                                <span className="text-[10px] font-black uppercase tracking-widest">No Risks Found - Clean Code</span>
+                            {/* Telemetry Console widget */}
+                            <div className="bg-zinc-950 rounded-2xl border border-white/5 p-4 max-h-[220px] overflow-y-auto custom-scrollbar font-mono text-[11px] leading-relaxed flex flex-col gap-2">
+                              <div className="pb-2 border-b border-white/5 flex items-center justify-between text-[10px] text-muted-foreground">
+                                <span>INGESTION STREAM</span>
+                                <span>STATUS</span>
                               </div>
-                            );
-                          }
-
-                          return (
-                            <div className="space-y-4 pr-4 pb-4">
-                              {findings.map((f: any, i: number) => {
-                                const severity = (f.Severity || f.severity || "MEDIUM").toUpperCase();
-                                const sevColor = severity === "CRITICAL" ? "bg-red-500/10 text-red-500 border-red-500/20" :
-                                  severity === "HIGH" ? "bg-orange-500/10 text-orange-500 border-orange-500/20" :
-                                    severity === "MEDIUM" ? "bg-amber-500/10 text-amber-500 border-amber-500/20" :
-                                      "bg-blue-500/10 text-blue-500 border-blue-500/20";
-
-                                const tool = f.Type || f.tool || "security check";
-                                const issue = f.Title || f.Message || f.issue || "security violation";
-                                const remediation = f.Resolution || f.Remediation || f.remediation || "";
-                                const startLine = f.CauseMetadata?.StartLine || f.line || "";
+                              {bulkScanLogs.map((log, idx) => {
+                                let statusIcon = "⚪";
+                                let statusColor = "text-muted-foreground";
+                                if (log.status === "scanning") {
+                                  statusIcon = "🟡 Ingesting...";
+                                  statusColor = "text-amber-400 animate-pulse";
+                                } else if (log.status === "clean") {
+                                  statusIcon = "✅ SECURE";
+                                  statusColor = "text-emerald-400 font-bold";
+                                } else if (log.status === "risks") {
+                                  statusIcon = `🛑 VULN [${log.findingsCount || 0} risks]`;
+                                  statusColor = "text-red-400 font-bold";
+                                } else if (log.status === "429") {
+                                  statusIcon = "⚠️ LIMIT (429)";
+                                  statusColor = "text-yellow-500 font-bold animate-pulse";
+                                } else if (log.status === "401") {
+                                  statusIcon = "❌ BAD KEY (401)";
+                                  statusColor = "text-rose-500 font-bold";
+                                } else if (log.status === "error") {
+                                  statusIcon = "❌ FAULT";
+                                  statusColor = "text-rose-500 font-bold";
+                                }
 
                                 return (
-                                  <div key={i} className="p-5 rounded-xl border bg-muted/10 hover:bg-muted/20 transition-all relative overflow-hidden group">
-                                    <div className="flex items-center justify-between mb-3">
-                                      <div className="flex items-center gap-2">
-                                        <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0", sevColor)}>
-                                          {severity}
-                                        </Badge>
-                                        <span className="text-[10px] font-black text-muted-foreground tracking-widest lowercase">{tool}</span>
-                                      </div>
-                                      {startLine && <span className="text-[9px] font-mono opacity-40">L:{startLine}</span>}
+                                  <div
+                                    key={idx}
+                                    className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0 transition-all"
+                                  >
+                                    <div className="flex items-center gap-2 truncate max-w-[65%]">
+                                      <FileCode className="w-3.5 h-3.5 opacity-40 shrink-0" />
+                                      <span className="truncate text-zinc-300">{log.name}</span>
                                     </div>
-                                    <h4 className="text-sm font-black tracking-tight mb-2 lowercase">{issue}</h4>
-
-                                    {remediation && (
-                                      <div className="flex flex-col gap-2 mt-4">
-                                        <span className="text-[9px] font-black tracking-[0.1em] text-muted-foreground/60 lowercase">remediation insight</span>
-                                        <div className="p-4 rounded-lg bg-background/50 text-[11px] font-medium text-foreground/80 border border-border/40 leading-relaxed italic lowercase">
-                                          {remediation}
-                                        </div>
-                                      </div>
-                                    )}
+                                    <span className={cn("text-[10px] shrink-0 font-bold", statusColor)}>
+                                      {statusIcon}
+                                    </span>
                                   </div>
                                 );
                               })}
                             </div>
-                          );
-                        })()}
-                      </ScrollArea>
-                    </TabsContent>
-
-                    <TabsContent value="raw" className="flex-1 mt-4 min-h-0 overflow-hidden data-[state=active]:flex data-[state=active]:flex-col">
-                      <div className="flex-1 bg-zinc-950 rounded-2xl border border-white/5 shadow-2xl overflow-hidden relative group flex flex-col min-h-0">
-                        <ScrollArea className="flex-1 w-full">
-                          <div className="p-6 w-max min-w-full">
-                            <pre className="text-[11px] font-mono text-emerald-500/70 leading-relaxed whitespace-pre font-medium block">
-                              {JSON.stringify(selectedBulkLog.report || { error: selectedBulkLog.errorMsg || "No report available" }, null, 2)}
-                            </pre>
                           </div>
-                        </ScrollArea>
+                        )}
                       </div>
-                    </TabsContent>
-                  </Tabs>
+                    )}
+                  </CardContent>
                 </Card>
-              ) : (
-                <Card className="absolute inset-0 rounded-[2.5rem] border-border/50 bg-secondary/5 border-dashed p-12 flex flex-col items-center justify-center text-center animate-in fade-in duration-300">
-                  <Terminal className="w-12 h-12 text-muted-foreground/30 mb-4 animate-pulse" />
-                  <h3 className="text-sm font-black uppercase tracking-wider text-muted-foreground/50">Telemetry Log Reader</h3>
-                  <p className="text-xs text-muted-foreground/30 mt-2 max-w-xs">Select any completed scan item from the Ingestion Stream console on the left to read its detailed security analysis.</p>
-                </Card>
-              )}
-            </div>
+              );
+            })}
           </div>
         </div>
       )}

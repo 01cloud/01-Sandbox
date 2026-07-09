@@ -7,8 +7,8 @@ export default function Metrics() {
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Dynamically resolve base API URL with fallbacks
-  const API_BASE_URL = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "";
-  let cleanBase = "https://api-sandbox.01security.com";
+  const API_BASE_URL = import.meta.env.DEV ? "" : ((window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "");
+  let cleanBase = import.meta.env.DEV ? "" : "https://api-sandbox.01security.com";
   if (API_BASE_URL) {
     cleanBase = API_BASE_URL.replace(/\/api\/z1sandbox\/?$/, "").replace(/\/v1\/?$/, "");
   }

@@ -7,6 +7,9 @@ apiServer:
   configMap:
     AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com"
     AUTH0_AUDIENCE: "https://code-inspector-api"
+    SENDGRID_FROM_EMAIL: "sandbox@01security.com"
+  secret:
+    SENDGRID_API_KEY: ""
   deployment:
     image:
       repository: 199012118961/01sandbox-api

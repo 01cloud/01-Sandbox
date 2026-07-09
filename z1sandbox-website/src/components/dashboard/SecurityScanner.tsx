@@ -22,6 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { useJobStore } from "@/hooks/useJobStore";
 import { UnifiedPipelineView } from "./UnifiedPipelineView";
 import {
@@ -419,73 +420,72 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
 
     return (
       <div className="space-y-7 animate-in fade-in duration-500">
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-          <div className="flex flex-wrap items-center gap-4">
-            <div className={cn(
-              "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border",
-              totalFindings === 0
-                ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
-                : "bg-red-500/10 border-red-500/20 text-red-500"
-            )}>
-              {totalFindings === 0 ? (
-                <CheckCircle2 className="w-5 h-5" />
-              ) : (
-                <AlertCircle className="w-5 h-5" />
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="font-black text-base text-foreground">
-                {totalFindings === 0 ? "SCAN VERDICT: SECURE" : "VULNERABILITIES DETECTED"}
-              </p>
-              <p className="text-[11px] text-muted-foreground mt-0.5">
-                Detected by <span className="font-semibold text-violet-500">Unified Ingestion Pipeline</span>
-                {" · "}{filesScanned.length} files scanned{" · "}{code.split('\n').length} lines of code
-              </p>
-            </div>
-            <div className="flex gap-2 flex-wrap">
-              <Badge variant="outline" className="bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/25 font-bold text-xs px-3 py-1">
-                {langEntries.length} {langEntries.length === 1 ? "Language" : "Languages"}
-              </Badge>
-              <Badge variant="outline" className={cn("font-bold text-xs px-3 py-1", totalFindings === 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25" : "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/25")}>
-                {totalFindings} Findings
-              </Badge>
-            </div>
+        {/* Verdict Banner (Flat) */}
+        <div className="p-1 flex flex-wrap items-center gap-4">
+          <div className={cn(
+            "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border",
+            totalFindings === 0
+              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
+              : "bg-red-500/10 border-red-500/20 text-red-500"
+          )}>
+            {totalFindings === 0 ? (
+              <CheckCircle2 className="w-5 h-5" />
+            ) : (
+              <AlertCircle className="w-5 h-5" />
+            )}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-black text-base text-foreground">
+              {totalFindings === 0 ? "SCAN VERDICT: SECURE" : "VULNERABILITIES DETECTED"}
+            </p>
+            <p className="text-[11px] text-muted-foreground mt-0.5">
+              Detected by <span className="font-semibold text-violet-500">Unified Ingestion Pipeline</span>
+              {" · "}{filesScanned.length} files scanned{" · "}{code.split('\n').length} lines of code
+            </p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <Badge variant="outline" className="bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/25 font-bold text-xs px-3 py-1">
+              {langEntries.length} {langEntries.length === 1 ? "Language" : "Languages"}
+            </Badge>
+            <Badge variant="outline" className={cn("font-bold text-xs px-3 py-1", totalFindings === 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25" : "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/25")}>
+              {totalFindings} Findings
+            </Badge>
           </div>
         </div>
 
         {/* Tab Toggle */}
-        <div className="flex bg-muted/40 p-1 rounded-xl border border-border/40 max-w-md">
+        <div className="flex bg-muted/30 p-0.5 rounded-lg max-w-xs">
           <button
             type="button"
             onClick={() => setActiveTab("dashboard")}
             className={cn(
-              "flex-1 py-1.5 px-4 text-xs font-black uppercase tracking-wider rounded-lg transition-all",
+              "flex-1 py-1 px-3 text-[10px] font-black uppercase tracking-wider rounded-md transition-all",
               activeTab === "dashboard"
-                ? "bg-violet-600 text-white shadow-md shadow-violet-600/10"
+                ? "bg-violet-600 text-white shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            Executive Dashboard
+            Dashboard
           </button>
           <button
             type="button"
             onClick={() => setActiveTab("telemetry")}
             className={cn(
-              "flex-1 py-1.5 px-4 text-xs font-black uppercase tracking-wider rounded-lg transition-all",
+              "flex-1 py-1 px-3 text-[10px] font-black uppercase tracking-wider rounded-md transition-all",
               activeTab === "telemetry"
-                ? "bg-violet-600 text-white shadow-md shadow-violet-600/10"
+                ? "bg-violet-600 text-white shadow-sm"
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            Developer Telemetry
+            Telemetry
           </button>
         </div>
 
         {activeTab === "dashboard" ? (
           <div className="space-y-7 animate-in fade-in duration-300">
             {chartData.length > 0 && (
-              <div className="rounded-[2rem] border border-border bg-card p-6 shadow-sm">
-                <div className="flex items-center justify-between mb-4">
+              <div className="p-1 space-y-4">
+                <div className="flex items-center justify-between">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
                     Language Distribution
                   </h3>
@@ -495,7 +495,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                 </div>
 
                 {/* Thinner stacked horizontal color bar */}
-                <div className="h-1.5 rounded-full overflow-hidden flex mb-4 border border-border/10 bg-muted/20">
+                <div className="h-1.5 rounded-full overflow-hidden flex border border-border/10 bg-muted/20">
                   {chartData.map((d, i) => (
                     <div
                       key={d.name}
@@ -514,7 +514,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                 </div>
 
                 {/* Grid legend list with file count and percentage (no individual bars) */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3.5 pt-2">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 pt-1">
                   {chartData.map((d, i) => {
                     const langInfo = syntheticLangs[d.name];
                     return (
@@ -537,7 +537,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
               </div>
             )}
 
-            <div className="space-y-3">
+            <div className="divide-y divide-border/10">
               {langEntries.map(([lang, info]: [string, any], i) => {
                 const sevCounts = info.findings.reduce(
                   (acc: any, f: any) => {
@@ -559,9 +559,9 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                 );
 
                 return (
-                  <div key={lang} className="rounded-2xl border border-border/50 bg-background/40 overflow-hidden shadow-sm">
+                  <div key={lang} className="py-2.5">
                     <button
-                      className="w-full p-4 flex items-center justify-between text-left hover:bg-muted/10 transition-colors"
+                      className="w-full py-3 flex items-center justify-between text-left hover:bg-muted/10 px-2 rounded-xl transition-all group"
                       onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
                     >
                       <div className="flex items-center gap-3">
@@ -624,31 +624,37 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                     </button>
 
                     {expandedLang === lang && (
-                      <div className="border-t border-border bg-muted/40">
+                      <div className="mt-3 pl-6 pr-2 space-y-3">
                         {info.findings.length === 0 ? (
-                          <div className="p-4 text-xs font-semibold text-muted-foreground/50 text-center">
+                          <div className="py-4 text-xs font-semibold text-muted-foreground/50 text-center">
                             No security findings for this language
                           </div>
                         ) : (
-                          <div className="overflow-y-auto p-4 space-y-2.5 max-h-[350px]">
+                          <div className="space-y-3 max-h-[350px] overflow-y-auto pr-1">
                             {info.findings.map((f: any, fi: number) => {
                               const sev = f.severity?.toUpperCase() ?? "INFO";
-                              const sevColor =
-                                sev === "CRITICAL" ? "border-red-500/20 bg-red-500/10 dark:bg-red-500/5 text-red-950 dark:text-red-100" :
-                                sev === "HIGH"     ? "border-orange-500/20 bg-orange-500/10 dark:bg-orange-500/5 text-orange-950 dark:text-orange-100" :
-                                sev === "MEDIUM"   ? "border-yellow-500/20 bg-yellow-500/10 dark:bg-yellow-500/5 text-yellow-950 dark:text-yellow-100" :
-                                sev === "LOW"      ? "border-blue-500/20 bg-blue-500/10 dark:bg-blue-500/5 text-blue-950 dark:text-blue-100" :
-                                                     "border-border bg-card text-foreground";
+                              const borderLeftColor =
+                                sev === "CRITICAL" ? "border-l-red-500 bg-red-500/[0.03]" :
+                                sev === "HIGH"     ? "border-l-orange-500 bg-orange-500/[0.03]" :
+                                sev === "MEDIUM"   ? "border-l-yellow-500 bg-yellow-500/[0.03]" :
+                                sev === "LOW"      ? "border-l-blue-500 bg-blue-500/[0.03]" :
+                                                     "border-l-muted-foreground/30 bg-muted/[0.02]";
                               const badgeColor =
-                                sev === "CRITICAL" ? "bg-red-500/15 text-red-600 dark:text-red-400 border-red-500/30" :
-                                sev === "HIGH"     ? "bg-orange-500/15 text-orange-600 dark:text-orange-400 border-orange-500/30" :
-                                sev === "MEDIUM"   ? "bg-yellow-500/15 text-yellow-600 dark:text-yellow-400 border-yellow-500/30" :
-                                sev === "LOW"      ? "bg-blue-500/15 text-blue-600 dark:text-blue-400 border-blue-500/30" :
-                                                     "bg-muted text-muted-foreground border-border";
+                                sev === "CRITICAL" ? "bg-red-500/10 text-red-600 dark:text-red-400" :
+                                sev === "HIGH"     ? "bg-orange-500/10 text-orange-600 dark:text-orange-400" :
+                                sev === "MEDIUM"   ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" :
+                                sev === "LOW"      ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" :
+                                                     "bg-muted/30 text-muted-foreground";
                               return (
-                                <div key={fi} className={cn("p-3 rounded-lg border text-[11px] transition-all", sevColor)}>
-                                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                                    <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide", badgeColor)}>
+                                <div
+                                  key={fi}
+                                  className={cn(
+                                    "p-3.5 pl-4 border-l-2 border-y-0 border-r-0 rounded-r-xl text-[11px] transition-all flex flex-col gap-1.5",
+                                    borderLeftColor
+                                  )}
+                                >
+                                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                                    <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide px-1.5 py-0 border-0", badgeColor)}>
                                       {sev}
                                     </Badge>
                                     <span className="text-[9px] font-bold text-muted-foreground/60">{f.tool}</span>
@@ -658,13 +664,13 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                                   </div>
                                   <p className="text-[11px] font-semibold leading-normal">{f.issue}</p>
                                   {f.file && (
-                                    <div className="flex items-center gap-1.5 mt-2">
+                                    <div className="flex items-center gap-1.5 mt-1">
                                       <FileCode className="w-3 h-3 text-muted-foreground/40 shrink-0" />
                                       <p className="text-[9px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
                                     </div>
                                   )}
                                   {f.remediation && (
-                                    <p className="text-[9px] text-muted-foreground/60 mt-1.5 leading-relaxed">{f.remediation}</p>
+                                    <p className="text-[9px] text-muted-foreground/60 mt-1 leading-relaxed">{f.remediation}</p>
                                   )}
                                 </div>
                               );
@@ -679,14 +685,14 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
             </div>
           </div>
         ) : (
-          /* Developer split view: Report vs Insights */
+          /* Developer split view: Report vs Insights (Flat) */
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[700px] animate-in fade-in duration-300">
             {/* JSON Telemetry */}
             <section className="flex flex-col gap-3 overflow-hidden">
               <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">
                 Security Telemetry Report
               </h3>
-              <div className="flex-1 bg-zinc-950 rounded-2xl border border-border/50 shadow-2xl overflow-hidden">
+              <div className="flex-1 bg-zinc-950/80 rounded-2xl border border-border/30 overflow-hidden">
                 <ScrollArea className="h-full">
                   <pre className="p-6 text-[11px] font-mono text-emerald-500/80 leading-relaxed whitespace-pre font-medium">
                     {JSON.stringify(normalized, null, 2)}
@@ -701,25 +707,35 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                 <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground shrink-0">
                   Vulnerability Insights
                 </h3>
-                <ScrollArea className="flex-1 border border-border/50 rounded-2xl p-4 bg-muted/5">
+                <ScrollArea className="flex-1 pr-1">
                   {findings.length > 0 ? (
                     <div className="space-y-4">
                       {findings.map((f: any, i: number) => {
                         const severity = (f.severity || "MEDIUM").toUpperCase();
-                        const sevColor =
-                          severity === "CRITICAL"
-                            ? "bg-red-500/10 text-red-500 border-red-500/20"
-                            : severity === "HIGH"
-                            ? "bg-orange-500/10 text-orange-500 border-orange-500/20"
-                            : severity === "MEDIUM"
-                            ? "bg-amber-500/10 text-amber-500 border-amber-500/20"
-                            : "bg-blue-500/10 text-blue-500 border-blue-500/20";
+                        const borderLeftColor =
+                          severity === "CRITICAL" ? "border-l-red-500 bg-red-500/[0.03]" :
+                          severity === "HIGH"     ? "border-l-orange-500 bg-orange-500/[0.03]" :
+                          severity === "MEDIUM"   ? "border-l-yellow-500 bg-yellow-500/[0.03]" :
+                          severity === "LOW"      ? "border-l-blue-500 bg-blue-500/[0.03]" :
+                                                    "border-l-muted-foreground/30 bg-muted/[0.02]";
+                        const badgeColor =
+                          severity === "CRITICAL" ? "bg-red-500/10 text-red-600 dark:text-red-400" :
+                          severity === "HIGH"     ? "bg-orange-500/10 text-orange-600 dark:text-orange-400" :
+                          severity === "MEDIUM"   ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" :
+                          severity === "LOW"      ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" :
+                                                    "bg-muted/30 text-muted-foreground";
 
                         return (
-                          <div key={i} className="p-4 rounded-xl border bg-card hover:bg-muted/15 transition-all relative overflow-hidden">
-                            <div className="flex items-center justify-between mb-2">
+                          <div
+                            key={i}
+                            className={cn(
+                              "p-4 border-l-2 border-y-0 border-r-0 rounded-r-xl text-[11px] transition-all flex flex-col gap-2 relative overflow-hidden",
+                              borderLeftColor
+                            )}
+                          >
+                            <div className="flex items-center justify-between mb-1">
                               <div className="flex items-center gap-2">
-                                <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0", sevColor)}>
+                                <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0 border-0", badgeColor)}>
                                   {severity}
                                 </Badge>
                                 <span className="text-[9px] font-mono text-muted-foreground tracking-widest uppercase">
@@ -729,20 +745,20 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                               {f.line && <span className="text-[9px] font-mono opacity-40">L:{f.line}</span>}
                             </div>
 
-                            <h4 className="text-xs font-bold mb-2 text-foreground">
+                            <h4 className="text-xs font-bold text-foreground">
                               {f.issue || "Security violation"}
                             </h4>
 
-                            <div className="flex flex-col gap-1.5 mt-3">
+                            <div className="flex flex-col gap-1.5 mt-2">
                               <span className="text-[8px] font-black tracking-[0.1em] text-muted-foreground/60 uppercase">
                                 remediation insight
                               </span>
-                              <div className="p-3 rounded-lg bg-muted text-[10px] text-muted-foreground leading-relaxed italic border border-border/30">
+                              <div className="text-[10px] text-muted-foreground/80 leading-relaxed italic pl-3 border-l border-border/30">
                                 {f.remediation || "Analyze the specific code structure and apply industry security standards to mitigate this risk."}
                               </div>
                             </div>
 
-                            <div className="mt-2 text-[8px] font-mono opacity-40">
+                            <div className="mt-1 text-[8px] font-mono opacity-40">
                               FILE: {f.file || "unknown"}
                             </div>
                           </div>
@@ -854,40 +870,40 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                   </>
                 )}
               </Button>
+
+              {selectedJob && (
+                <div className="border-t border-border/10 pt-5 mt-2 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300">
+                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
+                  <div className="flex flex-col gap-1">
+                    {QUICK_SCAN_STEPS.map((step, i) => {
+                      const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
+                      const isError = selectedJob.status === "ERROR";
+                      const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
+                      const isActive = step.key === selectedJob.status && !isError;
+                      return (
+                         <div key={step.key} className={cn("flex items-center gap-3 py-2 px-3 rounded-xl transition-all", isActive ? "bg-violet-500/8" : "")}>
+                           <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 border-2 transition-all",
+                             isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
+                               isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
+                                 isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
+                                   "border-border text-muted-foreground/30")}>
+                             {isDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : isActive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>{i + 1}</span>}
+                           </div>
+                           <span className={cn("text-xs font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/40")}>
+                             {step.label}
+                           </span>
+                         </div>
+                      );
+                    })}
+                  </div>
+                  <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
+                    <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
+                  </div>
+                  {selectedJob.stepMessage && <p className="text-[11px] text-muted-foreground">{selectedJob.stepMessage}</p>}
+                </div>
+              )}
             </div>
           </div>
-
-          {selectedJob && (
-            <div className="rounded-[2rem] border border-border/50 bg-background/50 backdrop-blur-sm p-8 flex flex-col gap-4 shadow-xl shadow-primary/5 animate-in fade-in slide-in-from-top-3 duration-300">
-              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
-              <div className="flex flex-col gap-1">
-                {QUICK_SCAN_STEPS.map((step, i) => {
-                  const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
-                  const isError = selectedJob.status === "ERROR";
-                  const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
-                  const isActive = step.key === selectedJob.status && !isError;
-                  return (
-                     <div key={step.key} className={cn("flex items-center gap-3 py-2.5 px-3 rounded-xl transition-all", isActive ? "bg-violet-500/8" : "")}>
-                       <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 border-2 transition-all",
-                         isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
-                           isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
-                             isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
-                               "border-border text-muted-foreground/30")}>
-                         {isDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : isActive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>{i + 1}</span>}
-                       </div>
-                       <span className={cn("text-xs font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/40")}>
-                         {step.label}
-                       </span>
-                     </div>
-                  );
-                })}
-              </div>
-              <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
-                <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
-              </div>
-              {selectedJob.stepMessage && <p className="text-[11px] text-muted-foreground">{selectedJob.stepMessage}</p>}
-            </div>
-          )}
         </div>
 
         {/* Right Column (Results & Telemetry Stream) */}
@@ -1023,16 +1039,16 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
           </div>
         </div>
 
-        {/* ── Two-Column Layout ── */}
-        <div className="flex-1 flex overflow-hidden">
-          {/* Left Sidebar: Input & Status */}
-          <div className="w-[420px] shrink-0 flex flex-col h-full overflow-y-auto p-5 space-y-4 border-r border-border/40 bg-background/5">
-            {/* Quick Templates */}
-            <div className="flex flex-col gap-2">
-              <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 block">
-                Quick Templates
-              </span>
-              <div className="flex flex-wrap gap-1.5">
+        {/* ── Two-Column Layout (Dynamic Partitions) ── */}
+        <ResizablePanelGroup direction="horizontal" className="flex-grow">
+          <ResizablePanel defaultSize={35} minSize={25} maxSize={55} className="flex flex-col h-full overflow-y-auto">
+            <div className="p-5 space-y-4 h-full bg-background/5 flex flex-col">
+              {/* Quick Templates */}
+              <div className="flex flex-col gap-2 shrink-0">
+                <span className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 block">
+                  Quick Templates
+                </span>
+                <div className="flex flex-wrap gap-1.5">
                 {CODE_TEMPLATES.map((tmpl) => (
                   <button
                     key={tmpl.name}
@@ -1052,12 +1068,12 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
             </div>
 
             {/* Source Ingestion */}
-            <div className="flex flex-col gap-2">
+            <div className="flex-grow flex flex-col gap-2 min-h-[260px]">
               <label className="text-[10px] font-black uppercase tracking-[0.2em] text-zinc-400 block">
                 Source Ingestion
               </label>
 
-              <div className="relative h-[340px] rounded-2xl bg-[#0b0e14] border border-border/60 overflow-hidden flex flex-col focus-within:ring-2 focus-within:ring-violet-500/25 transition-all shadow-lg shadow-black/10">
+              <div className="flex-grow relative rounded-2xl bg-[#0b0e14] border border-border/60 overflow-hidden flex flex-col focus-within:ring-2 focus-within:ring-violet-500/25 transition-all shadow-lg shadow-black/10">
                 {/* Editor Window Header Tab */}
                 <div className="flex items-center justify-between px-4 py-2.5 bg-[#111622] border-b border-border/30 select-none">
                   <div className="flex items-center gap-3">
@@ -1083,7 +1099,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                 <textarea
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  className="flex-1 bg-transparent p-5 font-mono text-xs text-zinc-100 focus:outline-none resize-none leading-relaxed focus:ring-0 overflow-y-auto selection:bg-violet-500/30 caret-violet-500"
+                  className="flex-grow bg-transparent p-5 font-mono text-xs text-zinc-100 focus:outline-none resize-none leading-relaxed focus:ring-0 overflow-y-auto selection:bg-violet-500/30 caret-violet-500"
                   spellCheck="false"
                   placeholder="# Paste code here..."
                   disabled={isScanning}
@@ -1091,60 +1107,63 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
               </div>
             </div>
 
-            <Button
-              onClick={runScan}
-              disabled={isScanning || !code.trim()}
-              className="h-9 w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all active:scale-[0.98] shrink-0 uppercase tracking-wider"
-            >
-              {isScanning ? (
-                <>
-                  <LoadingSpinner size="sm" className="text-current" />
-                  <span>Scanning Snippet...</span>
-                </>
-              ) : (
-                <>
-                  <Zap className="w-3.5 h-3.5 fill-current" />
-                  EXECUTE AUDIT
-                </>
-              )}
-            </Button>
+              <Button
+                onClick={runScan}
+                disabled={isScanning || !code.trim()}
+                className="h-9 w-full rounded-lg bg-violet-600 hover:bg-violet-500 text-white font-bold text-[11px] flex items-center justify-center gap-1.5 shadow-md shadow-violet-600/10 transition-all active:scale-[0.98] shrink-0 uppercase tracking-wider mt-2"
+              >
+                {isScanning ? (
+                  <>
+                    <LoadingSpinner size="sm" className="text-current" />
+                    <span>Scanning Snippet...</span>
+                  </>
+                ) : (
+                  <>
+                    <Zap className="w-3.5 h-3.5 fill-current" />
+                    EXECUTE AUDIT
+                  </>
+                )}
+              </Button>
 
-            {/* Stepper inside sidebar for selectedJob */}
-            {selectedJob && (
-              <div className="rounded-2xl border border-border/50 bg-background/50 p-4 flex flex-col gap-4 shadow-sm animate-in fade-in slide-in-from-top-3 duration-300">
-                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
-                <div className="flex flex-col gap-1">
-                  {QUICK_SCAN_STEPS.map((step, i) => {
-                    const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
-                    const isError = selectedJob.status === "ERROR";
-                    const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
-                    const isActive = step.key === selectedJob.status && !isError;
-                    return (
-                      <div key={step.key} className={cn("flex items-center gap-2.5 py-1.5 px-2 rounded-lg transition-all", isActive ? "bg-violet-500/8" : "")}>
-                        <div className={cn("w-4.5 h-4.5 rounded-full flex items-center justify-center shrink-0 border-2 text-[9px] transition-all",
-                          isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
-                            isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
-                              isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
-                                "border-border text-muted-foreground/35")}>
-                          {isDone ? <CheckCircle2 className="w-2.5 h-2.5" /> : isActive ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <span>{i + 1}</span>}
+              {/* Stepper inside sidebar for selectedJob */}
+              {selectedJob && (
+                <div className="border-t border-border/10 pt-4 flex flex-col gap-4 animate-in fade-in slide-in-from-top-3 duration-300 mt-2 shrink-0">
+                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
+                  <div className="flex flex-col gap-1">
+                    {QUICK_SCAN_STEPS.map((step, i) => {
+                      const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
+                      const isError = selectedJob.status === "ERROR";
+                      const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
+                      const isActive = step.key === selectedJob.status && !isError;
+                      return (
+                        <div key={step.key} className={cn("flex items-center gap-2.5 py-1.5 px-2 rounded-lg transition-all", isActive ? "bg-violet-500/8" : "")}>
+                          <div className={cn("w-4.5 h-4.5 rounded-full flex items-center justify-center shrink-0 border-2 text-[9px] transition-all",
+                            isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
+                              isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
+                                isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
+                                  "border-border text-muted-foreground/35")}>
+                            {isDone ? <CheckCircle2 className="w-2.5 h-2.5" /> : isActive ? <Loader2 className="w-2.5 h-2.5 animate-spin" /> : <span>{i + 1}</span>}
+                          </div>
+                          <span className={cn("text-[10px] font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/45")}>
+                            {step.label}
+                          </span>
                         </div>
-                        <span className={cn("text-[10px] font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/45")}>
-                          {step.label}
-                        </span>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
+                  </div>
+                  <div className="h-1 rounded-full bg-muted/50 overflow-hidden">
+                    <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
+                  </div>
+                  {selectedJob.stepMessage && <p className="text-[10px] text-muted-foreground">{selectedJob.stepMessage}</p>}
                 </div>
-                <div className="h-1 rounded-full bg-muted/50 overflow-hidden">
-                  <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
-                </div>
-                {selectedJob.stepMessage && <p className="text-[10px] text-muted-foreground">{selectedJob.stepMessage}</p>}
-              </div>
-            )}
-          </div>
+              )}
+            </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle />
 
           {/* Right Column: Results & Telemetry */}
-          <div className="flex-1 overflow-y-auto p-6 bg-background/5">
+          <ResizablePanel defaultSize={65} className="flex flex-col h-full overflow-y-auto p-6 bg-background/5">
             {/* Ready state */}
             {!selectedJob && (
               <div className="h-full rounded-[2rem] border border-border/40 bg-card/15 p-8 flex flex-col justify-between overflow-hidden shadow-inner relative animate-in fade-in duration-500">
@@ -1249,8 +1268,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, inline = f
                 {renderQuickScanResult(selectedResult)}
               </div>
             )}
-          </div>
-        </div>
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </div>
     );
   }

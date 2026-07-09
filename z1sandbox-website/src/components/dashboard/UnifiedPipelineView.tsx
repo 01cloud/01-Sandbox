@@ -171,8 +171,11 @@ export function UnifiedPipelineView({
 
                 return (
                   <div key={step.key} className="flex items-start gap-4 relative">
-                    {/* Step circle indicator - exactly centered with the line */}
-                    <div className="relative z-10 w-[27px] h-[27px] rounded-full flex items-center justify-center bg-card shrink-0 mt-[7px]">
+                    {/* Step circle indicator - dynamically aligned with dynamic padding */}
+                    <div className={cn(
+                      "relative z-10 w-[27px] h-[27px] rounded-full flex items-center justify-center bg-card shrink-0 transition-all",
+                      isActive || isActiveRetry || isFailedStep ? "mt-[9px]" : "mt-[4px]"
+                    )}>
                       {isDone ? (
                         <div className="w-[21px] h-[21px] rounded-full flex items-center justify-center bg-emerald-500/10 border border-emerald-500/30 text-emerald-500">
                           <CheckCircle2 className="w-3 h-3" />
@@ -196,15 +199,15 @@ export function UnifiedPipelineView({
                       )}
                     </div>
 
-                    {/* Step card box */}
+                    {/* Step box (borderless by default, highlighted cards with left accent for active states) */}
                     <div
                       className={cn(
-                        "flex-1 rounded-xl border p-4 transition-all duration-300 flex flex-col gap-2.5",
-                        isDone && "bg-card/40 border-border/30 hover:border-border/40",
-                        isActive && "bg-muted/10 border-violet-500/25 shadow-sm shadow-violet-500/5",
-                        isActiveRetry && "bg-amber-500/5 border-amber-500/20",
-                        isFailedStep && "bg-destructive/5 border-destructive/20",
-                        isPending && "bg-card/10 border-border/10 opacity-45"
+                        "flex-1 transition-all duration-300 flex flex-col gap-2",
+                        isDone && "py-1.5 px-1 opacity-90",
+                        isActive && "bg-violet-500/[0.04] border-l-2 border-violet-500 py-3 pl-4 pr-3 rounded-r-xl shadow-sm shadow-violet-500/5",
+                        isActiveRetry && "bg-amber-500/[0.04] border-l-2 border-amber-500 py-3 pl-4 pr-3 rounded-r-xl",
+                        isFailedStep && "bg-destructive/[0.04] border-l-2 border-destructive py-3 pl-4 pr-3 rounded-r-xl",
+                        isPending && "py-1.5 px-1 opacity-35"
                       )}
                     >
                       <div className="flex items-center justify-between">
@@ -213,16 +216,16 @@ export function UnifiedPipelineView({
                             className={cn(
                               "text-xs font-bold leading-tight tracking-wide block",
                               isDone && "text-foreground/90",
-                              isActive && "text-foreground",
-                              isActiveRetry && "text-amber-500",
-                              isFailedStep && "text-destructive",
-                              isPending && "text-muted-foreground/40"
+                              isActive && "text-foreground font-black",
+                              isActiveRetry && "text-amber-500 font-black",
+                              isFailedStep && "text-destructive font-black",
+                              isPending && "text-muted-foreground/45"
                             )}
                           >
                             {step.label}
                           </span>
 
-                          {/* Submessage inside the card */}
+                          {/* Submessage inside the active item */}
                           {isActive && job.stepMessage && (
                             <p className="text-[10px] text-muted-foreground/75 mt-1 font-mono leading-relaxed">
                               {job.stepMessage}
@@ -254,21 +257,28 @@ export function UnifiedPipelineView({
                         </div>
                       </div>
 
-                      {/* Terminal sandbox log display (within the same card) */}
+                      {/* Premium Mac-style Terminal logs */}
                       {showTerminal && (
-                        <div className="rounded-xl bg-zinc-950 border border-border/30 p-3.5 font-mono text-[10px] leading-relaxed text-zinc-300 max-h-[160px] overflow-y-auto shadow-inner flex flex-col gap-1">
-                          <div className="flex items-center justify-between text-zinc-500 text-[9px] border-b border-zinc-800/50 pb-1.5 mb-1.5 shrink-0">
-                            <span>SANDBOX WORKSPACE TERMINAL</span>
-                            <span className="flex items-center gap-1.5">
+                        <div className="rounded-xl bg-zinc-950 border border-white/5 overflow-hidden shadow-lg mt-2 animate-in fade-in duration-300">
+                          {/* Title bar */}
+                          <div className="bg-zinc-900/80 px-4 py-2 flex items-center justify-between border-b border-white/5 shrink-0 select-none">
+                            <div className="flex items-center gap-1.5">
+                              <span className="w-2 h-2 rounded-full bg-[#ff5f56]" />
+                              <span className="w-2 h-2 rounded-full bg-[#ffbd2e]" />
+                              <span className="w-2 h-2 rounded-full bg-[#27c93f]" />
+                              <span className="text-[9px] font-mono font-bold text-zinc-500 ml-2">sandbox-terminal</span>
+                            </div>
+                            <span className="text-[8px] font-mono font-bold text-zinc-500 flex items-center gap-1.5">
                               {!["DONE", "COMPLETE", "ERROR"].includes(job.status) && (
-                                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                                <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
                               )}
                               LIVE STREAM
                             </span>
                           </div>
-                          <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+                          {/* Terminal content */}
+                          <div className="p-4 font-mono text-[10px] leading-relaxed text-zinc-300 max-h-[160px] overflow-y-auto flex flex-col gap-1 select-text">
                             {liveLogs.map((log, idx) => (
-                              <div key={idx} className="whitespace-pre-wrap break-all hover:bg-zinc-900/50 py-0.5 rounded px-1">
+                              <div key={idx} className="whitespace-pre-wrap break-all hover:bg-white/5 py-0.5 rounded px-1 transition-colors">
                                 {log}
                               </div>
                             ))}
