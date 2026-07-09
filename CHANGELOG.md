@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.6.17](https://github.com/01cloud/01-Sandbox/compare/v0.6.16...v0.6.17) (2026-07-09)
+
+
+### 🐛 Bug Fixes
+
+* ui api key notification ([2f283f0](https://github.com/01cloud/01-Sandbox/commit/2f283f04a988378fecad18bcf7ba327f5e8b9ddb))
+* ui api key notification ([9a552fb](https://github.com/01cloud/01-Sandbox/commit/9a552fba539d2ab6050a4a059ab0cdd5e625baaf))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.16 [skip ci] ([77b27f3](https://github.com/01cloud/01-Sandbox/commit/77b27f39b93f8b658f7b351efa29c7af7c10b1c7))
+
 ## [0.6.16](https://github.com/01cloud/01-Sandbox/compare/v0.6.15...v0.6.16) (2026-07-09)
 
 
