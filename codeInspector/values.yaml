@@ -107,7 +107,7 @@ apiServer:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-api
-      tag: "v0.6.14"
+      tag: "v0.6.15"
       pullPolicy: Always
     resources:
       requests:
@@ -203,7 +203,7 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
-    sandboxImage: "01community/01sandbox-codeinterpreter:v0.5.24"
+    sandboxImage: "01community/01sandbox-codeinterpreter:v0.6.15"
     sandboxCpu: "1000m"
     sandboxMemory: "1024Mi"
     image:
