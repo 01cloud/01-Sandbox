@@ -94,14 +94,7 @@ export function UnifiedPipelineView({
     ? (steps.findIndex(s => s.key === "SCANNING") !== -1 ? steps.findIndex(s => s.key === "SCANNING") : 1)
     : currentIdx;
 
-  const terminalEndRef = useRef<HTMLDivElement>(null);
   const liveLogs = generateLiveLogs(job);
-
-  useEffect(() => {
-    if (terminalEndRef.current) {
-      terminalEndRef.current.scrollIntoView({ behavior: "smooth" });
-    }
-  }, [liveLogs.length]);
 
   // Helper to get step durations matching Image 2
   const getStepDuration = (stepKey: string): string => {
@@ -150,11 +143,9 @@ export function UnifiedPipelineView({
           </div>
         </div>
 
-        {/* Timeline */}
+         {/* Timeline */}
         <div className="px-6 pb-6">
           <div className="relative flex flex-col gap-4">
-            {/* Centered vertical connector line running down behind circle centers */}
-            <div className="absolute left-[13px] top-6 bottom-6 w-px bg-border/40" />
 
             <div className="flex flex-col gap-3">
               {steps.map((step, idx) => {
@@ -171,10 +162,22 @@ export function UnifiedPipelineView({
 
                 return (
                   <div key={step.key} className="flex items-start gap-4 relative">
+                    {/* Dynamic segment connector line */}
+                    {idx < steps.length - 1 && (
+                      <div className={cn(
+                        "absolute left-[13.5px] top-[24px] bottom-[-22px] w-[2px] -translate-x-1/2 z-0 transition-all duration-300",
+                        isDone
+                          ? "bg-emerald-500"
+                          : (isActive || isActiveRetry)
+                            ? "bg-violet-500/40 animate-pulse"
+                            : "bg-border/35"
+                      )} />
+                    )}
+
                     {/* Step circle indicator - dynamically aligned with dynamic padding */}
                     <div className={cn(
                       "relative z-10 w-[27px] h-[27px] rounded-full flex items-center justify-center bg-card shrink-0 transition-all",
-                      isActive || isActiveRetry || isFailedStep ? "mt-[9px]" : "mt-[4px]"
+                      isActive || isActiveRetry || isFailedStep ? "mt-[2px]" : "mt-[4px]"
                     )}>
                       {isDone ? (
                         <div className="w-[21px] h-[21px] rounded-full flex items-center justify-center bg-emerald-500/10 border border-emerald-500/30 text-emerald-500">
@@ -199,15 +202,11 @@ export function UnifiedPipelineView({
                       )}
                     </div>
 
-                    {/* Step box (borderless by default, highlighted cards with left accent for active states) */}
+                    {/* Step box (completely flat/borderless with dynamic text highlight) */}
                     <div
                       className={cn(
-                        "flex-1 transition-all duration-300 flex flex-col gap-2",
-                        isDone && "py-1.5 px-1 opacity-90",
-                        isActive && "bg-violet-500/[0.04] border-l-2 border-violet-500 py-3 pl-4 pr-3 rounded-r-xl shadow-sm shadow-violet-500/5",
-                        isActiveRetry && "bg-amber-500/[0.04] border-l-2 border-amber-500 py-3 pl-4 pr-3 rounded-r-xl",
-                        isFailedStep && "bg-destructive/[0.04] border-l-2 border-destructive py-3 pl-4 pr-3 rounded-r-xl",
-                        isPending && "py-1.5 px-1 opacity-35"
+                        "flex-1 transition-all duration-300 flex flex-col gap-2 py-1.5 px-1",
+                        isPending && "opacity-35"
                       )}
                     >
                       <div className="flex items-center justify-between">
@@ -216,9 +215,9 @@ export function UnifiedPipelineView({
                             className={cn(
                               "text-xs font-bold leading-tight tracking-wide block",
                               isDone && "text-foreground/90",
-                              isActive && "text-foreground font-black",
-                              isActiveRetry && "text-amber-500 font-black",
-                              isFailedStep && "text-destructive font-black",
+                              isActive && "text-violet-500 dark:text-violet-400 font-extrabold",
+                              isActiveRetry && "text-amber-500 font-extrabold",
+                              isFailedStep && "text-destructive font-extrabold",
                               isPending && "text-muted-foreground/45"
                             )}
                           >
@@ -226,9 +225,10 @@ export function UnifiedPipelineView({
                           </span>
 
                           {/* Submessage inside the active item */}
-                          {isActive && job.stepMessage && (
-                            <p className="text-[10px] text-muted-foreground/75 mt-1 font-mono leading-relaxed">
-                              {job.stepMessage}
+                          {isActive && (
+                            <p className="text-[10px] text-violet-500/80 dark:text-violet-400/85 mt-1 font-mono leading-relaxed flex items-center gap-1.5 animate-pulse">
+                              <span className="w-1.5 h-1.5 rounded-full bg-violet-500 animate-ping shrink-0" />
+                              {liveLogs[liveLogs.length - 1] || job.stepMessage}
                             </p>
                           )}
                           {isActiveRetry && job.stepMessage && (
@@ -256,36 +256,6 @@ export function UnifiedPipelineView({
                           )}
                         </div>
                       </div>
-
-                      {/* Premium Mac-style Terminal logs */}
-                      {showTerminal && (
-                        <div className="rounded-xl bg-zinc-950 border border-white/5 overflow-hidden shadow-lg mt-2 animate-in fade-in duration-300">
-                          {/* Title bar */}
-                          <div className="bg-zinc-900/80 px-4 py-2 flex items-center justify-between border-b border-white/5 shrink-0 select-none">
-                            <div className="flex items-center gap-1.5">
-                              <span className="w-2 h-2 rounded-full bg-[#ff5f56]" />
-                              <span className="w-2 h-2 rounded-full bg-[#ffbd2e]" />
-                              <span className="w-2 h-2 rounded-full bg-[#27c93f]" />
-                              <span className="text-[9px] font-mono font-bold text-zinc-500 ml-2">sandbox-terminal</span>
-                            </div>
-                            <span className="text-[8px] font-mono font-bold text-zinc-500 flex items-center gap-1.5">
-                              {!["DONE", "COMPLETE", "ERROR"].includes(job.status) && (
-                                <span className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-                              )}
-                              LIVE STREAM
-                            </span>
-                          </div>
-                          {/* Terminal content */}
-                          <div className="p-4 font-mono text-[10px] leading-relaxed text-zinc-300 max-h-[160px] overflow-y-auto flex flex-col gap-1 select-text">
-                            {liveLogs.map((log, idx) => (
-                              <div key={idx} className="whitespace-pre-wrap break-all hover:bg-white/5 py-0.5 rounded px-1 transition-colors">
-                                {log}
-                              </div>
-                            ))}
-                            <div ref={terminalEndRef} />
-                          </div>
-                        </div>
-                      )}
                     </div>
                   </div>
                 );
@@ -295,7 +265,7 @@ export function UnifiedPipelineView({
         </div>
 
         {/* Separator line & Overall Progress section in the same card (matching Image 2) */}
-        <div className="border-t border-border/30 px-6 py-4 flex flex-col gap-3 bg-muted/10 shrink-0">
+        <div className="border-t border-border px-6 py-2.5 flex flex-col gap-2 bg-muted/10 shrink-0">
           <div className="flex justify-between items-center">
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">

@@ -37,12 +37,12 @@ export function JobsPanel({
     <div className={cn(
       "flex flex-col h-full transition-all duration-300",
       embedded
-        ? "w-full border-t border-border/15 bg-transparent"
-        : "w-[260px] shrink-0 border-r border-border/50 bg-muted/10 animate-in slide-in-from-left duration-300"
+        ? "w-full border-t border-border bg-transparent"
+        : "w-[260px] shrink-0 border-r border-border bg-muted/10 animate-in slide-in-from-left duration-300"
     )}>
       {/* Header */}
       {!embedded && (
-        <div className="p-5 border-b border-border/50 shrink-0">
+        <div className="p-5 border-b border-border shrink-0">
           <h3 className="text-sm font-black uppercase tracking-wider text-foreground">
             {jobType === "repo-scan" ? "Repository Scans" : "Quick Scans"}
           </h3>
@@ -59,7 +59,7 @@ export function JobsPanel({
             No recent scans
           </div>
         ) : (
-          <div className="divide-y divide-border/10">
+          <div className="divide-y divide-border">
             {jobs.map((job) => {
               const isSelected = job.job_id === selectedJobId;
               const isActive = !["DONE", "ERROR"].includes(job.status);
@@ -132,7 +132,7 @@ export function JobsPanel({
                   </div>
 
                   {/* Status row */}
-                  <div className="flex items-center gap-1.5 mt-1 border-t border-border/10 pt-2.5">
+                  <div className="flex items-center gap-1.5 mt-1 border-t border-border pt-2.5">
                     {isDone ? (
                       <CheckCircle2 className="w-3 h-3 text-emerald-500 shrink-0" />
                     ) : isError ? (
@@ -194,7 +194,7 @@ export function JobsPanel({
 
                   {/* Expanded language statuses for selected repository scans */}
                   {showPipeline && jobType === "repo-scan" && job.detail?.languages && Object.keys(job.detail.languages).length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-border/10 flex flex-col gap-2">
+                    <div className="mt-3 pt-3 border-t border-border flex flex-col gap-2">
                       <p className="text-[9px] font-black uppercase tracking-wider text-muted-foreground mb-1">
                         Language Pipeline
                       </p>

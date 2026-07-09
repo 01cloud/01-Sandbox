@@ -137,7 +137,7 @@ export function InlineApiKeyPanel({ backendId = "Z1_SANDBOX" }: InlineApiKeyPane
         <Button
           variant="outline"
           size="sm"
-          className="h-9 rounded-xl border border-border/50 font-bold text-xs flex items-center gap-1.5 hover:bg-secondary/20"
+          className="h-9 rounded-xl border border-border/50 font-bold text-xs flex items-center gap-1.5 text-foreground hover:text-foreground hover:bg-secondary/30"
           title="API Key Settings"
         >
           <Key className="w-3.5 h-3.5" />

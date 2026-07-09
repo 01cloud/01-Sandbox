@@ -387,7 +387,6 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                       <span className="font-bold text-foreground/90 truncate">{d.name}</span>
                     </div>
                     <div className="flex items-center gap-2 text-right shrink-0">
-                      <span className="text-[10px] text-muted-foreground/60">{langInfo?.file_count || 0} files</span>
                       <span className="font-extrabold text-foreground/80 tabular-nums">{d.value}%</span>
                     </div>
                   </div>
@@ -540,9 +539,9 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
 
   if (inline) {
     return (
-      <div className="w-full h-[650px] border-t border-b border-border/30 flex flex-row overflow-hidden p-0 animate-in fade-in duration-500">
+      <div className="w-full h-[calc(100vh-210px)] min-h-[600px] border-t border-b border-border flex flex-row overflow-hidden p-0 animate-in fade-in duration-500">
         {/* Left Sidebar: Input + Scans */}
-        <div className="w-full md:w-[22%] shrink-0 border-r border-border/30 flex flex-col h-full overflow-hidden p-4 space-y-4">
+        <div className="w-full md:w-[26%] shrink-0 border-r border-border flex flex-col h-full overflow-hidden p-4 space-y-4">
           {/* Box 1: REPOSITORY URL Input & Button */}
           <div className="flex flex-col gap-4 shrink-0 px-1 py-2">
             <div className="flex flex-col gap-2">
@@ -566,7 +565,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                 }}
                 onBlur={handleUrlBlur}
                 placeholder="https://github.com/owner/repo"
-                className={cn("rounded-lg h-10 font-mono text-xs border border-border/50 bg-background/50 text-foreground placeholder:text-muted-foreground/45 transition-colors focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20", urlError ? "border-red-500/50" : "")}
+                className={cn("rounded-lg h-10 font-mono text-xs border border-border bg-background text-foreground placeholder:text-muted-foreground/45 transition-colors focus:border-violet-500/40 focus:ring-1 focus:ring-violet-500/20", urlError ? "border-red-500/50" : "")}
                 disabled={isScanning}
               />
               {urlError && <p className="text-[10px] text-red-500 font-medium">{urlError}</p>}
@@ -618,7 +617,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                       value={gitToken}
                       onChange={(e) => setGitToken(e.target.value)}
                       placeholder="ghp_xxxxxxxxxxxx"
-                      className="rounded-lg h-9 font-mono text-[11px] border border-border/50 bg-background/50 text-foreground/90 focus:border-violet-500/40"
+                      className="rounded-lg h-9 font-mono text-[11px] border border-border bg-background text-foreground/90 focus:border-violet-500/40"
                     />
                   </div>
                 ) : (
@@ -631,7 +630,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                       value={sshKey}
                       onChange={(e) => setSshKey(e.target.value)}
                       placeholder="Paste your SSH Private Key here..."
-                      className="rounded-lg min-h-[100px] p-3 font-mono text-[11px] border border-border/50 bg-background/50 text-foreground/90 focus:border-violet-500/40 focus:outline-none focus:ring-1 focus:ring-violet-500/20 resize-y"
+                      className="rounded-lg min-h-[100px] p-3 font-mono text-[11px] border border-border bg-background text-foreground/90 focus:border-violet-500/40 focus:outline-none focus:ring-1 focus:ring-violet-500/20 resize-y"
                     />
                   </div>
                 )}
@@ -672,7 +671,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
         {/* Right Panel: Pipeline + Results */}
         <div className="flex-grow flex flex-col h-full overflow-hidden bg-background">
           <ScrollArea className="flex-grow">
-            <div className="w-full p-6">
+            <div className="w-full p-4">
               {selectedJob ? (
                 <UnifiedPipelineView
                   job={selectedJob}

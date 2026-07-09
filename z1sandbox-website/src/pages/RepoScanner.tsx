@@ -700,9 +700,6 @@ export default function RepoScanner() {
                   <Badge variant="outline" className="bg-violet-500/10 text-violet-500 border-violet-500/20 font-bold">
                     {langEntries.length} Languages
                   </Badge>
-                  <Badge variant="outline" className="font-bold bg-orange-500/10 text-orange-500 border-orange-500/20">
-                    {result.total_findings} Findings
-                  </Badge>
                 </div>
               </div>
 
