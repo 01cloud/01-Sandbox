@@ -587,7 +587,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
         {activeTab === "dashboard" ? (
           <div className="space-y-7 animate-in fade-in duration-300">
             {chartData.length > 0 && (
-              <div className="p-1 space-y-4">
+              <div className="border-t border-border/60 pt-6 p-1 space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
                     Language Distribution
@@ -640,7 +640,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
             )}
 
         {/* ── Per-Language Details ── */}
-        <div className="space-y-4">
+        <div className="border-t border-border/60 pt-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
               Per-Language Details

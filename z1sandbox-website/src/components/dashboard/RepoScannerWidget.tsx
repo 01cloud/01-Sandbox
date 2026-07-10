@@ -344,7 +344,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
 
         {/* ── Language Distribution ── */}
         {chartData.length > 0 && (
-          <div className="p-1 space-y-4">
+          <div className="border-t border-border/60 pt-6 p-1 space-y-4">
             <div className="flex items-center justify-between">
               <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
                 Language Distribution
@@ -397,7 +397,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
         )}
 
         {/* ── Per-Language Details ── */}
-        <div className="space-y-4">
+        <div className="border-t border-border/60 pt-6 space-y-4">
           <div className="flex items-center justify-between">
             <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
               Per-Language Details
