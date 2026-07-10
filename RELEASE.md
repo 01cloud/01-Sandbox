@@ -1,3 +1,38 @@
+## Release v0.6.20 — 01-Sandbox
+**Release Date:** July 10, 2026
+
+---
+
+### Summary
+v0.6.20 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* backend issues ([193cafb](https://github.com/01cloud/01-Sandbox/commit/193cafb3f05230d00eff628f04440be9bc38b3ba))
+* backend issues ([e3ea17c](https://github.com/01cloud/01-Sandbox/commit/e3ea17c5805e2c32dc65e395d750bd091e7d19d3))
+* generate RELEASE.md for v0.6.19 [skip ci] ([9771511](https://github.com/01cloud/01-Sandbox/commit/9771511f738c4381750e0ca4d4d2ee53d668e7fe))
+
+### Changes
+## [0.6.20](https://github.com/01cloud/01-Sandbox/compare/v0.6.19...v0.6.20) (2026-07-10)
+
+
+### 🐛 Bug Fixes
+
+* backend issues ([193cafb](https://github.com/01cloud/01-Sandbox/commit/193cafb3f05230d00eff628f04440be9bc38b3ba))
+* backend issues ([e3ea17c](https://github.com/01cloud/01-Sandbox/commit/e3ea17c5805e2c32dc65e395d750bd091e7d19d3))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.19 [skip ci] ([9771511](https://github.com/01cloud/01-Sandbox/commit/9771511f738c4381750e0ca4d4d2ee53d668e7fe))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.20)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.19 — 01-Sandbox
 **Release Date:** July 09, 2026
 
