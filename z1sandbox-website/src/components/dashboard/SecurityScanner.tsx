@@ -918,7 +918,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                   </label>
                 </div>
 
-                <div className="relative h-[380px] rounded-2xl bg-[#0b0e14] border border-border/60 overflow-hidden flex flex-col focus-within:ring-2 focus-within:ring-violet-500/25 transition-all shadow-lg shadow-black/10">
+                <div className="relative h-[380px] rounded-2xl bg-[#0b0e14] border border-border/60 overflow-hidden flex flex-col transition-all shadow-lg shadow-black/10">
                   {/* Editor Window Header Tab */}
                   <div className="flex items-center justify-between px-4 py-2.5 bg-[#111622] border-b border-border/30 select-none">
                     <div className="flex items-center gap-3">
@@ -1125,10 +1125,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
         <div className="w-full md:w-[24%] shrink-0 border-r border-border flex flex-col h-full overflow-hidden">
           <div className="p-4 space-y-3 h-full flex flex-col justify-between">
             {/* Integrated Templates & Editor Box */}
-            <div className={cn(
-              "flex-grow flex flex-col min-h-0 border border-border rounded-lg bg-white dark:bg-[#0b0e14] overflow-hidden transition-all",
-              isEditorFocused ? "ring-2 ring-violet-500/25 border-violet-500/30" : ""
-            )}>
+            <div className="flex-grow flex flex-col min-h-0 border border-border rounded-lg bg-white dark:bg-[#0b0e14] overflow-hidden transition-all">
               {/* Top part: Quick Templates */}
               <div className="p-3 bg-gray-50/50 dark:bg-[#0f131a] border-b border-border shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75 block mb-2">
