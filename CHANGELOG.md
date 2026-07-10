@@ -1,5 +1,24 @@
 # Changelog
 
+## [0.6.21](https://github.com/01cloud/01-Sandbox/compare/v0.6.20...v0.6.21) (2026-07-10)
+
+
+### 🐛 Bug Fixes
+
+* rename the sandbox dashboard ([3d7114f](https://github.com/01cloud/01-Sandbox/commit/3d7114fc655c342597c9e0ffed6fd621322bcee4))
+* rename the sandbox dashboard ([88a8a8d](https://github.com/01cloud/01-Sandbox/commit/88a8a8d4a829828f014a20e65abab573843df017))
+* **ui:** highlight editor border only on textarea focus ([51665b8](https://github.com/01cloud/01-Sandbox/commit/51665b8d472ba00a6e84919f0a54a9620fc63780))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.20 [skip ci] ([7e14e51](https://github.com/01cloud/01-Sandbox/commit/7e14e518f0801645756646743ebce9aba50b398c))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.20 [skip ci] ([c1cb9fd](https://github.com/01cloud/01-Sandbox/commit/c1cb9fdbb581ba104331f83a81d4ca4fb6b408d2))
+
 ## [0.6.20](https://github.com/01cloud/01-Sandbox/compare/v0.6.19...v0.6.20) (2026-07-10)
 
 
