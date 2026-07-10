@@ -236,6 +236,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
   const effectiveApiKey = apiKey || authToken || "";
   const [code, setCode] = useState("# Simple Code Example\ndef greet(name):\n    return f\"Hello, {name}!\"\n\nprint(greet(\"User\"))");
   const [isScanning, setIsScanning] = useState(false);
+  const [isEditorFocused, setIsEditorFocused] = useState(false);
 
   const getFilename = (lang: string) => {
     switch (lang) {
@@ -1124,7 +1125,10 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
         <div className="w-full md:w-[24%] shrink-0 border-r border-border flex flex-col h-full overflow-hidden">
           <div className="p-4 space-y-3 h-full flex flex-col justify-between">
             {/* Integrated Templates & Editor Box */}
-            <div className="flex-grow flex flex-col min-h-0 border border-border rounded-lg bg-white dark:bg-[#0b0e14] overflow-hidden focus-within:ring-2 focus-within:ring-violet-500/25 transition-all">
+            <div className={cn(
+              "flex-grow flex flex-col min-h-0 border border-border rounded-lg bg-white dark:bg-[#0b0e14] overflow-hidden transition-all",
+              isEditorFocused ? "ring-2 ring-violet-500/25 border-violet-500/30" : ""
+            )}>
               {/* Top part: Quick Templates */}
               <div className="p-3 bg-gray-50/50 dark:bg-[#0f131a] border-b border-border shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75 block mb-2">
@@ -1176,6 +1180,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 <textarea
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
+                  onFocus={() => setIsEditorFocused(true)}
+                  onBlur={() => setIsEditorFocused(false)}
                   className="flex-grow bg-transparent p-3 font-mono text-[11px] text-foreground focus:outline-none resize-none leading-relaxed overflow-y-auto selection:bg-violet-500/30 caret-violet-500"
                   spellCheck="false"
                   placeholder="# Paste code here..."
