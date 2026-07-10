@@ -290,7 +290,18 @@ async def validate_token(request: Request):
 
         is_management_route = any(
             request.url.path.startswith(p)
-            for p in ["/v1/api-keys", "/v1/generate-api", "/v1/revoke-api-key"]
+            for p in [
+                "/v1/api-keys",
+                "/v1/generate-api",
+                "/v1/revoke-api-key",
+                "/v1/backends",
+                "/v1/subscriptions",
+                "/v1/health",
+                "/v1/queue",
+                "/v1/jobs",
+                "/v1/repo-scan/jobs",
+                "/v1/repo-scan/precheck",
+            ]
         )
 
         if user_id:

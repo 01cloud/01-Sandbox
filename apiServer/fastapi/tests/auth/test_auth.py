@@ -341,3 +341,25 @@ async def test_validate_token_revoked_key(mock_get_header, mock_decode):
 
     assert exc_info.value.status_code == 401
     assert "API Key has been revoked" in exc_info.value.detail
+
+
+@pytest.mark.asyncio
+@patch("jwt.decode")
+@patch("jwt.get_unverified_header")
+async def test_validate_token_management_route_no_api_key(mock_get_header, mock_decode):
+    """
+    SCENARIO: An Auth0 user requests a management route (e.g. '/v1/backends') but has no active API keys.
+    EXPECTATION: Token validation succeeds without requiring developer API keys.
+    """
+    req = make_mock_request(
+        method="GET",
+        path="/v1/backends",
+        headers={"authorization": "Bearer auth0-token"},
+    )
+    mock_get_header.return_value = {"kid": "code-inspector-key-01"}
+
+    payload = {"sub": "user_auth0_123", "iss": "auth0-mock"}
+    mock_decode.return_value = payload
+
+    res = await validate_token(req)
+    assert res == payload
