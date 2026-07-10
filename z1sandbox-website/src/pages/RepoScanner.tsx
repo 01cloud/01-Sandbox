@@ -704,7 +704,7 @@ export default function RepoScanner() {
               </div>
 
               {chartData.length > 0 && (
-                <div className="p-1 space-y-4">
+                <div className="border-t border-border/60 pt-6 p-1 space-y-4">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground mb-2">Language Distribution</h3>
                   <div className="h-[220px]">
                     <ResponsiveContainer width="100%" height="100%">
@@ -721,7 +721,7 @@ export default function RepoScanner() {
                 </div>
               )}
 
-              <div className="space-y-4">
+              <div className="border-t border-border/60 pt-6 space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
                     Per-Language Details
