@@ -107,7 +107,7 @@ apiServer:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-api
-      tag: "v0.6.18"
+      tag: "v0.6.20"
       pullPolicy: Always
     resources:
       requests:
