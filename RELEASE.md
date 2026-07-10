@@ -1,3 +1,45 @@
+## Release v0.6.21 — 01-Sandbox
+**Release Date:** July 10, 2026
+
+---
+
+### Summary
+v0.6.21 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* rename the sandbox dashboard ([3d7114f](https://github.com/01cloud/01-Sandbox/commit/3d7114fc655c342597c9e0ffed6fd621322bcee4))
+* rename the sandbox dashboard ([88a8a8d](https://github.com/01cloud/01-Sandbox/commit/88a8a8d4a829828f014a20e65abab573843df017))
+* **ui:** highlight editor border only on textarea focus ([51665b8](https://github.com/01cloud/01-Sandbox/commit/51665b8d472ba00a6e84919f0a54a9620fc63780))
+* generate RELEASE.md for v0.6.20 [skip ci] ([7e14e51](https://github.com/01cloud/01-Sandbox/commit/7e14e518f0801645756646743ebce9aba50b398c))
+
+### Changes
+## [0.6.21](https://github.com/01cloud/01-Sandbox/compare/v0.6.20...v0.6.21) (2026-07-10)
+
+
+### 🐛 Bug Fixes
+
+* rename the sandbox dashboard ([3d7114f](https://github.com/01cloud/01-Sandbox/commit/3d7114fc655c342597c9e0ffed6fd621322bcee4))
+* rename the sandbox dashboard ([88a8a8d](https://github.com/01cloud/01-Sandbox/commit/88a8a8d4a829828f014a20e65abab573843df017))
+* **ui:** highlight editor border only on textarea focus ([51665b8](https://github.com/01cloud/01-Sandbox/commit/51665b8d472ba00a6e84919f0a54a9620fc63780))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.20 [skip ci] ([7e14e51](https://github.com/01cloud/01-Sandbox/commit/7e14e518f0801645756646743ebce9aba50b398c))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.20 [skip ci] ([c1cb9fd](https://github.com/01cloud/01-Sandbox/commit/c1cb9fdbb581ba104331f83a81d4ca4fb6b408d2))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.6.21)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.20 — 01-Sandbox
 **Release Date:** July 10, 2026
 
