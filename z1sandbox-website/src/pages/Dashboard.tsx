@@ -720,7 +720,7 @@ const Dashboard = () => {
             <div className="p-2.5 rounded-xl bg-primary/10 text-primary border border-primary/20">
               <LayoutDashboard className="w-6 h-6" />
             </div>
-            <h1 className="text-4xl font-display font-black tracking-tight">01 Sandbox Dashboard</h1>
+            <h1 className="text-4xl font-display font-black tracking-tight">Sandbox Dashboard</h1>
           </div>
           <p className="text-muted-foreground text-lg max-w-2xl">
             Securely manage your API integrations, track sandbox activity, and scale your intelligence infrastructure.
