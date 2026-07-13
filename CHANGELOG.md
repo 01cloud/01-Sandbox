@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.7.0](https://github.com/01cloud/01-Sandbox/compare/v0.6.21...v0.7.0) (2026-07-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* implement real-time scan logs terminal
+
+### 🚀 New Features
+
+* implement real-time scan logs terminal ([f5d28b8](https://github.com/01cloud/01-Sandbox/commit/f5d28b82604ac6227c17d145d0d1a30a2566a0c8))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.21 [skip ci] ([15a52cd](https://github.com/01cloud/01-Sandbox/commit/15a52cd385fbce65700d42192737983cee05c4a6))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.21 [skip ci] ([110e33c](https://github.com/01cloud/01-Sandbox/commit/110e33ce475b9d645fe22407fb21985d64c23034))
+
 ## [0.6.21](https://github.com/01cloud/01-Sandbox/compare/v0.6.20...v0.6.21) (2026-07-10)
 
 
