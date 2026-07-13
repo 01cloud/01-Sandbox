@@ -22,7 +22,7 @@ class GenericJobRecord:
         self.job_type = job_type
         self.metadata = metadata
         self.queue: asyncio.Queue = asyncio.Queue()
-        self.event_log: deque = deque(maxlen=200)
+        self.event_log: deque = deque(maxlen=2000)
         self.step: str = "QUEUED"
         self.result: Optional[Any] = None
         self.finished_at: Optional[float] = None
@@ -99,7 +99,8 @@ class ReusableJobTracker:
 
         # 1. Update in-memory job
         if job:
-            job.step = step
+            if step != "LOG_LINE":
+                job.step = step
             job.event_log.append(event)
             await job.queue.put(event)
             if step in ("DONE", "ERROR"):
@@ -114,7 +115,8 @@ class ReusableJobTracker:
                 r.publish(f"job:{job_id}:chan", event_json)
                 r.rpush(f"job:{job_id}:events", event_json)
                 r.expire(f"job:{job_id}:events", 86400)
-                r.set(f"job:{job_id}:status", step, ex=86400)
+                if step != "LOG_LINE":
+                    r.set(f"job:{job_id}:status", step, ex=86400)
                 if step in ("DONE", "ERROR") and detail:
                     r.set(f"job:{job_id}:result", json.dumps(detail), ex=86400)
             except Exception as e:

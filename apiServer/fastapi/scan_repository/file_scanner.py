@@ -281,6 +281,43 @@ async def _submit_scan_job(
     )
     t0 = time.monotonic()
 
+    import asyncio
+
+    done_event = asyncio.Event()
+
+    async def poll_logs():
+        last_offset = 0
+        from core import state
+
+        # Give the sandbox a brief moment to boot up and generate log entries
+        await asyncio.sleep(2.0)
+        while not done_event.is_set():
+            try:
+                loop = asyncio.get_running_loop()
+                status_res = await loop.run_in_executor(
+                    None, state.backend.get_scan_status, child_job_id
+                )
+                if isinstance(status_res, str) and status_res:
+                    if len(status_res) > last_offset:
+                        new_content = status_res[last_offset:]
+                        last_offset = len(status_res)
+                        for line in new_content.splitlines():
+                            if line.strip():
+                                target_id = parent_id or child_job_id
+                                await state.job_tracker.push_event(
+                                    target_id,
+                                    "LOG_LINE",
+                                    line,
+                                    60,
+                                    detail={"child_job_id": child_job_id},
+                                )
+            except Exception:
+                # Don't let polling logs crash the scan pipeline
+                pass
+            await asyncio.sleep(1.0)
+
+    poller_task = asyncio.create_task(poll_logs())
+
     try:
         async with httpx.AsyncClient(timeout=950.0) as client:
             resp = await client.post(url, json=payload, headers=opensandbox_headers())
@@ -324,6 +361,13 @@ async def _submit_scan_job(
         err_msg = f"Scan job failed to execute: {str(exc)}"
         print(f"{_TAG}   ✗ {err_msg}")
         raise RuntimeError(err_msg) from exc
+    finally:
+        done_event.set()
+        poller_task.cancel()
+        try:
+            await poller_task
+        except asyncio.CancelledError:
+            pass
 
 
 def _log_tool_execution(

@@ -233,7 +233,7 @@ resource "aws_security_group_rule" "allow_all" {
 ];
 
 const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken, inline = false, onSwitchTab }: SecurityScannerProps) => {
-  const effectiveApiKey = apiKey || authToken || "";
+  const effectiveApiKey = apiKey || "";
   const [code, setCode] = useState("# Simple Code Example\ndef greet(name):\n    return f\"Hello, {name}!\"\n\nprint(greet(\"User\"))");
   const [isScanning, setIsScanning] = useState(false);
   const [isEditorFocused, setIsEditorFocused] = useState(false);
@@ -258,6 +258,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
   const {
     jobs,
     volatileResults,
+    volatileLogs,
     addJob,
     removeJob,
     openStream,
@@ -1088,6 +1089,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 result={selectedResult}
                 onResultRender={renderQuickScanResult}
                 onCancel={handleCancelJob}
+                logs={selectedJobId ? volatileLogs[selectedJobId] : undefined}
               />
             </div>
           )}
@@ -1267,6 +1269,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 result={selectedResult}
                 onResultRender={renderQuickScanResult}
                 onCancel={handleCancelJob}
+                logs={selectedJobId ? volatileLogs[selectedJobId] : undefined}
               />
             </div>
           )}

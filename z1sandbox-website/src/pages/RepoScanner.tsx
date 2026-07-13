@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 import {
   Github, Search, CheckCircle2, AlertCircle, Loader2,
-  BarChart3, ChevronDown, ChevronUp, ArrowLeft, FileCode, Shield
+  BarChart3, ChevronDown, ChevronUp, ArrowLeft, FileCode, Shield, Terminal
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -118,6 +118,15 @@ export default function RepoScanner() {
   // ID of the job currently streamed on this page (UI-submitted or CLI-detected)
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [scanningLanguages, setScanningLanguages] = useState<Record<string, string>>({});
+  const [logs, setLogs] = useState<string[]>([]);
+  const [showConsole, setShowConsole] = useState(false);
+  const consoleEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (consoleEndRef.current) {
+      consoleEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logs]);
 
   // Private repository scan states
   const [requiresAuth, setRequiresAuth] = useState(false);
@@ -193,6 +202,8 @@ export default function RepoScanner() {
     setCurrentStep(""); setStepMessage(""); setProgress(0); setResult(null); setExpandedLang(null);
     setActiveJobId(null);
     setScanningLanguages({});
+    setLogs([]);
+    setShowConsole(false);
     esRef.current?.close(); esRef.current = null;
   };
 
@@ -201,6 +212,7 @@ export default function RepoScanner() {
     esRef.current?.close();
     setActiveJobId(job_id);
     setIsScanning(true);
+    setLogs([]);
 
     const es = new EventSource(
       `${API_BASE}/v1/repo-scan/${job_id}/status?token=${encodeURIComponent(apiKey)}&since=${since}`
@@ -210,6 +222,10 @@ export default function RepoScanner() {
     es.onmessage = (e) => {
       try {
         const ev: ScanEvent = JSON.parse(e.data);
+        if (ev.step === "LOG_LINE") {
+          setLogs((prev) => [...prev, ev.message]);
+          return;
+        }
         setCurrentStep(ev.step);
         setStepMessage(ev.message);
         setProgress(ev.progress);
@@ -623,52 +639,116 @@ export default function RepoScanner() {
           )}
 
           {isScanning && !result && (
-            <div className="h-[480px] rounded-[2rem] border border-violet-500/20 bg-violet-500/5 flex flex-col items-center justify-center p-8 gap-6 overflow-hidden">
-              {currentStep === "SCANNING" && Object.keys(scanningLanguages).length > 0 ? (
-                <div className="w-full max-w-md flex flex-col gap-6">
-                  <div className="text-center">
-                    <Loader2 className="w-10 h-10 animate-spin text-violet-500 mx-auto mb-3" />
-                    <p className="font-black text-xl tracking-tight">Security Scan In Progress</p>
-                    <p className="text-xs text-muted-foreground mt-1.5">{stepMessage || "Analyzing files in isolated sandboxes..."}</p>
+            <div className={cn(
+              "rounded-[2rem] border border-violet-500/20 bg-violet-500/5 flex flex-col items-center p-8 gap-6 overflow-hidden transition-all duration-300",
+              showConsole ? "min-h-[580px] w-full" : "h-[480px] justify-center"
+            )}>
+              {/* Top part: Status and Progress */}
+              <div className="w-full max-w-md flex flex-col items-center justify-center">
+                {currentStep === "SCANNING" && Object.keys(scanningLanguages).length > 0 ? (
+                  <div className="w-full flex flex-col gap-5">
+                    <div className="text-center">
+                      <Loader2 className="w-10 h-10 animate-spin text-violet-500 mx-auto mb-3" />
+                      <p className="font-black text-xl tracking-tight">Security Scan In Progress</p>
+                      <p className="text-xs text-muted-foreground mt-1.5">{stepMessage || "Analyzing files in isolated sandboxes..."}</p>
+                    </div>
+
+                    <div className="rounded-2xl border border-border/50 bg-background/50 p-4 flex flex-col gap-2 shadow-md max-h-[140px] overflow-y-auto">
+                      <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground mb-1">Language Pipeline</p>
+                      {Object.entries(scanningLanguages).map(([lang, status]) => {
+                        const isPending = status === "PENDING";
+                        const isScanningLang = status === "SCANNING";
+                        const isDone = status === "DONE";
+                        const isFailed = status === "FAILED";
+
+                        return (
+                          <div key={lang} className="flex items-center justify-between py-1 border-b border-border/10 last:border-0">
+                            <span className="font-bold text-xs">{lang}</span>
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "text-[9px] font-bold px-1.5 py-0 flex items-center gap-1 uppercase",
+                                isPending && "bg-muted/30 text-muted-foreground border-border",
+                                isScanningLang && "bg-violet-500/10 text-violet-500 border-violet-500/30",
+                                isDone && "bg-emerald-500/10 text-emerald-500 border-emerald-500/30",
+                                isFailed && "bg-destructive/10 text-destructive border-destructive/30"
+                              )}
+                            >
+                              {isScanningLang && <Loader2 className="w-2 h-2 animate-spin" />}
+                              {isDone && <CheckCircle2 className="w-2 h-2" />}
+                              {isFailed && <AlertCircle className="w-2 h-2" />}
+                              {status === "PENDING" ? "Pending" : status === "SCANNING" ? "Scanning" : status === "DONE" ? "Complete" : "Failed"}
+                            </Badge>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
+                ) : (
+                  <div className="text-center flex flex-col items-center gap-3">
+                    <Loader2 className="w-10 h-10 animate-spin text-violet-500" />
+                    <p className="font-black text-xl tracking-tight">{STEP_LABELS[currentStep] || "Processing..."}</p>
+                    {stepMessage && <p className="text-xs text-muted-foreground">{stepMessage}</p>}
+                  </div>
+                )}
+              </div>
 
-                  <div className="rounded-2xl border border-border/50 bg-background/50 p-5 flex flex-col gap-3 shadow-md max-h-[260px] overflow-y-auto">
-                    <p className="text-[10px] font-black uppercase tracking-wider text-muted-foreground mb-1">Language Pipeline</p>
-                    {Object.entries(scanningLanguages).map(([lang, status]) => {
-                      const isPending = status === "PENDING";
-                      const isScanningLang = status === "SCANNING";
-                      const isDone = status === "DONE";
-                      const isFailed = status === "FAILED";
+              {/* Console Toggle Button */}
+              <button
+                onClick={() => setShowConsole(!showConsole)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold bg-background/80 hover:bg-background border border-border/60 text-muted-foreground hover:text-foreground transition-all shadow-sm"
+              >
+                <Terminal className="w-3.5 h-3.5" />
+                {showConsole ? "Hide Console Logs" : "Show Live Scan Logs"}
+                {logs.length > 0 && (
+                  <span className="bg-violet-500/15 text-violet-600 dark:text-violet-400 text-[10px] px-1.5 py-0.2 rounded-full font-bold ml-1">
+                    {logs.length}
+                  </span>
+                )}
+              </button>
 
-                      return (
-                        <div key={lang} className="flex items-center justify-between py-1.5 border-b border-border/20 last:border-0">
-                          <span className="font-bold text-sm">{lang}</span>
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "text-[10px] font-bold px-2 py-0.5 flex items-center gap-1.5 uppercase",
-                              isPending && "bg-muted/30 text-muted-foreground border-border",
-                              isScanningLang && "bg-violet-500/10 text-violet-500 border-violet-500/30",
-                              isDone && "bg-emerald-500/10 text-emerald-500 border-emerald-500/30",
-                              isFailed && "bg-destructive/10 text-destructive border-destructive/30"
-                            )}
-                          >
-                            {isScanningLang && <Loader2 className="w-2.5 h-2.5 animate-spin" />}
-                            {isDone && <CheckCircle2 className="w-2.5 h-2.5" />}
-                            {isFailed && <AlertCircle className="w-2.5 h-2.5" />}
-                            {status === "PENDING" ? "Pending" : status === "SCANNING" ? "Scanning" : status === "DONE" ? "Complete" : "Failed"}
-                          </Badge>
-                        </div>
-                      );
-                    })}
+              {/* Terminal Window */}
+              {showConsole && (
+                <div className="w-full max-w-2xl flex flex-col rounded-xl border border-zinc-850 bg-[#0c1017] shadow-2xl overflow-hidden mt-2">
+                  {/* Terminal Header */}
+                  <div className="flex items-center justify-between px-4 py-2 bg-[#161b22] border-b border-zinc-800">
+                    <div className="flex items-center gap-1.5">
+                      <span className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80" />
+                      <span className="w-2.5 h-2.5 rounded-full bg-green-500/80" />
+                    </div>
+                    <span className="text-[10px] font-mono text-zinc-500 select-none">sandbox-terminal</span>
+                    <div className="w-10" />
+                  </div>
+                  {/* Terminal Body */}
+                  <div className="p-4 h-[180px] overflow-y-auto font-mono text-[10px] leading-relaxed text-zinc-300 space-y-1 select-text scrollbar-thin scrollbar-thumb-zinc-800 text-left w-full">
+                    {logs.length === 0 ? (
+                      <div className="text-zinc-500 italic flex items-center justify-center h-full">
+                        Waiting for sandbox process logs...
+                      </div>
+                    ) : (
+                      logs.map((log, index) => {
+                        let lineClass = "text-zinc-300";
+                        if (log.includes("[ERROR]") || log.includes("Error:") || log.includes("FAILED")) {
+                          lineClass = "text-red-400 font-bold";
+                        } else if (log.includes("[WARNING]") || log.includes("Warning:")) {
+                          lineClass = "text-yellow-400 font-bold";
+                        } else if (log.includes("[SUCCESS]") || log.includes("SUCCESS:") || log.includes("DONE")) {
+                          lineClass = "text-emerald-400 font-bold";
+                        } else if (log.startsWith("[SANDBOX]") || log.startsWith("-->") || log.includes("Running")) {
+                          lineClass = "text-blue-400 font-bold";
+                        }
+                        return (
+                          <div key={index} className={cn("whitespace-pre-wrap break-all", lineClass)}>
+                            <span className="text-zinc-650 select-none mr-2">{(index + 1).toString().padStart(3, "0")}</span>
+                            {log}
+                          </div>
+                        );
+                      })
+                    )}
+                    <div ref={consoleEndRef} />
                   </div>
                 </div>
-              ) : (
-                <>
-                  <Loader2 className="w-10 h-10 animate-spin text-violet-500" />
-                  <p className="font-black text-xl tracking-tight">{STEP_LABELS[currentStep] || "Processing..."}</p>
-                  {stepMessage && <p className="text-xs text-muted-foreground -mt-3">{stepMessage}</p>}
-                </>
               )}
             </div>
           )}

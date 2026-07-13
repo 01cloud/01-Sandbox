@@ -104,15 +104,17 @@ async def validate_token(request: Request):
     path = request.url.path
 
     # Bypass validation for public documentation, spec, status, health, and report routes
-    if path.endswith(
-        (
-            "/docs",
-            "/redoc",
-            "/openapi.json",
-            "/status",
-            "/report",
-            "/health",
+    if (
+        path.endswith(
+            (
+                "/docs",
+                "/redoc",
+                "/openapi.json",
+                "/report",
+                "/health",
+            )
         )
+        or path == "/status"
     ):
         # We only rate limit the "View Documentation" HTML page actions (docs, redoc) - NOT openapi.json spec!
         if path.endswith(("/docs", "/redoc")):
@@ -171,10 +173,17 @@ async def validate_token(request: Request):
         return {}
 
     # 1. Path-Aware Enforcement: Decide if we allow Cookie Fallbacks
-    is_execution_route = path.startswith("/v1/run") or (
-        "/api/z1sandbox/" in path
-        and "/docs" not in path
-        and "/openapi.json" not in path
+    is_execution_route = (
+        path.startswith("/v1/run")
+        or path.startswith("/v1/scan-jobs")
+        or path == "/v1/repo-scan"
+        or "/scan-jobs" in path
+        or "/repo-scan" in path
+        or (
+            "/api/z1sandbox/" in path
+            and "/docs" not in path
+            and "/openapi.json" not in path
+        )
     )
 
     auth_header = request.headers.get("authorization") or request.headers.get(
@@ -305,21 +314,31 @@ async def validate_token(request: Request):
         )
 
         if user_id:
-            if issuer != conf["issuer"] and is_management_route:
+            if issuer != conf["issuer"]:
+                if is_management_route:
+                    print(
+                        f"[Security] Allowing management operation for Auth0 user: {user_id}"
+                    )
+                    return payload
+
                 print(
-                    f"[Security] Allowing management operation for Auth0 user: {user_id}"
+                    f"[Identity Bridge] Mapping active developer key pool for User: {user_id}..."
                 )
-                return payload
+                active_keys = await get_active_developer_keys(state, user_id)
+                print(
+                    f"[Identity Bridge] Resolved {len(active_keys)} active keys for User {user_id}"
+                )
 
-            print(
-                f"[Identity Bridge] Mapping active developer key pool for User: {user_id}..."
-            )
-            active_keys = await get_active_developer_keys(state, user_id)
-            print(
-                f"[Identity Bridge] Resolved {len(active_keys)} active keys for User {user_id}"
-            )
+                if not active_keys:
+                    print(
+                        f"[Identity Bridge] WARNING: No active/non-expired Developer Key found for {user_id}"
+                    )
+                    auth_failures_total.labels(reason="no_active_developer_keys").inc()
+                    raise HTTPException(
+                        status_code=403,
+                        detail="No active or non-expired Developer API Key found. Please create a NEW API Key to enable sandbox operations.",
+                    )
 
-            if active_keys:
                 selected_jti = None
                 for candidate_jti in active_keys:
                     limited = is_key_rate_limited(state, candidate_jti)
@@ -340,15 +359,6 @@ async def validate_token(request: Request):
                     print(
                         f"[Identity Bridge] WARNING: All active developer keys are rate limited. Falling back to key ID: {jti}"
                     )
-            elif not jti:
-                print(
-                    f"[Identity Bridge] WARNING: No active/non-expired Developer Key found for {user_id}"
-                )
-                auth_failures_total.labels(reason="no_active_developer_keys").inc()
-                raise HTTPException(
-                    status_code=403,
-                    detail="No active or non-expired Developer API Key found. Please create a NEW API Key to enable sandbox operations.",
-                )
 
         if not jti:
             auth_failures_total.labels(reason="missing_jti").inc()
