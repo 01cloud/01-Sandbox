@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.1](https://github.com/01cloud/01-Sandbox/compare/v0.7.0...v0.7.1) (2026-07-13)
+
+
+### 🐛 Bug Fixes
+
+* controller with rulesets and logs ([4c60e78](https://github.com/01cloud/01-Sandbox/commit/4c60e78dfb1eb5f98a1c357726ec45e1afd56d3e))
+* controller with rulesets and logs ([08b32ee](https://github.com/01cloud/01-Sandbox/commit/08b32ee95c60a7255db2399b155b85b7b1917fcf))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.0 [skip ci] ([b6b1c70](https://github.com/01cloud/01-Sandbox/commit/b6b1c70b30a36c23148c952ce89c382d91678220))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.0 [skip ci] ([f1ce777](https://github.com/01cloud/01-Sandbox/commit/f1ce77710a8ab8588492e7f9524fe211e1c01092))
+
 ## [0.7.0](https://github.com/01cloud/01-Sandbox/compare/v0.6.21...v0.7.0) (2026-07-13)
 
 
