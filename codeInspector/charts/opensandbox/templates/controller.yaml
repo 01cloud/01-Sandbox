@@ -10,7 +10,7 @@ metadata:
   name: opensandbox-controller
 rules:
   - apiGroups: [""]
-    resources: ["pods", "services", "configmaps", "namespaces"]
+    resources: ["pods", "pods/log", "pods/exec", "services", "configmaps", "namespaces"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets"]

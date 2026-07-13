@@ -140,6 +140,129 @@ def log_job_event(job_id: str, message: str):
         pass  # Best effort logging
 
 
+def stream_pod_logs_to_file(
+    sandbox_id: str,
+    job_id: str,
+    namespace: str,
+    stop_event,
+) -> None:
+    """
+    Background thread: streams the sandbox pod's stdout/stderr line-by-line
+    into the job's process.log so the SSE polling loop picks it up in real time.
+
+    Pod naming convention: BatchSandbox/StatefulSet pods are named <sandbox_id>-0.
+    We fall back to label-selector lookup (opensandbox.io/id=<sandbox_id>) if the
+    direct name lookup fails (e.g. the pod isn't ready yet).
+    """
+    import threading
+    import time as _time
+
+    from kubernetes import client as k8s_client
+    from kubernetes import watch as k8s_watch
+    from kubernetes.client.exceptions import ApiException
+
+    tag = f"[PodLogStream][{sandbox_id[:8]}]"
+
+    def _get_v1() -> k8s_client.CoreV1Api:
+        """Return a CoreV1Api using the already-loaded in-cluster config."""
+        return k8s_client.CoreV1Api()
+
+    def _wait_for_pod(
+        v1: k8s_client.CoreV1Api, pod_name: str, timeout: int = 90
+    ) -> bool:
+        """Poll until the pod exists and is Running/Succeeded (or timeout)."""
+        deadline = _time.monotonic() + timeout
+        while _time.monotonic() < deadline:
+            if stop_event.is_set():
+                return False
+            try:
+                pod = v1.read_namespaced_pod(name=pod_name, namespace=namespace)
+                phase = pod.status.phase if pod.status else None
+                if phase in ("Running", "Succeeded"):
+                    return True
+                if phase in ("Failed", "Unknown"):
+                    log_job_event(
+                        job_id,
+                        f"{tag} Pod entered terminal phase '{phase}' — stopping log stream",
+                    )
+                    return False
+            except ApiException as exc:
+                if exc.status != 404:
+                    log_job_event(
+                        job_id, f"{tag} Waiting for pod (API error {exc.status})..."
+                    )
+            _time.sleep(2)
+        log_job_event(job_id, f"{tag} Timed out waiting for pod to become Running")
+        return False
+
+    def _find_pod_name(v1: k8s_client.CoreV1Api) -> str:
+        """Resolve the actual pod name for this sandbox_id.
+
+        Tries <sandbox_id>-0 first (StatefulSet convention used by BatchSandbox
+        provider), then falls back to a label selector.
+        """
+        primary = f"{sandbox_id}-0"
+        try:
+            v1.read_namespaced_pod(name=primary, namespace=namespace)
+            return primary
+        except ApiException:
+            pass
+
+        # Fallback: label-selector lookup
+        try:
+            pods = v1.list_namespaced_pod(
+                namespace=namespace,
+                label_selector=f"opensandbox.io/id={sandbox_id}",
+            )
+            if pods.items:
+                return pods.items[0].metadata.name
+        except ApiException:
+            pass
+
+        return primary  # best-effort — may fail, will be caught by the caller
+
+    try:
+        v1 = _get_v1()
+        pod_name = _find_pod_name(v1)
+        log_job_event(job_id, f"{tag} Waiting for pod '{pod_name}' to start...")
+
+        if not _wait_for_pod(v1, pod_name):
+            return
+
+        log_job_event(job_id, f"{tag} Streaming live logs from pod '{pod_name}'...")
+
+        w = k8s_watch.Watch()
+        try:
+            for raw in w.stream(
+                v1.read_namespaced_pod_log,
+                name=pod_name,
+                namespace=namespace,
+                container="sandbox",
+                follow=True,
+                _preload_content=False,
+            ):
+                if stop_event.is_set():
+                    w.stop()
+                    break
+                line = (
+                    raw.decode("utf-8", errors="replace").rstrip()
+                    if isinstance(raw, bytes)
+                    else str(raw).rstrip()
+                )
+                if line.strip():
+                    log_job_event(job_id, f"[{sandbox_id[:8]}] {line}")
+        except Exception as stream_err:
+            log_job_event(job_id, f"{tag} Log stream ended: {stream_err}")
+        finally:
+            try:
+                w.stop()
+            except Exception:
+                pass
+
+    except Exception as outer_err:
+        log_job_event(job_id, f"{tag} Pod log streamer error: {outer_err}")
+
+
 # ============================================================================
 # Sandbox CRUD Operations
 # ============================================================================
@@ -385,57 +508,93 @@ async def create_scan_job(
 
     log_job_event(
         job_id,
-        f"[SERVER] Sandbox created (ID: {sandbox_id}). Waiting for scan results...",
+        f"[SERVER] Sandbox created (ID: {sandbox_id[:8]}...). Starting live log stream...",
     )
+
+    # ── Start real-time pod log streaming ────────────────────────────────────
+    # Determine the namespace from the sandbox_service config if available,
+    # defaulting to the well-known opensandbox-system namespace.
+    import threading
+
+    _sandbox_namespace = os.environ.get("SANDBOX_NAMESPACE", "opensandbox-system")
+    try:
+        if hasattr(sandbox_service, "namespace"):
+            _sandbox_namespace = sandbox_service.namespace
+    except Exception:
+        pass
+
+    _stop_log_stream = threading.Event()
+    _log_thread = threading.Thread(
+        target=stream_pod_logs_to_file,
+        args=(sandbox_id, job_id, _sandbox_namespace, _stop_log_stream),
+        daemon=True,
+        name=f"pod-log-stream-{job_id[:8]}",
+    )
+    _log_thread.start()
+    # ─────────────────────────────────────────────────────────────────────────
+
     report_path = os.path.join(reports_dir, "security_scan_report.json")
     timeout_seconds = sandbox_req.timeout if sandbox_req.timeout else 300
     deadline = asyncio.get_event_loop().time() + timeout_seconds
+    final_response = None
 
-    while asyncio.get_event_loop().time() < deadline:
-        # 1. Check if the final report exists — return immediately when found
-        if os.path.exists(report_path):
+    try:
+        while asyncio.get_event_loop().time() < deadline:
+            # 1. Check if the final report exists — return immediately when found
+            if os.path.exists(report_path):
+                try:
+                    with open(report_path, "r") as f:
+                        report_data = json.load(f)
+                    final_response = ScanJobResponse(
+                        job_id=job_id,
+                        sandbox_id=sandbox_id,
+                        status="COMPLETED",
+                        report=report_data,
+                    )
+                    break
+                except (json.JSONDecodeError, OSError):
+                    pass  # File may still be mid-write; retry next cycle
+
+            # 2. Yield control to the async event loop (non-blocking wait)
+            await asyncio.sleep(1)
+
+            # 3. Check sandbox state for early terminal failures
+            #    Run in executor so the blocking K8s API call doesn't freeze the event loop
             try:
-                with open(report_path, "r") as f:
-                    report_data = json.load(f)
-                return ScanJobResponse(
-                    job_id=job_id,
-                    sandbox_id=sandbox_id,
-                    status="COMPLETED",
-                    report=report_data,
+                loop = asyncio.get_event_loop()
+                sb = await loop.run_in_executor(
+                    None, sandbox_service.get_sandbox, sandbox_id
                 )
-            except (json.JSONDecodeError, OSError):
-                pass  # File may still be mid-write; retry next cycle
+                state = sb.status.state if sb.status else "Unknown"
+                if state in ("Failed", "Terminated", "Stopped") and not os.path.exists(
+                    report_path
+                ):
+                    final_response = ScanJobResponse(
+                        job_id=job_id,
+                        sandbox_id=sandbox_id,
+                        status="FAILED",
+                        error=f"Sandbox reached terminal state '{state}' before scan report was written.",
+                    )
+                    break
+            except HTTPException as he:
+                if he.status_code == 404:
+                    final_response = ScanJobResponse(
+                        job_id=job_id,
+                        sandbox_id=sandbox_id,
+                        status="FAILED",
+                        error="Sandbox was deleted or expired before the scan report was written.",
+                    )
+                    break
+            except Exception:
+                pass  # Ignore transient look-up errors; keep waiting
 
-        # 2. Yield control to the async event loop (non-blocking wait)
-        await asyncio.sleep(1)
+    finally:
+        # Always stop the log streamer thread when the job ends
+        _stop_log_stream.set()
+        _log_thread.join(timeout=3)
 
-        # 3. Check sandbox state for early terminal failures
-        #    Run in executor so the blocking K8s API call doesn't freeze the event loop
-        try:
-            loop = asyncio.get_event_loop()
-            sb = await loop.run_in_executor(
-                None, sandbox_service.get_sandbox, sandbox_id
-            )
-            state = sb.status.state if sb.status else "Unknown"
-            if state in ("Failed", "Terminated", "Stopped") and not os.path.exists(
-                report_path
-            ):
-                return ScanJobResponse(
-                    job_id=job_id,
-                    sandbox_id=sandbox_id,
-                    status="FAILED",
-                    error=f"Sandbox reached terminal state '{state}' before scan report was written.",
-                )
-        except HTTPException as he:
-            if he.status_code == 404:
-                return ScanJobResponse(
-                    job_id=job_id,
-                    sandbox_id=sandbox_id,
-                    status="FAILED",
-                    error="Sandbox was deleted or expired before the scan report was written.",
-                )
-        except Exception:
-            pass  # Ignore transient look-up errors; keep waiting
+    if final_response is not None:
+        return final_response
 
     # Deadline exceeded without a report
     return ScanJobResponse(
