@@ -10,6 +10,9 @@ export function useJobStore(
 
   // Cache of full scan results in volatile RAM (never persisted to localStorage)
   const [volatileResults, setVolatileResults] = useState<Record<string, any>>({});
+  // Cache of live logs in volatile RAM (never persisted to localStorage)
+  const [volatileLogs, setVolatileLogs] = useState<Record<string, string[]>>({});
+
 
   const esRefs = useRef<Record<string, EventSource>>({});
   const streamErrors = useRef<Record<string, number>>({});
@@ -34,6 +37,11 @@ export function useJobStore(
       delete esRefs.current[jobId];
     }
     setVolatileResults(prev => {
+      const copy = { ...prev };
+      delete copy[jobId];
+      return copy;
+    });
+    setVolatileLogs(prev => {
       const copy = { ...prev };
       delete copy[jobId];
       return copy;
@@ -113,6 +121,17 @@ export function useJobStore(
           // If the job was deleted or not in storage, close stream
           es.close();
           delete esRefs.current[jobId];
+          return;
+        }
+
+        if (ev.step === "LOG_LINE") {
+          setVolatileLogs(prev => {
+            const currentLogs = prev[jobId] || [];
+            return {
+              ...prev,
+              [jobId]: [...currentLogs, ev.message]
+            };
+          });
           return;
         }
 
@@ -349,6 +368,7 @@ export function useJobStore(
   return {
     jobs,
     volatileResults,
+    volatileLogs,
     addJob,
     removeJob,
     openStream,

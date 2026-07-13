@@ -641,24 +641,18 @@ async def get_scan_status(job_id: Optional[str] = None):
             )
         job_id = _latest_job_id
 
-    request = ListSandboxesRequest(
-        filter=SandboxFilter(metadata={"job_id": job_id}),
-        pagination=PaginationRequest(page=1, pageSize=1),
-    )
-    res = sandbox_service.list_sandboxes(request)
-
-    if not res.items:
-        return {
-            "job_id": job_id,
-            "status": "NOT_FOUND",
-            "message": "No active sandbox found for this job ID. It may have been garbage collected, or never existed.",
-        }
-
-    sandbox = res.items[0]
-
-    # Try to fetch process logs if available
+    # 1. Try to fetch process logs first if available (works even if sandbox is completed/deleted)
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
     log_path = os.path.join(data_root, job_id, "reports", "process.log")
+    if not os.path.exists(log_path):
+        import glob
+
+        matches = glob.glob(
+            os.path.join(data_root, "*", job_id, "reports", "process.log")
+        )
+        if matches:
+            log_path = matches[0]
+
     logs = ""
     if os.path.exists(log_path):
         try:
@@ -670,6 +664,21 @@ async def get_scan_status(job_id: Optional[str] = None):
     if logs:
         return Response(content=logs, media_type="text/plain")
 
+    # 2. Fall back to active sandboxes if log file does not exist or is empty
+    request = ListSandboxesRequest(
+        filter=SandboxFilter(metadata={"job_id": job_id}),
+        pagination=PaginationRequest(page=1, pageSize=1),
+    )
+    res = sandbox_service.list_sandboxes(request)
+
+    if not res.items:
+        return {
+            "job_id": job_id,
+            "status": "NOT_FOUND",
+            "message": "No active sandbox found for this job ID and no process logs exist.",
+        }
+
+    sandbox = res.items[0]
     return {
         "job_id": job_id,
         "sandbox_id": sandbox.id,

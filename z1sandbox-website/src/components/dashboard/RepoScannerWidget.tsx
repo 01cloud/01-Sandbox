@@ -62,12 +62,13 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
     return null;
   };
 
-  const apiKey = getApiKey() || authToken || "";
+  const apiKey = getApiKey() || "";
 
   // Initialize unified hook
   const {
     jobs,
     volatileResults,
+    volatileLogs,
     addJob,
     removeJob,
     openStream,
@@ -679,6 +680,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                   result={selectedResult}
                   onResultRender={renderRepoScanResult}
                   onCancel={handleCancelJob}
+                  logs={selectedJobId ? volatileLogs[selectedJobId] : undefined}
                 />
               ) : (
                 <div className="h-[50vh] flex flex-col items-center justify-center text-center gap-4">
@@ -899,6 +901,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                       result={selectedResult}
                       onResultRender={renderRepoScanResult}
                       onCancel={handleCancelJob}
+                      logs={selectedJobId ? volatileLogs[selectedJobId] : undefined}
                     />
                   ) : (
                     <div className="h-[60vh] flex flex-col items-center justify-center text-center gap-4">

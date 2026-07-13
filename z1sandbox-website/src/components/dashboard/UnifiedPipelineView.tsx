@@ -1,5 +1,5 @@
-import React, { useRef, useEffect } from "react";
-import { CheckCircle2, AlertCircle, Loader2, Circle, RotateCw, XCircle } from "lucide-react";
+import React, { useRef, useEffect, useState } from "react";
+import { CheckCircle2, AlertCircle, Loader2, Circle, RotateCw, XCircle, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GenericJob } from "@/lib/jobStore";
 
@@ -14,6 +14,7 @@ interface UnifiedPipelineViewProps {
   result: any | null;
   onResultRender: (result: any) => React.ReactNode;
   onCancel?: (jobId: string) => void;
+  logs?: string[];
 }
 
 // Dynamically generate scan logs for the terminal based on the languages and progress
@@ -86,6 +87,7 @@ export function UnifiedPipelineView({
   result,
   onResultRender,
   onCancel,
+  logs,
 }: UnifiedPipelineViewProps) {
   const currentStep = job.status;
   const currentIdx = steps.findIndex((s) => s.key === currentStep);
@@ -95,6 +97,15 @@ export function UnifiedPipelineView({
     : currentIdx;
 
   const liveLogs = generateLiveLogs(job);
+
+  const consoleEndRef = useRef<HTMLDivElement>(null);
+  const [showConsole, setShowConsole] = useState(false);
+
+  useEffect(() => {
+    if (showConsole && consoleEndRef.current) {
+      consoleEndRef.current.scrollIntoView({ behavior: "smooth" });
+    }
+  }, [logs, showConsole]);
 
   // Helper to get step durations matching Image 2
   const getStepDuration = (stepKey: string): string => {
@@ -261,6 +272,67 @@ export function UnifiedPipelineView({
                 );
               })}
             </div>
+
+            {/* Console Toggle Button */}
+            <div className="flex justify-start">
+              <button
+                type="button"
+                onClick={() => setShowConsole(!showConsole)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold bg-background/80 hover:bg-background border border-border/60 text-muted-foreground hover:text-foreground transition-all shadow-sm"
+              >
+                <Terminal className="w-3.5 h-3.5" />
+                {showConsole ? "Hide Console Logs" : "Show Live Scan Logs"}
+                {logs && logs.length > 0 && (
+                  <span className="bg-violet-500/15 text-violet-600 dark:text-violet-400 text-[10px] px-1.5 py-0.2 rounded-full font-bold ml-1">
+                    {logs.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            {/* Terminal Window */}
+            {showConsole && (
+              <div className="w-full flex flex-col rounded-xl border border-zinc-800/80 bg-[#0c1017] shadow-2xl overflow-hidden mt-1">
+                {/* Terminal Header */}
+                <div className="flex items-center justify-between px-4 py-2 bg-[#161b22] border-b border-zinc-850">
+                  <div className="flex items-center gap-1.5">
+                    <span className="w-2.5 h-2.5 rounded-full bg-red-500/80" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-yellow-500/80" />
+                    <span className="w-2.5 h-2.5 rounded-full bg-green-500/80" />
+                  </div>
+                  <span className="text-[10px] font-mono text-zinc-500 select-none">sandbox-terminal</span>
+                  <div className="w-10" />
+                </div>
+                {/* Terminal Body */}
+                <div className="p-4 h-[180px] overflow-y-auto font-mono text-[10px] leading-relaxed text-zinc-300 space-y-1 select-text scrollbar-thin scrollbar-thumb-zinc-800 text-left w-full">
+                  {!logs || logs.length === 0 ? (
+                    <div className="text-zinc-500 italic flex items-center justify-center h-full">
+                      Waiting for sandbox process logs...
+                    </div>
+                  ) : (
+                    logs.map((log, index) => {
+                      let lineClass = "text-zinc-300";
+                      if (log.includes("[ERROR]") || log.includes("Error:") || log.includes("FAILED")) {
+                        lineClass = "text-red-400 font-bold";
+                      } else if (log.includes("[WARNING]") || log.includes("Warning:")) {
+                        lineClass = "text-yellow-400 font-bold";
+                      } else if (log.includes("[SUCCESS]") || log.includes("SUCCESS:") || log.includes("DONE")) {
+                        lineClass = "text-emerald-400 font-bold";
+                      } else if (log.startsWith("[SANDBOX]") || log.startsWith("-->") || log.includes("Running")) {
+                        lineClass = "text-blue-400 font-bold";
+                      }
+                      return (
+                        <div key={index} className={cn("whitespace-pre-wrap break-all", lineClass)}>
+                          <span className="text-zinc-500 select-none mr-2">{(index + 1).toString().padStart(3, "0")}</span>
+                          {log}
+                        </div>
+                      );
+                    })
+                  )}
+                  <div ref={consoleEndRef} />
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

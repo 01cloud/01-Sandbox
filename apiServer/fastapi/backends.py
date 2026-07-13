@@ -48,7 +48,7 @@ class SandboxBackend(abc.ABC):
         pass
 
     @abc.abstractmethod
-    def get_scan_status(self, job_id: str) -> dict:
+    def get_scan_status(self, job_id: str) -> dict | str:
         pass
 
     @abc.abstractmethod
@@ -169,7 +169,7 @@ class GenericHTTPBackend(SandboxBackend):
             r.raise_for_status()
             return r.json()
 
-    def get_scan_status(self, job_id: str) -> dict:
+    def get_scan_status(self, job_id: str) -> dict | str:
         """Retrieves the live scanning status mapped to the backend OpenSandbox service."""
         prefix = opensandbox_route_prefix()
         with httpx.Client(timeout=5) as client:
@@ -178,7 +178,13 @@ class GenericHTTPBackend(SandboxBackend):
                 headers=opensandbox_headers(),
             )
             r.raise_for_status()
-            return r.json()
+            content_type = r.headers.get("content-type", "")
+            if "text/plain" in content_type:
+                return r.text
+            try:
+                return r.json()
+            except Exception:
+                return r.text
 
     def delete_scan_job(self, job_id: str, terminate: bool = False) -> None:
         """Deletes a persistent scan report and workspace from the remote PVC."""

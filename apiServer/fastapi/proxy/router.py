@@ -172,6 +172,50 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
                     detail=f"Proxy routing failed targeting {target_url}: {type(exc).__name__} - {exc}",
                 )
 
+    def start_log_polling(job_id: str):
+        import asyncio
+
+        done_event = asyncio.Event()
+
+        async def poll_logs():
+            last_offset = 0
+            # Give the sandbox a brief moment to boot up and generate log entries
+            await asyncio.sleep(2.0)
+            while not done_event.is_set():
+                try:
+                    loop = asyncio.get_running_loop()
+                    status_res = await loop.run_in_executor(
+                        None, state.backend.get_scan_status, job_id
+                    )
+                    if isinstance(status_res, str) and status_res:
+                        if len(status_res) > last_offset:
+                            new_content = status_res[last_offset:]
+                            last_offset = len(status_res)
+                            for line in new_content.splitlines():
+                                if line.strip():
+                                    await state.job_tracker.push_event(
+                                        job_id,
+                                        "LOG_LINE",
+                                        line,
+                                        60,
+                                    )
+                except Exception:
+                    pass
+                await asyncio.sleep(1.0)
+
+        poller_task = asyncio.create_task(poll_logs())
+        return done_event, poller_task
+
+    async def stop_log_polling(done_event, poller_task):
+        import asyncio
+
+        done_event.set()
+        poller_task.cancel()
+        try:
+            await poller_task
+        except asyncio.CancelledError:
+            pass
+
     async def run_scan_in_background(job_id: str, req_dict: dict):
         """Background worker — mirrors sandboxes router's full job-tracker lifecycle."""
         import asyncio
@@ -187,7 +231,11 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
             await state.job_tracker.push_event(
                 job_id, "SCANNING", "Running Semgrep security analysis...", 60
             )
-            data = await state.backend.create_scan_job(req_dict)
+            done_event, poller_task = start_log_polling(job_id)
+            try:
+                data = await state.backend.create_scan_job(req_dict)
+            finally:
+                await stop_log_polling(done_event, poller_task)
 
             critical_count = high_count = medium_count = low_count = info_count = 0
             findings = data.get("findings", [])
@@ -304,7 +352,13 @@ def get_proxy_router(state, validate_token: Callable) -> APIRouter:
                 await state.job_tracker.push_event(
                     job_id, "SCANNING", "Running Semgrep security analysis...", 60
                 )
-                data = await state.backend.create_scan_job(req.dict(exclude_none=True))
+                done_event, poller_task = start_log_polling(job_id)
+                try:
+                    data = await state.backend.create_scan_job(
+                        req.dict(exclude_none=True)
+                    )
+                finally:
+                    await stop_log_polling(done_event, poller_task)
 
                 critical_count = 0
                 high_count = 0
