@@ -1,3 +1,47 @@
+## Release v0.7.0 — 01-Sandbox
+**Release Date:** July 13, 2026
+
+---
+
+### Summary
+v0.7.0 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement real-time scan logs terminal
+* implement real-time scan logs terminal ([f5d28b8](https://github.com/01cloud/01-Sandbox/commit/f5d28b82604ac6227c17d145d0d1a30a2566a0c8))
+* generate RELEASE.md for v0.6.21 [skip ci] ([15a52cd](https://github.com/01cloud/01-Sandbox/commit/15a52cd385fbce65700d42192737983cee05c4a6))
+* bump versions to v0.6.21 [skip ci] ([110e33c](https://github.com/01cloud/01-Sandbox/commit/110e33ce475b9d645fe22407fb21985d64c23034))
+
+### Changes
+## [0.7.0](https://github.com/01cloud/01-Sandbox/compare/v0.6.21...v0.7.0) (2026-07-13)
+
+
+### ⚠ BREAKING CHANGES
+
+* implement real-time scan logs terminal
+
+### 🚀 New Features
+
+* implement real-time scan logs terminal ([f5d28b8](https://github.com/01cloud/01-Sandbox/commit/f5d28b82604ac6227c17d145d0d1a30a2566a0c8))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.6.21 [skip ci] ([15a52cd](https://github.com/01cloud/01-Sandbox/commit/15a52cd385fbce65700d42192737983cee05c4a6))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.6.21 [skip ci] ([110e33c](https://github.com/01cloud/01-Sandbox/commit/110e33ce475b9d645fe22407fb21985d64c23034))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.7.0)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.6.21 — 01-Sandbox
 **Release Date:** July 10, 2026
 
