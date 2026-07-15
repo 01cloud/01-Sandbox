@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.2](https://github.com/01cloud/01-Sandbox/compare/v0.7.1...v0.7.2) (2026-07-15)
+
+
+### 🐛 Bug Fixes
+
+* create apidocumentation ([c6a4ecb](https://github.com/01cloud/01-Sandbox/commit/c6a4ecba959f25e4d188f241cee379feb55f9a0e))
+* rabbitmq consumer ([43d6fb5](https://github.com/01cloud/01-Sandbox/commit/43d6fb57e1bce66e30a19a60775916f08b6215f7))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.1 [skip ci] ([036fe9f](https://github.com/01cloud/01-Sandbox/commit/036fe9f7cb7cc84a64ab379dccaf1164717a102a))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.1 [skip ci] ([e1a47e3](https://github.com/01cloud/01-Sandbox/commit/e1a47e38faafbcb1e487b775bac09e54363ac6c0))
+
 ## [0.7.1](https://github.com/01cloud/01-Sandbox/compare/v0.7.0...v0.7.1) (2026-07-13)
 
 
