@@ -108,9 +108,9 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
 
             if jt.job_type == "quick-scan":
                 print(f"[RabbitMQ][quick-scan] job={job_id[:8]}")
-                from sandboxes.router import run_scan_in_background
+                from scan_jobs.worker import run_scan_in_background
 
-                await run_scan_in_background(job_id, p["req_dict"])
+                await run_scan_in_background(job_id, p["req_dict"], app_state)
             elif jt.job_type == "repo-scan":
                 print(
                     f"[RabbitMQ][repo-scan] job={job_id[:8]} {p['owner']}/{p['repo']}"

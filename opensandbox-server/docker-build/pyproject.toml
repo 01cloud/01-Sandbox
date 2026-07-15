@@ -125,5 +125,7 @@ exclude = [
 venvPath = "."
 venv = ".venv"
 
+extraPaths = ["."]
+
 reportMissingImports = true
 reportMissingTypeStubs = false

@@ -29,3 +29,6 @@ __pycache__/
 
 node_modules
 sandbox_api_logs.txt
+
+.coverage
+.pytest_cache
