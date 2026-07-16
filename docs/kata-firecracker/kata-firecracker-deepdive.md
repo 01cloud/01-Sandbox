@@ -328,3 +328,38 @@ Verify that networking works identically to normal pods:
    # Returns the default Nginx welcome page
    ```
    *This proves the `tcfilter` network bridging works perfectly, routing traffic through the Kubernetes SDN (Cilium) straight into the Firecracker MicroVM.*
+
+### D. Verify Containerd Runtime Routing to Kata Handler
+To verify that RKE2's containerd instance is correctly receiving and routing pod requests to the Kata handler instead of the default runc runtime:
+
+1. **Verify the Containerd Configuration Mapping:**
+   Inspect the configuration file RKE2 dynamically builds for containerd:
+   ```bash
+   cat /var/lib/rancher/rke2/agent/etc/containerd/config.toml
+   ```
+   Look for the `kata-fc` block. It should map the handler to the Kata containerd-v2 shim:
+   ```toml
+   [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc]
+     runtime_type = "io.containerd.kata.v2"
+   ```
+
+2. **Verify the Active Host-Side Shim Process:**
+   When a pod runs on `kata-fc`, containerd launches the Kata shim process. You can query the host process table to find it:
+   ```bash
+   ps aux | grep containerd-shim-kata
+   ```
+   *Expected Output:*
+   ```text
+   root      4782  0.0  0.2 ... /opt/kata/bin/containerd-shim-kata-v2 -namespace k8s.io -address /run/k3s/containerd/containerd.sock -id <sandbox-id>
+   ```
+   *This proves containerd spawned the shim to manage the container via the RKE2 socket.*
+
+3. **Trace Handshake Logs in Systemd Journal:**
+   You can view the actual handshake and routing events in the RKE2 logs:
+   ```bash
+   # On RKE2 Server node:
+   journalctl -u rke2-server --no-pager | grep -E "kata|shim" | tail -n 20
+
+   # On RKE2 Agent node:
+   journalctl -u rke2-agent --no-pager | grep -E "kata|shim" | tail -n 20
+   ```
