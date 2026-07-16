@@ -79,6 +79,16 @@ If you are new to hardware virtualization and container shims, these concepts ca
     *   Firecracker is a software program running on the host. If a malicious container manages to find a bug in Firecracker, they could theoretically escape the VM and take control of the Firecracker process on the host.
     *   To prevent this, the **Jailer** runs before Firecracker starts. It locks down a folder (a `chroot` jail), drops all root privileges, and restricts access to the rest of the host's files. It then spawns the Firecracker process inside this vault. Even if a hacker escapes the VM, they are trapped inside the vault on the host.
 
+### D. Security Comparison: runc vs. gVisor vs. Firecracker
+
+| Feature | `runc` (Standard) | `gVisor` (Sandboxed) | `Firecracker` / Kata (Virtualized) |
+| :--- | :--- | :--- | :--- |
+| **Isolation Level** | Software namespaces (Low) | Syscall intercept sandbox (High) | Hardware virtualization (Highest) |
+| **Kernel Status** | Shared host kernel | Emulated user-space kernel | Dedicated guest kernel |
+| **Performance** | Native speed (No overhead) | Slightly slower syscalls (Go emulation) | Near-native speed (KVM backed) |
+| **Compatibility** | 100% (Supports all Linux apps) | Medium (Some complex system calls fail) | High (Supports standard Linux binaries) |
+| **Best Used For** | Trusted, standard internal apps. | Untrusted code, multi-tenant web apps. | High-risk environments (untrusted user code). |
+
 ---
 
 ## 3. Installation: Under the Hood
