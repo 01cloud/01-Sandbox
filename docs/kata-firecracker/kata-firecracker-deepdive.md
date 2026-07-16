@@ -210,8 +210,8 @@ Lower-level container inspection tools:
 # Check the container details inside containerd's Kubernetes namespace
 sudo crictl --runtime-endpoint unix:///run/k3s/containerd/containerd.sock ps
 
-# Check the running tasks from containerd's perspective
-sudo ctr -n k8s.io tasks ls
+# Check the running tasks from containerd's perspective (RKE2 socket)
+sudo ctr --address /run/k3s/containerd/containerd.sock -n k8s.io tasks ls
 ```
 
 ---
@@ -221,26 +221,45 @@ sudo ctr -n k8s.io tasks ls
 Here is how you can verify the value proposition of Kata Containers + Firecracker:
 
 ### A. Verify Hardware-Level Security (Kernel Isolation)
-Run a standard pod (`runc`) and a Kata pod (`kata-fc`), and compare their kernels.
 
-1. **Standard Pod Kernel Check:**
-   ```bash
-   kubectl run test-runc --image=nginx --restart=Never
-   kubectl exec test-runc -- uname -r
-   # Returns the host machine's exact kernel version (e.g., 5.15.0-xxx-generic)
-   ```
-2. **Kata Pod Kernel Check:**
-   ```bash
-   kubectl exec kata-test -- uname -r
-   # Returns the Kata Guest Kernel version (e.g., 6.1.x-kata)
-   ```
-3. **Process Space Check:**
-   Inside `kata-test`, look at the running processes:
-   ```bash
-   kubectl exec kata-test -- ps aux
-   # You will only see the Nginx processes and the kata-agent.
-   # You cannot see any processes running on the host or in other pods.
-   ```
+When describing a Kata pod using `kubectl describe pod kata-test`, Kubernetes will report a Container ID like `containerd://<hash>`. This is normal: Kubernetes communicates solely with the CRI (Containerd), which is responsible for routing the task. Under the hood, containerd intercepts the `kata-fc` runtime class and boots a dedicated MicroVM.
+
+You can verify that a pod is running in a fully isolated MicroVM using the following methods:
+
+#### 1. Host vs. Guest Kernel Verification (The Ultimate Proof)
+Compare the kernel running on the host with the kernel running inside the pod.
+*   **On the host node:**
+    ```bash
+    uname -r
+    # Returns the host's kernel version (e.g., 6.8.0-134-generic)
+    ```
+*   **Inside the Kata Container:**
+    ```bash
+    kubectl exec -it kata-test -- uname -r
+    # Returns the custom guest kernel packaged with Kata (e.g., 6.12.28)
+    ```
+*   **Conclusion:** If the versions mismatch, the pod is running on its own dedicated guest kernel, completely isolated from the host.
+
+#### 2. Active Firecracker Process Verification
+Check the host process space to find the active VM instance:
+```bash
+ps aux | grep firecracker
+```
+*   **Expected Output:** You will see a running `/firecracker` process with a unique `--id` and a path to its VM configuration file (e.g., `/fcConfig.json` or VM chroot location).
+
+#### 3. Listing Active Containerd Tasks
+Because RKE2 runs containerd on a custom socket, use the `--address` flag to query active tasks under the Kubernetes (`k8s.io`) namespace:
+```bash
+sudo ctr --address /run/k3s/containerd/containerd.sock -n k8s.io tasks ls
+# Lists all running tasks including the kata shims
+```
+
+#### 4. Guest Container Process Space Check
+Verify that the pod has its own distinct namespace where host-level processes are completely hidden. Inside the container, run:
+```bash
+kubectl exec kata-test -- ps aux
+```
+*   **Expected Output:** You will only see the application process (e.g., `nginx`) and the guest agent (`kata-agent`). None of the host's processes or other pods' processes will be visible, as there is no shared kernel.
 
 ### B. Verify Memory and Startup Overhead (Performance)
 1. **Startup Time:**
