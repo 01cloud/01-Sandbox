@@ -37,18 +37,36 @@ graph TD
 
 ### Detailed Flow of Execution
 
-1. **Pod Scheduling:** Kubelet receives a request to run a Pod with `runtimeClassName: kata-fc`.
-2. **CRI Request:** Kubelet calls Containerd over the CRI socket, requesting the creation of a Sandbox and Container using the `kata-fc` handler.
-3. **Shim Spawning:** Containerd spawns `containerd-shim-kata-v2`. This shim is responsible for managing the lifecycle of the MicroVM.
-4. **Storage Allocation:** The `devmapper` snapshotter takes the container image layers, creates a block device (snapshot) from the LVM thin-pool, and maps it to a block device node on the host.
-5. **MicroVM Bootstrapping:**
-   - The shim launches `firecracker` via `jailer` (for security sandboxing) and sends configuration parameters (kernel path, rootfs image, vCPUs, RAM).
-   - Firecracker starts the guest kernel (`vmlinux`) using KVM.
-6. **Agent Initialization:** The guest kernel boots and starts the `kata-agent` inside the VM.
-7. **Storage & Network Hotplugging:**
-   - The container rootfs block device is attached to the VM as a `virtio-block` device and mounted inside the VM.
-   - The network tap device (`tapX`) is hot-plugged, and `tc` rules redirect traffic from the host network namespace into the MicroVM.
-8. **App Execution:** The `kata-agent` spawns the container processes (e.g., `nginx`) inside the guest namespaces inside the MicroVM.
+Here is what each piece is actually doing, in the order they get invoked when a Pod is provisioned:
+
+1. **Kubernetes API / Control Plane:**
+   This is where the desired state lives — someone applies a pod spec with `runtimeClassName: kata-fc`. The API server persists that intent and the scheduler picks a node; it doesn't touch the VM machinery at all, it just decides where the pod should land.
+2. **Kubelet:**
+   Runs on the chosen node and is the thing that actually turns "a pod should exist here" into action. It doesn't create containers itself — it talks to `containerd` over the Container Runtime Interface (CRI), a gRPC API, asking it to create a sandbox and container using the `kata-fc` handler specified in the pod spec.
+3. **Containerd Daemon:**
+   The general-purpose container engine. Normally it would hand off to `runc` to build namespaces and cgroups directly on the host kernel. Because the runtime class says `kata-fc`, it instead spawns a different shim binary entirely — this is the fork in the road between a normal pod and a Kata pod.
+4. **`containerd-shim-kata-v2`:**
+   This is the long-running host-side process that manages the whole lifecycle of the microVM. It's the only thing standing between Kubernetes and the VM — kubelet can't see inside the VM's virtual hardware boundary, so when Kubernetes asks "is this container healthy," it's really asking the shim, which relays that question to the `kata-agent` running inside the guest and passes the answer back. It also reads `/etc/kata-containers/configuration.toml` to know which Firecracker binary, kernel, and rootfs image to use, and how many vCPUs/how much RAM to allocate.
+5. **`devmapper` Snapshotter:**
+   Handles storage on the host side, in parallel with the shim spawning. It takes the pulled container image layers and creates a copy-on-write block device snapshot from the LVM thin pool, then exposes that as a device node the shim can pass into the VM. This is why Kata needs `devmapper` specifically rather than the more common `overlayfs` snapshotter — the VM needs an actual block device to attach, not a filesystem overlay.
+6. **LVM Thin Pool:**
+   The physical backing storage `devmapper` draws from. It's a thinly-provisioned pool, meaning space is allocated on demand rather than reserved up front per container, which keeps storage overhead low across many pods.
+7. **Jailer:**
+   Runs before Firecracker even starts. Since Firecracker itself is just a regular host process, a VM-escape bug in it would hand an attacker the privileges of that process. The jailer locks Firecracker into a `chroot`, drops root privileges, and applies its own `cgroups` and namespaces restrictions — so even a successful escape from the VM lands the attacker in a locked-down cell on the host, not a general-purpose shell.
+8. **Firecracker Process (the VMM):**
+   The actual hypervisor. It talks straight to `/dev/kvm` to create virtual CPUs and memory for the microVM and expose minimal virtio devices (block, network, serial) — nothing more elaborate than that. It has zero awareness of Kubernetes, container images, or Nginx; it only knows how to boot a small virtual machine from a kernel path and a rootfs image path that the shim hands it.
+9. **Guest Kernel (`vmlinux`):**
+   A stripped-down Linux kernel built specifically for fast boot — most unnecessary drivers are removed, which is how boot gets down to roughly 10–30ms. It's a genuinely separate kernel from the host's, which is the core of the security claim: a Kata pod's `uname -r` reports the guest kernel version, not the host's.
+10. **Kata Agent:**
+    The first process the guest kernel starts (its `init`). It's the counterpart to the shim — everything the shim wants done inside the VM (mount this device, start this process, report this status) goes through the agent over a virtual serial/vsock channel. It has no visibility into anything outside the VM.
+11. **Rootfs (virtio-block hotplug):**
+    Once the guest is up, the block device snapshot `devmapper` created on the host gets hot-plugged into the running VM as a `virtio-block` device (using `virtio-mmio` rather than PCI, since Firecracker doesn't emulate a PCI bus). The `kata-agent` mounts it as the container's root filesystem.
+12. **Networking (tap device + tc rules):**
+    Alongside storage, a host-side `tap` network device is hot-plugged into the VM, and `tc` (traffic control) rules redirect packets from the host network namespace into that tap, effectively bridging the VM into whatever SDN the cluster is using (e.g., Cilium) so the pod gets normal Kubernetes networking despite living behind a hardware boundary.
+13. **App Process (e.g. Nginx):**
+    The `kata-agent` finally spawns the actual container process inside the guest's own process namespace. From inside, `ps aux` shows only that process and the agent — none of the host's or other pods' processes are visible, since there's no shared kernel to see them through.
+
+**The Net Effect:** Everything up through the shim is a normal, inspectable host process; everything from Firecracker onward is walled off behind actual hardware virtualization rather than software isolation, which is the whole point relative to `runc`.
 ---
 
 ## 2. Core Concepts & Analogies
