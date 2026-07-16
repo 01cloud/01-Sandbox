@@ -232,13 +232,16 @@ Compare the kernel running on the host with the kernel running inside the pod.
     ```bash
     uname -r
     # Returns the host's kernel version (e.g., 6.8.0-134-generic)
+    # This is the standard Ubuntu OS kernel running on the host server.
     ```
 *   **Inside the Kata Container:**
     ```bash
     kubectl exec -it kata-test -- uname -r
-    # Returns the custom guest kernel packaged with Kata (e.g., 6.12.28)
+    # Returns the custom guest kernel version (e.g., 6.12.28)
+    # This is the lightweight, optimized guest kernel file (vmlinux.container)
+    # provided by Kata Containers and booted in memory by Firecracker.
     ```
-*   **Conclusion:** If the versions mismatch, the pod is running on its own dedicated guest kernel, completely isolated from the host.
+*   **Conclusion:** If the versions mismatch (e.g., `6.8.0-134-generic` vs `6.12.28`), the pod is running on its own dedicated guest kernel, completely isolated from the host operating system.
 
 #### 2. Active Firecracker Process Verification
 Check the host process space to find the active VM instance:
