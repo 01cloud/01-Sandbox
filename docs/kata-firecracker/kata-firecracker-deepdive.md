@@ -28,7 +28,7 @@ graph TD
             FC -->|Loads Guest Kernel| Kernel[Guest Kernel: vmlinux]
             Kernel -->|Starts Init| Agent[Kata Agent]
             Agent -->|Mounts Block Device| Rootfs[Container Rootfs]
-            Agent -->|Spawns Container| Application[App Process (e.g. Nginx)]
+            Agent -->|Spawns Container| Application["App Process (e.g. Nginx)"]
         end
 
         LVM -->|Hotplugged via virtio-block| Rootfs
