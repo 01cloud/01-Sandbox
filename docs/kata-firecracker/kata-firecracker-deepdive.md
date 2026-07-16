@@ -12,7 +12,7 @@ Unlike standard container runtimes (like `runc`) that rely on shared host kernel
 
 ```mermaid
 graph TD
-    subgraph Host System (Ubuntu)
+    subgraph "Host System (Ubuntu)"
         K8s[Kubernetes API / Control Plane] -->|Schedules Pod| Kubelet[Kubelet]
         Kubelet -->|CRI gRPC| Containerd[Containerd Daemon]
 
@@ -24,7 +24,7 @@ graph TD
         DevMapper -->|Exposes Thin Device| LVM[LVM Thin Pool]
         Shim -->|Launches| FC[Firecracker Process]
 
-        subgraph Firecracker MicroVM (Hardware-Isolated via KVM)
+        subgraph "Firecracker MicroVM (Hardware-Isolated via KVM)"
             FC -->|Loads Guest Kernel| Kernel[Guest Kernel: vmlinux]
             Kernel -->|Starts Init| Agent[Kata Agent]
             Agent -->|Mounts Block Device| Rootfs[Container Rootfs]
