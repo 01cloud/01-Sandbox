@@ -84,6 +84,12 @@ If you are new to hardware virtualization and container shims, these concepts ca
 *   **The Runtime (Kata Containers):** *The Hotel Manager.*
     *   **What it does:** Kubernetes does not speak virtual machine language. It only speaks container language (e.g., *"pull Nginx and run it"*). The Kata runtime acts as the translator: it receives the container request from Kubernetes, calls Firecracker to build the MicroVM, mounts the Nginx block storage device inside it, and starts it.
 
+#### Division of VM Creation Responsibility:
+*   **Kata Containers (The Coordinator/Runtime) is responsible for the *What* and *When*:**
+    It is the orchestrator that receives the scheduling instruction from Kubernetes, determines that a dedicated VM boundary is required for the pod, gathers all resources (guest kernel path, LVM thin-pool block storage disk, network taps), and issues the command to launch the MicroVM.
+*   **Firecracker (The Hypervisor/VMM) is responsible for the *How* (Actual VM Creation):**
+    It receives the configuration instructions from Kata (such as number of vCPUs, RAM limits, kernel and storage paths) and directly calls the Linux host's Kernel-based Virtual Machine (**KVM** via `/dev/kvm`). KVM handles the hardware-level virtualization, while Firecracker manages the threads representing vCPUs and maps the host's physical memory pages into the newly constructed, hardware-isolated boundary.
+
 ### B. What is Shim Spawning?
 
 *   **The Analogy:** *The Personal Butler.*
