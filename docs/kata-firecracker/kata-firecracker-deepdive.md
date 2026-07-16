@@ -273,6 +273,15 @@ kubectl exec kata-test -- ps aux
    kubectl describe pod kata-test
    ```
    Under `Events`, examine the time difference between `Scheduled`, `Pulling image`, and `Started container`. You will find that VM creation and guest boot take **less than 1 second**!
+
+   > [!NOTE]
+   > If the `Events` section shows `<none>`, it is because Kubernetes garbage-collects pod event history after **1 hour** by default. To check the startup speed of a fresh MicroVM, deploy a temporary test pod and describe it immediately:
+   > ```bash
+   > kubectl run kata-speed-test --image=nginx --restart=Never --overrides='{"spec":{"runtimeClassName":"kata-fc"}}'
+   > kubectl describe pod kata-speed-test
+   > # Clean up:
+   > kubectl delete pod kata-speed-test
+   > ```
 2. **Memory Footprint:**
    Find the active `firecracker` process on the host:
    ```bash
