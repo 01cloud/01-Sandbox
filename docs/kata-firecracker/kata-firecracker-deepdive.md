@@ -363,3 +363,14 @@ To verify that RKE2's containerd instance is correctly receiving and routing pod
    # On RKE2 Agent node:
    journalctl -u rke2-agent --no-pager | grep -E "kata|shim" | tail -n 20
    ```
+
+   **Interpreting Common Warnings & Errors in these logs:**
+   When running the logs query, you may see warnings and transient errors. These are expected and do not indicate a failure if the pod is `Running`:
+   *   `level=error msg="getting vm status failed" error="... connect: no such file or directory"`:
+       **Transient Error.** The Kata shim tries to query the Firecracker control socket immediately upon startup. Because the socket takes a few milliseconds to initialize, the first connection attempt fails. The shim automatically retries and connects successfully.
+   *   `level=warning msg="VM memory (256MB) smaller than image..."`:
+       **Low Memory Warning.** The default allocation of 256MB is close to the minimum size needed to mount the guest system rootfs image in RAM.
+   *   `level=warning msg="Advanced PCIe Topology only available for QEMU/CLH..."`:
+       **Feature Warning.** Firecracker uses lightweight `virtio-mmio` devices instead of emulating a full PCIe bus (which is why it boots in milliseconds). Kata simply warns that PCIe features are being bypassed.
+   *   `level=warning msg="Could not add /dev/mshv to the devices cgroup"`:
+       **Driver Check Warning.** Kata checks for Hyper-V drivers (`/dev/mshv`) on startup. Because you are virtualizing via Linux KVM, this warning is ignored safely.
