@@ -11,28 +11,33 @@ Unlike standard container runtimes (like `runc`) that rely on shared host kernel
 ### Component Diagram
 
 ```mermaid
-graph TD
-    subgraph "Host System (Ubuntu)"
+graph LR
+    subgraph Host ["Host System (Ubuntu)"]
+        direction TB
         K8s[Kubernetes API / Control Plane] -->|Schedules Pod| Kubelet[Kubelet]
         Kubelet -->|CRI gRPC| Containerd[Containerd Daemon]
 
-        subgraph Containerd Plugins
-            Containerd -->|Invokes| Shim[containerd-shim-kata-v2]
-            Containerd -->|Allocates Blocks| DevMapper[devmapper Snapshotter]
+        subgraph Plugins ["Containerd Plugins"]
+            direction TB
+            Shim[containerd-shim-kata-v2]
+            DevMapper[devmapper Snapshotter]
         end
 
-        DevMapper -->|Exposes Thin Device| LVM[LVM Thin Pool]
-        Shim -->|Launches| FC[Firecracker Process]
-
-        subgraph "Firecracker MicroVM (Hardware-Isolated via KVM)"
-            FC -->|Loads Guest Kernel| Kernel[Guest Kernel: vmlinux]
-            Kernel -->|Starts Init| Agent[Kata Agent]
-            Agent -->|Mounts Block Device| Rootfs[Container Rootfs]
-            Agent -->|Spawns Container| Application["App Process (e.g. Nginx)"]
-        end
-
-        LVM -->|Hotplugged via virtio-block| Rootfs
+        Containerd --> Shim
+        Containerd --> DevMapper
+        DevMapper -->|Exposes Device| LVM[LVM Thin Pool]
     end
+
+    subgraph VM ["Firecracker MicroVM (Isolated via KVM)"]
+        direction TB
+        FC[Firecracker Process] -->|Loads Kernel| Kernel[Guest Kernel: vmlinux]
+        Kernel -->|Starts Init| Agent[Kata Agent]
+        Agent -->|Mounts Block| Rootfs[Container Rootfs]
+        Agent -->|Spawns| Application["App Process (e.g. Nginx)"]
+    end
+
+    Shim -->|Launches| FC
+    LVM -->|Hotplugged via virtio-block| Rootfs
 ```
 
 ### Detailed Flow of Execution
