@@ -91,7 +91,29 @@ If you are new to hardware virtualization and container shims, these concepts ca
 
 ---
 
-## 3. Installation: Under the Hood
+## 3. Storage & Boot Mechanics: Devmapper & Millisecond Booting
+
+Unlike traditional containers that overlay filesystems on the host directory, or traditional VMs that emulate a full system motherboard, Kata + Firecracker optimizes storage and booting to reach near-instantaneous startup times.
+
+### A. The devmapper Mandatory Requirement
+Standard container runtimes stack directories using `overlayfs`. Since Firecracker is a minimalist hypervisor designed for maximum security, it does not support file-sharing mechanisms (like `virtio-fs` or `9p` sharing) out of the box.
+Instead, it requires the container root filesystem to be presented as a raw virtual block device. The `devmapper` snapshotter translates the container's directory-based image layers into a virtual block device node on the host.
+
+### B. Microsecond-Level Disk Cloning via LVM Thin-Pools
+Creating, formatting, and copying files to a new virtual disk during pod creation would take seconds. To avoid this, `devmapper` uses thin-provisioning:
+*   **Base Image Layout:** When a container image (e.g., Ubuntu/Nginx) is downloaded, it is unpacked onto a single parent virtual block device in the LVM thin-pool.
+*   **Instant Clone:** When a pod is scheduled, `devmapper` instantly creates a **pointer-based copy-on-write (CoW) snapshot** of the parent device. No data is duplicated, allowing this creation to finish in microseconds.
+*   **Copy-on-Write:** Any writes made by the container at runtime are written to newly allocated blocks in the thin-pool, leaving the base image untouched and read-only.
+
+### C. The 10–30ms Deviceless Boot Mechanics
+Traditional VMs take seconds or minutes to boot because they perform hardware self-tests, initialize virtual PCI buses, and load ACPI controllers. Firecracker eliminates these steps:
+*   **No Virtual PCI Bus:** Firecracker lacks PCI controllers, ACPI tables, and legacy BIOS/UEFI firmware.
+*   **Memory-Mapped I/O (`virtio-mmio`):** Devices (like the `devmapper` disk and the `tap` network interface) are mapped directly via MMIO, bypassing PCI scan overhead.
+*   **Direct Memory Loading:** Firecracker directly injects the uncompressed guest kernel (`vmlinux.container`) into the VM's memory and sets the instruction pointer to the kernel entry point, starting execution immediately.
+
+---
+
+## 4. Installation: Under the Hood
 
 When you install Firecracker and Kata Containers, the binaries and libraries occupy specific roles:
 
@@ -107,7 +129,7 @@ When you install Firecracker and Kata Containers, the binaries and libraries occ
 
 ---
 
-## 4. Configuring Kata with Firecracker
+## 5. Configuring Kata with Firecracker
 
 The configuration file `/etc/kata-containers/configuration.toml` defines how the host interacts with the guest. Key directives include:
 
@@ -132,7 +154,7 @@ jailer_path = "/opt/kata/bin/jailer"
 
 ---
 
-## 5. Key Commands & Diagnostics
+## 6. Key Commands & Diagnostics
 
 ### A. `kata-runtime check`
 Validates that the host meets the requirements for running Kata:
@@ -170,7 +192,7 @@ sudo ctr -n k8s.io tasks ls
 
 ---
 
-## 6. Verifying Security, Performance, and Orchestration
+## 7. Verifying Security, Performance, and Orchestration
 
 Here is how you can verify the value proposition of Kata Containers + Firecracker:
 
