@@ -240,6 +240,8 @@ Compare the kernel running on the host with the kernel running inside the pod.
     # Returns the custom guest kernel version (e.g., 6.12.28)
     # This is the lightweight, optimized guest kernel file (vmlinux.container)
     # provided by Kata Containers and booted in memory by Firecracker.
+    # The file path is configured on the host in '/etc/kata-containers/configuration.toml'
+    # under the [hypervisor.firecracker] -> kernel setting.
     ```
 *   **Conclusion:** If the versions mismatch (e.g., `6.8.0-134-generic` vs `6.12.28`), the pod is running on its own dedicated guest kernel, completely isolated from the host operating system.
 
