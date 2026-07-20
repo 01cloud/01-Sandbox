@@ -33,7 +33,9 @@ set -euo pipefail
 # ─── Configurable Variables ───────────────────────────────────────────────────
 
 RKE2_VERSION="${RKE2_VERSION:-v1.30.5+rke2r1}"
+# RKE2_VERSION="${RKE2_VERSION:-v1.31.12+rke2r1}"
 LONGHORN_VERSION="${LONGHORN_VERSION:-1.6.2}"
+# LONGHORN_VERSION="${LONGHORN_VERSION:-1.8.1}"
 CLUSTER_CIDR="${CLUSTER_CIDR:-10.42.0.0/16}"
 SERVICE_CIDR="${SERVICE_CIDR:-10.43.0.0/16}"
 LONGHORN_REPLICAS="${LONGHORN_REPLICAS:-3}"
