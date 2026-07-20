@@ -504,3 +504,59 @@ LV              VG        Attr       LSize   Pool Origin Data%  Meta%  Move Log 
   ubuntu-lv       ubuntu-vg -wi-ao---- <24.00g
 ```
 This thin pool holds parent read-only blocks for image layers. Each active container root filesystem is hotplugged to the MicroVM's `virtio-block` device (using the preconfigured drive slots `drive_X`) from a CoW pointer-based mapper snapshot, guaranteeing zero file-level exposure on the host.
+
+---
+
+## 9. Core Concepts & Terminologies Glossary
+
+To master the Kata Containers + Firecracker architecture, you must understand the following core concepts and terminologies. They represent the boundaries between the host operating system, the hypervisor, the guest microVM, and Kubernetes.
+
+### A. Core Architectural Entities
+
+1. **Virtual Machine Monitor (VMM) / Hypervisor:**
+   - **Definition:** The software process running on the host that creates and manages the virtual machine hardware.
+   - **Role:** For `kata-fc`, the VMM is **Firecracker**. It interacts with the KVM API (`/dev/kvm`) to spin up virtual CPUs, assign RAM, and attach virtual disk and network interfaces.
+
+2. **MicroVM:**
+   - **Definition:** A highly stripped-down, lightweight virtual machine designed specifically for running transient serverless or containerized workloads.
+   - **Role:** Unlike a traditional VM (which emulates complex PC motherboards, USB controllers, and PCI buses), a microVM removes all non-essential hardware emulation, allowing booting to finish in 10-30 milliseconds and consuming less than 20MB of memory overhead.
+
+3. **Kata Shim (`containerd-shim-kata-v2`):**
+   - **Definition:** A host-side daemon process spawned by `containerd` for each Pod.
+   - **Role:** It represents the pod to Kubernetes (handling CRI gRPC calls) and acts as the management bridge to the guest VM. The shim reads `/etc/kata-containers/configuration.toml` to allocate resources, instructs the VMM to boot the guest, and translates container commands (like start, stop, exec) into a protocol the guest understands.
+
+4. **Kata Agent (`kata-agent`):**
+   - **Definition:** A minimal daemon running inside the guest MicroVM's kernel space as the initial process (`PID 1` / `init`).
+   - **Role:** It acts as the guest-side execution arm. It listens to commands from the host-side Kata Shim, mounts the container's root filesystem, configures guest networking, and spawns the actual application container process (e.g. Nginx).
+
+5. **Jailer:**
+   - **Definition:** A security wrapper binary developed by AWS that sandboxes the Firecracker process before boot.
+   - **Role:** It locks the VMM into a dedicated directory using `chroot`, unshares all host namespaces (PID, NET, IPC, Mount), drops all superuser privileges, and applies strict Seccomp filters. This ensures that even if a guest breaks out of the MicroVM into the hypervisor process, it is trapped inside a locked-down cell on the host.
+
+### B. Guest-Host Communication & I/O Channels
+
+6. **VSock (Virtual Socket - `AF_VSOCK`):**
+   - **Definition:** A zero-copy, high-speed socket address family designed specifically for guest-to-host VM communication.
+   - **Role:** Kata uses VSock to establish a direct management control channel between `containerd-shim-kata-v2` on the host and `kata-agent` in the guest. On the host, this maps to a UNIX socket (e.g., `/run/vc/firecracker/<vm-id>/root/kata.hvsock`), bypassing the host's TCP/IP stack entirely.
+
+7. **virtio-mmio (Memory-Mapped I/O):**
+   - **Definition:** A direct, memory-mapped device transport mechanism that bypasses standard virtual PCI buses.
+   - **Role:** Firecracker does not support virtual PCI. Instead, storage disks and network TAP interfaces are mapped directly to pre-defined physical memory address offsets. The guest kernel reads/writes to these memory addresses directly, reducing device initialization overhead to microseconds.
+
+8. **TAP Device:**
+   - **Definition:** A software-defined virtual Ethernet network link that operates at the Data Link Layer (Layer 2).
+   - **Role:** Kata creates a host-side TAP device (`tap0_kata`) inside the Pod's network namespace and links it to Firecracker. Packets sent by the guest kernel to its virtual `eth0` are received by the host's TAP device.
+
+9. **TC (Traffic Control) Redirect:**
+   - **Definition:** A Linux kernel subsystem used to inspect and route network traffic at the packet level.
+   - **Role:** Because Kata VMs run behind a hardware hypervisor boundary, standard Linux bridges introduce latency. Instead, Kata installs bidirectional `tc mirred egress redirect` rules between the CNI interface (`eth0`) and the hypervisor-facing TAP interface (`tap0_kata`), transferring raw IP packets directly between the outer SDN and the VM.
+
+### C. Host Storage & Layering Abstractions
+
+10. **Device Mapper (`devmapper`) Snapshotter:**
+    - **Definition:** A containerd storage plugin that presents container images as raw block devices instead of directories.
+    - **Role:** Firecracker is designed for maximum security and minimal size, and does not support file-sharing systems like `virtio-fs`. The `devmapper` snapshotter packages container layers into a raw virtual block device, which Firecracker can attach as a physical drive.
+
+11. **LVM Thin-Pool:**
+    - **Definition:** A logical volume pool that dynamically allocates physical disk blocks on demand.
+    - **Role:** The backing storage system for the `devmapper` snapshotter. Instead of pre-allocating full virtual disk space for each Pod (which would take seconds and waste disk space), it uses a copy-on-write (CoW) thin-pool. When a Pod is scheduled, it creates a pointer-based snapshot of the parent image layer instantly (in microseconds).
