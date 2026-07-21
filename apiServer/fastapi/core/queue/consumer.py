@@ -127,6 +127,7 @@ async def _start_single_consumer(jt: ScanJobType, app_state) -> None:
                     app_state,
                     git_token=git_token,
                     ssh_key=ssh_key,
+                    runtime=p.get("runtime"),
                 )
             elif jt.job_type == "email-notification":
                 print(

@@ -240,6 +240,7 @@ async def _submit_scan_job(
     files_dict: dict[str, str],
     tools: Optional[list[str]] = None,
     parent_job_id: Optional[str] = None,
+    runtime: Optional[str] = None,
 ) -> dict:
     """
     Submit files to POST /scan-jobs and wait for the result.
@@ -271,6 +272,8 @@ async def _submit_scan_job(
             "job_id": child_job_id,
         },
     }
+    if runtime:
+        payload["metadata"]["runtime"] = runtime
     if parent_id:
         payload["metadata"]["parent_job_id"] = parent_id
     if tools:
@@ -512,6 +515,7 @@ async def scan_language(
     files: list[str],
     percentage: float,
     parent_job_id: Optional[str] = None,
+    runtime: Optional[str] = None,
 ) -> LanguageScanResult:
     """
     Run security analysis for a detected language by submitting
@@ -580,6 +584,7 @@ async def scan_language(
             files=files_capped,
             total_percentage=round(percentage, 2),
             parent_job_id=parent_job_id,
+            runtime=runtime,
         )
 
     # Select tool hints for the scan-jobs orchestrator
@@ -601,7 +606,7 @@ async def scan_language(
         f"{_TAG} [{language}] Submitting {len(files_dict)} file(s) to scan-jobs (tools: {tool_hints or 'auto'})"
     )
     report = await _submit_scan_job(
-        files_dict, tools=tool_hints, parent_job_id=parent_job_id
+        files_dict, tools=tool_hints, parent_job_id=parent_job_id, runtime=runtime
     )
 
     elapsed = time.monotonic() - t0
@@ -686,6 +691,7 @@ async def scan_yaml_files(
     files: list[str],
     total_percentage: float,
     parent_job_id: Optional[str] = None,
+    runtime: Optional[str] = None,
 ) -> Tuple[LanguageScanResult, Optional[LanguageScanResult]]:
     """
     Split YAML files into:
@@ -729,7 +735,10 @@ async def scan_yaml_files(
             )
             t_yaml0 = time.monotonic()
             report = await _submit_scan_job(
-                plain_dict, tools=["yamllint"], parent_job_id=parent_job_id
+                plain_dict,
+                tools=["yamllint"],
+                parent_job_id=parent_job_id,
+                runtime=runtime,
             )
             elapsed_yaml = time.monotonic() - t_yaml0
             if report:
@@ -795,7 +804,7 @@ async def scan_yaml_files(
             )
             t_k8s0 = time.monotonic()
             report = await _submit_scan_job(
-                k8s_dict, tools=k8s_tools, parent_job_id=parent_job_id
+                k8s_dict, tools=k8s_tools, parent_job_id=parent_job_id, runtime=runtime
             )
             elapsed_k8s = time.monotonic() - t_k8s0
             if report:

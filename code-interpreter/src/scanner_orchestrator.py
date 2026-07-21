@@ -274,15 +274,15 @@ class ScannerOrchestrator:
             }
             return
 
-        # Strict-Mode security configurations + Harmful Logic Audits
+        # Strict-Mode security configurations + Harmful Logic Audits (offline local configs)
         cmd = [
             "semgrep",
             "scan",
-            "--config=auto",
-            "--config=p/security-audit",
-            "--config=p/r2c-security-audit",
-            "--config=p/secrets",
-            "--config=p/python",
+            "--config=/opt/opensandbox/rules/default.yaml",
+            "--config=/opt/opensandbox/rules/security-audit.yaml",
+            "--config=/opt/opensandbox/rules/r2c-security-audit.yaml",
+            "--config=/opt/opensandbox/rules/secrets.yaml",
+            "--config=/opt/opensandbox/rules/python.yaml",
             "--json",
             "--quiet",
             self.target_dir,
@@ -644,12 +644,15 @@ class ScannerOrchestrator:
             "--format",
             "json",
             "--scanners",
-            "vuln,secret,config",
+            "secret,config",
             "--severity",
             "CRITICAL,HIGH,MEDIUM,LOW",
             "--quiet",
             "--skip-db-update",
             "--skip-java-db-update",
+            "--offline-scan",
+            "--skip-check-update",
+            "--skip-version-check",
             self.target_dir,
         ]
         res = self.run_command(cmd, "Trivy")

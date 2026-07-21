@@ -13,6 +13,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Disable Semgrep phone home telemetry and version check to prevent hanging in network-restricted sandboxes
+export SEMGREP_SEND_TELEMETRY=off
+export SEMGREP_DISABLE_VERSION_CHECK=true
+export SEMGREP_SKIP_VERSION_CHECK=true
+export SEMGREP_ENABLE_VERSION_CHECK=0
+
+# Set up symlinks for SCAN_DIR and SCAN_REPORT if they are custom and not at standard /workspace and /reports paths.
+# This prevents Kata Containers/Firecracker subPath volume mounting issues by mounting the PVC root instead of subPath.
+if [ -n "$SCAN_DIR" ] && [ "$SCAN_DIR" != "/workspace" ]; then
+    rm -rf /workspace
+    mkdir -p "$(dirname "$SCAN_DIR")"
+    ln -sf "$SCAN_DIR" /workspace
+fi
+
+if [ -n "$SCAN_REPORT" ] && [ "$(dirname "$SCAN_REPORT")" != "/reports" ]; then
+    rm -rf /reports
+    mkdir -p "$(dirname "$SCAN_REPORT")"
+    ln -sf "$(dirname "$SCAN_REPORT")" /reports
+fi
+
 # If EXECD_CLONE3_COMPAT is set (same accepted values as execd's pkg/clone3compat), re-exec this
 # script under AkihiroSuda/clone3-workaround so the rest of startup runs with clone3 -> ENOSYS.
 # See https://github.com/AkihiroSuda/clone3-workaround — binary is /usr/local/bin/clone3-workaround (amd64 image only).
@@ -114,7 +134,6 @@ setup_java() {
 
 setup_node() {
 	time {
-		npm install -g tslab
 		tslab install
 	}
 }

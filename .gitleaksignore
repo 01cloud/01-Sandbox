@@ -3,3 +3,13 @@ codeInspector/charts/sealed-secrets/README.md:private-key:144
 z1sandbox-website/src/components/dashboard/SecurityScanner.tsx:aws-access-token:87
 z1sandbox-website/src/components/dashboard/SecurityScanner.tsx:slack-webhook-url:88
 codeInspector/values-local.yaml:private-key:15
+# semgrep rule pattern - example private key format in rule definition
+code-interpreter/rules/secrets.yaml:private-key:493
+# semgrep rule pattern - example Slack webhook placeholder in pattern-not rule
+code-interpreter/rules/secrets.yaml:slack-webhook-url:618
+# semgrep rule pattern - example private key regex in rule definition
+code-interpreter/rules/default.yaml:private-key:1433
+# semgrep rule pattern - example Slack webhook placeholder in pattern-not rule
+code-interpreter/rules/default.yaml:slack-webhook-url:1646
+# scratch/dev test RSA key - not a real production credential
+scratch/test_jwks.py:private-key:7

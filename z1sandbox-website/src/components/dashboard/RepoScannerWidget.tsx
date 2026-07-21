@@ -53,6 +53,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
   const [gitToken, setGitToken] = useState("");
   const [sshKey, setSshKey] = useState("");
   const [isValidating, setIsValidating] = useState(false);
+  const [runtime, setRuntime] = useState<string>("gvisor");
 
   const getApiKey = () => {
     for (const k of keys) {
@@ -62,7 +63,8 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
     return null;
   };
 
-  const apiKey = getApiKey() || "";
+  const hasKeyInDb = keys.length > 0;
+  const apiKey = getApiKey() || (hasKeyInDb ? authToken : "") || "";
 
   // Initialize unified hook
   const {
@@ -211,7 +213,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
 
       for (const url of urls) {
         try {
-          const bodyPayload: any = { repo_url: url, backend_id: backendId };
+          const bodyPayload: any = { repo_url: url, backend_id: backendId, runtime: runtime };
           if (requiresAuth) {
             if (authMethod === "token" && gitToken.trim()) {
               bodyPayload.git_token = gitToken.trim();
@@ -572,6 +574,41 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
               {urlError && <p className="text-[10px] text-red-500 font-medium">{urlError}</p>}
             </div>
 
+            {/* Isolation Runtime Selector */}
+            <div className="flex flex-col gap-2 shrink-0">
+              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75">
+                Isolation Runtime
+              </label>
+              <div className="flex bg-muted/40 rounded-xl p-0.5 border border-border/50">
+                <button
+                  type="button"
+                  onClick={() => setRuntime("gvisor")}
+                  className={cn(
+                    "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
+                    runtime === "gvisor"
+                      ? "bg-violet-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Shield className="w-3 h-3" />
+                  gVisor
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRuntime("kata-fc")}
+                  className={cn(
+                    "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
+                    runtime === "kata-fc"
+                      ? "bg-violet-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Activity className="w-3 h-3" />
+                  Kata-FC
+                </button>
+              </div>
+            </div>
+
             {requiresAuth && (
               <div className="border-t border-violet-500/25 pt-4 flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
                 <div className="flex items-center justify-between">
@@ -784,6 +821,41 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                     disabled={isScanning}
                   />
                   {urlError && <p className="text-[10px] text-red-500 font-medium">{urlError}</p>}
+                </div>
+
+                {/* Isolation Runtime Selector */}
+                <div className="flex flex-col gap-2 shrink-0">
+                  <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75">
+                    Isolation Runtime
+                  </label>
+                  <div className="flex bg-muted/40 rounded-xl p-0.5 border border-border/50">
+                    <button
+                      type="button"
+                      onClick={() => setRuntime("gvisor")}
+                      className={cn(
+                        "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
+                        runtime === "gvisor"
+                          ? "bg-violet-600 text-white shadow-sm"
+                          : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <Shield className="w-3 h-3" />
+                      gVisor
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRuntime("kata-fc")}
+                      className={cn(
+                        "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
+                        runtime === "kata-fc"
+                      ? "bg-violet-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                      )}
+                    >
+                      <Activity className="w-3 h-3" />
+                      Kata-FC
+                    </button>
+                  </div>
                 </div>
 
                 {/* Auth Panel */}

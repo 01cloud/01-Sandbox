@@ -421,12 +421,18 @@ const Dashboard = () => {
         const saved = localStorage.getItem(`bound_key_${k.id}`);
         if (saved) { setResolvedApiKey(saved); return; }
       }
+      // If we are logged in (authToken exists) and have keys in the database for this backend,
+      // we can use authToken as the fallback so the backend Identity Bridge can map it.
+      if (authToken && backendKeys.length > 0) {
+        setResolvedApiKey(authToken);
+        return;
+      }
       setResolvedApiKey("");
     };
     resolve();
     window.addEventListener("api-keys-changed", resolve);
     return () => window.removeEventListener("api-keys-changed", resolve);
-  }, [selectedBackend, keys]);
+  }, [selectedBackend, keys, authToken]);
 
   const fetchBackends = async () => {
     try {

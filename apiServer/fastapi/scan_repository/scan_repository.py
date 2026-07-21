@@ -52,6 +52,7 @@ async def _run_scan_pipeline(
     app_state,
     git_token: Optional[str] = None,
     ssh_key: Optional[str] = None,
+    runtime: Optional[str] = None,
 ) -> None:
     """
     Full scan pipeline executed as a background task.
@@ -283,6 +284,7 @@ async def _run_scan_pipeline(
                         files=files,
                         percentage=pct(len(files)),
                         parent_job_id=job_id,
+                        runtime=runtime,
                     ),
                     timeout=950.0,
                 )
@@ -709,6 +711,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 "repo_url": req.repo_url,
                 "submitted_at": submitted_at,
                 "user_id": user_id,
+                "runtime": req.runtime,
             },
         )
 
@@ -728,6 +731,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                     "repo": repo,
                     "git_token": req.git_token,
                     "ssh_key": req.ssh_key,
+                    "runtime": req.runtime,
                 },
             )
         else:
@@ -740,6 +744,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 app_state,
                 req.git_token,
                 req.ssh_key,
+                req.runtime,
             )
         return RepoScanSubmitResponse(
             job_id=job_id,

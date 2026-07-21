@@ -112,6 +112,7 @@ RUN set -euo pipefail \
     && echo "Setting up gonb done"
 
 COPY src/ /opt/opensandbox/src/
+COPY rules/ /opt/opensandbox/rules/
 COPY scripts/code-interpreter.sh /opt/opensandbox/code-interpreter.sh
 
 RUN chmod +x /opt/opensandbox/code-interpreter.sh

@@ -180,6 +180,27 @@ class BatchSandboxProvider(WorkloadProvider):
         # Extract extra pod spec fragments from template (volumes/volumeMounts only).
         extra_volumes, extra_mounts = self._extract_template_pod_extras()
 
+        # Extract imagePullPolicy from template if available
+        image_pull_policy = None
+        template = self.template_manager.get_base_template()
+        if isinstance(template, dict):
+            template_spec = template.get("spec", {}).get("template", {}).get("spec", {})
+            containers = template_spec.get("containers", []) or []
+            if containers and isinstance(containers, list):
+                target_container = None
+                for c in containers:
+                    if isinstance(c, dict) and c.get("name") in ("sandbox", "main"):
+                        target_container = c
+                        break
+                if (
+                    target_container is None
+                    and containers
+                    and isinstance(containers[0], dict)
+                ):
+                    target_container = containers[0]
+                if target_container:
+                    image_pull_policy = target_container.get("imagePullPolicy")
+
         # Build init container for execd installation
         init_container = self._build_execd_init_container(execd_image)
 
@@ -190,6 +211,7 @@ class BatchSandboxProvider(WorkloadProvider):
             env=env,
             resource_limits=resource_limits,
             has_network_policy=network_policy is not None,
+            image_pull_policy=image_pull_policy,
         )
 
         # Build containers list
@@ -202,9 +224,30 @@ class BatchSandboxProvider(WorkloadProvider):
             "volumes": [{"name": "opensandbox-bin", "emptyDir": {}}],
         }
 
-        # Inject runtimeClassName if secure runtime is configured
-        if self.runtime_class:
-            pod_spec["runtimeClassName"] = self.runtime_class
+        # Inject runtimeClassName if secure runtime is configured or overridden in extensions
+        runtime_class = self.runtime_class
+        if extensions and "runtimeClassName" in extensions:
+            runtime_class = extensions["runtimeClassName"]
+        elif extensions and "runtime_class" in extensions:
+            runtime_class = extensions["runtime_class"]
+        elif extensions and "secure_runtime" in extensions:
+            sr = extensions["secure_runtime"]
+            if sr == "gvisor":
+                runtime_class = "gvisor"
+            elif sr in ("kata-fc", "firecracker"):
+                runtime_class = "kata-fc"
+            elif sr in ("kata", "kata-qemu"):
+                runtime_class = "kata-qemu"
+
+        logger.info(
+            "[DEBUG RUNTIME] extensions=%s, self.runtime_class=%s, resolved runtime_class=%s",
+            extensions,
+            self.runtime_class,
+            runtime_class,
+        )
+
+        if runtime_class:
+            pod_spec["runtimeClassName"] = runtime_class
 
         # Inject imagePullSecrets if image auth is provided
         # secret_name is deterministic so it can be embedded before the Secret is created
@@ -243,6 +286,13 @@ class BatchSandboxProvider(WorkloadProvider):
 
         # Merge with template to get final manifest
         batchsandbox = self.template_manager.merge_with_runtime_values(runtime_manifest)
+        logger.info(
+            "[DEBUG RUNTIME] final runtimeClassName=%s",
+            batchsandbox.get("spec", {})
+            .get("template", {})
+            .get("spec", {})
+            .get("runtimeClassName"),
+        )
         # Set or strip expireTime after merge so we override any template value
         if expires_at is None:
             batchsandbox["spec"].pop("expireTime", None)
@@ -538,6 +588,7 @@ class BatchSandboxProvider(WorkloadProvider):
         env: Dict[str, str],
         resource_limits: Dict[str, str],
         has_network_policy: bool = False,
+        image_pull_policy: Optional[str] = None,
     ) -> V1Container:
         """
         Build main container spec with execd support.
@@ -551,6 +602,7 @@ class BatchSandboxProvider(WorkloadProvider):
             env: Environment variables
             resource_limits: Resource limits
             has_network_policy: Whether network policy is enabled for this sandbox
+            image_pull_policy: Image pull policy
 
         Returns:
             V1Container: Main container spec
@@ -587,6 +639,7 @@ class BatchSandboxProvider(WorkloadProvider):
                 V1VolumeMount(name="opensandbox-bin", mount_path="/opt/opensandbox/bin")
             ],
             security_context=security_context,
+            image_pull_policy=image_pull_policy,
         )
 
     def _container_to_dict(self, container: V1Container) -> Dict[str, Any]:
@@ -603,6 +656,9 @@ class BatchSandboxProvider(WorkloadProvider):
             "name": container.name,
             "image": container.image,
         }
+
+        if container.image_pull_policy:
+            result["imagePullPolicy"] = container.image_pull_policy
 
         if container.command:
             result["command"] = container.command

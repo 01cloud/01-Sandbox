@@ -466,6 +466,15 @@ async def create_scan_job(
             },
         )
 
+    extensions = {}
+    if metadata:
+        if metadata.get("runtime"):
+            extensions["runtimeClassName"] = metadata.get("runtime")
+        elif metadata.get("runtime_class"):
+            extensions["runtimeClassName"] = metadata.get("runtime_class")
+        elif metadata.get("secure_runtime"):
+            extensions["secure_runtime"] = metadata.get("secure_runtime")
+
     sandbox_req = CreateSandboxRequest(
         image=ImageSpec(uri=sandbox_image),
         resourceLimits=SchemaResourceLimits(
@@ -477,8 +486,8 @@ async def create_scan_job(
         entrypoint=["/opt/opensandbox/code-interpreter.sh"],
         timeout=scan_request.timeout if scan_request and scan_request.timeout else 300,
         env={
-            "SCAN_DIR": "/workspace",
-            "SCAN_REPORT": "/reports/security_scan_report.json",
+            "SCAN_DIR": f"/data/{subpath_prefix}/workspace",
+            "SCAN_REPORT": f"/data/{subpath_prefix}/reports/security_scan_report.json",
             "SCAN_TOOLS": (
                 ",".join(scan_request.tools)
                 if scan_request and scan_request.tools
@@ -487,19 +496,13 @@ async def create_scan_job(
         },
         volumes=[
             Volume(
-                name="workspace",
+                name="scan-data-volume",
                 pvc=PVC(claimName="scan-pvc"),
-                mountPath="/workspace",
-                subPath=f"{subpath_prefix}/workspace",
-            ),
-            Volume(
-                name="reports",
-                pvc=PVC(claimName="scan-pvc"),
-                mountPath="/reports",
-                subPath=f"{subpath_prefix}/reports",
+                mountPath="/data",
             ),
         ],
         metadata=metadata,
+        extensions=extensions if extensions else None,
     )
 
     log_job_event(job_id, "[SERVER] Provisioning code-interpreter sandbox...")

@@ -161,13 +161,14 @@ data:
           labels:
             app: opensandbox-sandbox
         spec:
+          runtimeClassName: gvisor
           restartPolicy: Never
           tolerations:
             - operator: "Exists"
           containers:
           - name: main
             image: {{ .Values.server.sandboxImage | quote }}
-            imagePullPolicy: IfNotPresent
+            imagePullPolicy: Always
             command:
             - tail
             - -f

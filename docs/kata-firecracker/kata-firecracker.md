@@ -86,19 +86,74 @@ kata-runtime --version
 ## 6. Configure LVM Thin-Pool for Device Mapper Snapshotter
 To support Firecracker's block-storage requirement, we must create a dedicated **LVM thin-pool** on the host.
 
-### Step 6.1 Check Volume Group Space
-Check for available free space in your Volume Group (e.g. `ubuntu-vg`):
-```bash
-sudo vgs
-```
-Ensure you have sufficient free space (e.g., `15G` or more).
+Depending on your host's partitioning, choose one of the following options:
 
-### Step 6.2 Create the Thin-Pool
-Run the following command to create a thin-pool named `containerd-pool` inside your volume group (e.g., `ubuntu-vg`):
-```bash
-sudo lvcreate --size 15G --thinpool containerd-pool ubuntu-vg
-```
+### Option A: Standard LVM Setup (When LVM is pre-configured on host)
+If your primary disk is already partition-managed using LVM (e.g. Ubuntu's default LVM installer layout):
+1. Check for available free space in your Volume Group (e.g. `ubuntu-vg`):
+   ```bash
+   sudo vgs
+   ```
+2. Create the thin-pool `containerd-pool` inside your volume group:
+   ```bash
+   sudo lvcreate --size 15G --thinpool containerd-pool ubuntu-vg
+   ```
 
+---
+
+### Option B: Loopback-Backed LVM Setup (When LVM is NOT pre-configured)
+If your host partition layout is standard `ext4`/`xfs` on a plain partition (no Volume Group or LVM initialized):
+
+1. **Create a backing file** (e.g. 20GB sparse file) to serve as physical storage:
+   ```bash
+   sudo truncate -s 20G /var/lib/containerd-loopback.img
+   ```
+
+2. **Associate a loopback device** with the file:
+   ```bash
+   LOOP_DEV=$(sudo losetup -fP --show /var/lib/containerd-loopback.img)
+   ```
+
+3. **Initialize the Physical Volume and create the Volume Group (`ubuntu-vg`)**:
+   ```bash
+   sudo pvcreate $LOOP_DEV
+   sudo vgcreate ubuntu-vg $LOOP_DEV
+   ```
+
+4. **Create the Thin-Pool (`containerd-pool`)**:
+   ```bash
+   sudo lvcreate --size 15G --thinpool containerd-pool ubuntu-vg
+   ```
+
+5. **Persist the loopback device on boot**:
+   Create a systemd service at `/etc/systemd/system/containerd-loopback.service`:
+   ```ini
+   [Unit]
+   Description=Setup loopback device for containerd devmapper thinpool
+   DefaultDependencies=no
+   After=systemd-modules-load.service
+   Before=rke2-server.service rke2-agent.service containerd.service
+
+   [Service]
+   Type=oneshot
+   RemainAfterExit=yes
+   ExecStart=/bin/sh -c 'if ! losetup -a | grep -q "/var/lib/containerd-loopback.img"; then \
+     LOOP_DEV=$(losetup -fP --show /var/lib/containerd-loopback.img); \
+     vgchange -ay ubuntu-vg; \
+   fi'
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   Enable the service:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable containerd-loopback.service
+   ```
+
+---
+
+### Step 6.3 Verify Thin-Pool Device
 Verify that the thin pool device was created and mapper link exists:
 ```bash
 ls -la /dev/mapper/

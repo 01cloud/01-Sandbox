@@ -314,7 +314,7 @@ async def validate_token(request: Request):
         )
 
         if user_id:
-            if issuer != conf["issuer"]:
+            if issuer != conf["issuer"] and not jti:
                 if is_management_route:
                     print(
                         f"[Security] Allowing management operation for Auth0 user: {user_id}"
@@ -368,15 +368,16 @@ async def validate_token(request: Request):
 
         # --- DISTRIBUTED VALIDATION (Redis -> Postgres) ---
         is_valid = False
+        backend_val = None
 
         if state.use_redis:
             is_valid = state.redis_client.sismember("active_api_keys", jti)
 
-        if not is_valid:
+        if not is_valid or (issuer != conf["issuer"]):
             now_iso = datetime.datetime.now(datetime.UTC).isoformat()
             conn = state.get_db_conn()
             cursor = conn.cursor()
-            query = "SELECT is_revoked, expires_at FROM api_keys WHERE id = %s"
+            query = "SELECT is_revoked, expires_at, backend FROM api_keys WHERE id = %s"
             cursor.execute(query, (jti,))
             row = cursor.fetchone()
             conn.close()
@@ -397,9 +398,23 @@ async def validate_token(request: Request):
                 auth_failures_total.labels(reason="expired_key").inc()
                 raise HTTPException(status_code=401, detail="API Key has expired")
 
+            backend_val = row[2]
             if state.use_redis:
                 state.redis_client.sadd("active_api_keys", jti)
             is_valid = True
+
+        # Mutate payload to bridge Identity context for downstream endpoints/guards
+        payload["jti"] = jti
+        if backend_val:
+            payload["backend"] = backend_val
+        elif "backend" not in payload:
+            conn = state.get_db_conn()
+            cursor = conn.cursor()
+            cursor.execute("SELECT backend FROM api_keys WHERE id = %s", (jti,))
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                payload["backend"] = row[0]
 
         # SUCCESS CASE: Record API key invocation rate
         api_key_requests_total.labels(api_key_id=jti).inc()

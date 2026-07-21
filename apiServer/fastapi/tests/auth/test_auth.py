@@ -363,3 +363,55 @@ async def test_validate_token_management_route_no_api_key(mock_get_header, mock_
 
     res = await validate_token(req)
     assert res == payload
+
+
+@pytest.mark.asyncio
+@patch("jwt.decode")
+@patch("jwt.get_unverified_header")
+async def test_validate_token_auth0_identity_bridge_mutates_payload(
+    mock_get_header, mock_decode
+):
+    """
+    SCENARIO: An Auth0 user requests an execution route (e.g. '/v1/run') and has an active API key in the DB.
+    EXPECTATION: Token validation succeeds, running the Identity Bridge, and mutates the decoded
+                 Auth0 payload to include the mapped API key's JTI and backend scope.
+    """
+    req = make_mock_request(
+        method="GET",
+        path="/v1/run",
+        headers={"authorization": "Bearer auth0-token"},
+    )
+    mock_get_header.return_value = {"kid": "code-inspector-key-01"}
+
+    # Mock Auth0 payload: has sub, different issuer, no jti
+    payload = {"sub": "user_auth0_456", "iss": "https://auth0-mock/"}
+    mock_decode.return_value = payload
+
+    # Seed an active developer key for user_auth0_456 in SQLite
+    conn = state.get_db_conn()
+    cursor = conn.cursor()
+    cursor.execute(
+        """
+        INSERT INTO api_keys (id, name, backend, user_id, user_email, created_at, expires_at, prefix, is_revoked)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 0)
+        """,
+        (
+            "active_jti_456",
+            "Active Key",
+            "Z1_SANDBOX",
+            "user_auth0_456",
+            "user_auth0_456@example.com",
+            "2026-07-07T12:00:00Z",
+            "2036-07-08T12:00:00Z",
+            "ci_act",
+        ),
+    )
+    conn.commit()
+    conn.close()
+
+    with patch("auth.token_validator.update_last_used", new_callable=AsyncMock):
+        res = await validate_token(req)
+
+    # Verify that the returned payload was mutated with the JTI and backend scope resolved from the database
+    assert res.get("jti") == "active_jti_456"
+    assert res.get("backend") == "Z1_SANDBOX"

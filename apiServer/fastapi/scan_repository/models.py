@@ -38,6 +38,10 @@ class RepoScanRequest(BaseModel):
         "Z1_SANDBOX",
         description="Target backend for scan execution gating",
     )
+    runtime: Optional[str] = Field(
+        None,
+        description="Optional container runtime for execution (e.g., 'gvisor', 'kata-fc')",
+    )
 
     @validator("repo_url")
     def strip_whitespace(cls, v: str) -> str:
