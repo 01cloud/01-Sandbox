@@ -231,33 +231,70 @@ def stream_pod_logs_to_file(
 
         log_job_event(job_id, f"{tag} Streaming live logs from pod '{pod_name}'...")
 
-        w = k8s_watch.Watch()
         try:
-            for raw in w.stream(
-                v1.read_namespaced_pod_log,
+            in_report = False
+            report_lines = []
+            import glob
+            import json
+            import os
+
+            def _process_line(line_str: str):
+                nonlocal in_report, report_lines
+                if not line_str.strip():
+                    return
+                if "---SCAN_REPORT_START---" in line_str:
+                    in_report = True
+                    report_lines = []
+                    return
+                elif "---SCAN_REPORT_END---" in line_str:
+                    in_report = False
+                    report_str = "".join(report_lines)
+                    try:
+                        report_data = json.loads(report_str)
+                        data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
+                        reports_dir = os.path.join(data_root, job_id, "reports")
+                        if not os.path.exists(reports_dir):
+                            pattern = os.path.join(data_root, "*", job_id, "reports")
+                            matches = glob.glob(pattern)
+                            if matches:
+                                reports_dir = matches[0]
+                        os.makedirs(reports_dir, exist_ok=True)
+                        report_path = os.path.join(
+                            reports_dir, "security_scan_report.json"
+                        )
+                        with open(report_path, "w") as f:
+                            json.dump(report_data, f, indent=2)
+                        log_job_event(
+                            job_id,
+                            f"{tag} Intercepted and saved scan report to host PVC at {report_path}",
+                        )
+                    except Exception as parse_err:
+                        log_job_event(
+                            job_id,
+                            f"{tag} Failed to parse/save intercepted scan report: {parse_err}",
+                        )
+                    return
+
+                if in_report:
+                    report_lines.append(line_str)
+                else:
+                    log_job_event(job_id, f"[{sandbox_id[:8]}] {line_str}")
+
+            resp = v1.read_namespaced_pod_log(
                 name=pod_name,
                 namespace=namespace,
                 container="sandbox",
                 follow=True,
                 _preload_content=False,
-            ):
+            )
+            for line_bytes in resp:
                 if stop_event.is_set():
-                    w.stop()
                     break
-                line = (
-                    raw.decode("utf-8", errors="replace").rstrip()
-                    if isinstance(raw, bytes)
-                    else str(raw).rstrip()
-                )
-                if line.strip():
-                    log_job_event(job_id, f"[{sandbox_id[:8]}] {line}")
+                line = line_bytes.decode("utf-8", errors="replace").rstrip("\r\n")
+                _process_line(line)
+
         except Exception as stream_err:
             log_job_event(job_id, f"{tag} Log stream ended: {stream_err}")
-        finally:
-            try:
-                w.stop()
-            except Exception:
-                pass
 
     except Exception as outer_err:
         log_job_event(job_id, f"{tag} Pod log streamer error: {outer_err}")

@@ -1105,8 +1105,15 @@ class ScannerOrchestrator:
 
     def save_results(self):
         """Saves scan results to a JSON file and displays a pretty summary."""
-        with open(REPORT_PATH, "w") as f:
-            json.dump(self.results, f, indent=2)
+        try:
+            with open(REPORT_PATH, "w") as f:
+                json.dump(self.results, f, indent=2)
+        except Exception as e:
+            print(f"Warning: Failed to write report to PVC directly: {e}")
+
+        print("---SCAN_REPORT_START---")
+        print(json.dumps(self.results))
+        print("---SCAN_REPORT_END---")
 
         self._display_pretty_summary()
 
