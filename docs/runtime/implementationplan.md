@@ -318,13 +318,30 @@ Every language scanner Dockerfile requires **`code-interpreter.sh`** and **`code
 ## 3. Verification & Validation Plan
 
 ### Automated Build Verification
-1. Build individual language scanner Dockerfiles and verify image sizes:
-   ```bash
-   docker build -t 01sandbox-scanner-python:dev -f code-interpreter/dockerfiles/Dockerfile.python code-interpreter/
-   docker build -t 01sandbox-scanner-go:dev -f code-interpreter/dockerfiles/Dockerfile.go code-interpreter/
-   docker images | grep 01sandbox-scanner
-   ```
-2. Verify image sizes are under ~300 MB each (vs ~10 GB mono-image).
+
+#### A. When building from inside `code-interpreter/dockerfiles/`
+Pass `..` as the build context so Docker can locate the parent `src/` and `scripts/` directories:
+```bash
+docker build -f Dockerfile.python -t 199012118961/01sandbox-scanner-python:dev ..
+docker build -f Dockerfile.go     -t 199012118961/01sandbox-scanner-go:dev     ..
+docker build -f Dockerfile.java   -t 199012118961/01sandbox-scanner-java:dev   ..
+docker build -f Dockerfile.node   -t 199012118961/01sandbox-scanner-node:dev   ..
+docker build -f Dockerfile.k8s    -t 199012118961/01sandbox-scanner-k8s:dev    ..
+```
+
+#### B. When building from `code-interpreter/` parent directory
+```bash
+docker build -f dockerfiles/Dockerfile.python -t 199012118961/01sandbox-scanner-python:dev .
+docker build -f dockerfiles/Dockerfile.go     -t 199012118961/01sandbox-scanner-go:dev     .
+docker build -f dockerfiles/Dockerfile.java   -t 199012118961/01sandbox-scanner-java:dev   .
+docker build -f dockerfiles/Dockerfile.node   -t 199012118961/01sandbox-scanner-node:dev   .
+docker build -f dockerfiles/Dockerfile.k8s    -t 199012118961/01sandbox-scanner-k8s:dev    .
+```
+
+Verify that image sizes are under **~250 MB – 300 MB each** (compared to the 10 GB mono-image):
+```bash
+docker images | grep 01sandbox-scanner
+```
 
 ### Manual Verification
 1. Submit a multi-language GitHub repository scan via `POST /api/v1/01sbx/scan-jobs`.
