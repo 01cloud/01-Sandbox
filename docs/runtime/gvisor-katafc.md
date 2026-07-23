@@ -153,6 +153,32 @@ Ensure Kubernetes resource requests and limits are configured on sandbox pods to
 
 ---
 
+## 6. Frequently Asked Questions: Can `kata-fc` Memory Be Set to 25 MB RAM?
+
+### Question:
+Can we configure `sandboxMemory: "25Mi"` for `kata-fc` pods to reduce host memory consumption?
+
+### Technical Answer:
+**No, 25 MB RAM is below the operational floor for `kata-fc` MicroVMs and will cause pod failure.**
+
+#### Why 25 MB RAM Is Not Feasible for `kata-fc`:
+1. **Guest Linux Kernel Boot Floor (~128 MB Minimum)**:
+   `kata-fc` does not run containers directly on host namespaces; it boots a dedicated **Linux guest kernel (`vmlinux`)** and guest init process (`kata-agent`) inside a Firecracker MicroVM. Operating system kernel boot routines, page table management, and virtio device drivers require **64 MB – 128 MB RAM minimum** just to initialize the guest OS. Setting 25 MB results in an immediate **Kernel Panic** or **Early OOM Crash** during VM boot.
+2. **Analysis Tool Execution Footprint**:
+   The static security analyzers inside the sandbox image (`semgrep`, `pmd`, `bandit`, `gosec`) require significant memory to load AST rules:
+   - `semgrep` (Python rule parsing engine): Requires ~150 MB – 300 MB RAM.
+   - `pmd` (Java static analyzer): Requires ~256 MB RAM minimum.
+   Running these engines within 25 MB RAM will trigger instant **`OOMKilled`** process terminations.
+3. **Operational Minimum for `kata-fc`**:
+   The practical lower bound for a `kata-fc` MicroVM pod is **256 MB** (`sandboxMemory: "256Mi"`).
+
+#### Solution for 25 MB RAM Requirements:
+If your target workload requires running pods with a **25 MB RAM footprint**, switch `runtimeClassName` to **`gvisor`**:
+- `gvisor` (`runsc`) runs as a user-space application sandbox without booting a guest Linux kernel or hypervisor.
+- It allocates memory dynamically from host pages, running smoothly with **15 MB – 30 MB RAM per pod**.
+
+---
+
 ## Related Documentation
 - [OpenSandbox Runtime Selection & Configuration Guide](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/runtime/runtime.md)
 - [Kata Containers + Firecracker Technical Deep Dive](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/kata-firecracker/kata-firecracker-deepdive.md)
