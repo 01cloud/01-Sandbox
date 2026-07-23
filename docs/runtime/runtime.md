@@ -270,4 +270,5 @@ spec:
 
 ## Related Documentation
 - [Container Runtime Resource Comparison: gVisor vs. Kata-FC](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/runtime/gvisor-katafc.md)
+- [Modular Scanner Image Implementation Plan](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/runtime/implementationplan.md)
 - [Kata Containers + Firecracker Technical Deep Dive](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/kata-firecracker/kata-firecracker-deepdive.md)
