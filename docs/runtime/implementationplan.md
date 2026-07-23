@@ -294,6 +294,27 @@ elif extensions and "sandboxImage" in extensions:
 
 ---
 
+### E. Necessity and Functions of Startup Scripts in the Dockerfile
+
+Every language scanner Dockerfile requires **`code-interpreter.sh`** and **`code-interpreter-env.sh`**. Below is their exact technical necessity and function:
+
+#### 1. `code-interpreter.sh` (Container `ENTRYPOINT` & Startup Orchestrator)
+- **Why Required**: Configured as `ENTRYPOINT ["/opt/opensandbox/code-interpreter.sh"]`. Without this script, the container pod will not execute volume path normalization, tool health checks, or automated security scans upon boot.
+- **Key Functions**:
+  1. **Volume Path Normalization for Kata-FC**: Symlinks custom `$SCAN_DIR` to `/workspace` and `$SCAN_REPORT` to `/reports`. In Kata Containers / Firecracker MicroVMs, `subPath` volume mounts often fail or cause lock issues; symlinking raw root PVC mounts ensures 100% Kata compatibility.
+  2. **`clone3` Syscall Workaround**: Checks `EXECD_CLONE3_COMPAT` and re-executes container startup under `/usr/local/bin/clone3-workaround` on host kernels/runtimes that do not support the `clone3` syscall.
+  3. **Tool Startup Health Check**: Verifies that all 9+ security tools (`semgrep`, `bandit`, `gitleaks`, `trivy`, `shellcheck`, etc.) exist on `$PATH` before scanning.
+  4. **Automated Scanning Trigger**: Invokes `run_security_scans()`, executing `python3 /opt/opensandbox/src/scanner_orchestrator.py` against `/workspace` files and logging output to `/reports/process.log`.
+
+#### 2. `code-interpreter-env.sh` (Environment & Language Version Switcher)
+- **Why Required**: Provides a unified interface (`source code-interpreter-env.sh <language> <version>`) for switching `$PATH`, `$JAVA_HOME`, and `$GOROOT` environment variables across toolchains.
+- **Key Functions**:
+  1. **Build-Time Tooling Setup**: Used during `docker build` to source the target Python/Node/Go/Java version environment before installing packages via `pip`, `npm`, or `go install`.
+  2. **Runtime Version Switching**: Allows `code-interpreter.sh` or scan tasks to dynamically switch language versions (e.g. Python 3.12 vs 3.10) on the fly inside the container.
+  3. **Sub-Shell Environment Persistence**: Appends updated `PATH` exports to `/root/.bashrc` and `$EXECD_ENVS` so child process trees (like `scanner_orchestrator.py`) automatically inherit the correct binary paths.
+
+---
+
 ## 3. Verification & Validation Plan
 
 ### Automated Build Verification
