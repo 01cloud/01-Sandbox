@@ -284,7 +284,8 @@ RUN set -eux; \
 # enry — fallback detector (Go port of linguist, lightweight)
 RUN /opt/go/1.25.5/bin/go install github.com/go-enry/go-enry/v2/cmd/enry@latest \
     && cp /root/go/bin/enry /usr/local/bin/enry \
-    && chmod 755 /usr/local/bin/enry
+    && chmod 755 /usr/local/bin/enry \
+    && rm -rf /root/.cache /root/go/pkg /tmp/*
 
 # pylint — Python code quality (bandit already present)
 RUN UV_BREAK_SYSTEM_PACKAGES=1 uv pip install --system --python 3.12 --no-cache pylint

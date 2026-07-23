@@ -70,6 +70,7 @@ configToml: |
   informer_enabled = true
   informer_resync_seconds = 300
   informer_watch_timeout_seconds = 60
+  sandbox_create_timeout_seconds = 600
   workload_provider = "batchsandbox"
   batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
 

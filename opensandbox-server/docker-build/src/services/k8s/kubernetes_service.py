@@ -139,7 +139,7 @@ class KubernetesSandboxService(SandboxService):
     def _wait_for_sandbox_ready(
         self,
         sandbox_id: str,
-        timeout_seconds: int = 60,
+        timeout_seconds: int = 600,
         poll_interval_seconds: float = 1.0,
     ) -> Dict[str, Any]:
         """

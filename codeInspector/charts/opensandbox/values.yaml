@@ -35,3 +35,6 @@ server:
       cpu: 500m
       memory: 512Mi
   sandboxImage: "01community/01sandbox-codeinterpreter:1.0.0"
+  sandboxCreateTimeoutSeconds: 600
+  autoTerminationSeconds: 0
+  runtimeClassName: "kata-fc"

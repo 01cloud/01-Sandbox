@@ -22,6 +22,7 @@ All business logic is delegated to the service layer that backs each operation.
 import asyncio
 import base64
 import json
+import logging
 import os
 import re
 from typing import Any, List, Optional
@@ -53,6 +54,8 @@ from src.api.schema import (
     Volume,
 )
 from src.services.factory import create_sandbox_service
+
+logger = logging.getLogger(__name__)
 
 # RFC 2616 Section 13.5.1
 HOP_BY_HOP_HEADERS = {
@@ -504,13 +507,17 @@ async def create_scan_job(
         )
 
     extensions = {}
-    if metadata:
-        if metadata.get("runtime"):
-            extensions["runtimeClassName"] = metadata.get("runtime")
-        elif metadata.get("runtime_class"):
-            extensions["runtimeClassName"] = metadata.get("runtime_class")
-        elif metadata.get("secure_runtime"):
-            extensions["secure_runtime"] = metadata.get("secure_runtime")
+    metadata = metadata or {}
+    metadata["job_id"] = job_id
+    if parent_job_id:
+        metadata["parent_job_id"] = parent_job_id
+
+    if metadata.get("runtime"):
+        extensions["runtimeClassName"] = metadata.get("runtime")
+    elif metadata.get("runtime_class"):
+        extensions["runtimeClassName"] = metadata.get("runtime_class")
+    elif metadata.get("secure_runtime"):
+        extensions["secure_runtime"] = metadata.get("secure_runtime")
 
     sandbox_req = CreateSandboxRequest(
         image=ImageSpec(uri=sandbox_image),
@@ -521,7 +528,7 @@ async def create_scan_job(
             }
         ),
         entrypoint=["/opt/opensandbox/code-interpreter.sh"],
-        timeout=scan_request.timeout if scan_request and scan_request.timeout else 300,
+        timeout=scan_request.timeout if scan_request and scan_request.timeout else 600,
         env={
             "SCAN_DIR": f"/data/{subpath_prefix}/workspace",
             "SCAN_REPORT": f"/data/{subpath_prefix}/reports/security_scan_report.json",
@@ -574,7 +581,7 @@ async def create_scan_job(
     # ─────────────────────────────────────────────────────────────────────────
 
     report_path = os.path.join(reports_dir, "security_scan_report.json")
-    timeout_seconds = sandbox_req.timeout if sandbox_req.timeout else 300
+    timeout_seconds = sandbox_req.timeout if sandbox_req.timeout else 600
     deadline = asyncio.get_event_loop().time() + timeout_seconds
     final_response = None
 
@@ -633,10 +640,46 @@ async def create_scan_job(
         _stop_log_stream.set()
         _log_thread.join(timeout=3)
 
+    # Schedule automatic pod termination after scan completion (configurable via AUTO_TERMINATION_SECONDS env var)
     if final_response is not None:
+        try:
+            auto_term_secs = float(os.environ.get("AUTO_TERMINATION_SECONDS", "0"))
+
+            def _cleanup_sandbox(sb_id: str):
+                try:
+                    sandbox_service.delete_sandbox(sb_id)
+                    logger.info(
+                        f"[SERVER] Auto-terminated sandbox {sb_id} {auto_term_secs}s after scan completion."
+                    )
+                except Exception as del_err:
+                    logger.warning(
+                        f"[SERVER] Cleanup error for sandbox {sb_id}: {del_err}"
+                    )
+
+            if auto_term_secs <= 0:
+                _cleanup_sandbox(sandbox_id)
+            else:
+                import threading
+
+                timer = threading.Timer(
+                    auto_term_secs, _cleanup_sandbox, args=[sandbox_id]
+                )
+                timer.daemon = True
+                timer.start()
+        except Exception as t_err:
+            logger.warning(
+                f"[SERVER] Failed to schedule auto cleanup for sandbox {sandbox_id}: {t_err}"
+            )
+
         return final_response
 
     # Deadline exceeded without a report
+    # Also clean up sandbox if 10-minute deadline is exceeded
+    try:
+        sandbox_service.delete_sandbox(sandbox_id)
+    except Exception:
+        pass
+
     return ScanJobResponse(
         job_id=job_id,
         sandbox_id=sandbox_id,
@@ -991,9 +1034,6 @@ async def list_sandboxes(
         pagination=PaginationRequest(page=page, pageSize=page_size),
     )
 
-    import logging
-
-    logger = logging.getLogger(__name__)
     logger.info("ListSandboxes: %s", request.filter)
 
     # Delegate to the service layer for filtering and pagination

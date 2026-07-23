@@ -221,7 +221,7 @@ class BatchSandboxProvider(WorkloadProvider):
         pod_spec: Dict[str, Any] = {
             "initContainers": [self._container_to_dict(init_container)],
             "containers": containers,
-            "volumes": [{"name": "opensandbox-bin", "emptyDir": {}}],
+            "volumes": [{"name": "opensandbox-bin", "emptyDir": {"sizeLimit": "1Gi"}}],
         }
 
         # Inject runtimeClassName if secure runtime is configured or overridden in extensions

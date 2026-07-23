@@ -287,7 +287,7 @@ class KubernetesRuntimeConfig(BaseModel):
         description="Path to BatchSandbox CR YAML template file. Used when workload_provider is 'batchsandbox'.",
     )
     sandbox_create_timeout_seconds: int = Field(
-        default=60,
+        default=600,
         ge=1,
         description="Timeout in seconds to wait for a sandbox to become ready (IP assigned) after creation.",
     )

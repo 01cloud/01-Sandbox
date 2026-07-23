@@ -158,6 +158,24 @@ func (r *BatchSandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request
 		if err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to scale batch sandbox %w", err)
 		}
+
+		// Auto-delete BatchSandbox when all pods have completed (Succeeded or Failed)
+		if len(pods) > 0 && batchSbx.DeletionTimestamp == nil {
+			allCompleted := true
+			for _, pod := range pods {
+				if pod.Status.Phase != corev1.PodSucceeded && pod.Status.Phase != corev1.PodFailed {
+					allCompleted = false
+					break
+				}
+			}
+			if allCompleted {
+				log.Info("all pods for batch sandbox have completed, deleting batch sandbox", "sandbox", batchSbx.Name)
+				if err := r.Delete(ctx, batchSbx); err != nil && !errors.IsNotFound(err) {
+					return ctrl.Result{}, err
+				}
+				return ctrl.Result{}, nil
+			}
+		}
 	}
 
 	// TODO merge task status update

@@ -77,6 +77,10 @@ spec:
               value: {{ .Values.server.sandboxCpu | default "200m" | quote }}
             - name: SANDBOX_MEMORY
               value: {{ .Values.server.sandboxMemory | default "512Mi" | quote }}
+            - name: AUTO_TERMINATION_SECONDS
+              value: {{ .Values.server.autoTerminationSeconds | default 30 | quote }}
+            - name: SANDBOX_CREATE_TIMEOUT_SECONDS
+              value: {{ .Values.server.sandboxCreateTimeoutSeconds | default 600 | quote }}
           volumeMounts:
             - name: server-config
               mountPath: /etc/opensandbox/config.toml
@@ -145,6 +149,7 @@ data:
     informer_enabled = true
     informer_resync_seconds = 300
     informer_watch_timeout_seconds = 60
+    sandbox_create_timeout_seconds = {{ .Values.server.sandboxCreateTimeoutSeconds | default 600 }}
     workload_provider = "batchsandbox"
     batchsandbox_template_file = "/etc/opensandbox/example.batchsandbox-template.yaml"
 

@@ -109,6 +109,7 @@ RUN set -euo pipefail \
         && go install golang.org/x/tools/cmd/goimports@latest \
         && go install golang.org/x/tools/gopls@latest; \
     done \
+    && rm -rf /root/.cache /root/go/pkg /tmp/* \
     && echo "Setting up gonb done"
 
 COPY src/ /opt/opensandbox/src/

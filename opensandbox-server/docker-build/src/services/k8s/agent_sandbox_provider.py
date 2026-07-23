@@ -252,7 +252,7 @@ class AgentSandboxProvider(WorkloadProvider):
             "volumes": [
                 {
                     "name": "opensandbox-bin",
-                    "emptyDir": {},
+                    "emptyDir": {"sizeLimit": "1Gi"},
                 }
             ],
         }
