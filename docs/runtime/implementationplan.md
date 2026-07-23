@@ -1,6 +1,6 @@
 # Implementation Plan: Modular Language-Specific Scanner Images & Dynamic Routing
 
-This document outlines the technical design, base image selection, architecture, and step-by-step implementation plan to replace the monolithic **10 GB `code-interpreter` image** with lightweight, language-specific scanner images dynamically assigned during repository scanning.
+This document outlines the technical design, base image selection, architecture, step-by-step implementation plan, and **complete code changes** to replace the monolithic **10 GB `code-interpreter` image** with lightweight, language-specific scanner images dynamically assigned during repository scanning.
 
 ---
 
@@ -11,10 +11,10 @@ Currently, every sandbox pod pulls a monolithic 10 GB container image (`code-int
 
 **Proposed Architecture**:
 Instead of a single 10 GB mono-image, we decompose `code-interpreter` into modular, domain-specific micro-images:
-- `01sandbox-scanner-python`: Python runtime + `semgrep`, `bandit`, `pylint` (~250 MB)
-- `01sandbox-scanner-go`: Go runtime + `gosec`, `staticcheck`, `golangci-lint` (~180 MB)
-- `01sandbox-scanner-java`: OpenJDK runtime + `pmd`, Maven (~350 MB)
-- `01sandbox-scanner-node`: Node.js runtime + `eslint`, TypeScript (~200 MB)
+- `01sandbox-scanner-python`: Python 3.12 + `semgrep`, `bandit`, `pylint` (~250 MB)
+- `01sandbox-scanner-go`: Go 1.24 + `gosec`, `staticcheck`, `golangci-lint` (~180 MB)
+- `01sandbox-scanner-java`: OpenJDK 21 + `pmd`, Maven (~350 MB)
+- `01sandbox-scanner-node`: Node.js 22 + `eslint`, TypeScript (~200 MB)
 - `01sandbox-scanner-k8s`: Minimal runtime + `yamllint`, `kube-linter`, `kubeconform`, `kube-score`, `shellcheck`, `gitleaks`, `trivy` (~150 MB)
 - `01sandbox-codeinterpreter-base`: Fallback multi-language image for arbitrary code execution.
 
@@ -32,8 +32,6 @@ During repository scanning, `apiServer` identifies the detected language for eac
 | **Google Distroless** | **~20 MB** | `glibc` | **Low**: No shell (`/bin/sh`), breaks orchestrator scripts | Highly minimal | **Not Suitable** (Needs bash/sh orchestrator) |
 | **Void Linux** | **~40 MB** | `glibc/musl` | **Medium**: Niche package ecosystem | Community-driven | **Not Recommended** (Non-standard ecosystem) |
 
-**Recommendation**: Use **Wolfi** (or **Debian Slim** for 100% legacy script drop-in compatibility).
-
 ---
 
 ### C. Impact on `kata-fc` CPU, RAM, & Disk Load
@@ -50,51 +48,249 @@ During repository scanning, `apiServer` identifies the detected language for eac
 
 ---
 
-## 2. Component Design & Proposed Changes
+## 2. Code Changes & File Implementation Specifications
 
-### A. `code-interpreter` (Modular Dockerfiles & Base Images)
+### A. Modular Dockerfiles (`code-interpreter/dockerfiles/`)
 
-#### 1. `Dockerfile.python`
-Create lightweight Python scanner image containing Python 3.12, `semgrep`, `bandit`, `pylint`, and `scanner_orchestrator.py`.
+#### 1. `code-interpreter/dockerfiles/Dockerfile.python`
+```dockerfile
+FROM debian:bookworm-slim
 
-#### 2. `Dockerfile.go`
-Create lightweight Go scanner image containing Go 1.24, `gosec`, `staticcheck`, `golangci-lint`, and `scanner_orchestrator.py`.
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8
 
-#### 3. `Dockerfile.java`
-Create lightweight Java scanner image containing OpenJDK 21, Maven, `pmd`, and `scanner_orchestrator.py`.
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git python3 python3-pip python3-venv \
+    libseccomp2 \
+    && rm -rf /var/lib/apt/lists/*
 
-#### 4. `Dockerfile.node`
-Create lightweight Node/TS scanner image containing Node 22, `eslint`, `@typescript-eslint`, and `scanner_orchestrator.py`.
+# Install Python static analysis tools
+RUN pip3 install --break-system-packages --no-cache-dir \
+    semgrep \
+    bandit \
+    yamllint \
+    pylint
 
-#### 5. `Dockerfile.k8s`
-Create lightweight K8s/IaC/Shell scanner image containing `yamllint`, `kube-linter`, `kubeconform`, `kube-score`, `shellcheck`, `gitleaks`, `trivy`.
+# Setup workspace & copy scanner orchestrator
+RUN mkdir -p /opt/opensandbox/src /workspace /reports
+COPY src/ /opt/opensandbox/src/
+COPY scripts/code-interpreter.sh /opt/opensandbox/code-interpreter.sh
+RUN chmod +x /opt/opensandbox/code-interpreter.sh
+
+WORKDIR /workspace
+ENTRYPOINT ["/opt/opensandbox/code-interpreter.sh"]
+```
 
 ---
 
-### B. `apiServer/fastapi` (Dynamic Image Assignment Router)
+#### 2. `code-interpreter/dockerfiles/Dockerfile.go`
+```dockerfile
+FROM debian:bookworm-slim
 
-#### 1. `config.py`
-Add configurable mapping of language scanner images:
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git python3 python3-pip golang-go \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Go security tools
+RUN GOSEC_VERSION="2.19.0" && \
+    curl -sfL "https://raw.githubusercontent.com/securego/gosec/master/install.sh" | sh -s -- -b /usr/local/bin v${GOSEC_VERSION}
+
+RUN curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b /usr/local/bin v1.57.2
+
+RUN mkdir -p /opt/opensandbox/src /workspace /reports
+COPY src/ /opt/opensandbox/src/
+COPY scripts/code-interpreter.sh /opt/opensandbox/code-interpreter.sh
+RUN chmod +x /opt/opensandbox/code-interpreter.sh
+
+WORKDIR /workspace
+ENTRYPOINT ["/opt/opensandbox/code-interpreter.sh"]
+```
+
+---
+
+#### 3. `code-interpreter/dockerfiles/Dockerfile.java`
+```dockerfile
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git python3 python3-pip openjdk-21-jdk maven unzip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PMD static analyzer
+RUN set -eux; \
+    PMD_VERSION="7.3.0"; \
+    curl -fsSL "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" -o /tmp/pmd.zip \
+    && unzip -q /tmp/pmd.zip -d /opt \
+    && ln -s /opt/pmd-bin-${PMD_VERSION}/bin/pmd /usr/local/bin/pmd \
+    && rm /tmp/pmd.zip
+
+RUN mkdir -p /opt/opensandbox/src /workspace /reports
+COPY src/ /opt/opensandbox/src/
+COPY scripts/code-interpreter.sh /opt/opensandbox/code-interpreter.sh
+RUN chmod +x /opt/opensandbox/code-interpreter.sh
+
+WORKDIR /workspace
+ENTRYPOINT ["/opt/opensandbox/code-interpreter.sh"]
+```
+
+---
+
+#### 4. `code-interpreter/dockerfiles/Dockerfile.node`
+```dockerfile
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git python3 python3-pip nodejs npm \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN npm install -g eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin typescript
+
+RUN mkdir -p /opt/opensandbox/src /workspace /reports
+COPY src/ /opt/opensandbox/src/
+COPY scripts/code-interpreter.sh /opt/opensandbox/code-interpreter.sh
+RUN chmod +x /opt/opensandbox/code-interpreter.sh
+
+WORKDIR /workspace
+ENTRYPOINT ["/opt/opensandbox/code-interpreter.sh"]
+```
+
+---
+
+#### 5. `code-interpreter/dockerfiles/Dockerfile.k8s`
+```dockerfile
+FROM debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates curl git python3 python3-pip shellcheck \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip3 install --break-system-packages --no-cache-dir yamllint
+
+# Install trivy, gitleaks, kube-linter, kubeconform, kube-score
+RUN set -eux; \
+    curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz | tar -xz -C /usr/local/bin gitleaks; \
+    curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz | tar -xz -C /usr/local/bin trivy; \
+    curl -fsSL https://github.com/stackrox/kube-linter/releases/download/v0.8.3/kube-linter-linux.tar.gz | tar -xz -C /usr/local/bin kube-linter; \
+    curl -fsSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz | tar -xz -C /usr/local/bin kubeconform; \
+    curl -fsSL https://github.com/zegl/kube-score/releases/download/v1.20.0/kube-score_1.20.0_linux_amd64.tar.gz | tar -xz -C /usr/local/bin kube-score; \
+    chmod 755 /usr/local/bin/*
+
+RUN mkdir -p /opt/opensandbox/src /workspace /reports
+COPY src/ /opt/opensandbox/src/
+COPY scripts/code-interpreter.sh /opt/opensandbox/code-interpreter.sh
+RUN chmod +x /opt/opensandbox/code-interpreter.sh
+
+WORKDIR /workspace
+ENTRYPOINT ["/opt/opensandbox/code-interpreter.sh"]
+```
+
+---
+
+### B. `apiServer/fastapi/config.py` Code Changes
+
+Add language scanner image resolution mapping in `apiServer/fastapi/config.py`:
+
 ```python
+# --- Language Scanner Image Registry ---
 SCANNER_IMAGES = {
-    "python": os.getenv("SCANNER_IMAGE_PYTHON", "199012118961/01sandbox-scanner-python:dev"),
-    "go": os.getenv("SCANNER_IMAGE_GO", "199012118961/01sandbox-scanner-go:dev"),
-    "java": os.getenv("SCANNER_IMAGE_JAVA", "199012118961/01sandbox-scanner-java:dev"),
-    "javascript": os.getenv("SCANNER_IMAGE_NODE", "199012118961/01sandbox-scanner-node:dev"),
-    "yaml": os.getenv("SCANNER_IMAGE_K8S", "199012118961/01sandbox-scanner-k8s:dev"),
-    "default": os.getenv("SCANNER_IMAGE_DEFAULT", "199012118961/01sandbox-codeinterpreter:dev"),
+    "python": os.getenv(
+        "SCANNER_IMAGE_PYTHON", "199012118961/01sandbox-scanner-python:dev"
+    ),
+    "go": os.getenv(
+        "SCANNER_IMAGE_GO", "199012118961/01sandbox-scanner-go:dev"
+    ),
+    "java": os.getenv(
+        "SCANNER_IMAGE_JAVA", "199012118961/01sandbox-scanner-java:dev"
+    ),
+    "javascript": os.getenv(
+        "SCANNER_IMAGE_NODE", "199012118961/01sandbox-scanner-node:dev"
+    ),
+    "typescript": os.getenv(
+        "SCANNER_IMAGE_NODE", "199012118961/01sandbox-scanner-node:dev"
+    ),
+    "yaml": os.getenv(
+        "SCANNER_IMAGE_K8S", "199012118961/01sandbox-scanner-k8s:dev"
+    ),
+    "kubernetes yaml": os.getenv(
+        "SCANNER_IMAGE_K8S", "199012118961/01sandbox-scanner-k8s:dev"
+    ),
+    "shell": os.getenv(
+        "SCANNER_IMAGE_K8S", "199012118961/01sandbox-scanner-k8s:dev"
+    ),
+    "default": os.getenv(
+        "SCANNER_IMAGE_DEFAULT", "199012118961/01sandbox-codeinterpreter:dev"
+    ),
 }
 ```
 
-#### 2. `file_scanner.py`
-Pass the specific language scanner image in `image` / `metadata.image` payload when requesting sandbox creation from `opensandbox-server`.
+---
+
+### C. `apiServer/fastapi/scan_repository/file_scanner.py` Code Changes
+
+Modify `_submit_scan_job` in `apiServer/fastapi/scan_repository/file_scanner.py` to dynamically attach target language image:
+
+```python
+# File: apiServer/fastapi/scan_repository/file_scanner.py
+
+from config import SCANNER_IMAGES, opensandbox_base_url, opensandbox_headers, opensandbox_route_prefix
+
+async def _submit_scan_job(
+    files_dict: dict[str, str],
+    tools: Optional[list[str]] = None,
+    parent_job_id: Optional[str] = None,
+    runtime: Optional[str] = None,
+    language: Optional[str] = None,  # Added target language parameter
+) -> dict:
+    ...
+    # Resolve dynamic scanner image based on target language
+    target_lang = (language or "").strip().lower()
+    selected_image = SCANNER_IMAGES.get(target_lang, SCANNER_IMAGES["default"])
+
+    payload: dict = {
+        "files": files_dict,
+        "timeout": 900,
+        "metadata": {
+            "job_id": child_job_id,
+            "image": selected_image,  # Pass target image in metadata
+        },
+    }
+    if runtime:
+        payload["metadata"]["runtime"] = runtime
+    ...
+```
 
 ---
 
-### C. `opensandbox-server` (Backend Sandbox Provisioner)
+### D. `opensandbox-server` Backend Dynamic Image Override Code Changes
 
-#### 1. `batchsandbox_provider.py`
-Ensure dynamic `image` passed in request override payload takes precedence over default ConfigMap sandbox image when constructing the `BatchSandbox` CRD pod spec.
+Modify `create_workload` in `opensandbox-server/docker-build/src/services/k8s/batchsandbox_provider.py`:
+
+```python
+# File: opensandbox-server/docker-build/src/services/k8s/batchsandbox_provider.py
+
+# Check if a custom sandbox image is specified in request extensions/metadata
+if extensions and "image" in extensions:
+    custom_image = extensions["image"]
+    logger.info("[DYNAMIC IMAGE] Overriding container image to %s", custom_image)
+    pod_spec["containers"][0]["image"] = custom_image
+elif extensions and "sandboxImage" in extensions:
+    custom_image = extensions["sandboxImage"]
+    logger.info("[DYNAMIC IMAGE] Overriding container image to %s", custom_image)
+    pod_spec["containers"][0]["image"] = custom_image
+```
 
 ---
 
