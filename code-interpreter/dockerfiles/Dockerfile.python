@@ -1,5 +1,5 @@
 FROM debian:bookworm-slim
-
+# FROM alpine:3.22
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8
 
