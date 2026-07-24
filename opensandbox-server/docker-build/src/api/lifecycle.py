@@ -128,19 +128,37 @@ sandbox_service = create_sandbox_service()
 _latest_job_id = None
 
 
-def log_job_event(job_id: str, message: str):
+def log_job_event(job_id: str, message: str, parent_job_id: Optional[str] = None):
     """Appends a timestamped message to the job's unified process log."""
+    import glob
     from datetime import datetime
 
     data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
-    log_path = os.path.join(data_root, job_id, "reports", "process.log")
+
+    # Candidate directories for process.log
+    candidate_dirs = [
+        os.path.join(data_root, job_id, "reports"),
+    ]
+    if parent_job_id:
+        candidate_dirs.insert(
+            0, os.path.join(data_root, parent_job_id, job_id, "reports")
+        )
+
+    # Search existing subdirectories under data_root
+    pattern = os.path.join(data_root, "*", job_id, "reports")
+    matches = glob.glob(pattern)
+    if matches:
+        candidate_dirs.insert(0, matches[0])
+
+    log_dir = candidate_dirs[0]
+    log_path = os.path.join(log_dir, "process.log")
     try:
-        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        os.makedirs(log_dir, exist_ok=True)
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         with open(log_path, "a") as f:
             f.write(f"[{timestamp}] {message}\n")
-    except Exception:
-        pass  # Best effort logging
+    except Exception as e:
+        print(f"[SERVER] Failed to write process.log for job {job_id}: {e}")
 
 
 def stream_pod_logs_to_file(
@@ -148,6 +166,7 @@ def stream_pod_logs_to_file(
     job_id: str,
     namespace: str,
     stop_event,
+    parent_job_id: Optional[str] = None,
 ) -> None:
     """
     Background thread: streams the sandbox pod's stdout/stderr line-by-line
@@ -281,7 +300,11 @@ def stream_pod_logs_to_file(
                 if in_report:
                     report_lines.append(line_str)
                 else:
-                    log_job_event(job_id, f"[{sandbox_id[:8]}] {line_str}")
+                    log_job_event(
+                        job_id,
+                        f"[{sandbox_id[:8]}] {line_str}",
+                        parent_job_id=parent_job_id,
+                    )
 
             resp = v1.read_namespaced_pod_log(
                 name=pod_name,
@@ -632,7 +655,7 @@ async def create_scan_job(
     _stop_log_stream = threading.Event()
     _log_thread = threading.Thread(
         target=stream_pod_logs_to_file,
-        args=(sandbox_id, job_id, _sandbox_namespace, _stop_log_stream),
+        args=(sandbox_id, job_id, _sandbox_namespace, _stop_log_stream, parent_job_id),
         daemon=True,
         name=f"pod-log-stream-{job_id[:8]}",
     )

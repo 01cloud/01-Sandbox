@@ -543,6 +543,7 @@ async def _run_scan_pipeline(
             "info": info_count,
         }
         if job_record:
+            job_record.result = final_result
             job_record.metadata["summary"] = summary_data
             if app_state.use_redis and app_state.redis_client:
                 try:
@@ -550,6 +551,9 @@ async def _run_scan_pipeline(
                     metadata_copy["job_type"] = "repo-scan"
                     app_state.redis_client.set(
                         f"job:{job_id}:metadata", json.dumps(metadata_copy), ex=86400
+                    )
+                    app_state.redis_client.set(
+                        f"job:{job_id}:result", final_result.json(), ex=86400
                     )
                 except Exception as e:
                     print(f"[RepoScanner] Redis metadata update error: {e}")
@@ -562,6 +566,9 @@ async def _run_scan_pipeline(
                     app_state.redis_client.set(
                         f"job:{job_id}:metadata", json.dumps(metadata_copy), ex=86400
                     )
+                app_state.redis_client.set(
+                    f"job:{job_id}:result", final_result.json(), ex=86400
+                )
             except Exception as e:
                 print(f"[RepoScanner] Redis metadata update error (no job_record): {e}")
 
