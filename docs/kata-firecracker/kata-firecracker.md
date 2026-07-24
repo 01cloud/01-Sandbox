@@ -23,6 +23,10 @@ sudo apt install -y \
 ```
 
 ## 3. Verify Virtualization Support
+
+> [!IMPORTANT]
+> **Hardware Virtualization Requirement:** Firecracker strictly requires access to `/dev/kvm` and CPU hardware virtualization flags (`vmx` for Intel or `svm` for AMD). Standard Cloud VPS instances (such as standard OVH Cloud VMs, AWS EC2 non-metal instances, or DigitalOcean Droplets) do **not** enable nested virtualization by default, causing `/dev/kvm` lookups to fail.
+
 Verify that hardware virtualization (nested virtualization) is supported on the host:
 ```bash
 egrep -c '(vmx|svm)' /proc/cpuinfo
@@ -38,6 +42,20 @@ sudo kvm-ok
 INFO: /dev/kvm exists
 KVM acceleration can be used
 ```
+
+### Hardware & Cloud Provider Requirements for `kata-fc`
+
+| Host Infrastructure | `/dev/kvm` Available? | `kata-fc` Support | Action Required if Unsupported |
+| :--- | :---: | :---: | :--- |
+| **Physical Bare Metal** | ✅ YES | **Fully Supported** | Enable Intel VT-x / AMD-V in BIOS/UEFI. |
+| **OVH Bare Metal / Dedicated** | ✅ YES | **Fully Supported** | Supported out of the box on dedicated servers. |
+| **AWS EC2 `.metal` Instances** | ✅ YES | **Fully Supported** | Use `.metal` instance types (e.g. `c5.metal`, `i3.metal`). |
+| **GCP / Azure VMs** | ✅ YES | **Supported** | Enable `--enable-nested-virtualization` during VM creation. |
+| **Proxmox / KVM On-Prem** | ✅ YES | **Supported** | Set `options kvm_intel nested=1` on host & VM CPU type to `host`. |
+| **OVH Standard VPS / Cloud VM** | ❌ NO | *Not Supported* | Switch runtime to **gVisor (`gvisor`)** in `values.yaml`. |
+
+> [!NOTE]
+> If your cloud environment does not support `/dev/kvm`, switch the sandbox runtime in your Helm `values.yaml` to **`gvisor`** (`runtimeClassName: "gvisor"`). gVisor isolates containers in user space via system call interception without needing hardware KVM extensions.
 
 ## 4. Install Firecracker
 Download and install the latest stable version of the Firecracker binary:

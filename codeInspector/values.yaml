@@ -72,8 +72,8 @@ apiServer:
   configMap:
     PYTHONUNBUFFERED: "1"
     APP_ENV: "production"
-    MAX_CONCURRENT_LANG_SCANS: "2"
-    MAX_CONCURRENT_LANG_PODS: "2"
+    MAX_CONCURRENT_LANG_SCANS: "10"
+    MAX_CONCURRENT_LANG_PODS: "10"
     ALLOW_MOCK_KEYS: "false"
     PORT: "8000"
     BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"
@@ -227,7 +227,7 @@ opensandbox:
     sandboxMemory: "256Mi"
     sandboxCreateTimeoutSeconds: 600
     autoTerminationSeconds: 0
-    runtimeClassName: "kata-fc"
+    runtimeClassName: "gvisor"
     image:
       repository: 01community/01sandbox-opensandbox-server
       tag: "v0.7.3"
