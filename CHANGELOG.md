@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.7.3](https://github.com/01cloud/01-Sandbox/compare/v0.7.2...v0.7.3) (2026-07-24)
+
+
+### 🚀 New Features
+
+* kata and gvisor implementation ([0f5d3e9](https://github.com/01cloud/01-Sandbox/commit/0f5d3e96b8e04153834af93c5cd710ccff3ee5f1))
+* kata and gvisor implementation ([8acc30c](https://github.com/01cloud/01-Sandbox/commit/8acc30ce7342c7f3642f84a7f2dd4cb736bc6708))
+
+
+### 🐛 Bug Fixes
+
+* changes to the server tst ([11b8a11](https://github.com/01cloud/01-Sandbox/commit/11b8a11e8d8802890d3122b096453dfecfd7b83f))
+* k8s docker images ([86e2ff4](https://github.com/01cloud/01-Sandbox/commit/86e2ff4a9fc53a097cba38404665df1ad8bd2654))
+* k8s docker images ([bd30cde](https://github.com/01cloud/01-Sandbox/commit/bd30cde296c3f1f95b0f239f344992aff09ec311))
+* report generation for kata-fc ([18b0618](https://github.com/01cloud/01-Sandbox/commit/18b0618127242ebbb75adb8c64dfbc309f3af662))
+* ui for repository scanner ([90e7025](https://github.com/01cloud/01-Sandbox/commit/90e7025a17420d3e582aae5cab20ef59644176a4))
+* ui for repository scanner ([126389d](https://github.com/01cloud/01-Sandbox/commit/126389de04770ec456b03b13d0f35de4d5b54b2f))
+* ui for repository scanner ([09640f4](https://github.com/01cloud/01-Sandbox/commit/09640f4b30134f657fd42a2b9b84bcaea196a670))
+
+
+### 📖 Documentation
+
+* **deepdive:** add containerd handler routing verification ([d4aecc1](https://github.com/01cloud/01-Sandbox/commit/d4aecc1780ed37540f84d60e80a17329766def60))
+* **deepdive:** add core concepts, explanations, and analogies ([fb3337a](https://github.com/01cloud/01-Sandbox/commit/fb3337ac0dcdec66c2456082eaa468123d44bf3f))
+* **deepdive:** add example speed-test event analysis ([3d7438e](https://github.com/01cloud/01-Sandbox/commit/3d7438eae7c0a8d710052e9352250ec7c0760338))
+* **deepdive:** add guest kernel binary version check command ([ca211f3](https://github.com/01cloud/01-Sandbox/commit/ca211f33e5a5a27331bec3845989683b0753d929))
+* **deepdive:** add host vs guest microvm validation steps ([75af127](https://github.com/01cloud/01-Sandbox/commit/75af12736dcbde61d8dad5a25b442d2d4687e6e8))
+* **deepdive:** add runc vs. gvisor vs. firecracker security comparison ([074f711](https://github.com/01cloud/01-Sandbox/commit/074f7113f5248bd4f3c094ed1e24f57ec2ae3115))
+* **deepdive:** add section on storage and boot mechanics under the hood ([91ee913](https://github.com/01cloud/01-Sandbox/commit/91ee9136757f9a3aced27a07292870579434cebe))
+* **deepdive:** add sequence numbers to architecture diagram ([9c7ce47](https://github.com/01cloud/01-Sandbox/commit/9c7ce4768082a60d525d8e398540e04e1b59ecc1))
+* **deepdive:** clarify host vs guest kernel sources ([17199b4](https://github.com/01cloud/01-Sandbox/commit/17199b4804de5e71b3d0e342f2a56a38e12e61cc))
+* **deepdive:** detail runtime and hypervisor vm duties ([29586ba](https://github.com/01cloud/01-Sandbox/commit/29586ba72bca5e6ec99496141afca3503fdcdc56))
+* **deepdive:** expand flow execution details ([cde7b70](https://github.com/01cloud/01-Sandbox/commit/cde7b709b4defa10293f680964c755330146fceb))
+* **deepdive:** explain common containerd log warnings ([5d55a6c](https://github.com/01cloud/01-Sandbox/commit/5d55a6c4be985b019154f9b4316d7f7c955a3556))
+* **deepdive:** fix mermaid diagram syntax ([f858a0d](https://github.com/01cloud/01-Sandbox/commit/f858a0d08545aa0f4450d910c76a85d7365b9212))
+* **deepdive:** improve architecture diagram layout for readability ([bc43b0c](https://github.com/01cloud/01-Sandbox/commit/bc43b0ce140edad58fc10fe38693a24ba7c15c07))
+* **deepdive:** link guest kernel verification to configuration ([8f93176](https://github.com/01cloud/01-Sandbox/commit/8f931764451a86a2f460a6f2932faa4ad2dbee90))
+* **deepdive:** note on k8s event ttl and speed testing ([15facf5](https://github.com/01cloud/01-Sandbox/commit/15facf5e6b8ca182adfaea2f2c4028bf21f3922f))
+* **deepdive:** quote parentheses inside node label in mermaid diagram ([03af2a1](https://github.com/01cloud/01-Sandbox/commit/03af2a102fe33ade96874d15992b1cfb22c3025d))
+* generate RELEASE.md for v0.7.2 [skip ci] ([9bb5a63](https://github.com/01cloud/01-Sandbox/commit/9bb5a631f0a12369394702b3c7906441820d7e53))
+* **readme:** update the readme ([ffd4e2d](https://github.com/01cloud/01-Sandbox/commit/ffd4e2d033c3847259411dff44abb23848b1c2e8))
+* **readme:** update the readme ([9e0738c](https://github.com/01cloud/01-Sandbox/commit/9e0738c4cfc183658a0c3640acfe9179c4dfcf3f))
+* **readme:** update the readme ([34091d0](https://github.com/01cloud/01-Sandbox/commit/34091d029a0b3e03d25186b277143d4ef5e8ac38))
+* **readme:** update the readme ([0bd828d](https://github.com/01cloud/01-Sandbox/commit/0bd828d964bc396c135c45efad5001e6299f50af))
+* **readme:** update the reamde file ([a03d94f](https://github.com/01cloud/01-Sandbox/commit/a03d94f64b539800d8d3cbb9f5ce2ce10acbd16f))
+* **readme:** update the reamde file ([d93c1e4](https://github.com/01cloud/01-Sandbox/commit/d93c1e463bcc1106149e29e244c6c0d141f6fdc2))
+* **readme:** update the reamde file ([ac0cd16](https://github.com/01cloud/01-Sandbox/commit/ac0cd16fb5609f664859e1db151828b35c02ae39))
+* **readme:** update the reamde file ([53592f2](https://github.com/01cloud/01-Sandbox/commit/53592f2eb9baa66ed3e57f84ae6794ded2ee87e1))
+* **readme:** update the reamde file ([a165c68](https://github.com/01cloud/01-Sandbox/commit/a165c68cdedd4c86ac3ea16152990370961b3e4e))
+* **readme:** update the reamde file ([d0d0ba1](https://github.com/01cloud/01-Sandbox/commit/d0d0ba172c520f27e2be3d27f8959b8c20a98184))
+* **readme:** update the reamde file ([efabc5f](https://github.com/01cloud/01-Sandbox/commit/efabc5f2d688b68d14243fabd2473f1197f99a98))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.2 [skip ci] ([0ece6fd](https://github.com/01cloud/01-Sandbox/commit/0ece6fda7e426bcf69853f7e04c367bf35e677eb))
+
 ## [0.7.2](https://github.com/01cloud/01-Sandbox/compare/v0.7.1...v0.7.2) (2026-07-15)
 
 
