@@ -1,16 +1,109 @@
-# Local development overrides for codeInspector Helm deployment
-# To deploy: helm upgrade --install codeinspector ./codeInspector -f ./codeInspector/values.yaml -f ./codeInspector/values-local.yaml
+##################################################################################################
 
+################################################################
+# This chart aggregates values from all sub-chart
+################################################################
+
+global:
+  apiRoutePrefix: "/api/v1/01sbx"
+  JWT_PUBLIC_JWKS: ""
+  allowedIps:
+    - "110.44.123.206"
+    - "10."
+    - "127.0.0.1"
+    - "::1"
+################################################################
+# Agent Gateway  values
+################################################################
+agentgateway:
+  enabled: true
+  namespace: agentgateway-system
+  httproute:
+    hostnames:
+      # - api-sandbox.01security.com
+      - 10.0.8.9
+    backendService:
+      name: sandbox-api-service
+      port: 80
+  gateway:
+    gatewayClassName: agentgateway
+    addresses:
+      - value: 10.0.8.9
+    listeners:
+      - protocol: HTTP
+        port: 80
+        name: http
+      # - protocol: HTTPS
+      #   port: 443
+      #   name: https
+      #   tls:
+      #     certificateRefs:
+      #       - name: agentgateway-tls
+      - protocol: TCP
+        port: 5432
+        name: postgresql
+      - protocol: TCP
+        port: 6379
+        name: redis
+      - protocol: TCP
+        port: 5672
+        name: rabbitmq-amqp
+  policy:
+    authenticationType: "jwt"
+    jwtMode: "Strict"
+    rateLimit:
+      enabled: false
+      requests: 7
+      unit: "Minutes"
+################################################################
+# Agent Gateway Controller values
+################################################################
+agentgateway-controller:
+  enabled: true
+  controller:
+    extraEnv:
+      KGW_ENABLE_GATEWAY_API_EXPERIMENTAL_FEATURES: "true"
+    image:
+      pullPolicy: Always
+################################################################
+# API Server component values
+################################################################
 apiServer:
-  sealedSecrets:
-    enabled: false
+  enabled: true
+  namespace: opensandbox-system
   configMap:
+    PYTHONUNBUFFERED: "1"
+    APP_ENV: "production"
+    MAX_CONCURRENT_LANG_SCANS: "2"
+    SCANNER_IMAGE_PYTHON: "199012118961/01sandbox-scanner-python:dev"
+    SCANNER_IMAGE_GO: "199012118961/01sandbox-scanner-go:dev"
+    SCANNER_IMAGE_JAVA: "199012118961/01sandbox-scanner-java:dev"
+    SCANNER_IMAGE_NODE: "199012118961/01sandbox-scanner-node:dev"
+    SCANNER_IMAGE_K8S: "199012118961/01sandbox-scanner-k8s:dev"
+    SCANNER_IMAGE_RUST: "199012118961/01sandbox-scanner-rust:dev"
+    SCANNER_IMAGE_CPP: "199012118961/01sandbox-scanner-cpp:dev"
+    SCANNER_IMAGE_RUBY: "199012118961/01sandbox-scanner-ruby:dev"
+    SCANNER_IMAGE_DEFAULT: "199012118961/01sandbox-codeinterpreter:dev"
+    PORT: "8000"
+    BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"
+    RATE_LIMIT_REQUESTS: "20"
+    RATE_LIMIT_WINDOW_SECS: "60"
+    GATEWAY_SECRET_NAME: "apikey"
+    GATEWAY_SECRET_NAMESPACE: "agentgateway-system"
+    GATEWAY_SECRET_KEY: "api-key"
+    ALLOW_MOCK_KEYS: "true"
+    JWT_EXPIRATION_MINUTES: "60"
+    JWT_ISSUER: "01 Sandbox"
+    JWT_ALGORITHM: "RS256"
     AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com"
     AUTH0_AUDIENCE: "https://code-inspector-api"
+    OPENSANDBOX_ROUTE_PREFIX: "{{ .Values.global.apiRoutePrefix }}"
+    DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"http://10.0.8.9{{ .Values.global.apiRoutePrefix }}","documentationUrl":"http://10.0.8.9{{ .Values.global.apiRoutePrefix }}/docs"}]'
+    JWT_PUBLIC_JWKS: ""
     SENDGRID_FROM_EMAIL: "sandbox@01security.com"
-    ALLOW_MOCK_KEYS: "true"
+    MAX_CONCURRENT_LANG_PODS: "2"
   secret:
-    SENDGRID_API_KEY: ""
+    E2B_API_KEY: ""
     JWT_PRIVATE_KEY: |
       -----BEGIN PRIVATE KEY-----
       MIIEvgIBADANBgkqhkiG9w0BAQEFAASCBKgwggSkAgEAAoIBAQC4cJ4r0fjpgQ8j
@@ -41,39 +134,225 @@ apiServer:
       kYVZfPw/fIDkPCKJx7E8mCmM
       -----END PRIVATE KEY-----
     JWT_PUBLIC_JWKS: '{"keys": [{"kty": "RSA", "use": "sig", "kid": "code-inspector-key-01", "alg": "RS256", "n": "uHCeK9H46YEPI0Pd3zYYuDZpsumgqh3KsNhCOMMp5-kvUeesi6W5BeThyosp33gK226T1AucXJe6MnEJui5uxeAge6SmjTJqAd4t9EMNywXqutgnQw9g4mCeyfZDB3R2SDnXTvx9HKpSFctSppJ0GYeqmkiRt5lLTWuHnYn9CLRH8Htgc9yP10wcRub6L1OkNMC8cAiq4i5SRcqMi4--EjLIDA2CkluKqnZKBYix7aGe6-59XHG2ARNy87Fwr6I8kEBjh_r2rbZfVY54AI-InNj8qIptYFoM_PRzeNw1VD2NYue2S6ZAlfBanK9keiNgA4Ll7Tvb_wchfv2sMxKmdw", "e": "AQAB"}]}'
+    SENDGRID_API_KEY: ""
+  sealedSecrets:
+    enabled: false
   deployment:
+    replicaCount: 1
     image:
       repository: 199012118961/01sandbox-api
       tag: "dev"
+      pullPolicy: Always
+    resources:
+      requests:
+        cpu: "100m"
+        memory: "128Mi"
+      limits:
+        cpu: "500m"
+        memory: "256Mi"
+    securityContext:
+      runAsNonRoot: true
+      runAsUser: 1000
+      fsGroup: 1000
+  service:
+    type: NodePort
+    port: 80
+    targetPort: 8000
+    nodePort: 30080
+  ingress:
+    enabled: false
+    className: nginx
+    host: api-sandbox.01security.com
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: /
+      nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
+      nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
+  hpa:
+    enabled: true
+    minReplicas: 1
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+  postgresql:
+    enabled: true
+    host: "postgresql-service"
+    port: 5432
+    user: "postgres"
+    password: "password123"
+    database: "apikeys"
+    storage: "5Gi"
+    storageClassName: "longhorn"
+  redis:
+    enabled: true
+    host: "redis-service"
+    port: 6379
+    password: ""
+  rabbitmq:
+    enabled: true
+    host: "rabbitmq-service"
+    port: 5672
+    user: "admin"
+    password: "changeme"
+    maxQuickScanWorkers: "1"
+    maxRepoScanWorkers: "1"
+################################################################
+# MetalLB component values
+################################################################
+metallb:
+  enabled: true
+  namespace: metallb-system
+  ipAddressPool:
+    addresses:
+      # - 172.18.0.200-172.18.0.250
+      - 10.0.8.9-10.0.8.9
+  l2Advertisement:
+    enabled: true
 
+################################################################
+# OpenSandbox component values
+################################################################
 opensandbox:
+  enabled: true
+  namespace: opensandbox-system
   controller:
+    replicaCount: 1
     image:
       repository: 199012118961/01sandbox-opensandbox-controller
       tag: "dev"
+      pullPolicy: Always
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
   server:
+    replicaCount: 1
     sandboxImage: "199012118961/01sandbox-codeinterpreter:dev"
+    scannerImagePython: "199012118961/01sandbox-scanner-python:dev"
+    scannerImageGo: "199012118961/01sandbox-scanner-go:dev"
+    scannerImageJava: "199012118961/01sandbox-scanner-java:dev"
+    scannerImageNode: "199012118961/01sandbox-scanner-node:dev"
+    scannerImageK8s: "199012118961/01sandbox-scanner-k8s:dev"
+    scannerImageRust: "199012118961/01sandbox-scanner-rust:dev"
+    scannerImageCpp: "199012118961/01sandbox-scanner-cpp:dev"
+    scannerImageRuby: "199012118961/01sandbox-scanner-ruby:dev"
+    sandboxCpu: "200m"
+    sandboxMemory: "256Mi"
+    sandboxCreateTimeoutSeconds: 600
+    autoTerminationSeconds: 0
+    runtimeClassName: "kata-fc"
     image:
       repository: 199012118961/01sandbox-opensandbox-server
       tag: "dev"
-
-metallb:
-  enabled: true
-  ipAddressPool:
-    addresses:
-      - 10.0.8.9-10.0.8.9
-
-agentgateway:
-  enabled: true
-  httproute:
-    hostnames:
-      - api-sandbox.01security.com
-      - 10.0.8.9
-      - localhost
-      - 127.0.0.1
-  gateway:
-    addresses:
-      - value: 10.0.8.9
-
+      pullPolicy: Always
+    resources:
+      requests:
+        cpu: 100m
+        memory: 128Mi
+      limits:
+        cpu: 500m
+        memory: 256Mi
+    storage:
+      enabled: true
+      pvcName: "scan-pvc"
+      size: "10Gi"
+      accessMode: "ReadWriteMany"
+      mountPath: "/data"
+      storageClassName: "longhorn"
+################################################################
+# OpenSandbox Resource Pool component values
+################################################################
+opensandboxResourcePool:
+  enabled: false
+  namespace: opensandbox-system
+  pool:
+    name: my-sandbox-pool
+    container:
+      image: "199012118961/01sandbox-codeinterpreter:dev"
+      ports:
+        - containerPort: 44772
+        - containerPort: 54321
+    capacitySpec:
+      bufferMin: 3
+      bufferMax: 10
+      poolMin: 1
+      poolMax: 50
+###############################################################
+# Prometheus component values
+###############################################################
+prometheus:
+  enabled: false
+  namespace: monitoring
+  apiServerNamespace: opensandbox-system
+  apiServerServiceName: sandbox-api-service
+  apiServerPort: 80
+  agentgatewayNamespace: agentgateway-system
+  agentgatewayServiceName: agentgateway-proxy
+  agentgatewayPort: 80
+  replicaCount: 1
+  ingressRoute:
+    enabled: true
+  ingressHostnames:
+    - api-sandbox.01security.com
+    - 10.0.8.9
+  ingressPath: "/prometheus"
+  image:
+    repository: prom/prometheus
+    tag: "v2.54.1"
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: false
+    pvcName: "prometheus-pvc"
+  service:
+    type: ClusterIP
+    port: 9090
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+###############################################################
+# Grafana component values
+###############################################################
+grafana:
+  enabled: false
+  namespace: monitoring
+  prometheusNamespace: monitoring
+  prometheusServiceName: prometheus-service
+  prometheusPort: 9090
+  replicaCount: 1
+  ingressRoute:
+    enabled: true
+  ingressHost: "api-sandbox.01security.com"
+  ingressHostnames:
+    - api-sandbox.01security.com
+    - 10.0.8.9
+  ingressPath: "/grafana"
+  image:
+    repository: grafana/grafana
+    tag: "11.1.0"
+    pullPolicy: IfNotPresent
+  persistence:
+    enabled: false
+    pvcName: "grafana-pvc"
+  service:
+    type: NodePort
+    port: 3000
+    nodePort: 32000
+  adminPassword: "admin"
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+###############################################################
+# Sealed Secrets subchart controller values
+###############################################################
 sealed-secrets:
   enabled: false

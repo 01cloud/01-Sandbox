@@ -93,6 +93,15 @@ def ensure_metadata_labels(metadata: Optional[Dict[str, str]]) -> None:
     if not metadata:
         return
     for key, value in metadata.items():
+        if key in (
+            "image",
+            "sandboxImage",
+            "runtime",
+            "runtimeClassName",
+            "runtime_class",
+            "secure_runtime",
+        ):
+            continue
         if not isinstance(key, str) or not isinstance(value, str):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

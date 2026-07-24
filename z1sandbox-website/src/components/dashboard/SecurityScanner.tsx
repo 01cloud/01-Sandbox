@@ -237,6 +237,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
   const [code, setCode] = useState("# Simple Code Example\ndef greet(name):\n    return f\"Hello, {name}!\"\n\nprint(greet(\"User\"))");
   const [isScanning, setIsScanning] = useState(false);
   const [isEditorFocused, setIsEditorFocused] = useState(false);
+  const [runtime, setRuntime] = useState<string>("gvisor");
 
   const getFilename = (lang: string) => {
     switch (lang) {
@@ -277,7 +278,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
   useEffect(() => {
     if (selectedJobId) {
       const job = jobs.find((j) => j.job_id === selectedJobId);
-      if (job && job.status === "DONE" && !volatileResults[selectedJobId]) {
+      if (job && (job.status === "DONE" || job.status === "COMPLETE" || job.progress >= 100 || job.stepMessage?.toLowerCase().includes("complete")) && !volatileResults[selectedJobId]) {
         lazyFetchResult(selectedJobId);
       }
     }
@@ -367,7 +368,10 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
           "Authorization": `Bearer ${effectiveApiKey}`
         },
         body: JSON.stringify({
-          files: { [filename]: code }
+          files: { [filename]: code },
+          metadata: {
+            runtime: runtime
+          }
         })
       });
 
@@ -386,7 +390,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
         eventIndex: 0,
         metadata: {
           files_count: 1,
-          submitted_at: new Date().toISOString()
+          submitted_at: new Date().toISOString(),
+          runtime: runtime
         },
         summary: null,
         result: null,
@@ -953,6 +958,43 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 </div>
               </div>
 
+              {/* Isolation Runtime Selector */}
+              <div className="flex flex-col gap-2 mt-2">
+                <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75">
+                  Isolation Runtime
+                </label>
+                <div className="flex bg-muted/40 rounded-xl p-0.5 border border-border/50">
+                  <button
+                    type="button"
+                    disabled={isScanning}
+                    onClick={() => setRuntime("gvisor")}
+                    className={cn(
+                      "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
+                      runtime === "gvisor"
+                        ? "bg-violet-600 text-white shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Shield className="w-3 h-3" />
+                    gVisor
+                  </button>
+                  <button
+                    type="button"
+                    disabled={isScanning}
+                    onClick={() => setRuntime("kata-fc")}
+                    className={cn(
+                      "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
+                      runtime === "kata-fc"
+                        ? "bg-violet-600 text-white shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    )}
+                  >
+                    <Activity className="w-3 h-3" />
+                    Kata-FC
+                  </button>
+                </div>
+              </div>
+
               <Button
                 onClick={runScan}
                 disabled={isScanning || !code.trim()}
@@ -1186,6 +1228,43 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                   placeholder="# Paste code here..."
                   disabled={isScanning}
                 />
+              </div>
+            </div>
+
+            {/* Isolation Runtime Selector */}
+            <div className="flex flex-col gap-2 shrink-0">
+              <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75">
+                Isolation Runtime
+              </label>
+              <div className="flex bg-muted/40 rounded-xl p-0.5 border border-border/50">
+                <button
+                  type="button"
+                  disabled={isScanning}
+                  onClick={() => setRuntime("gvisor")}
+                  className={cn(
+                    "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
+                    runtime === "gvisor"
+                      ? "bg-violet-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Shield className="w-3 h-3" />
+                  gVisor
+                </button>
+                <button
+                  type="button"
+                  disabled={isScanning}
+                  onClick={() => setRuntime("kata-fc")}
+                  className={cn(
+                    "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
+                    runtime === "kata-fc"
+                      ? "bg-violet-600 text-white shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  <Activity className="w-3 h-3" />
+                  Kata-FC
+                </button>
               </div>
             </div>
 

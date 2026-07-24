@@ -48,6 +48,9 @@ kubeconfig_path = "~/.kube/config"
 # Namespace for sandbox workloads
 namespace = "opensandbox"
 
+# Timeout in seconds (10 mins) to wait for sandbox image pull and readiness
+sandbox_create_timeout_seconds = 600
+
 # [Beta] Enable informer-backed cache to reduce API calls.
 # Set to false to disable the watch-based cache.
 informer_enabled = true

@@ -109,9 +109,11 @@ RUN set -euo pipefail \
         && go install golang.org/x/tools/cmd/goimports@latest \
         && go install golang.org/x/tools/gopls@latest; \
     done \
+    && rm -rf /root/.cache /root/go/pkg /tmp/* \
     && echo "Setting up gonb done"
 
 COPY src/ /opt/opensandbox/src/
+COPY rules/ /opt/opensandbox/rules/
 COPY scripts/code-interpreter.sh /opt/opensandbox/code-interpreter.sh
 
 RUN chmod +x /opt/opensandbox/code-interpreter.sh

@@ -62,10 +62,10 @@ export function JobsPanel({
           <div className="divide-y divide-border">
             {jobs.map((job) => {
               const isSelected = job.job_id === selectedJobId;
-              const isActive = !["DONE", "ERROR"].includes(job.status);
-              const isDone = job.status === "DONE";
+              const isDone = job.status === "DONE" || job.status === "COMPLETE" || job.progress >= 100 || job.stepMessage?.toLowerCase().includes("complete") || (job.summary !== null && job.summary !== undefined);
               const isError = job.status === "ERROR";
               const isCancelled = job.status === "CANCELLED";
+              const isActive = !isDone && !isError && !isCancelled;
 
               // Metadata displays
               const repoUrl = job.metadata?.repo_url || "";
@@ -152,7 +152,7 @@ export function JobsPanel({
                         isActive && !isCancelled && (jobType === "repo-scan" ? "text-violet-400" : "text-blue-400")
                       )}
                     >
-                      {isActive ? `${job.status} (${job.progress}%)` : job.status}
+                      {isActive ? `${job.status} (${job.progress}%)` : (isDone ? "SCAN COMPLETE" : job.status)}
                     </span>
 
                     {/* Severity Summary counts badge */}
@@ -201,10 +201,10 @@ export function JobsPanel({
                       <div className="flex flex-col gap-1.5">
                         {Object.entries(job.detail.languages).map(([lang, status]: [string, any]) => {
                           const statusStr = typeof status === "string" ? status : "DONE";
-                          const isPending = statusStr === "PENDING";
-                          const isScanningLang = statusStr === "SCANNING";
-                          const isDone = statusStr === "DONE" || statusStr === "COMPLETE";
-                          const isFailed = statusStr === "FAILED";
+                          const isDone = job.status === "DONE" || statusStr === "DONE" || statusStr === "COMPLETE";
+                          const isFailed = !isDone && statusStr === "FAILED";
+                          const isScanningLang = !isDone && !isFailed && statusStr === "SCANNING";
+                          const isPending = !isDone && !isFailed && !isScanningLang;
 
                           return (
                             <div key={lang} className="flex items-center justify-between text-[11px]">

@@ -1,0 +1,37 @@
+FROM alpine:3.22
+
+ENV LANG=C.UTF-8
+
+RUN apk add --no-cache \
+    ca-certificates \
+    curl \
+    git \
+    python3 \
+    py3-pip \
+    bash
+
+# Install cargo-audit pre-compiled binary & semgrep
+RUN set -eux; \
+    CARGO_AUDIT_VER="0.21.1"; \
+    curl -fsSL "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv${CARGO_AUDIT_VER}/cargo-audit-x86_64-unknown-linux-musl-v${CARGO_AUDIT_VER}.tgz" -o /tmp/cargo-audit.tgz; \
+    tar -xzf /tmp/cargo-audit.tgz -C /usr/local/bin --strip-components=1; \
+    chmod 755 /usr/local/bin/cargo-audit; \
+    rm -rf /tmp/*
+
+RUN pip3 install --break-system-packages --no-cache-dir semgrep \
+    && rm -rf /root/.cache/pip
+
+# Install gitleaks and trivy
+RUN set -eux; \
+    curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz | tar -xz -C /usr/local/bin gitleaks; \
+    curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz | tar -xz -C /usr/local/bin trivy; \
+    chmod 755 /usr/local/bin/gitleaks /usr/local/bin/trivy
+
+RUN mkdir -p /opt/opensandbox/src /opt/opensandbox/rules /workspace /reports
+COPY src/ /opt/opensandbox/src/
+COPY rules/ /opt/opensandbox/rules/
+COPY scripts/code-interpreter.sh /opt/opensandbox/code-interpreter.sh
+RUN chmod +x /opt/opensandbox/code-interpreter.sh
+
+WORKDIR /workspace
+ENTRYPOINT ["/opt/opensandbox/code-interpreter.sh"]

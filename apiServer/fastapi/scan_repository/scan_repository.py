@@ -52,6 +52,7 @@ async def _run_scan_pipeline(
     app_state,
     git_token: Optional[str] = None,
     ssh_key: Optional[str] = None,
+    runtime: Optional[str] = None,
 ) -> None:
     """
     Full scan pipeline executed as a background task.
@@ -238,6 +239,11 @@ async def _run_scan_pipeline(
         language_results = {}
         completed_langs = 0
         progress_lock = asyncio.Lock()
+        # Cap max concurrent language scan pods (configurable via MAX_CONCURRENT_LANG_PODS env var, default: 2)
+        from config import max_concurrent_lang_pods
+
+        MAX_CONCURRENT_LANG_PODS = max_concurrent_lang_pods()
+        lang_semaphore = asyncio.Semaphore(MAX_CONCURRENT_LANG_PODS)
 
         async def scan_single_language(
             language: str, files: list[str], idx: int
@@ -252,114 +258,116 @@ async def _run_scan_pipeline(
                 )
                 raise asyncio.CancelledError()
 
-            file_count = min(len(files), 100)
             log(
                 "SCANNING",
-                f"[{idx+1}/{total_langs}] Starting {language} scan — {file_count} file(s) submitted to scan-jobs pipeline...",
+                f"[{idx+1}/{total_langs}] Queued scan for {language} ({len(files)} files, {pct(len(files)):.1f}% of repo)",
             )
 
-            # Set status to SCANNING
-            async with progress_lock:
-                if language.lower() in ("yaml", "yml"):
-                    if yaml_plain_present:
-                        lang_statuses["YAML"] = "SCANNING"
-                    if yaml_k8s_present:
-                        lang_statuses["Kubernetes YAML"] = "SCANNING"
-                else:
-                    lang_statuses[language] = "SCANNING"
-
-            await push_event(
-                ScanStep.SCANNING,
-                f"Scanning {total_langs} language(s) (active: {language})...",
-                60 + int((completed_langs / total_langs) * 30),
-                detail={"languages": lang_statuses},
-            )
-
-            try:
-                scan_output = await asyncio.wait_for(
-                    scan_language(
-                        sandbox_id=sandbox_id,
-                        language=language,
-                        files=files,
-                        percentage=pct(len(files)),
-                        parent_job_id=job_id,
-                    ),
-                    timeout=950.0,
-                )
-            except Exception as e:
+            async with lang_semaphore:
+                # Set status to SCANNING when semaphore is acquired
                 async with progress_lock:
                     if language.lower() in ("yaml", "yml"):
                         if yaml_plain_present:
-                            lang_statuses["YAML"] = "FAILED"
+                            lang_statuses["YAML"] = "SCANNING"
                         if yaml_k8s_present:
-                            lang_statuses["Kubernetes YAML"] = "FAILED"
+                            lang_statuses["Kubernetes YAML"] = "SCANNING"
                     else:
-                        lang_statuses[language] = "FAILED"
+                        lang_statuses[language] = "SCANNING"
+
                 await push_event(
                     ScanStep.SCANNING,
-                    f"Scan failed for {language}: {str(e)}",
+                    f"Scanning {total_langs} language(s) (active: {language})...",
                     60 + int((completed_langs / total_langs) * 30),
                     detail={"languages": lang_statuses},
                 )
-                raise e
 
-            async with progress_lock:
-                completed_langs += 1
-                progress = 60 + int((completed_langs / total_langs) * 30)
-
-                # YAML returns a tuple (plain_result, optional k8s_result)
-                # All other languages return a single LanguageScanResult
-                if isinstance(scan_output, tuple):
-                    yaml_result, k8s_result = scan_output
-                    language_results["YAML"] = yaml_result
-                    log(
-                        "SCANNING",
-                        f"[{idx+1}/{total_langs}] YAML (plain) complete — {yaml_result.file_count} file(s), "
-                        f"{yaml_result.lines_of_code} LoC, {len(yaml_result.findings)} finding(s)",
+                try:
+                    scan_output = await asyncio.wait_for(
+                        scan_language(
+                            sandbox_id=sandbox_id,
+                            language=language,
+                            files=files,
+                            percentage=pct(len(files)),
+                            parent_job_id=job_id,
+                            runtime=runtime,
+                        ),
+                        timeout=950.0,
                     )
-                    if yaml_plain_present:
-                        lang_statuses["YAML"] = "DONE"
-                    if k8s_result is not None:
-                        language_results["Kubernetes YAML"] = k8s_result
+                except Exception as e:
+                    async with progress_lock:
+                        if language.lower() in ("yaml", "yml"):
+                            if yaml_plain_present:
+                                lang_statuses["YAML"] = "FAILED"
+                            if yaml_k8s_present:
+                                lang_statuses["Kubernetes YAML"] = "FAILED"
+                        else:
+                            lang_statuses[language] = "FAILED"
+                    await push_event(
+                        ScanStep.SCANNING,
+                        f"Scan failed for {language}: {str(e)}",
+                        60 + int((completed_langs / total_langs) * 30),
+                        detail={"languages": lang_statuses},
+                    )
+                    raise e
+
+                async with progress_lock:
+                    completed_langs += 1
+                    progress = 60 + int((completed_langs / total_langs) * 30)
+
+                    # YAML returns a tuple (plain_result, optional k8s_result)
+                    # All other languages return a single LanguageScanResult
+                    if isinstance(scan_output, tuple):
+                        yaml_result, k8s_result = scan_output
+                        language_results["YAML"] = yaml_result
                         log(
                             "SCANNING",
-                            f"[{idx+1}/{total_langs}] Kubernetes YAML complete — {k8s_result.file_count} manifest(s), "
-                            f"{k8s_result.lines_of_code} LoC, {len(k8s_result.findings)} finding(s)",
+                            f"[{idx+1}/{total_langs}] YAML (plain) complete — {yaml_result.file_count} file(s), "
+                            f"{yaml_result.lines_of_code} LoC, {len(yaml_result.findings)} finding(s)",
                         )
-                        if yaml_k8s_present:
-                            lang_statuses["Kubernetes YAML"] = "DONE"
+                        if yaml_plain_present:
+                            lang_statuses["YAML"] = "COMPLETE"
+                        if k8s_result is not None:
+                            language_results["Kubernetes YAML"] = k8s_result
+                            log(
+                                "SCANNING",
+                                f"[{idx+1}/{total_langs}] Kubernetes YAML complete — {k8s_result.file_count} manifest(s), "
+                                f"{k8s_result.lines_of_code} LoC, {len(k8s_result.findings)} finding(s)",
+                            )
+                            if yaml_k8s_present:
+                                lang_statuses["Kubernetes YAML"] = "COMPLETE"
+                        else:
+                            log(
+                                "SCANNING",
+                                f"[{idx+1}/{total_langs}] No K8s manifests found — Kubernetes YAML section skipped",
+                            )
+                            if "Kubernetes YAML" in lang_statuses:
+                                lang_statuses["Kubernetes YAML"] = "COMPLETE"
                     else:
+                        result = scan_output
+                        language_results[language] = result
+                        lang_findings = len(result.findings)
                         log(
                             "SCANNING",
-                            f"[{idx+1}/{total_langs}] No K8s manifests found — Kubernetes YAML section skipped",
+                            f"[{idx+1}/{total_langs}] {language} complete — {result.lines_of_code} LoC, {lang_findings} finding(s)",
                         )
-                        if "Kubernetes YAML" in lang_statuses:
-                            lang_statuses["Kubernetes YAML"] = "DONE"
-                else:
-                    result = scan_output
-                    language_results[language] = result
-                    lang_findings = len(result.findings)
-                    log(
-                        "SCANNING",
-                        f"[{idx+1}/{total_langs}] {language} complete — {result.lines_of_code} LoC, {lang_findings} finding(s)",
-                    )
-                    lang_statuses[language] = "DONE"
-                    for f in result.findings[:5]:
-                        log(
-                            "SCANNING",
-                            f"  [{f.severity}] {f.file}:{f.line or '?'} — {f.issue[:80]} (tool={f.tool})",
-                        )
-                    if lang_findings > 5:
-                        log(
-                            "SCANNING", f"  ... and {lang_findings - 5} more finding(s)"
-                        )
+                        lang_statuses[language] = "COMPLETE"
+                        for f in result.findings[:5]:
+                            log(
+                                "SCANNING",
+                                f"  [{f.severity}] {f.file}:{f.line or '?'} — {f.issue[:80]} (tool={f.tool})",
+                            )
+                        if lang_findings > 5:
+                            log(
+                                "SCANNING",
+                                f"  ... and {lang_findings - 5} more finding(s)",
+                            )
 
-                await push_event(
-                    ScanStep.SCANNING,
-                    f"Scanned {completed_langs}/{total_langs} language(s) (completed: {language})...",
-                    progress,
-                    detail={"languages": lang_statuses},
-                )
+                    await push_event(
+                        ScanStep.SCANNING,
+                        f"Scanned {completed_langs}/{total_langs} language(s) (completed: {language})...",
+                        progress,
+                        detail={"languages": lang_statuses},
+                    )
 
         # Create tasks for all detected languages and run them concurrently
         tasks = [
@@ -709,6 +717,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 "repo_url": req.repo_url,
                 "submitted_at": submitted_at,
                 "user_id": user_id,
+                "runtime": req.runtime,
             },
         )
 
@@ -728,6 +737,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                     "repo": repo,
                     "git_token": req.git_token,
                     "ssh_key": req.ssh_key,
+                    "runtime": req.runtime,
                 },
             )
         else:
@@ -740,6 +750,7 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 app_state,
                 req.git_token,
                 req.ssh_key,
+                req.runtime,
             )
         return RepoScanSubmitResponse(
             job_id=job_id,
@@ -894,10 +905,6 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                 continue
             if job.job_type != "repo-scan":
                 continue
-            if job.metadata.get("user_id") != user_id:
-                continue
-
-            # Sync with Redis if it has completed elsewhere
             redis_status = None
             if app_state.use_redis and app_state.redis_client:
                 try:
@@ -908,10 +915,6 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                         )
                 except Exception:
                     pass
-
-            if redis_status in ("DONE", "ERROR"):
-                stale_ids.append(jid)
-                continue
 
             job_status = redis_status if redis_status else job.step
 
@@ -930,7 +933,9 @@ def get_repo_scan_router(app_state, validate_token: Callable) -> APIRouter:
                         if job_status in ("DONE", "ERROR")
                         else (job.event_log[-1].progress if job.event_log else 10)
                     ),
-                    "stepMessage": job.event_log[-1].message if job.event_log else "",
+                    "stepMessage": "Scan complete"
+                    if job_status == "DONE"
+                    else (job.event_log[-1].message if job.event_log else ""),
                     "eventIndex": len(job.event_log),
                     "metadata": job.metadata,
                     "summary": job.metadata.get("summary"),

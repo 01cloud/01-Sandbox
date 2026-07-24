@@ -139,10 +139,25 @@ class AgentSandboxProvider(WorkloadProvider):
         volumes: Optional[List[Volume]] = None,
     ) -> Dict[str, Any]:
         """Create an agent-sandbox Sandbox CRD workload."""
-        if self.runtime_class:
+        extensions = extensions or {}
+        runtime_class = self.runtime_class
+        if "runtimeClassName" in extensions:
+            runtime_class = extensions["runtimeClassName"]
+        elif "runtime_class" in extensions:
+            runtime_class = extensions["runtime_class"]
+        elif "secure_runtime" in extensions:
+            sr = extensions["secure_runtime"]
+            if sr == "gvisor":
+                runtime_class = "gvisor"
+            elif sr in ("kata-fc", "firecracker"):
+                runtime_class = "kata-fc"
+            elif sr in ("kata", "kata-qemu"):
+                runtime_class = "kata-qemu"
+
+        if runtime_class:
             logger.info(
                 "Using Kubernetes RuntimeClass '%s' for sandbox %s",
-                self.runtime_class,
+                runtime_class,
                 sandbox_id,
             )
 
@@ -154,6 +169,7 @@ class AgentSandboxProvider(WorkloadProvider):
             execd_image=execd_image,
             network_policy=network_policy,
             egress_image=egress_image,
+            runtime_class=runtime_class,
         )
 
         # Add user-specified volumes if provided
@@ -214,6 +230,7 @@ class AgentSandboxProvider(WorkloadProvider):
         execd_image: str,
         network_policy: Optional[NetworkPolicy] = None,
         egress_image: Optional[str] = None,
+        runtime_class: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Build pod spec dict for the Sandbox CRD."""
         init_container = self._build_execd_init_container(execd_image)
@@ -235,14 +252,14 @@ class AgentSandboxProvider(WorkloadProvider):
             "volumes": [
                 {
                     "name": "opensandbox-bin",
-                    "emptyDir": {},
+                    "emptyDir": {"sizeLimit": "1Gi"},
                 }
             ],
         }
 
-        # Inject runtimeClassName if secure runtime is configured
-        if self.runtime_class:
-            pod_spec["runtimeClassName"] = self.runtime_class
+        # Inject runtimeClassName if secure runtime is configured or overridden
+        if runtime_class:
+            pod_spec["runtimeClassName"] = runtime_class
 
         # Add egress sidecar if network policy is provided
         apply_egress_to_spec(
