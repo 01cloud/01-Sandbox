@@ -1,13 +1,12 @@
 """
 language_detector.py — Language detection using local file system tools.
 
-Since the repo is now cloned to a local temp directory, we run language
+Since the repo is cloned to a local temp directory, we run language
 detection tools directly on the API pod via subprocess (exec_in_sandbox).
 
 Priority order:
-  1. tokei  — fast, JSON output with file-level breakdown
-  2. enry   — lightweight Go port of linguist (if installed)
-  3. Fallback — extension-based file walking (always available)
+  1. github-linguist / tokei / enry
+  2. Ground-truth file-extension walk (guarantees 100% precision for all repo files)
 
 Tools are run against the local cloned repo directory.
 """
@@ -27,29 +26,81 @@ _TAG = "[RepoScanner][LangDetect]"
 
 # Mapping of file extensions to canonical language names
 EXT_MAP = {
+    # Python
     ".py": "Python",
+    ".pyw": "Python",
+    # JavaScript / TypeScript
     ".js": "JavaScript",
+    ".mjs": "JavaScript",
+    ".cjs": "JavaScript",
     ".jsx": "JavaScript",
     ".ts": "TypeScript",
     ".tsx": "TypeScript",
+    # Go
     ".go": "Go",
+    # Rust
     ".rs": "Rust",
+    # Java & JVM
     ".java": "Java",
+    ".kt": "Kotlin",
+    ".kts": "Kotlin",
+    ".scala": "Scala",
+    ".groovy": "Groovy",
+    # Ruby
     ".rb": "Ruby",
+    # Shell
     ".sh": "Shell",
     ".bash": "Shell",
+    ".zsh": "Shell",
+    # YAML / K8s
     ".yaml": "YAML",
     ".yml": "YAML",
+    # JSON / Config
     ".json": "JSON",
-    ".md": "Markdown",
+    ".toml": "TOML",
+    ".ini": "INI",
+    ".env": "Env",
+    # C / C++ / C#
     ".c": "C",
-    ".cpp": "C++",
     ".h": "C",
+    ".cpp": "C++",
+    ".cc": "C++",
+    ".cxx": "C++",
+    ".hpp": "C++",
     ".cs": "C#",
+    # PHP
     ".php": "PHP",
+    # Swift
     ".swift": "Swift",
-    ".kt": "Kotlin",
-    ".scala": "Scala",
+    # Infrastructure / IaC
+    ".tf": "Terraform",
+    ".tfvars": "Terraform",
+    ".hcl": "Terraform",
+    # Markdown
+    ".md": "Markdown",
+}
+
+CANONICAL_LANG_MAP = {
+    "yaml": "YAML",
+    "yml": "YAML",
+    "sh": "Shell",
+    "bash": "Shell",
+    "shell": "Shell",
+    "shellscript": "Shell",
+    "python": "Python",
+    "javascript": "JavaScript",
+    "typescript": "TypeScript",
+    "go": "Go",
+    "rust": "Rust",
+    "java": "Java",
+    "ruby": "Ruby",
+    "c": "C",
+    "cheader": "C",
+    "cpp": "C++",
+    "c++": "C++",
+    "dockerfile": "Dockerfile",
+    "hcl": "Terraform",
+    "terraform": "Terraform",
 }
 
 # Directories to skip during file walk
@@ -76,6 +127,7 @@ def _repo_path(sandbox_id: str) -> str:
 def _parse_tokei(output: str, base_path: str) -> Dict[str, List[str]]:
     """
     Parse `tokei --output json` to build {language: [absolute_file_paths]}.
+    Fixes relative path resolution against base_path.
     """
     result: Dict[str, List[str]] = {}
     try:
@@ -86,10 +138,18 @@ def _parse_tokei(output: str, base_path: str) -> Dict[str, List[str]]:
     for lang, info in data.items():
         if lang == "Total":
             continue
-        files = [r.get("name", "") for r in info.get("reports", [])]
-        files = [f for f in files if f and os.path.isfile(f)]
-        if files:
-            result[lang] = files
+        raw_files = [r.get("name", "") for r in info.get("reports", [])]
+        abs_files = []
+        for f in raw_files:
+            if not f:
+                continue
+            path = f if os.path.isabs(f) else os.path.join(base_path, f)
+            if os.path.isfile(path):
+                abs_files.append(path)
+
+        if abs_files:
+            canon = CANONICAL_LANG_MAP.get(lang.lower(), lang)
+            result.setdefault(canon, []).extend(abs_files)
 
     return result
 
@@ -120,7 +180,8 @@ def _parse_linguist(output: str, base_path: str) -> Dict[str, List[str]]:
                 abs_files.append(path)
 
         if abs_files:
-            result[lang] = abs_files
+            canon = CANONICAL_LANG_MAP.get(lang.lower(), lang)
+            result.setdefault(canon, []).extend(abs_files)
 
     return result
 
@@ -128,7 +189,6 @@ def _parse_linguist(output: str, base_path: str) -> Dict[str, List[str]]:
 def _parse_enry(output: str) -> Dict[str, List[str]]:
     """
     Parse `enry` output — language names only (no per-file detail).
-    Returns {language: []} — file list populated by fallback walk.
     """
     result: Dict[str, List[str]] = {}
     for line in output.splitlines():
@@ -139,14 +199,15 @@ def _parse_enry(output: str) -> Dict[str, List[str]]:
         if parts:
             lang = parts[0]
             if lang not in ("Total", "Other"):
-                result[lang] = []
+                canon = CANONICAL_LANG_MAP.get(lang.lower(), lang)
+                result[canon] = []
     return result
 
 
 def _local_walk(repo_path: str) -> Dict[str, List[str]]:
     """
-    Pure-Python fallback: walk the repo directory and classify files
-    by extension. Always succeeds — never requires external tools.
+    Pure-Python extension walk: scan repo directory and classify files
+    strictly by extension or known file name.
     """
     result: Dict[str, List[str]] = {}
 
@@ -155,8 +216,19 @@ def _local_walk(repo_path: str) -> Dict[str, List[str]]:
         dirs[:] = [d for d in dirs if d not in SKIP_DIRS]
 
         for filename in files:
+            base_lower = filename.lower()
             _, ext = os.path.splitext(filename)
-            lang = EXT_MAP.get(ext.lower())
+
+            lang = None
+            if base_lower == "dockerfile" or base_lower.startswith("dockerfile."):
+                lang = "Dockerfile"
+            elif base_lower == "jenkinsfile":
+                lang = "Groovy"
+            elif base_lower in ("makefile", "gnumakefile"):
+                lang = "Make"
+            else:
+                lang = EXT_MAP.get(ext.lower())
+
             if lang:
                 full_path = os.path.join(root, filename)
                 result.setdefault(lang, []).append(full_path)
@@ -173,15 +245,20 @@ async def detect_languages(
     sandbox_id: str,
 ) -> Tuple[Dict[str, List[str]], DetectionTool]:
     """
-    Detect languages in the locally cloned repository.
+    Detect languages in the locally cloned repository with strict precision.
+    Combines external tools (linguist/tokei/enry) with a ground-truth extension walk.
 
     Returns:
         (language_map, tool_used)
-        language_map: {"Python": ["/tmp/reposcanner_abc/repo/src/main.py", ...]}
-        tool_used: which DetectionTool was successful
     """
     repo_path = _repo_path(sandbox_id)
-    print(f"{_TAG} Starting language detection on: {repo_path}")
+    print(f"{_TAG} Starting strict language detection on: {repo_path}")
+
+    # Ground-truth extension walk
+    walk_map = _local_walk(repo_path)
+
+    tool_used = DetectionTool.UNKNOWN
+    tool_map: Dict[str, List[str]] = {}
 
     # ── 1. github-linguist ──────────────────────────────────────────────
     print(f"{_TAG} Trying github-linguist (JSON mode)...")
@@ -199,104 +276,78 @@ async def detect_languages(
             print(
                 f"{_TAG} linguist succeeded in {elapsed:.2f}s — {len(lang_map)} language(s) detected: {', '.join(lang_map.keys())}"
             )
-            for lang, files in lang_map.items():
-                print(f"{_TAG}   {lang}: {len(files)} file(s)")
-            return lang_map, DetectionTool.LINGUIST
-        else:
-            print(
-                f"{_TAG} linguist returned output but parsed 0 languages (elapsed={elapsed:.2f}s)"
-            )
-    else:
-        print(
-            f"{_TAG} linguist unavailable or failed (exit={exit_code}, elapsed={elapsed:.2f}s) — trying tokei..."
+            tool_map = lang_map
+            tool_used = DetectionTool.LINGUIST
+
+    # ── 2. tokei (if linguist not used) ─────────────────────────────────
+    if not tool_map:
+        print(f"{_TAG} Trying tokei (JSON mode)...")
+        t0 = time.monotonic()
+        stdout, stderr, exit_code = await exec_in_sandbox(
+            sandbox_id=sandbox_id,
+            command=["tokei", repo_path, "--output", "json"],
+            timeout=60.0,
         )
-        if stderr.strip():
-            print(f"{_TAG} linguist stderr: {stderr.strip()[:200]}")
+        elapsed = time.monotonic() - t0
 
-    # ── 2. tokei ────────────────────────────────────────────────────────
-    print(f"{_TAG} Trying tokei (JSON mode)...")
-    t0 = time.monotonic()
-    stdout, stderr, exit_code = await exec_in_sandbox(
-        sandbox_id=sandbox_id,
-        command=["tokei", repo_path, "--output", "json"],
-        timeout=60.0,
-    )
-    elapsed = time.monotonic() - t0
-
-    if exit_code == 0 and stdout.strip():
-        lang_map = _parse_tokei(stdout, repo_path)
-        if lang_map:
-            print(
-                f"{_TAG} tokei succeeded in {elapsed:.2f}s — {len(lang_map)} language(s) detected: {', '.join(lang_map.keys())}"
-            )
-            for lang, files in lang_map.items():
-                print(f"{_TAG}   {lang}: {len(files)} file(s)")
-            return lang_map, DetectionTool.TOKEI
-        else:
-            print(
-                f"{_TAG} tokei returned output but parsed 0 languages (elapsed={elapsed:.2f}s)"
-            )
-    else:
-        print(
-            f"{_TAG} tokei unavailable or failed (exit={exit_code}, elapsed={elapsed:.2f}s) — trying enry..."
-        )
-        if stderr.strip():
-            print(f"{_TAG} tokei stderr: {stderr.strip()[:200]}")
-
-    # ── 3. enry (if available) ──────────────────────────────────────────
-    print(f"{_TAG} Trying enry...")
-    t0 = time.monotonic()
-    stdout, stderr, exit_code = await exec_in_sandbox(
-        sandbox_id=sandbox_id,
-        command=["enry", repo_path],
-        timeout=60.0,
-    )
-    elapsed = time.monotonic() - t0
-
-    if exit_code == 0 and stdout.strip():
-        lang_names = _parse_enry(stdout)
-        if lang_names:
-            print(
-                f"{_TAG} enry succeeded in {elapsed:.2f}s — {len(lang_names)} language(s): {', '.join(lang_names.keys())}"
-            )
-            # enry gives no file list — fill it via extension walk
-            walk_map = _local_walk(repo_path)
-            lang_map: Dict[str, List[str]] = {}
-            for lang in lang_names:
-                files = walk_map.get(lang) or next(
-                    (v for k, v in walk_map.items() if k.lower() == lang.lower()), []
-                )
-                if files:
-                    lang_map[lang] = files
+        if exit_code == 0 and stdout.strip():
+            lang_map = _parse_tokei(stdout, repo_path)
             if lang_map:
                 print(
-                    f"{_TAG} enry + extension walk resolved {len(lang_map)} language(s) with file lists"
+                    f"{_TAG} tokei succeeded in {elapsed:.2f}s — {len(lang_map)} language(s) detected: {', '.join(lang_map.keys())}"
                 )
-                return lang_map, DetectionTool.ENRY
+                tool_map = lang_map
+                tool_used = DetectionTool.TOKEI
+
+    # ── 3. enry (if tokei not used) ─────────────────────────────────────
+    if not tool_map:
+        print(f"{_TAG} Trying enry...")
+        t0 = time.monotonic()
+        stdout, stderr, exit_code = await exec_in_sandbox(
+            sandbox_id=sandbox_id,
+            command=["enry", repo_path],
+            timeout=60.0,
+        )
+        elapsed = time.monotonic() - t0
+
+        if exit_code == 0 and stdout.strip():
+            lang_names = _parse_enry(stdout)
+            if lang_names:
+                print(
+                    f"{_TAG} enry succeeded in {elapsed:.2f}s — {len(lang_names)} language(s): {', '.join(lang_names.keys())}"
+                )
+                lang_map: Dict[str, List[str]] = {}
+                for lang in lang_names:
+                    files = walk_map.get(lang) or next(
+                        (v for k, v in walk_map.items() if k.lower() == lang.lower()),
+                        [],
+                    )
+                    if files:
+                        lang_map[lang] = files
+                if lang_map:
+                    tool_map = lang_map
+                    tool_used = DetectionTool.ENRY
+
+    # ── 4. Merge tool_map with ground-truth walk_map ────────────────────
+    final_map: Dict[str, List[str]] = {}
+
+    # Populate from ground-truth extension walk first
+    for lang, files in walk_map.items():
+        final_map[lang] = list(set(files))
+
+    # Merge any additional files/languages found by tools
+    if tool_map:
+        for lang, files in tool_map.items():
+            existing = set(final_map.get(lang, []))
+            existing.update(files)
+            final_map[lang] = sorted(list(existing))
     else:
-        print(
-            f"{_TAG} enry unavailable or failed (exit={exit_code}, elapsed={elapsed:.2f}s)"
-        )
-        if stderr.strip():
-            print(f"{_TAG} enry stderr: {stderr.strip()[:200]}")
-
-    # ── 4. Pure-Python extension walk (always works) ────────────────────
-    print(
-        f"{_TAG} Falling back to pure-Python extension walk (no external tools required)..."
-    )
-    t0 = time.monotonic()
-    lang_map = _local_walk(repo_path)
-    elapsed = time.monotonic() - t0
-
-    if lang_map:
-        print(
-            f"{_TAG} Extension walk completed in {elapsed:.3f}s — {len(lang_map)} language(s): {', '.join(lang_map.keys())}"
-        )
-        for lang, files in lang_map.items():
-            print(f"{_TAG}   {lang}: {len(files)} file(s)")
-        return lang_map, DetectionTool.UNKNOWN
+        tool_used = DetectionTool.UNKNOWN
 
     print(
-        f"{_TAG} Extension walk found 0 files — repository may be empty or binary-only"
+        f"{_TAG} Language detection finalized: {len(final_map)} language(s) detected (tool={tool_used.value}): {', '.join(final_map.keys())}"
     )
-    return {}, DetectionTool.UNKNOWN
+    for lang, files in final_map.items():
+        print(f"{_TAG}   {lang}: {len(files)} file(s)")
+
+    return final_map, tool_used

@@ -54,19 +54,19 @@ LOC_ONLY_LANGS = {
 }
 
 
-# K8s manifest signatures: a file must have BOTH apiVersion and kind at the top level
 def _is_k8s_yaml(filepath: str) -> bool:
     """
-    Heuristic: read the first 4 KB of a YAML file and check whether it contains
-    both 'apiVersion:' and 'kind:' at the start of a line — the two required
-    top-level fields in every Kubernetes resource manifest.
+    Heuristic: read the first 8 KB of a YAML file and check whether it contains
+    both 'apiVersion:' and 'kind:' — the two required top-level fields in every
+    Kubernetes resource manifest.
     """
+    import re
+
     try:
         with open(filepath, "r", errors="replace") as fh:
-            head = fh.read(4096)
-        lines = head.splitlines()
-        has_api_version = any(ln.startswith("apiVersion:") for ln in lines)
-        has_kind = any(ln.startswith("kind:") for ln in lines)
+            head = fh.read(8192)
+        has_api_version = bool(re.search(r"^\s*apiVersion\s*:", head, re.MULTILINE))
+        has_kind = bool(re.search(r"^\s*kind\s*:", head, re.MULTILINE))
         return has_api_version and has_kind
     except Exception:
         return False
@@ -113,6 +113,19 @@ def _read_files_as_dict(files: list[str], repo_root: str) -> dict[str, str]:
     return result, skipped
 
 
+def _clean_file_path(raw_path: str) -> str:
+    if not raw_path:
+        return ""
+    p = raw_path.strip()
+    if "/workspace/" in p:
+        p = p.split("/workspace/", 1)[1]
+    elif p.startswith("/workspace/"):
+        p = p[len("/workspace/") :]
+    elif p.startswith("./"):
+        p = p[2:]
+    return p
+
+
 def _parse_scan_report(report: dict, lang_lower: str) -> List[FindingItem]:
     """
     Parse the security_scan_report.json returned by the scan-jobs endpoint.
@@ -121,12 +134,10 @@ def _parse_scan_report(report: dict, lang_lower: str) -> List[FindingItem]:
     findings: List[FindingItem] = []
 
     # Findings are nested under tool names in the report
-    # Structure: {"findings": [...], "tool_outputs": {...}, ...}
     raw_findings = report.get("findings", [])
 
     for f in raw_findings:
         severity = f.get("severity", "INFO").upper()
-        # Normalize severity levels
         if severity not in ("CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"):
             severity = "INFO"
 
@@ -138,10 +149,13 @@ def _parse_scan_report(report: dict, lang_lower: str) -> List[FindingItem]:
             except (ValueError, TypeError):
                 sanitized_line = None
 
+        raw_file = f.get("file", f.get("filename", ""))
+        clean_file = _clean_file_path(raw_file)
+
         findings.append(
             FindingItem(
                 severity=severity,
-                file=f.get("file", f.get("filename", "")),
+                file=clean_file,
                 line=sanitized_line,
                 issue=f.get("issue", f.get("message", f.get("description", ""))),
                 tool=f.get("tool", "scanner"),

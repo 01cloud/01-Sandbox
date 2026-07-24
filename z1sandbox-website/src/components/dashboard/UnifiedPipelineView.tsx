@@ -100,21 +100,18 @@ export function UnifiedPipelineView({
   const liveLogs = generateLiveLogs(job);
   const allLogs = logs && logs.length > 0 ? logs : liveLogs;
   const isLogsFinished = allLogs.some((l) =>
-    l.includes("Security scans complete") ||
-    l.includes("Security scan complete") ||
-    l.includes("SCAN_REPORT_END") ||
-    l.includes("Persistent JSON Report") ||
     l.includes("All scans finished") ||
-    l.includes("consolidated stats")
+    l.includes("Repository scan complete") ||
+    l.includes("Final report assembled")
   );
 
   const isDoneOrComplete =
     job.status === "DONE" ||
     job.status === "COMPLETE" ||
-    isLogsFinished ||
     job.progress >= 100 ||
-    job.stepMessage?.toLowerCase().includes("complete") ||
-    !!(result && (result.languages || result.total_findings !== undefined || result.findings || result.critical_count !== undefined));
+    job.stepMessage === "Scan complete" ||
+    job.stepMessage === "All scans complete" ||
+    isLogsFinished;
 
   const currentStep = isDoneOrComplete ? "DONE" : job.status;
   const currentIdx = steps.findIndex((s) => s.key === currentStep);
