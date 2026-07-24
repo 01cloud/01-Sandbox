@@ -72,6 +72,9 @@ apiServer:
   configMap:
     PYTHONUNBUFFERED: "1"
     APP_ENV: "production"
+    MAX_CONCURRENT_LANG_SCANS: "2"
+    MAX_CONCURRENT_LANG_PODS: "2"
+    ALLOW_MOCK_KEYS: "false"
     PORT: "8000"
     BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"
     RATE_LIMIT_REQUESTS: "20"
@@ -86,7 +89,15 @@ apiServer:
     AUTH0_AUDIENCE: "https://api-sandbox"
     OPENSANDBOX_ROUTE_PREFIX: "{{ .Values.global.apiRoutePrefix }}"
     DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}","documentationUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}/docs"}]'
-    JWT_PUBLIC_JWKS: ""
+    SCANNER_IMAGE_PYTHON: "01community/01sandbox-scanner-python:1.0.0"
+    SCANNER_IMAGE_GO: "01community/01sandbox-scanner-go:1.0.0"
+    SCANNER_IMAGE_JAVA: "01community/01sandbox-scanner-java:1.0.0"
+    SCANNER_IMAGE_NODE: "01community/01sandbox-scanner-node:1.0.0"
+    SCANNER_IMAGE_K8S: "01community/01sandbox-scanner-k8s:1.0.0"
+    SCANNER_IMAGE_RUST: "01community/01sandbox-scanner-rust:1.0.0"
+    SCANNER_IMAGE_CPP: "01community/01sandbox-scanner-cpp:1.0.0"
+    SCANNER_IMAGE_RUBY: "01community/01sandbox-scanner-ruby:1.0.0"
+    SCANNER_IMAGE_DEFAULT: "01community/01sandbox-codeinterpreter:v0.6.15"
     SENDGRID_FROM_EMAIL: "sandbox@01security.com"
   secret:
     E2B_API_KEY: ""
@@ -173,15 +184,15 @@ metallb:
       - 10.0.10.9-10.0.10.9
   l2Advertisement:
     enabled: true
-################################################################
-# Kind Cluster component values
-################################################################
-kindCluster:
-  enabled: false
-  namespace: kind-cluster
-  runtimeClass:
-    name: gvisor
-    handler: runsc
+# ################################################################
+# # Kind Cluster component values
+# ################################################################
+# kindCluster:
+#   enabled: false
+#   namespace: kind-cluster
+#   runtimeClass:
+#     name: gvisor
+#     handler: runsc
 ################################################################
 # OpenSandbox component values
 ################################################################
@@ -204,8 +215,19 @@ opensandbox:
   server:
     replicaCount: 1
     sandboxImage: "01community/01sandbox-codeinterpreter:v0.6.15"
-    sandboxCpu: "1000m"
-    sandboxMemory: "1024Mi"
+    scannerImagePython: "01community/01sandbox-scanner-python:1.0.0"
+    scannerImageGo: "01community/01sandbox-scanner-go:1.0.0"
+    scannerImageJava: "01community/01sandbox-scanner-java:1.0.0"
+    scannerImageNode: "01community/01sandbox-scanner-node:1.0.0"
+    scannerImageK8s: "01community/01sandbox-scanner-k8s:1.0.0"
+    scannerImageRust: "01community/01sandbox-scanner-rust:1.0.0"
+    scannerImageCpp: "01community/01sandbox-scanner-cpp:1.0.0"
+    scannerImageRuby: "01community/01sandbox-scanner-ruby:1.0.0"
+    sandboxCpu: "200m"
+    sandboxMemory: "256Mi"
+    sandboxCreateTimeoutSeconds: 600
+    autoTerminationSeconds: 0
+    runtimeClassName: "kata-fc"
     image:
       repository: 01community/01sandbox-opensandbox-server
       tag: "v0.7.2"
@@ -216,7 +238,7 @@ opensandbox:
         memory: 128Mi
       limits:
         cpu: 500m
-        memory: 512Mi
+        memory: 256Mi
     storage:
       enabled: true
       pvcName: "scan-pvc"
