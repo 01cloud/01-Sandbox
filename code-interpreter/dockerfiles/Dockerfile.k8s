@@ -1,0 +1,35 @@
+FROM alpine:3.22
+
+ENV LANG=C.UTF-8
+
+RUN apk add --no-cache \
+    ca-certificates \
+    curl \
+    git \
+    python3 \
+    py3-pip \
+    yamllint \
+    bash
+
+# Install trivy, gitleaks, kube-linter, kubeconform, kube-score
+RUN set -eux; \
+    curl -fsSL --retry 5 --retry-connrefused https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz; \
+    tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks; \
+    curl -fsSL --retry 5 --retry-connrefused https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz -o /tmp/trivy.tar.gz; \
+    tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy; \
+    curl -fsSL --retry 5 --retry-connrefused https://github.com/stackrox/kube-linter/releases/download/v0.8.3/kube-linter-linux.tar.gz -o /tmp/kl.tar.gz; \
+    tar -xzf /tmp/kl.tar.gz -C /usr/local/bin kube-linter; \
+    curl -fsSL --retry 5 --retry-connrefused https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz -o /tmp/kc.tar.gz; \
+    tar -xzf /tmp/kc.tar.gz -C /usr/local/bin kubeconform; \
+    curl -fsSL --retry 5 --retry-connrefused https://github.com/zegl/kube-score/releases/download/v1.20.0/kube-score_1.20.0_linux_amd64.tar.gz -o /tmp/ks.tar.gz; \
+    tar -xzf /tmp/ks.tar.gz -C /usr/local/bin kube-score; \
+    chmod 755 /usr/local/bin/*; \
+    rm -rf /tmp/*
+
+RUN mkdir -p /opt/opensandbox/src /workspace /reports
+COPY src/ /opt/opensandbox/src/
+COPY scripts/code-interpreter.sh /opt/opensandbox/code-interpreter.sh
+RUN chmod +x /opt/opensandbox/code-interpreter.sh
+
+WORKDIR /workspace
+ENTRYPOINT ["/opt/opensandbox/code-interpreter.sh"]

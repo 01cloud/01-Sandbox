@@ -2,6 +2,7 @@
 import json
 import logging
 import os
+import shutil
 import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -131,34 +132,67 @@ class ScannerOrchestrator:
             elif ext in polyglot_exts:
                 self.classified_files["polyglot"].append(f)
 
-        # Build enabled tools list (Universal security baseline)
-        enabled = ["gitleaks", "semgrep", "trivy"]
+        enabled = []
 
+        # Universal tools: Run if installed on PATH
+        for tool in ["gitleaks", "semgrep", "trivy"]:
+            if shutil.which(tool):
+                enabled.append(tool)
+
+        # Language-specific tools: Run if files exist AND tool is installed on PATH
         if self.classified_files["python"]:
-            # Python: bandit + syntax check + universal tools
-            enabled.extend(["bandit", "py_compile"])
+            if shutil.which("bandit"):
+                enabled.append("bandit")
+            if shutil.which("pylint"):
+                enabled.append("pylint")
+            enabled.append("py_compile")
 
         if self.classified_files["go"]:
-            # Go: gosec + staticcheck + go_build + golangci-lint
-            enabled.extend(["go_build", "gosec", "staticcheck", "golangci_lint"])
+            if shutil.which("gosec"):
+                enabled.append("gosec")
+            if shutil.which("golangci-lint") or shutil.which("golangci_lint"):
+                enabled.append("golangci_lint")
+            if shutil.which("go"):
+                enabled.extend(["go_build", "staticcheck"])
 
-        if self.classified_files["yaml"]:
-            # General YAML: yamllint + universal tools
-            enabled.append("yamllint")
-
-        if self.classified_files["k8s"]:
-            # K8s YAML: Kube suite + universal tools
-            enabled.extend(["kubelinter", "kubeconform", "kubescore"])
+        if self.classified_files["yaml"] or self.classified_files["k8s"]:
+            if shutil.which("yamllint"):
+                enabled.append("yamllint")
+            if shutil.which("kube-linter"):
+                enabled.append("kubelinter")
+            if shutil.which("kubeconform"):
+                enabled.append("kubeconform")
+            if shutil.which("kube-score"):
+                enabled.append("kubescore")
 
         if self.classified_files["shell"]:
-            # Shell: shellcheck + universal tools
-            enabled.append("shellcheck")
+            if shutil.which("shellcheck"):
+                enabled.append("shellcheck")
+
+        # Additional language tools if present
+        if shutil.which("pmd"):
+            enabled.append("pmd")
+        if shutil.which("eslint"):
+            enabled.append("eslint")
+        if shutil.which("cargo-audit") or shutil.which("cargo"):
+            enabled.append("cargo_audit")
+        if shutil.which("cppcheck"):
+            enabled.append("cppcheck")
+        if shutil.which("clang-tidy"):
+            enabled.append("clang_tidy")
+        if shutil.which("rubocop"):
+            enabled.append("rubocop")
+        if shutil.which("brakeman"):
+            enabled.append("brakeman")
+
+        # Deduplicate while preserving order
+        unique_enabled = list(dict.fromkeys(enabled))
 
         logging.info(
-            f" Classified Files: K8s({len(self.classified_files['k8s'])}), YAML({len(self.classified_files['yaml'])}), Python({len(self.classified_files['python'])}), Shell({len(self.classified_files['shell'])})"
+            f" Classified Files: K8s({len(self.classified_files['k8s'])}), YAML({len(self.classified_files['yaml'])}), Python({len(self.classified_files['python'])}), Go({len(self.classified_files['go'])}), Shell({len(self.classified_files['shell'])})"
         )
-        logging.info(f" Enabled tools: {', '.join(enabled)}")
-        return enabled
+        logging.info(f" Enabled tools: {', '.join(unique_enabled)}")
+        return unique_enabled
 
     def _is_k8s_manifest(self, file_path: str) -> bool:
         """Heuristic to detect K8s manifests: Requires apiVersion AND (kind OR metadata)."""
@@ -283,6 +317,7 @@ class ScannerOrchestrator:
             "--config=/opt/opensandbox/rules/r2c-security-audit.yaml",
             "--config=/opt/opensandbox/rules/secrets.yaml",
             "--config=/opt/opensandbox/rules/python.yaml",
+            "--config=/opt/opensandbox/rules/javascript.yaml",
             "--json",
             "--quiet",
             self.target_dir,
@@ -396,7 +431,8 @@ class ScannerOrchestrator:
             return
 
         # Use parsable format to extract findings
-        cmd = ["/usr/local/bin/yamllint", "-f", "parsable"] + yaml_files
+        yamllint_bin = shutil.which("yamllint") or "yamllint"
+        cmd = [yamllint_bin, "-f", "parsable"] + yaml_files
         res = self.run_command(cmd, "Yamllint", cwd=self.target_dir)
 
         if res.get("stdout"):
@@ -989,6 +1025,328 @@ class ScannerOrchestrator:
 
         self.results["scans"]["shellcheck"] = res
 
+    def scan_pylint(self):
+        """Runs pylint static analysis on Python files."""
+        py_files = [
+            os.path.join(self.target_dir, f)
+            for f in self.results["files_scanned"]
+            if f.endswith(".py")
+        ]
+        if not py_files or not shutil.which("pylint"):
+            self.results["scans"]["pylint"] = {
+                "status": "SKIPPED",
+                "reason": "No Python files or tool not available",
+            }
+            return
+
+        cmd = ["pylint", "--output-format=json"] + py_files
+        res = self.run_command(cmd, "pylint")
+        if res.get("stdout"):
+            try:
+                data = json.loads(res["stdout"])
+                if data:
+                    res["status"] = "ISSUES_FOUND"
+                    for item in data:
+                        raw_type = item.get("type", "info").lower()
+                        sev = (
+                            "HIGH"
+                            if raw_type in ("error", "fatal")
+                            else ("MEDIUM" if raw_type == "warning" else "INFO")
+                        )
+                        with self.results_lock:
+                            self.results["findings"].append(
+                                {
+                                    "tool": "pylint",
+                                    "file": item.get("path"),
+                                    "line": item.get("line"),
+                                    "issue": f"{item.get('symbol')}: {item.get('message')}".lower(),
+                                    "severity": sev,
+                                    "remediation": f"fix code standard issue: {item.get('message-id')}".lower(),
+                                }
+                            )
+            except Exception as e:
+                logging.error(f" Failed to parse pylint JSON: {e}")
+        self.results["scans"]["pylint"] = res
+
+    def scan_eslint(self):
+        """Runs ESLint on JavaScript/TypeScript files."""
+        js_ts_files = [
+            os.path.join(self.target_dir, f)
+            for f in self.results["files_scanned"]
+            if f.endswith((".js", ".ts", ".jsx", ".tsx"))
+        ]
+        if not js_ts_files or not shutil.which("eslint"):
+            self.results["scans"]["eslint"] = {
+                "status": "SKIPPED",
+                "reason": "No JS/TS files or tool not available",
+            }
+            return
+
+        cmd = ["npx", "eslint", "--format=json"] + js_ts_files
+        res = self.run_command(cmd, "eslint")
+        if res.get("stdout"):
+            try:
+                data = json.loads(res["stdout"])
+                has_issues = False
+                for f_res in data:
+                    messages = f_res.get("messages", [])
+                    if messages:
+                        has_issues = True
+                    for msg in messages:
+                        sev = "HIGH" if msg.get("severity") == 2 else "MEDIUM"
+                        with self.results_lock:
+                            self.results["findings"].append(
+                                {
+                                    "tool": "eslint",
+                                    "file": f_res.get("filePath"),
+                                    "line": msg.get("line"),
+                                    "issue": str(msg.get("message")).lower(),
+                                    "severity": sev,
+                                    "remediation": f"eslint rule: {msg.get('ruleId')}".lower(),
+                                }
+                            )
+                if has_issues:
+                    res["status"] = "ISSUES_FOUND"
+            except Exception as e:
+                logging.error(f" Failed to parse eslint JSON: {e}")
+        self.results["scans"]["eslint"] = res
+
+    def scan_pmd(self):
+        """Runs PMD static analysis on Java code."""
+        java_files = [
+            f for f in self.results["files_scanned"] if f.endswith((".java", ".class"))
+        ]
+        if not java_files or not shutil.which("pmd"):
+            self.results["scans"]["pmd"] = {
+                "status": "SKIPPED",
+                "reason": "No Java files or tool not available",
+            }
+            return
+
+        cmd = [
+            "pmd",
+            "check",
+            "-d",
+            self.target_dir,
+            "-R",
+            "rulesets/java/quickstart.xml",
+            "-f",
+            "json",
+        ]
+        res = self.run_command(cmd, "pmd")
+        if res.get("stdout"):
+            try:
+                data = json.loads(res["stdout"])
+                files_res = data.get("files", [])
+                if files_res:
+                    res["status"] = "ISSUES_FOUND"
+                    for f_item in files_res:
+                        for viol in f_item.get("violations", []):
+                            with self.results_lock:
+                                self.results["findings"].append(
+                                    {
+                                        "tool": "pmd",
+                                        "file": f_item.get("filename"),
+                                        "line": viol.get("beginline"),
+                                        "issue": str(viol.get("description")).lower(),
+                                        "severity": "HIGH"
+                                        if viol.get("priority", 3) <= 2
+                                        else "MEDIUM",
+                                        "remediation": f"pmd rule: {viol.get('rule')}".lower(),
+                                    }
+                                )
+            except Exception as e:
+                logging.error(f" Failed to parse PMD JSON: {e}")
+        self.results["scans"]["pmd"] = res
+
+    def scan_cargo_audit(self):
+        """Runs cargo-audit on Rust projects."""
+        if not shutil.which("cargo-audit") and not shutil.which("cargo"):
+            self.results["scans"]["cargo_audit"] = {
+                "status": "SKIPPED",
+                "reason": "cargo-audit not installed",
+            }
+            return
+
+        cmd = ["cargo", "audit", "--json"]
+        res = self.run_command(cmd, "cargo-audit", cwd=self.target_dir)
+        if res.get("stdout"):
+            try:
+                data = json.loads(res["stdout"])
+                vulns = data.get("vulnerabilities", {}).get("list", [])
+                if vulns:
+                    res["status"] = "ISSUES_FOUND"
+                    for v in vulns:
+                        advisory = v.get("advisory", {})
+                        with self.results_lock:
+                            self.results["findings"].append(
+                                {
+                                    "tool": "cargo_audit",
+                                    "file": "Cargo.lock",
+                                    "line": None,
+                                    "issue": f"{advisory.get('id')}: {advisory.get('title')}".lower(),
+                                    "severity": "HIGH",
+                                    "remediation": f"update crate {advisory.get('package')}".lower(),
+                                }
+                            )
+            except Exception as e:
+                logging.error(f" Failed to parse cargo-audit JSON: {e}")
+        self.results["scans"]["cargo_audit"] = res
+
+    def scan_cppcheck(self):
+        """Runs cppcheck static analysis for C/C++ files."""
+        c_cpp_files = [
+            f
+            for f in self.results["files_scanned"]
+            if f.endswith((".c", ".cpp", ".cc", ".h", ".hpp"))
+        ]
+        if not c_cpp_files or not shutil.which("cppcheck"):
+            self.results["scans"]["cppcheck"] = {
+                "status": "SKIPPED",
+                "reason": "No C/C++ files or tool not available",
+            }
+            return
+
+        cmd = ["cppcheck", "--enable=all", "--quiet", self.target_dir]
+        res = self.run_command(cmd, "cppcheck")
+        if res.get("stderr") and (
+            "error" in res["stderr"].lower() or "warning" in res["stderr"].lower()
+        ):
+            res["status"] = "ISSUES_FOUND"
+            lines = res["stderr"].splitlines()
+            for line in lines[:10]:
+                if ":" in line:
+                    with self.results_lock:
+                        self.results["findings"].append(
+                            {
+                                "tool": "cppcheck",
+                                "file": line.split(":")[0],
+                                "line": None,
+                                "issue": line.lower(),
+                                "severity": "HIGH"
+                                if "error" in line.lower()
+                                else "MEDIUM",
+                                "remediation": "review cppcheck C/C++ warning",
+                            }
+                        )
+        self.results["scans"]["cppcheck"] = res
+
+    def scan_clang_tidy(self):
+        """Runs clang-tidy on C/C++ files."""
+        c_cpp_files = [
+            os.path.join(self.target_dir, f)
+            for f in self.results["files_scanned"]
+            if f.endswith((".c", ".cpp", ".cc", ".h", ".hpp"))
+        ]
+        if not c_cpp_files or not shutil.which("clang-tidy"):
+            self.results["scans"]["clang_tidy"] = {
+                "status": "SKIPPED",
+                "reason": "No C/C++ files or tool not available",
+            }
+            return
+
+        cmd = ["clang-tidy"] + c_cpp_files + ["--"]
+        res = self.run_command(cmd, "clang-tidy")
+        if res.get("stdout") and (
+            "warning:" in res["stdout"].lower() or "error:" in res["stdout"].lower()
+        ):
+            res["status"] = "ISSUES_FOUND"
+            lines = res["stdout"].splitlines()
+            for line in lines[:10]:
+                if ":" in line and (
+                    "warning:" in line.lower() or "error:" in line.lower()
+                ):
+                    with self.results_lock:
+                        self.results["findings"].append(
+                            {
+                                "tool": "clang_tidy",
+                                "file": line.split(":")[0],
+                                "line": None,
+                                "issue": line.lower(),
+                                "severity": "HIGH"
+                                if "error:" in line.lower()
+                                else "MEDIUM",
+                                "remediation": "review clang-tidy static analysis rule",
+                            }
+                        )
+        self.results["scans"]["clang_tidy"] = res
+
+    def scan_rubocop(self):
+        """Runs rubocop static analysis on Ruby code."""
+        rb_files = [f for f in self.results["files_scanned"] if f.endswith(".rb")]
+        if not rb_files or not shutil.which("rubocop"):
+            self.results["scans"]["rubocop"] = {
+                "status": "SKIPPED",
+                "reason": "No Ruby files or tool not available",
+            }
+            return
+
+        cmd = ["rubocop", "--format", "json", self.target_dir]
+        res = self.run_command(cmd, "rubocop")
+        if res.get("stdout"):
+            try:
+                data = json.loads(res["stdout"])
+                files_res = data.get("files", [])
+                if files_res:
+                    has_offenses = False
+                    for f_item in files_res:
+                        offenses = f_item.get("offenses", [])
+                        if offenses:
+                            has_offenses = True
+                        for off in offenses:
+                            with self.results_lock:
+                                self.results["findings"].append(
+                                    {
+                                        "tool": "rubocop",
+                                        "file": f_item.get("path"),
+                                        "line": off.get("location", {}).get("line"),
+                                        "issue": f"{off.get('cop_name')}: {off.get('message')}".lower(),
+                                        "severity": "HIGH"
+                                        if off.get("severity") in ("error", "fatal")
+                                        else "MEDIUM",
+                                        "remediation": f"rubocop rule: {off.get('cop_name')}".lower(),
+                                    }
+                                )
+                    if has_offenses:
+                        res["status"] = "ISSUES_FOUND"
+            except Exception as e:
+                logging.error(f" Failed to parse rubocop JSON: {e}")
+        self.results["scans"]["rubocop"] = res
+
+    def scan_brakeman(self):
+        """Runs brakeman Rails security scanner."""
+        rb_files = [f for f in self.results["files_scanned"] if f.endswith(".rb")]
+        if not rb_files or not shutil.which("brakeman"):
+            self.results["scans"]["brakeman"] = {
+                "status": "SKIPPED",
+                "reason": "No Ruby files or tool not available",
+            }
+            return
+
+        cmd = ["brakeman", "-p", self.target_dir, "-f", "json", "-q"]
+        res = self.run_command(cmd, "brakeman")
+        if res.get("stdout"):
+            try:
+                data = json.loads(res["stdout"])
+                warnings = data.get("warnings", [])
+                if warnings:
+                    res["status"] = "ISSUES_FOUND"
+                    for w in warnings:
+                        with self.results_lock:
+                            self.results["findings"].append(
+                                {
+                                    "tool": "brakeman",
+                                    "file": w.get("file"),
+                                    "line": w.get("line"),
+                                    "issue": f"{w.get('warning_type')}: {w.get('message')}".lower(),
+                                    "severity": w.get("confidence", "MEDIUM").upper(),
+                                    "remediation": f"brakeman advisory: {w.get('link')}".lower(),
+                                }
+                            )
+            except Exception as e:
+                logging.error(f" Failed to parse brakeman JSON: {e}")
+        self.results["scans"]["brakeman"] = res
+
     def _ensure_vulnerability_insights(self):
         """Safety net: Ensure every failed tool has at least one finding in the insights panel."""
         for tool, scan_res in self.results["scans"].items():
@@ -1033,6 +1391,14 @@ class ScannerOrchestrator:
             "gitleaks": self.scan_gitleaks,
             "yamllint": self.scan_yamllint,
             "bandit": self.scan_bandit,
+            "pylint": self.scan_pylint,
+            "eslint": self.scan_eslint,
+            "pmd": self.scan_pmd,
+            "cargo_audit": self.scan_cargo_audit,
+            "cppcheck": self.scan_cppcheck,
+            "clang_tidy": self.scan_clang_tidy,
+            "rubocop": self.scan_rubocop,
+            "brakeman": self.scan_brakeman,
             "go_build": self.scan_go_build,
             "gosec": self.scan_gosec,
             "staticcheck": self.scan_staticcheck,

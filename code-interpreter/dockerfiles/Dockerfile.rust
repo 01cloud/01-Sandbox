@@ -8,17 +8,18 @@ RUN apk add --no-cache \
     git \
     python3 \
     py3-pip \
-    openjdk17-jre-headless \
-    unzip \
     bash
 
-# Install PMD static analyzer
+# Install cargo-audit pre-compiled binary & semgrep
 RUN set -eux; \
-    PMD_VERSION="7.3.0"; \
-    curl -fsSL "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" -o /tmp/pmd.zip \
-    && unzip -q /tmp/pmd.zip -d /opt \
-    && ln -s /opt/pmd-bin-${PMD_VERSION}/bin/pmd /usr/local/bin/pmd \
-    && rm -rf /tmp/* /var/tmp/*
+    CARGO_AUDIT_VER="0.21.1"; \
+    curl -fsSL "https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv${CARGO_AUDIT_VER}/cargo-audit-x86_64-unknown-linux-musl-v${CARGO_AUDIT_VER}.tgz" -o /tmp/cargo-audit.tgz; \
+    tar -xzf /tmp/cargo-audit.tgz -C /usr/local/bin --strip-components=1; \
+    chmod 755 /usr/local/bin/cargo-audit; \
+    rm -rf /tmp/*
+
+RUN pip3 install --break-system-packages --no-cache-dir semgrep \
+    && rm -rf /root/.cache/pip
 
 # Install gitleaks and trivy
 RUN set -eux; \

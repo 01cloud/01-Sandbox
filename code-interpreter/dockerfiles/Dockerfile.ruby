@@ -6,19 +6,20 @@ RUN apk add --no-cache \
     ca-certificates \
     curl \
     git \
+    ruby \
     python3 \
     py3-pip \
-    openjdk17-jre-headless \
-    unzip \
     bash
 
-# Install PMD static analyzer
-RUN set -eux; \
-    PMD_VERSION="7.3.0"; \
-    curl -fsSL "https://github.com/pmd/pmd/releases/download/pmd_releases%2F${PMD_VERSION}/pmd-dist-${PMD_VERSION}-bin.zip" -o /tmp/pmd.zip \
-    && unzip -q /tmp/pmd.zip -d /opt \
-    && ln -s /opt/pmd-bin-${PMD_VERSION}/bin/pmd /usr/local/bin/pmd \
-    && rm -rf /tmp/* /var/tmp/*
+# Install Ruby security tools (rubocop & brakeman SAST scanners) and cleanup build headers
+RUN apk add --no-cache --virtual .build-deps build-base ruby-dev \
+    && gem install rubocop rubocop-performance brakeman --no-document \
+    && apk del .build-deps \
+    && rm -rf /root/.gem /tmp/* /var/tmp/* /usr/lib/ruby/gems/*/cache
+
+# Install semgrep for Ruby SAST scanning
+RUN pip3 install --break-system-packages --no-cache-dir semgrep \
+    && rm -rf /root/.cache/pip
 
 # Install gitleaks and trivy
 RUN set -eux; \

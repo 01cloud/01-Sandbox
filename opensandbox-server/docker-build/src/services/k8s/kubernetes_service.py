@@ -49,6 +49,7 @@ from src.services.k8s.client import K8sClient
 from src.services.k8s.provider_factory import create_workload_provider
 from src.services.sandbox_service import SandboxService
 from src.services.validators import (
+    _is_valid_label_value,
     calculate_expiration_or_raise,
     ensure_egress_configured,
     ensure_entrypoint,
@@ -288,9 +289,18 @@ class KubernetesSandboxService(SandboxService):
         if expires_at is None:
             labels[SANDBOX_MANUAL_CLEANUP_LABEL] = "true"
 
-        # Add user metadata as labels
+        # Add user metadata as labels (filtering out internal keys or invalid label values like image URLs)
         if request.metadata:
-            labels.update(request.metadata)
+            for k, v in request.metadata.items():
+                if k not in (
+                    "image",
+                    "sandboxImage",
+                    "runtime",
+                    "runtimeClassName",
+                    "runtime_class",
+                    "secure_runtime",
+                ) and _is_valid_label_value(v):
+                    labels[k] = v
 
         # Extract resource limits
         resource_limits = {}

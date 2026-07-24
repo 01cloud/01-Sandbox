@@ -20,7 +20,7 @@ for request/response validation and serialization.
 """
 
 from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field, RootModel, model_validator
 
@@ -350,7 +350,7 @@ class CreateSandboxRequest(BaseModel):
         None,
         description="Environment variables to inject into the sandbox runtime",
     )
-    metadata: Optional[Dict[str, str]] = Field(
+    metadata: Optional[Dict[str, Any]] = Field(
         None,
         description="Custom key-value metadata for management, filtering, and tagging",
     )
@@ -596,7 +596,7 @@ class ScanJobRequest(BaseModel):
     timeout: Optional[int] = Field(
         300, ge=60, description="Timeout for the scan sandbox in seconds."
     )
-    metadata: Optional[Dict[str, str]] = Field(
+    metadata: Optional[Dict[str, Any]] = Field(
         None, description="Custom metadata for the scan job."
     )
 

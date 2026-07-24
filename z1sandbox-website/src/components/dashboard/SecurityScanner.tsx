@@ -278,7 +278,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
   useEffect(() => {
     if (selectedJobId) {
       const job = jobs.find((j) => j.job_id === selectedJobId);
-      if (job && job.status === "DONE" && !volatileResults[selectedJobId]) {
+      if (job && (job.status === "DONE" || job.status === "COMPLETE" || job.progress >= 100 || job.stepMessage?.toLowerCase().includes("complete")) && !volatileResults[selectedJobId]) {
         lazyFetchResult(selectedJobId);
       }
     }

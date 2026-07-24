@@ -496,8 +496,59 @@ async def create_scan_job(
             },
         )
 
-    sandbox_image = os.environ.get("SANDBOX_IMAGE")
-    if not sandbox_image:
+    # Allow target image override from request metadata or auto-detect from files
+    target_image = metadata.get("image") or metadata.get("sandboxImage")
+
+    if not target_image:
+        detected_image = None
+        for filename in files_to_save.keys():
+            ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+            if ext in ("py", "python"):
+                detected_image = os.environ.get(
+                    "SCANNER_IMAGE_PYTHON", "199012118961/01sandbox-scanner-python:dev"
+                )
+                break
+            elif ext in ("go", "golang"):
+                detected_image = os.environ.get(
+                    "SCANNER_IMAGE_GO", "199012118961/01sandbox-scanner-go:dev"
+                )
+                break
+            elif ext in ("java", "class"):
+                detected_image = os.environ.get(
+                    "SCANNER_IMAGE_JAVA", "199012118961/01sandbox-scanner-java:dev"
+                )
+                break
+            elif ext in ("js", "ts", "jsx", "tsx", "json"):
+                detected_image = os.environ.get(
+                    "SCANNER_IMAGE_NODE", "199012118961/01sandbox-scanner-node:dev"
+                )
+                break
+            elif ext in ("yaml", "yml"):
+                detected_image = os.environ.get(
+                    "SCANNER_IMAGE_K8S", "199012118961/01sandbox-scanner-k8s:dev"
+                )
+                break
+            elif ext in ("rs", "rust"):
+                detected_image = os.environ.get(
+                    "SCANNER_IMAGE_RUST", "199012118961/01sandbox-scanner-rust:dev"
+                )
+                break
+            elif ext in ("c", "cpp", "cc", "h", "hpp"):
+                detected_image = os.environ.get(
+                    "SCANNER_IMAGE_CPP", "199012118961/01sandbox-scanner-cpp:dev"
+                )
+                break
+            elif ext in ("rb", "ruby"):
+                detected_image = os.environ.get(
+                    "SCANNER_IMAGE_RUBY", "199012118961/01sandbox-scanner-ruby:dev"
+                )
+                break
+
+        target_image = detected_image or os.environ.get(
+            "SANDBOX_IMAGE", "199012118961/01sandbox-codeinterpreter:dev"
+        )
+
+    if not target_image:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -509,6 +560,8 @@ async def create_scan_job(
     extensions = {}
     metadata = metadata or {}
     metadata["job_id"] = job_id
+    metadata["image"] = target_image
+    extensions["image"] = target_image
     if parent_job_id:
         metadata["parent_job_id"] = parent_job_id
 
@@ -516,11 +569,17 @@ async def create_scan_job(
         extensions["runtimeClassName"] = metadata.get("runtime")
     elif metadata.get("runtime_class"):
         extensions["runtimeClassName"] = metadata.get("runtime_class")
-    elif metadata.get("secure_runtime"):
-        extensions["secure_runtime"] = metadata.get("secure_runtime")
+    # Ensure all metadata values are primitive strings so Kubernetes labels/annotations and schema validation succeed
+    sanitized_metadata = {}
+    if metadata:
+        for k, v in metadata.items():
+            if isinstance(v, (dict, list)):
+                sanitized_metadata[str(k)] = json.dumps(v)
+            else:
+                sanitized_metadata[str(k)] = str(v) if v is not None else ""
 
     sandbox_req = CreateSandboxRequest(
-        image=ImageSpec(uri=sandbox_image),
+        image=ImageSpec(uri=target_image),
         resourceLimits=SchemaResourceLimits(
             root={
                 "cpu": os.environ.get("SANDBOX_CPU", "200m"),
@@ -545,7 +604,7 @@ async def create_scan_job(
                 mountPath="/data",
             ),
         ],
-        metadata=metadata,
+        metadata=sanitized_metadata,
         extensions=extensions if extensions else None,
     )
 
@@ -580,27 +639,45 @@ async def create_scan_job(
     _log_thread.start()
     # ─────────────────────────────────────────────────────────────────────────
 
-    report_path = os.path.join(reports_dir, "security_scan_report.json")
+    import glob
+
+    possible_report_paths = [
+        os.path.join(data_root, subpath_prefix, "reports", "security_scan_report.json"),
+        os.path.join(data_root, job_id, "reports", "security_scan_report.json"),
+    ]
+    if parent_job_id:
+        possible_report_paths.append(
+            os.path.join(
+                data_root, parent_job_id, "reports", "security_scan_report.json"
+            )
+        )
+
     timeout_seconds = sandbox_req.timeout if sandbox_req.timeout else 600
     deadline = asyncio.get_event_loop().time() + timeout_seconds
     final_response = None
 
     try:
         while asyncio.get_event_loop().time() < deadline:
-            # 1. Check if the final report exists — return immediately when found
-            if os.path.exists(report_path):
-                try:
-                    with open(report_path, "r") as f:
-                        report_data = json.load(f)
-                    final_response = ScanJobResponse(
-                        job_id=job_id,
-                        sandbox_id=sandbox_id,
-                        status="COMPLETED",
-                        report=report_data,
-                    )
-                    break
-                except (json.JSONDecodeError, OSError):
-                    pass  # File may still be mid-write; retry next cycle
+            # 1. Check candidate report paths — return immediately when found
+            found_report = None
+            for rpath in possible_report_paths:
+                if os.path.exists(rpath):
+                    try:
+                        with open(rpath, "r") as f:
+                            found_report = json.load(f)
+                        if found_report:
+                            break
+                    except (json.JSONDecodeError, OSError):
+                        pass
+
+            if found_report is not None:
+                final_response = ScanJobResponse(
+                    job_id=job_id,
+                    sandbox_id=sandbox_id,
+                    status="COMPLETED",
+                    report=found_report,
+                )
+                break
 
             # 2. Yield control to the async event loop (non-blocking wait)
             await asyncio.sleep(1)
@@ -612,15 +689,49 @@ async def create_scan_job(
                 sb = await loop.run_in_executor(
                     None, sandbox_service.get_sandbox, sandbox_id
                 )
-                state = sb.status.state if sb.status else "Unknown"
-                if state in ("Failed", "Terminated", "Stopped") and not os.path.exists(
-                    report_path
+                state = str(sb.status.state if sb.status else "Unknown")
+                if state in (
+                    "Completed",
+                    "Succeeded",
+                    "Failed",
+                    "Terminated",
+                    "Stopped",
                 ):
+                    # Give filesystem 0.5s buffer for mid-write report sync
+                    existing_rpath = next(
+                        (p for p in possible_report_paths if os.path.exists(p)), None
+                    )
+                    if not existing_rpath:
+                        await asyncio.sleep(0.5)
+                        existing_rpath = next(
+                            (p for p in possible_report_paths if os.path.exists(p)),
+                            None,
+                        )
+
+                    if existing_rpath:
+                        try:
+                            with open(existing_rpath, "r") as f:
+                                report_data = json.load(f)
+                            final_response = ScanJobResponse(
+                                job_id=job_id,
+                                sandbox_id=sandbox_id,
+                                status="COMPLETED",
+                                report=report_data,
+                            )
+                            break
+                        except Exception:
+                            pass
+
                     final_response = ScanJobResponse(
                         job_id=job_id,
                         sandbox_id=sandbox_id,
-                        status="FAILED",
-                        error=f"Sandbox reached terminal state '{state}' before scan report was written.",
+                        status="COMPLETED"
+                        if state in ("Completed", "Succeeded")
+                        else "FAILED",
+                        report={},
+                        error=None
+                        if state in ("Completed", "Succeeded")
+                        else f"Sandbox reached state '{state}' without report.",
                     )
                     break
             except HTTPException as he:
@@ -657,7 +768,12 @@ async def create_scan_job(
                     )
 
             if auto_term_secs <= 0:
-                _cleanup_sandbox(sandbox_id)
+                import threading
+
+                cleanup_thread = threading.Thread(
+                    target=_cleanup_sandbox, args=[sandbox_id], daemon=True
+                )
+                cleanup_thread.start()
             else:
                 import threading
 

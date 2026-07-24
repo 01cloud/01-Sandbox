@@ -249,3 +249,62 @@ def jwt_config():
         "auth0_domain": os.environ.get("AUTH0_DOMAIN", ""),
         "auth0_audience": os.environ.get("AUTH0_AUDIENCE", "code-inspector-api"),
     }
+
+
+def scanner_images() -> dict[str, str]:
+    """
+    Returns a mapping of programming language names to their designated scanner container images.
+    Can be overridden via environment variables for Helm deployment flexibility.
+    """
+    return {
+        "python": os.environ.get(
+            "SCANNER_IMAGE_PYTHON", "199012118961/01sandbox-scanner-python:dev"
+        ),
+        "go": os.environ.get(
+            "SCANNER_IMAGE_GO", "199012118961/01sandbox-scanner-go:dev"
+        ),
+        "java": os.environ.get(
+            "SCANNER_IMAGE_JAVA", "199012118961/01sandbox-scanner-java:dev"
+        ),
+        "javascript": os.environ.get(
+            "SCANNER_IMAGE_NODE", "199012118961/01sandbox-scanner-node:dev"
+        ),
+        "typescript": os.environ.get(
+            "SCANNER_IMAGE_NODE", "199012118961/01sandbox-scanner-node:dev"
+        ),
+        "yaml": os.environ.get(
+            "SCANNER_IMAGE_K8S", "199012118961/01sandbox-scanner-k8s:dev"
+        ),
+        "kubernetes yaml": os.environ.get(
+            "SCANNER_IMAGE_K8S", "199012118961/01sandbox-scanner-k8s:dev"
+        ),
+        "shell": os.environ.get(
+            "SCANNER_IMAGE_K8S", "199012118961/01sandbox-scanner-k8s:dev"
+        ),
+        "rust": os.environ.get(
+            "SCANNER_IMAGE_RUST", "199012118961/01sandbox-scanner-rust:dev"
+        ),
+        "c": os.environ.get(
+            "SCANNER_IMAGE_CPP", "199012118961/01sandbox-scanner-cpp:dev"
+        ),
+        "cpp": os.environ.get(
+            "SCANNER_IMAGE_CPP", "199012118961/01sandbox-scanner-cpp:dev"
+        ),
+        "c++": os.environ.get(
+            "SCANNER_IMAGE_CPP", "199012118961/01sandbox-scanner-cpp:dev"
+        ),
+        "ruby": os.environ.get(
+            "SCANNER_IMAGE_RUBY", "199012118961/01sandbox-scanner-ruby:dev"
+        ),
+        "default": os.environ.get(
+            "SCANNER_IMAGE_DEFAULT", "199012118961/01sandbox-codeinterpreter:dev"
+        ),
+    }
+
+
+def max_concurrent_lang_pods() -> int:
+    """Returns max concurrent language scan pods (default: 2, configurable via MAX_CONCURRENT_LANG_PODS env var)."""
+    try:
+        return int(os.environ.get("MAX_CONCURRENT_LANG_PODS", "2"))
+    except ValueError:
+        return 2

@@ -249,6 +249,22 @@ class BatchSandboxProvider(WorkloadProvider):
         if runtime_class:
             pod_spec["runtimeClassName"] = runtime_class
 
+        # Override container image if custom image is specified in extensions
+        if extensions and "image" in extensions:
+            custom_image = extensions["image"]
+            logger.info(
+                "[DEBUG DYNAMIC IMAGE] Overriding main container image to %s",
+                custom_image,
+            )
+            containers[0]["image"] = custom_image
+        elif extensions and "sandboxImage" in extensions:
+            custom_image = extensions["sandboxImage"]
+            logger.info(
+                "[DEBUG DYNAMIC IMAGE] Overriding main container image to %s",
+                custom_image,
+            )
+            containers[0]["image"] = custom_image
+
         # Inject imagePullSecrets if image auth is provided
         # secret_name is deterministic so it can be embedded before the Secret is created
         if image_spec.auth:
@@ -269,6 +285,7 @@ class BatchSandboxProvider(WorkloadProvider):
 
         spec: Dict[str, Any] = {
             "replicas": 1,
+            "taskResourcePolicyWhenCompleted": "Release",
             "template": {
                 "spec": pod_spec,
             },

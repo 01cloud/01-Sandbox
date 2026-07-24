@@ -88,6 +88,20 @@ export function useJobStore(
         ...prev,
         [jobId]: data
       }));
+
+      const stored = jobStore.get(jobId);
+      if (stored && stored.status !== "DONE") {
+        const updatedJob: GenericJob = {
+          ...stored,
+          status: "DONE",
+          progress: 100,
+          stepMessage: "Scan complete",
+          completedAt: stored.completedAt || new Date().toISOString()
+        };
+        jobStore.upsert(updatedJob);
+        setJobs(jobStore.getAll(jobType));
+      }
+
       return data;
     } catch (e) {
       console.error(`[useJobStore] Error fetching result for job ${jobId}`, e);
@@ -132,6 +146,20 @@ export function useJobStore(
               [jobId]: [...currentLogs, ev.message]
             };
           });
+
+          const msg = ev.message || "";
+          if (msg.includes("Security scans complete") || msg.includes("Security scan complete") || msg.includes("SCAN_REPORT_END")) {
+            const finishedJob: GenericJob = {
+              ...stored,
+              status: "DONE",
+              progress: 100,
+              stepMessage: "Scan complete",
+              completedAt: stored.completedAt || new Date().toISOString()
+            };
+            jobStore.upsert(finishedJob);
+            setJobs(jobStore.getAll(jobType));
+            lazyFetchResult(jobId);
+          }
           return;
         }
 
@@ -285,23 +313,28 @@ export function useJobStore(
             lazyFetchResult(sj.job_id);
           }
         } else {
-          // ── Existing job: Sync state if the SSE stream is not active ────────
-          if (!esRefs.current[sj.job_id]) {
+          // ── Existing job: Sync state if server reached terminal state, if result exists, or if SSE stream is not active ────────
+          const hasResult = !!volatileResults[sj.job_id];
+          const isTerminalServerState = ["DONE", "ERROR", "CANCELLED"].includes(sj.status) || hasResult;
+
+          if (isTerminalServerState || !esRefs.current[sj.job_id]) {
+            const existingProgress = typeof existing.progress === "number" && !isNaN(existing.progress) ? existing.progress : 0;
+            const newProgress = typeof sj.progress === "number" && !isNaN(sj.progress) ? sj.progress : 0;
+            const targetStatus = hasResult ? "DONE" : sj.status;
+            const targetProgress = (isTerminalServerState && targetStatus === "DONE") ? 100 : Math.max(existingProgress, newProgress);
+
             // If the server state is different, update local state
             if (
-              existing.status !== sj.status ||
-              existing.progress !== sj.progress ||
+              existing.status !== targetStatus ||
+              existing.progress !== targetProgress ||
               existing.stepMessage !== sj.stepMessage ||
               JSON.stringify(existing.detail) !== JSON.stringify(sj.detail)
             ) {
-              const existingProgress = typeof existing.progress === "number" && !isNaN(existing.progress) ? existing.progress : 0;
-              const newProgress = typeof sj.progress === "number" && !isNaN(sj.progress) ? sj.progress : 0;
-
               const updatedJob: GenericJob = {
                 ...existing,
-                status: sj.status,
-                progress: Math.max(existingProgress, newProgress),
-                stepMessage: sj.stepMessage,
+                status: targetStatus,
+                progress: targetProgress,
+                stepMessage: hasResult ? "Scan complete" : sj.stepMessage,
                 eventIndex: sj.eventIndex ?? existing.eventIndex,
                 summary: sj.summary ?? existing.summary,
                 detail: sj.detail ?? existing.detail,
@@ -310,14 +343,19 @@ export function useJobStore(
               jobStore.upsert(updatedJob);
               didUpdate = true;
 
-              if (sj.status === "DONE") {
+              if (targetStatus === "DONE") {
+                if (esRefs.current[sj.job_id]) {
+                  esRefs.current[sj.job_id].close();
+                  delete esRefs.current[sj.job_id];
+                }
                 lazyFetchResult(sj.job_id);
               }
             }
 
             // Attempt to reconnect SSE if it's still active on the server and we haven't hit the error limit
             if (
-              !["DONE", "ERROR", "CANCELLED"].includes(sj.status) &&
+              !isTerminalServerState &&
+              !esRefs.current[sj.job_id] &&
               (streamErrors.current[sj.job_id] || 0) < 3
             ) {
               openStream(sj.job_id, existing.eventIndex ?? 0);

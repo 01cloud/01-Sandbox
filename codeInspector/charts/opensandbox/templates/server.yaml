@@ -73,6 +73,22 @@ spec:
               value: {{ .Values.global.apiRoutePrefix | default "/api/v1/01sbx" | quote }}
             - name: SANDBOX_IMAGE
               value: {{ .Values.server.sandboxImage | quote }}
+            - name: SCANNER_IMAGE_PYTHON
+              value: {{ .Values.server.scannerImagePython | default "199012118961/01sandbox-scanner-python:dev" | quote }}
+            - name: SCANNER_IMAGE_GO
+              value: {{ .Values.server.scannerImageGo | default "199012118961/01sandbox-scanner-go:dev" | quote }}
+            - name: SCANNER_IMAGE_JAVA
+              value: {{ .Values.server.scannerImageJava | default "199012118961/01sandbox-scanner-java:dev" | quote }}
+            - name: SCANNER_IMAGE_NODE
+              value: {{ .Values.server.scannerImageNode | default "199012118961/01sandbox-scanner-node:dev" | quote }}
+            - name: SCANNER_IMAGE_K8S
+              value: {{ .Values.server.scannerImageK8s | default "199012118961/01sandbox-scanner-k8s:dev" | quote }}
+            - name: SCANNER_IMAGE_RUST
+              value: {{ .Values.server.scannerImageRust | default "199012118961/01sandbox-scanner-rust:dev" | quote }}
+            - name: SCANNER_IMAGE_CPP
+              value: {{ .Values.server.scannerImageCpp | default "199012118961/01sandbox-scanner-cpp:dev" | quote }}
+            - name: SCANNER_IMAGE_RUBY
+              value: {{ .Values.server.scannerImageRuby | default "199012118961/01sandbox-scanner-ruby:dev" | quote }}
             - name: SANDBOX_CPU
               value: {{ .Values.server.sandboxCpu | default "200m" | quote }}
             - name: SANDBOX_MEMORY

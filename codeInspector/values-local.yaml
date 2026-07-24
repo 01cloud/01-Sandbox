@@ -75,6 +75,15 @@ apiServer:
     PYTHONUNBUFFERED: "1"
     APP_ENV: "production"
     MAX_CONCURRENT_LANG_SCANS: "2"
+    SCANNER_IMAGE_PYTHON: "199012118961/01sandbox-scanner-python:dev"
+    SCANNER_IMAGE_GO: "199012118961/01sandbox-scanner-go:dev"
+    SCANNER_IMAGE_JAVA: "199012118961/01sandbox-scanner-java:dev"
+    SCANNER_IMAGE_NODE: "199012118961/01sandbox-scanner-node:dev"
+    SCANNER_IMAGE_K8S: "199012118961/01sandbox-scanner-k8s:dev"
+    SCANNER_IMAGE_RUST: "199012118961/01sandbox-scanner-rust:dev"
+    SCANNER_IMAGE_CPP: "199012118961/01sandbox-scanner-cpp:dev"
+    SCANNER_IMAGE_RUBY: "199012118961/01sandbox-scanner-ruby:dev"
+    SCANNER_IMAGE_DEFAULT: "199012118961/01sandbox-codeinterpreter:dev"
     PORT: "8000"
     BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"
     RATE_LIMIT_REQUESTS: "20"
@@ -92,6 +101,7 @@ apiServer:
     DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"http://10.0.8.9{{ .Values.global.apiRoutePrefix }}","documentationUrl":"http://10.0.8.9{{ .Values.global.apiRoutePrefix }}/docs"}]'
     JWT_PUBLIC_JWKS: ""
     SENDGRID_FROM_EMAIL: "sandbox@01security.com"
+    MAX_CONCURRENT_LANG_PODS: "2"
   secret:
     E2B_API_KEY: ""
     JWT_PRIVATE_KEY: |
@@ -220,10 +230,18 @@ opensandbox:
   server:
     replicaCount: 1
     sandboxImage: "199012118961/01sandbox-codeinterpreter:dev"
+    scannerImagePython: "199012118961/01sandbox-scanner-python:dev"
+    scannerImageGo: "199012118961/01sandbox-scanner-go:dev"
+    scannerImageJava: "199012118961/01sandbox-scanner-java:dev"
+    scannerImageNode: "199012118961/01sandbox-scanner-node:dev"
+    scannerImageK8s: "199012118961/01sandbox-scanner-k8s:dev"
+    scannerImageRust: "199012118961/01sandbox-scanner-rust:dev"
+    scannerImageCpp: "199012118961/01sandbox-scanner-cpp:dev"
+    scannerImageRuby: "199012118961/01sandbox-scanner-ruby:dev"
     sandboxCpu: "200m"
     sandboxMemory: "256Mi"
     sandboxCreateTimeoutSeconds: 600
-    autoTerminationSeconds: 10
+    autoTerminationSeconds: 0
     runtimeClassName: "kata-fc"
     image:
       repository: 199012118961/01sandbox-opensandbox-server

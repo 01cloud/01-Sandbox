@@ -316,11 +316,18 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
 
   // Custom renderer for scan result findings
   const renderRepoScanResult = (result: any) => {
+    if (!result) return null;
+    const owner = result.owner || (result.repo_url ? result.repo_url.split("github.com/")[1]?.split("/")[0] : "") || "Repository";
+    const repo = result.repo || (result.repo_url ? result.repo_url.split("/").pop() : "") || "Scan";
+    const totalFindings = result.total_findings ?? 0;
+    const totalFiles = result.total_files ?? 0;
+    const duration = result.scan_duration_seconds ?? 0;
+    const detectionTool = result.detection_tool || "OpenSandbox";
+
     const langEntries = result && result.languages ? Object.entries(result.languages) : [];
     const chartData = langEntries.map(([lang, r]: [string, any]) => ({
       name: lang, value: r && typeof r.percentage === "number" ? parseFloat(r.percentage.toFixed(1)) : 0,
     }));
-    const totalFiles = langEntries.reduce((sum, [, r]: [string, any]) => sum + (r?.file_count || 0), 0);
 
     return (
       <div className="space-y-6 mt-4 animate-in fade-in duration-500">
@@ -330,17 +337,17 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
             <CheckCircle2 className="w-5 h-5 text-emerald-500 dark:text-emerald-400" />
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-black text-base text-foreground">{result.owner}/{result.repo}</p>
+            <p className="font-black text-base text-foreground">{owner}/{repo}</p>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              {result.detection_tool} · {result.total_files} files · {result.scan_duration_seconds}s
+              {detectionTool} · {totalFiles} files · {duration}s
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <Badge variant="outline" className="bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/25 font-bold text-xs px-3 py-1">
               {langEntries.length} Languages
             </Badge>
-            <Badge variant="outline" className={cn("font-bold text-xs px-3 py-1", result.total_findings > 0 ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/25" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25")}>
-              {result.total_findings} Findings
+            <Badge variant="outline" className={cn("font-bold text-xs px-3 py-1", totalFindings > 0 ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/25" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25")}>
+              {totalFindings} Findings
             </Badge>
           </div>
         </div>
@@ -379,7 +386,7 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
             {/* Grid legend list with file count and percentage (no individual bars) */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 pt-1">
               {chartData.map((d, i) => {
-                const langInfo = (result.languages as any)[d.name];
+                const langInfo = result?.languages ? (result.languages as any)[d.name] : null;
                 return (
                   <div key={d.name} className="flex items-center justify-between text-xs py-1 border-b border-border/10">
                     <div className="flex items-center gap-2 min-w-0">
@@ -411,7 +418,8 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {langEntries.map(([lang, info]: [string, any], i) => {
-              const sevCounts = info.findings.reduce(
+              const findingsList = Array.isArray(info?.findings) ? info.findings : [];
+              const sevCounts = findingsList.reduce(
                 (acc: any, f: any) => {
                   const sev = (f.severity || "INFO").toUpperCase();
                   if (sev === "CRITICAL") acc.critical = (acc.critical || 0) + 1;
@@ -484,13 +492,13 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
                   </button>
                   {expandedLang === lang && (
                     <div className="border-t border-border/50">
-                      {info.findings.length === 0 ? (
+                      {findingsList.length === 0 ? (
                         <div className="p-5 text-xs font-semibold text-muted-foreground/60">
                           No security findings for this language
                         </div>
                       ) : (
                         <div className="overflow-y-auto p-4 space-y-2.5 max-h-[420px]">
-                          {info.findings.map((f: any, fi: number) => {
+                          {findingsList.map((f: any, fi: number) => {
                             const sev = f.severity?.toUpperCase() ?? "INFO";
                             const sevColor =
                               sev === "CRITICAL" ? "border-red-500/30 bg-red-500/[0.03] text-red-900 dark:text-red-200" :

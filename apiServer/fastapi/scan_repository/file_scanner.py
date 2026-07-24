@@ -27,7 +27,12 @@ from typing import List, Optional, Tuple
 from uuid import uuid4
 
 import httpx
-from config import opensandbox_base_url, opensandbox_headers, opensandbox_route_prefix
+from config import (
+    opensandbox_base_url,
+    opensandbox_headers,
+    opensandbox_route_prefix,
+    scanner_images,
+)
 
 from .models import FindingItem, LanguageScanResult
 
@@ -241,6 +246,7 @@ async def _submit_scan_job(
     tools: Optional[list[str]] = None,
     parent_job_id: Optional[str] = None,
     runtime: Optional[str] = None,
+    language: Optional[str] = None,
 ) -> dict:
     """
     Submit files to POST /scan-jobs and wait for the result.
@@ -265,11 +271,17 @@ async def _submit_scan_job(
     prefix = opensandbox_route_prefix()
     url = f"{base_url.rstrip('/')}{prefix}/scan-jobs"
 
+    # Resolve dynamic scanner image based on target language
+    target_lang = (language or "").strip().lower()
+    img_map = scanner_images()
+    selected_image = img_map.get(target_lang, img_map.get("default"))
+
     payload: dict = {
         "files": files_dict,
         "timeout": 900,  # 15 minutes sandbox lifetime timeout
         "metadata": {
             "job_id": child_job_id,
+            "image": selected_image,
         },
     }
     if runtime:
@@ -334,8 +346,22 @@ async def _submit_scan_job(
             raw_count = len(report.get("findings", []))
             print(f"{_TAG}   ← report received: {raw_count} raw finding(s)")
 
-            # Immediately clean up the temporary child scan job from PVC and terminate sandbox pod
-            # Note: Disabled immediate deletion so that the report and workspace persist on the PVC until the parent scan job is deleted.
+            # Immediately clean up the temporary child scan job and terminate sandbox pod
+            try:
+                delete_url = f"{base_url.rstrip('/')}{prefix}/scan-jobs/{child_job_id}"
+                await client.delete(
+                    delete_url,
+                    params={"terminate": "true"},
+                    headers=opensandbox_headers(),
+                )
+                print(
+                    f"{_TAG}   [CLEANUP] Terminated completed sandbox pod {child_job_id}"
+                )
+            except Exception as del_err:
+                print(
+                    f"{_TAG}   WARNING: failed to terminate child job {child_job_id}: {del_err}"
+                )
+
             try:
                 # Purge child job from Redis/job_tracker
                 try:
@@ -606,7 +632,11 @@ async def scan_language(
         f"{_TAG} [{language}] Submitting {len(files_dict)} file(s) to scan-jobs (tools: {tool_hints or 'auto'})"
     )
     report = await _submit_scan_job(
-        files_dict, tools=tool_hints, parent_job_id=parent_job_id, runtime=runtime
+        files_dict,
+        tools=tool_hints,
+        parent_job_id=parent_job_id,
+        runtime=runtime,
+        language=language,
     )
 
     elapsed = time.monotonic() - t0
@@ -739,6 +769,7 @@ async def scan_yaml_files(
                 tools=["yamllint"],
                 parent_job_id=parent_job_id,
                 runtime=runtime,
+                language="yaml",
             )
             elapsed_yaml = time.monotonic() - t_yaml0
             if report:
@@ -804,7 +835,11 @@ async def scan_yaml_files(
             )
             t_k8s0 = time.monotonic()
             report = await _submit_scan_job(
-                k8s_dict, tools=k8s_tools, parent_job_id=parent_job_id, runtime=runtime
+                k8s_dict,
+                tools=k8s_tools,
+                parent_job_id=parent_job_id,
+                runtime=runtime,
+                language="kubernetes yaml",
             )
             elapsed_k8s = time.monotonic() - t_k8s0
             if report:

@@ -72,6 +72,12 @@ RUN pip3 install --break-system-packages --no-cache-dir \
     yamllint \
     pylint
 
+# Install gitleaks and trivy
+RUN set -eux; \
+    curl -fsSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz | tar -xz -C /usr/local/bin gitleaks; \
+    curl -fsSL https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz | tar -xz -C /usr/local/bin trivy; \
+    chmod 755 /usr/local/bin/gitleaks /usr/local/bin/trivy
+
 # Setup workspace & copy scanner orchestrator
 RUN mkdir -p /opt/opensandbox/src /workspace /reports
 COPY src/ /opt/opensandbox/src/

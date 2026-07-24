@@ -6,17 +6,14 @@ RUN apk add --no-cache \
     ca-certificates \
     curl \
     git \
+    clang-extra-tools \
+    cppcheck \
     python3 \
     py3-pip \
-    nodejs \
-    npm \
-    bash
+    bash \
+    && rm -rf /usr/bin/clangd /usr/bin/clang-doc /usr/bin/clang-query /usr/bin/clang-refactor /usr/bin/clang-apply-replacements
 
-RUN npm install -g eslint @typescript-eslint/parser @typescript-eslint/eslint-plugin typescript \
-    && npm cache clean --force \
-    && rm -rf /tmp/* /var/tmp/*
-
-# Install semgrep SAST engine for JS/TS security vulnerability scanning
+# Install semgrep for C/C++ SAST scanning
 RUN pip3 install --break-system-packages --no-cache-dir semgrep \
     && find /usr/lib/python* -name '__pycache__' -exec rm -rf {} + 2>/dev/null || true \
     && find /usr/lib/python* -name '*.pyc' -delete \
@@ -24,9 +21,9 @@ RUN pip3 install --break-system-packages --no-cache-dir semgrep \
 
 # Install gitleaks and trivy
 RUN set -eux; \
-    curl -fsSL --retry 5 --retry-connrefused https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz; \
+    curl -fsSL --retry 5 https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz -o /tmp/gitleaks.tar.gz; \
     tar -xzf /tmp/gitleaks.tar.gz -C /usr/local/bin gitleaks; \
-    curl -fsSL --retry 5 --retry-connrefused https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz -o /tmp/trivy.tar.gz; \
+    curl -fsSL --retry 5 https://github.com/aquasecurity/trivy/releases/download/v0.69.3/trivy_0.69.3_Linux-64bit.tar.gz -o /tmp/trivy.tar.gz; \
     tar -xzf /tmp/trivy.tar.gz -C /usr/local/bin trivy; \
     chmod 755 /usr/local/bin/gitleaks /usr/local/bin/trivy; \
     rm -rf /tmp/*

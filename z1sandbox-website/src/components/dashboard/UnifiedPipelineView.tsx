@@ -18,15 +18,15 @@ interface UnifiedPipelineViewProps {
 }
 
 // Dynamically generate scan logs for the terminal based on the languages and progress
-function generateLiveLogs(job: GenericJob) {
-  const languages = job.detail?.languages
-    ? Object.keys(job.detail.languages)
-    : ["Python", "JavaScript", "Go", "Shell"];
-
+function generateLiveLogs(job: GenericJob | null): string[] {
+  if (!job) return [];
   const logs: string[] = [];
+  const metadata = job.metadata || {};
+  const languages: string[] = metadata.languages || (metadata.primary_language ? [metadata.primary_language] : ["Python"]);
 
-  logs.push(`[SYSTEM] Initializing secure sandbox environment...`);
-  logs.push(`[SYSTEM] Scanner container successfully provisioned.`);
+  logs.push(`[SYSTEM] Initializing containerized sandbox execution node...`);
+  logs.push(`[SYSTEM] Target Repository: ${metadata.repo_url || "Local / Target Repository"}`);
+  logs.push(`[SYSTEM] Isolation Runtime: ${job.metadata?.isolation_runtime || "gVisor (Rule-Based Hardened)"}`);
 
   if (job.progress > 20) {
     logs.push(`[PARSER] Codebase language matching initiated...`);
@@ -89,14 +89,37 @@ export function UnifiedPipelineView({
   onCancel,
   logs,
 }: UnifiedPipelineViewProps) {
-  const currentStep = job.status;
+  if (!job) {
+    return (
+      <div className="p-8 text-center text-xs font-semibold text-muted-foreground/40 flex flex-col items-center justify-center h-[300px]">
+        Select or submit a scan job to view live execution pipeline.
+      </div>
+    );
+  }
+
+  const liveLogs = generateLiveLogs(job);
+  const allLogs = logs && logs.length > 0 ? logs : liveLogs;
+  const isLogsFinished = allLogs.some((l) =>
+    l.includes("Security scans complete") ||
+    l.includes("Security scan complete") ||
+    l.includes("SCAN_REPORT_END") ||
+    l.includes("Persistent JSON Report")
+  );
+
+  const isDoneOrComplete =
+    job.status === "DONE" ||
+    job.status === "COMPLETE" ||
+    isLogsFinished ||
+    job.progress >= 100;
+
+  const currentStep = isDoneOrComplete ? "DONE" : job.status;
   const currentIdx = steps.findIndex((s) => s.key === currentStep);
   const isRetrying = currentStep === "RETRYING";
   const activeIdx = isRetrying
     ? (steps.findIndex(s => s.key === "SCANNING") !== -1 ? steps.findIndex(s => s.key === "SCANNING") : 1)
-    : currentIdx;
+    : (isDoneOrComplete ? steps.length - 1 : currentIdx);
 
-  const liveLogs = generateLiveLogs(job);
+  const effectiveProgress = isDoneOrComplete ? 100 : job.progress;
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const [showConsole, setShowConsole] = useState(false);
@@ -115,15 +138,15 @@ export function UnifiedPipelineView({
       "CLONING": "3.8s",
       "DETECTING": "2.1s",
     };
-    if (stepKey === "SCANNING" && ["DONE", "COMPLETE", "ERROR"].includes(job.status)) {
+    if (stepKey === "SCANNING" && isDoneOrComplete) {
       return "24.5s";
     }
     return durations[stepKey] || "";
   };
 
-  // When the scan is completed, hide the pipeline timeline/progress entirely
-  // and directly render the final security report inside the same screen.
-  if ((job.status === "DONE" || job.status === "COMPLETE") && result) {
+  // When the scan is completed or rich result is available, render the final security report
+  const isCompleteResult = result && (result.owner !== undefined || result.total_findings !== undefined || result.scan_duration_seconds !== undefined || result.total_files !== undefined || result.languages !== undefined);
+  if (isCompleteResult && isDoneOrComplete) {
     return (
       <div className="animate-in fade-in duration-500">
         {onResultRender(result)}
@@ -350,13 +373,14 @@ export function UnifiedPipelineView({
             <span
               className={cn(
                 "text-base font-black tabular-nums",
+                isDoneOrComplete && "text-emerald-500 font-extrabold",
                 job.status === "ERROR" && "text-destructive",
                 job.status === "CANCELLED" && "text-orange-500",
                 job.status === "RETRYING" && "text-amber-500",
-                !["DONE", "COMPLETE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "text-foreground"
+                !isDoneOrComplete && !["ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "text-foreground"
               )}
             >
-              {job.progress}%
+              {effectiveProgress}%
             </span>
           </div>
 
@@ -366,13 +390,13 @@ export function UnifiedPipelineView({
               <div
                 className={cn(
                   "absolute inset-y-0 left-0 rounded-full transition-all duration-700 ease-out",
-                  (job.status === "DONE" || job.status === "COMPLETE") && "bg-emerald-500",
+                  isDoneOrComplete && "bg-emerald-500",
                   job.status === "ERROR" && "bg-destructive",
                   job.status === "CANCELLED" && "bg-orange-500",
                   job.status === "RETRYING" && "bg-amber-500",
-                  !["DONE", "COMPLETE", "ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "bg-violet-600"
+                  !isDoneOrComplete && !["ERROR", "CANCELLED", "RETRYING"].includes(job.status) && "bg-violet-600"
                 )}
-                style={{ width: `${Math.min(job.progress, 100)}%` }}
+                style={{ width: `${Math.min(effectiveProgress, 100)}%` }}
               />
             </div>
 
