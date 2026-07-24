@@ -310,11 +310,14 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
 
   // Find currently selected job record
   const selectedJob = jobs.find((j) => j.job_id === selectedJobId) || null;
-  // Use volatile RAM result first (freshly fetched), fall back to job.detail which is
-  // persisted in localStorage from the DONE SSE event and contains the full scan report.
-  const selectedResult = (selectedJobId ? volatileResults[selectedJobId] : null) ?? selectedJob?.detail ?? null;
+  // Use volatile RAM result first (freshly fetched), fall back to job.detail only if it contains full scan report.
+  const selectedResult = (selectedJobId ? volatileResults[selectedJobId] : null) ?? (
+    selectedJob?.detail && (selectedJob.detail.languages || selectedJob.detail.total_findings !== undefined)
+      ? selectedJob.detail
+      : null
+  );
 
-  // Custom renderer for scan result findings
+  // Custom renderer for scan result findings matching Quick Scanner design
   const renderRepoScanResult = (result: any) => {
     if (!result) return null;
     const owner = result.owner || (result.repo_url ? result.repo_url.split("github.com/")[1]?.split("/")[0] : "") || "Repository";
@@ -331,22 +334,34 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
 
     return (
       <div className="space-y-6 mt-4 animate-in fade-in duration-500">
-        {/* ── Summary Banner ── */}
+        {/* ── Verdict Banner (Matching Quick Scanner Image 2) ── */}
         <div className="p-1 flex flex-wrap items-center gap-4">
-          <div className="w-10 h-10 rounded-xl bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center shrink-0">
-            <CheckCircle2 className="w-5 h-5 text-emerald-500 dark:text-emerald-400" />
+          <div className={cn(
+            "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border",
+            totalFindings === 0
+              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
+              : "bg-red-500/10 border-red-500/20 text-red-500"
+          )}>
+            {totalFindings === 0 ? (
+              <CheckCircle2 className="w-5 h-5" />
+            ) : (
+              <AlertCircle className="w-5 h-5" />
+            )}
           </div>
           <div className="flex-1 min-w-0">
-            <p className="font-black text-base text-foreground">{owner}/{repo}</p>
+            <p className="font-black text-base text-foreground">
+              {totalFindings === 0 ? "SCAN VERDICT: SECURE" : `VULNERABILITIES DETECTED (${totalFindings})`}
+            </p>
             <p className="text-[11px] text-muted-foreground mt-0.5">
-              {detectionTool} · {totalFiles} files · {duration}s
+              Detected by <span className="font-semibold text-violet-500">Unified Ingestion Pipeline</span>
+              {" · "}{owner}/{repo}{" · "}{totalFiles} files scanned{" · "}{duration}s
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <Badge variant="outline" className="bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/25 font-bold text-xs px-3 py-1">
-              {langEntries.length} Languages
+              {langEntries.length} {langEntries.length === 1 ? "Language" : "Languages"}
             </Badge>
-            <Badge variant="outline" className={cn("font-bold text-xs px-3 py-1", totalFindings > 0 ? "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/25" : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25")}>
+            <Badge variant="outline" className={cn("font-bold text-xs px-3 py-1", totalFindings === 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25" : "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/25")}>
               {totalFindings} Findings
             </Badge>
           </div>

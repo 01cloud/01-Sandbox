@@ -74,41 +74,47 @@ export function useJobStore(
       ? `${apiBase}/v1/repo-scan/${jobId}/result`
       : `${apiBase}/v1/jobs/${jobId}/result`;
 
-    try {
-      const resp = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${apiKey}`
+    // Try up to 4 attempts with 1-second delays to handle backend report aggregation window
+    for (let attempt = 1; attempt <= 4; attempt++) {
+      try {
+        const resp = await fetch(url, {
+          headers: {
+            Authorization: `Bearer ${apiKey}`
+          }
+        });
+        if (resp.ok) {
+          const data = await resp.json();
+          setVolatileResults(prev => ({
+            ...prev,
+            [jobId]: data
+          }));
+
+          const stored = jobStore.get(jobId);
+          if (stored && stored.status !== "DONE") {
+            const updatedJob: GenericJob = {
+              ...stored,
+              status: "DONE",
+              progress: 100,
+              stepMessage: "Scan complete",
+              completedAt: stored.completedAt || new Date().toISOString()
+            };
+            jobStore.upsert(updatedJob);
+            setJobs(jobStore.getAll(jobType));
+          }
+
+          return data;
         }
-      });
-      if (!resp.ok) throw new Error(`Failed to fetch result (HTTP ${resp.status})`);
-      const data = await resp.json();
-
-      // Cache in volatile React memory
-      setVolatileResults(prev => ({
-        ...prev,
-        [jobId]: data
-      }));
-
-      const stored = jobStore.get(jobId);
-      if (stored && stored.status !== "DONE") {
-        const updatedJob: GenericJob = {
-          ...stored,
-          status: "DONE",
-          progress: 100,
-          stepMessage: "Scan complete",
-          completedAt: stored.completedAt || new Date().toISOString()
-        };
-        jobStore.upsert(updatedJob);
-        setJobs(jobStore.getAll(jobType));
+      } catch (e) {
+        console.warn(`[useJobStore] Attempt ${attempt}/4 error fetching result for job ${jobId}:`, e);
       }
 
-      return data;
-    } catch (e) {
-      console.error(`[useJobStore] Error fetching result for job ${jobId}`, e);
-      return null;
+      if (attempt < 4) {
+        await new Promise(res => setTimeout(res, 1200));
+      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [apiBase, apiKey, jobType]);
+
+    return null;
+  }, [apiBase, apiKey, jobType, volatileResults]);
 
   const openStream = useCallback((jobId: string, since = 0) => {
     if (esRefs.current[jobId]) {
@@ -166,13 +172,11 @@ export function useJobStore(
         const isTerminal = ["DONE", "ERROR"].includes(ev.step);
 
         // Extract and volatile-cache full result when done
-        if (ev.step === "DONE") {
-          // NOTE: ev.detail here contains only language-pipeline statuses (e.g. {"Go": "DONE"}),
-          // NOT the full scan report. We do NOT write it into volatileResults here because
-          // that would block lazyFetchResult from fetching the real rich result (with findings,
-          // percentages, file counts) that powers the language distribution chart.
-          // lazyFetchResult is triggered by the useEffect in RepoScannerWidget when a DONE
-          // job is selected and volatileResults[jobId] is absent.
+        if (ev.step === "DONE" && ev.detail) {
+          setVolatileResults(prev => ({
+            ...prev,
+            [jobId]: ev.detail
+          }));
         }
 
         const storedProgress = typeof stored.progress === "number" && !isNaN(stored.progress) ? stored.progress : 0;
@@ -313,44 +317,42 @@ export function useJobStore(
             lazyFetchResult(sj.job_id);
           }
         } else {
-          // ── Existing job: Sync state if server reached terminal state, if result exists, or if SSE stream is not active ────────
+          // ── Existing job: Sync state whenever server state or progress advances ────────
           const hasResult = !!volatileResults[sj.job_id];
           const isTerminalServerState = ["DONE", "ERROR", "CANCELLED"].includes(sj.status) || hasResult;
+          const existingProgress = typeof existing.progress === "number" && !isNaN(existing.progress) ? existing.progress : 0;
+          const newProgress = typeof sj.progress === "number" && !isNaN(sj.progress) ? sj.progress : 0;
+          const targetStatus = hasResult ? "DONE" : sj.status;
+          const targetProgress = (isTerminalServerState && targetStatus === "DONE") ? 100 : Math.max(existingProgress, newProgress);
 
-          if (isTerminalServerState || !esRefs.current[sj.job_id]) {
-            const existingProgress = typeof existing.progress === "number" && !isNaN(existing.progress) ? existing.progress : 0;
-            const newProgress = typeof sj.progress === "number" && !isNaN(sj.progress) ? sj.progress : 0;
-            const targetStatus = hasResult ? "DONE" : sj.status;
-            const targetProgress = (isTerminalServerState && targetStatus === "DONE") ? 100 : Math.max(existingProgress, newProgress);
+          // If the server state or progress has advanced, update local state
+          if (
+            existing.status !== targetStatus ||
+            targetProgress > existingProgress ||
+            (sj.stepMessage && existing.stepMessage !== sj.stepMessage) ||
+            JSON.stringify(existing.detail) !== JSON.stringify(sj.detail)
+          ) {
+            const updatedJob: GenericJob = {
+              ...existing,
+              status: targetStatus,
+              progress: targetProgress,
+              stepMessage: hasResult ? "Scan complete" : (sj.stepMessage || existing.stepMessage),
+              eventIndex: sj.eventIndex ?? existing.eventIndex,
+              summary: sj.summary ?? existing.summary,
+              detail: sj.detail ?? existing.detail,
+              completedAt: sj.completedAt ?? existing.completedAt
+            };
+            jobStore.upsert(updatedJob);
+            didUpdate = true;
 
-            // If the server state is different, update local state
-            if (
-              existing.status !== targetStatus ||
-              existing.progress !== targetProgress ||
-              existing.stepMessage !== sj.stepMessage ||
-              JSON.stringify(existing.detail) !== JSON.stringify(sj.detail)
-            ) {
-              const updatedJob: GenericJob = {
-                ...existing,
-                status: targetStatus,
-                progress: targetProgress,
-                stepMessage: hasResult ? "Scan complete" : sj.stepMessage,
-                eventIndex: sj.eventIndex ?? existing.eventIndex,
-                summary: sj.summary ?? existing.summary,
-                detail: sj.detail ?? existing.detail,
-                completedAt: sj.completedAt ?? existing.completedAt
-              };
-              jobStore.upsert(updatedJob);
-              didUpdate = true;
-
-              if (targetStatus === "DONE") {
-                if (esRefs.current[sj.job_id]) {
-                  esRefs.current[sj.job_id].close();
-                  delete esRefs.current[sj.job_id];
-                }
-                lazyFetchResult(sj.job_id);
+            if (targetStatus === "DONE") {
+              if (esRefs.current[sj.job_id]) {
+                esRefs.current[sj.job_id].close();
+                delete esRefs.current[sj.job_id];
               }
+              lazyFetchResult(sj.job_id);
             }
+          }
 
             // Attempt to reconnect SSE if it's still active on the server and we haven't hit the error limit
             if (
@@ -362,7 +364,6 @@ export function useJobStore(
             }
           }
         }
-      }
 
       if (didUpdate) {
         setJobs(jobStore.getAll(jobType));
