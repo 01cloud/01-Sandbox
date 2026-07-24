@@ -405,6 +405,38 @@ async def _run_scan_pipeline(
         def get_target_language(file_path: str, tool_name: str) -> str:
             import os
 
+            from .file_scanner import _is_k8s_yaml
+
+            tool_clean = str(tool_name or "").lower().replace("-", "").replace("_", "")
+
+            # 1. Direct tool-based classification
+            if any(
+                t in tool_clean
+                for t in (
+                    "kubelinter",
+                    "kubeconform",
+                    "kubescore",
+                    "checkov",
+                    "terrascan",
+                )
+            ):
+                if "Kubernetes YAML" in language_results:
+                    return "Kubernetes YAML"
+                if "YAML" in language_results:
+                    return "YAML"
+                return "Kubernetes YAML"
+
+            if "yamllint" in tool_clean:
+                if "YAML" in language_results:
+                    return "YAML"
+                if "Kubernetes YAML" in language_results:
+                    return "Kubernetes YAML"
+                return "YAML"
+
+            if any(t in tool_clean for t in ("gitleaks", "trufflehog", "secret")):
+                return "Secrets & Infrastructure"
+
+            # 2. File extension / path classification
             normalized = (file_path or "").strip()
             for prefix in ("/workspace/", "workspace/", "./"):
                 if normalized.startswith(prefix):
@@ -443,16 +475,19 @@ async def _run_scan_pipeline(
                         return possible
                 return "Shell"
             elif ext in (".yaml", ".yml"):
-                is_k8s_finding = any(
-                    t in str(tool_name).lower()
-                    for t in ("kubelinter", "kubeconform", "kubescore")
-                )
-                if is_k8s_finding or (
+                # If file path exists or can be resolved, check if it's K8s
+                if os.path.isfile(normalized) and _is_k8s_yaml(normalized):
+                    if "Kubernetes YAML" in language_results:
+                        return "Kubernetes YAML"
+                if (
                     "Kubernetes YAML" in language_results
                     and "YAML" not in language_results
                 ):
-                    if "Kubernetes YAML" in language_results:
-                        return "Kubernetes YAML"
+                    return "Kubernetes YAML"
+                if "YAML" in language_results:
+                    return "YAML"
+                if "Kubernetes YAML" in language_results:
+                    return "Kubernetes YAML"
                 return "YAML"
             elif ext == ".rb" or base in ("gemfile", "gemfile.lock"):
                 return "Ruby"
@@ -464,7 +499,7 @@ async def _run_scan_pipeline(
                 if lang.lower() in normalized.lower():
                     return lang
 
-            # If it's a global secret, manifest, or not specific to a code language
+            # If it's a global secret scanner finding or unclassified infrastructure item
             return "Secrets & Infrastructure"
 
         # Distribute each finding to the correct language section

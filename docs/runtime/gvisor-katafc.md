@@ -101,7 +101,73 @@ When 8 languages are detected:
 
 ---
 
-## 4. Empirical Performance & Resource Metrics
+## 5. Security & Threat Model Comparison: gVisor vs. Kata-FC
+
+While both **gVisor (`gvisor`)** and **Kata Containers with Firecracker (`kata-fc`)** provide strong multi-tenant security boundaries far exceeding standard `runc` Docker containers, they achieve security through fundamentally different architectural models.
+
+```mermaid
+graph TD
+    subgraph gVisor_Security ["gVisor Security Model (Syscall Virtualization)"]
+        Container1["Untrusted Container Code"] -->|Intercepts Syscalls| Sentry["gVisor Sentry (Go Engine)"]
+        Sentry -->|Strict Seccomp Filter| HostKernel1["Host Linux Kernel"]
+        style Sentry fill:#4a154b,color:#fff
+    end
+
+    subgraph Kata_Security ["Kata-FC Security Model (Hardware MicroVM)"]
+        Container2["Untrusted Container Code"] -->|Runs inside| GuestKernel["Disposable Guest Kernel (vmlinux)"]
+        GuestKernel -->|Hardware KVM Boundary| Firecracker["Firecracker VMM (Rust)"]
+        Firecracker -->|/dev/kvm| HostKernel2["Host Linux Kernel"]
+        style Firecracker fill:#0052cc,color:#fff
+    end
+```
+
+---
+
+### A. Isolation Mechanism & Threat Boundaries
+
+#### 1. gVisor (`gvisor`): User-Space Kernel Virtualization
+- **How It Works**: gVisor replaces the Linux operating system interface. It includes a user-space kernel called **Sentry** (written in memory-safe **Go**) that implements over 315+ Linux system calls.
+- **Security Boundary**: The application running inside the container **never makes direct system calls to the host Linux kernel**. Every syscall (`read`, `write`, `execve`, `socket`, `ptrace`, etc.) is intercepted and handled internally by Sentry.
+- **Host Protection**: Sentry communicates with the host kernel through a restricted `seccomp` sandbox filter using a reduced set of system calls. If untrusted code executes a Linux kernel exploit (such as *Dirty COW*, *Dirty Pipe*, or zero-day privilege escalation CVEs), the exploit targets gVisor's Go emulation layer rather than the host Linux kernel, completely neutralizing host kernel compromise.
+- **Battle-Tested Provenance**: gVisor is the core security sandbox powering **Google Cloud Run**, **Google App Engine**, and **Google Cloud Functions**.
+
+#### 2. Kata Containers + Firecracker (`kata-fc`): Hardware MicroVM Isolation
+- **How It Works**: `kata-fc` leverages **AWS Firecracker** (written in memory-safe **Rust**) and Linux KVM (`/dev/kvm`) to spin up a lightweight hardware-assisted Virtual Machine (MicroVM) for every pod.
+- **Security Boundary**: Each pod runs its own dedicated **guest Linux kernel (`vmlinux`)** and guest init process (`kata-agent`).
+- **Host Protection**: Even if a malicious container process gains full `root` access and exploits a vulnerability inside the guest Linux kernel, the attacker remains trapped inside the guest MicroVM boundary. Escaping to the host requires breaking out of Intel VT-x / AMD-V hardware virtualization or the Firecracker Rust VMM, which represents a virtually insurmountable security barrier.
+- **Battle-Tested Provenance**: Firecracker is the security hypervisor powering **AWS Fargate**, **AWS Lambda**, and **Fly.io**.
+
+---
+
+### B. Detailed Security Feature Matrix
+
+| Security Feature | gVisor (`gvisor`) | Kata Containers + Firecracker (`kata-fc`) |
+| :--- | :--- | :--- |
+| **Isolation Type** | **User-space Kernel Sandbox** (Application-level) | **Hardware-assisted MicroVM** (Hypervisor-level) |
+| **Implementation Language** | Go (Memory-safe, garbage collected) | Rust (Memory-safe, zero-cost abstractions) |
+| **Host Kernel Exposure** | **Zero direct syscall exposure** (Intercepted by Sentry) | **Zero direct syscall exposure** (Wrapped in guest VM) |
+| **Root Privilege Containment** | `root` inside container is unprivileged `nobody` on host | `root` inside container is only `root` inside guest VM |
+| **Kernel Vulnerability Protection**| Protects host against all Linux kernel CVEs | Protects host against all Linux kernel CVEs |
+| **Side-Channel Isolation** | Software-level isolation (shared host CPU caches) | Hardware-level memory & CPU thread boundaries |
+| **Storage Isolation** | Standard `overlayfs` with gVisor `Gofer` file proxy | Isolated LVM `devmapper` block devices |
+| **Hardware Dependency** | **None** (Runs on any host, Cloud VPS, or VM) | **Requires `/dev/kvm`** (Physical bare metal or Nested VM) |
+| **Best Used For** | Static code analysis, web apps, polyglot scanners | Arbitrary untrusted binary / code execution |
+
+---
+
+### C. Security Trade-Off Summary
+
+- **Choose `gvisor` when**:
+  - You need **strong, enterprise-grade multi-tenant protection** against malicious code execution while maintaining minimal CPU/memory footprint and sub-second startup times.
+  - Your host environment is a **Cloud VPS (OVH, AWS EC2 standard instances, DigitalOcean)** where hardware `/dev/kvm` is unavailable.
+
+- **Choose `kata-fc` when**:
+  - You require **maximum hardware-enforced isolation** (hardware KVM boundaries) for executing untrusted user-submitted binaries or arbitrary code interpreter workloads.
+  - Your host infrastructure is **Physical Bare Metal** or a cloud instance supporting hardware nested virtualization (`.metal` instances).
+
+---
+
+## 6. Empirical Performance & Resource Metrics
 
 | Metric | `gvisor` (8 Parallel Scans) | `kata-fc` (8 Parallel Scans) | Difference / Impact |
 | :--- | :--- | :--- | :--- |

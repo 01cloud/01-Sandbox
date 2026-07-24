@@ -154,7 +154,8 @@ export function useJobStore(
           });
 
           const msg = ev.message || "";
-          if (msg.includes("Security scans complete") || msg.includes("Security scan complete") || msg.includes("SCAN_REPORT_END")) {
+          // Only trigger completion fetch if parent pipeline signals final aggregation
+          if (msg.includes("All scans finished") || msg.includes("Repository scan complete") || msg.includes("Final report assembled")) {
             const finishedJob: GenericJob = {
               ...stored,
               status: "DONE",

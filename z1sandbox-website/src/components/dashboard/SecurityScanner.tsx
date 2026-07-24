@@ -756,21 +756,33 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                               sev === "MEDIUM"   ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" :
                               sev === "LOW"      ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" :
                                                    "bg-muted/30 text-muted-foreground";
+                            const rawPath = f.file || "";
+                            const cleanPath = rawPath.includes("/workspace/")
+                              ? rawPath.split("/workspace/")[1]
+                              : rawPath.replace(/^\.\//, "");
+                            const fileName = cleanPath ? cleanPath.split("/").pop() : "";
+
                             return (
                               <div key={fi} className={cn("p-3 rounded-xl border text-[11px] transition-all flex flex-col gap-1.5", sevColor)}>
                                 <div className="flex items-center gap-2 flex-wrap">
                                   <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide px-1.5 py-0 border-0 rounded-md", badgeColor)}>
                                     {sev}
                                   </Badge>
-                                  <span className="text-[10px] font-bold text-muted-foreground">{f.tool}</span>
+                                  <span className="text-[10px] font-bold text-muted-foreground">
+                                    {f.tool} {fileName ? `(${fileName})` : ""}
+                                  </span>
                                   {f.line && (
-                                    <span className="text-[9px] font-mono text-muted-foreground/50 ml-auto">L:{f.line}</span>
+                                    <span className="text-[9px] font-mono font-bold text-muted-foreground/80 ml-auto bg-background/60 px-1.5 py-0.5 rounded border border-border/30">
+                                      L:{f.line}
+                                    </span>
                                   )}
                                 </div>
                                 <p className="font-semibold text-foreground/90 leading-snug">{f.issue}</p>
-                                {f.file && (
-                                  <div className="flex items-center gap-1.5 mt-1.5">
-                                    <p className="text-[9px] font-mono text-muted-foreground/50 truncate">{f.file}</p>
+                                {cleanPath && (
+                                  <div className="flex items-center gap-1.5 mt-1">
+                                    <p className="text-[9px] font-mono font-medium text-muted-foreground/70 bg-background/40 px-2 py-0.5 rounded border border-border/20 truncate" title={cleanPath}>
+                                      📄 {cleanPath}
+                                    </p>
                                   </div>
                                 )}
                                 {f.remediation && (
