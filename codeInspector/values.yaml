@@ -118,7 +118,7 @@ apiServer:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-api
-      tag: "v0.7.2"
+      tag: "v0.7.3"
       pullPolicy: Always
     resources:
       requests:
@@ -203,7 +203,7 @@ opensandbox:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-opensandbox-controller
-      tag: "0.5.1"
+      tag: "v0.7.3"
       pullPolicy: Always
     resources:
       requests:
@@ -214,7 +214,7 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
-    sandboxImage: "01community/01sandbox-codeinterpreter:v0.6.15"
+    sandboxImage: "01community/01sandbox-codeinterpreter:v0.7.3"
     scannerImagePython: "01community/01sandbox-scanner-python:1.0.0"
     scannerImageGo: "01community/01sandbox-scanner-go:1.0.0"
     scannerImageJava: "01community/01sandbox-scanner-java:1.0.0"
@@ -230,7 +230,7 @@ opensandbox:
     runtimeClassName: "kata-fc"
     image:
       repository: 01community/01sandbox-opensandbox-server
-      tag: "v0.7.2"
+      tag: "v0.7.3"
       pullPolicy: Always
     resources:
       requests:
