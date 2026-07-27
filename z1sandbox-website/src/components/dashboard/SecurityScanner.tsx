@@ -278,7 +278,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
   useEffect(() => {
     if (selectedJobId) {
       const job = jobs.find((j) => j.job_id === selectedJobId);
-      if (job && (job.status === "DONE" || job.status === "COMPLETE" || job.progress >= 100 || job.stepMessage?.toLowerCase().includes("complete")) && !volatileResults[selectedJobId]) {
+      if (job && (job.status === "DONE" || job.status === "COMPLETE") && !volatileResults[selectedJobId]) {
         lazyFetchResult(selectedJobId);
       }
     }
@@ -439,7 +439,10 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
 
   // Find currently selected job record
   const selectedJob = jobs.find((j) => j.job_id === selectedJobId) || null;
-  const selectedResult = selectedJobId ? volatileResults[selectedJobId] : null;
+  const isSelectedDone = selectedJob?.status === "DONE" || selectedJob?.status === "COMPLETE";
+  const selectedResult = (selectedJobId && isSelectedDone ? volatileResults[selectedJobId] : null) ?? (
+    isSelectedDone ? selectedJob?.detail : null
+  );
 
   const generateSyntheticLanguages = (filesScanned: string[], findings: any[]): Record<string, any> => {
     const languages: Record<string, any> = {};

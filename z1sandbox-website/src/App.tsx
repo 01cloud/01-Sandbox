@@ -24,6 +24,58 @@ import { useNavigate } from "react-router-dom";
 
 const queryClient = new QueryClient();
 
+import React, { Component, ErrorInfo, ReactNode } from "react";
+
+interface ErrorBoundaryProps {
+  children: ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
+  public state: ErrorBoundaryState = {
+    hasError: false,
+    error: null,
+  };
+
+  public static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
+    console.error("Uncaught React Error:", error, errorInfo);
+  }
+
+  public render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen flex flex-col items-center justify-center bg-background text-foreground p-6 text-center">
+          <div className="max-w-md p-8 rounded-3xl border border-destructive/30 bg-destructive/5 space-y-4">
+            <h2 className="text-xl font-bold text-destructive">Dashboard Error</h2>
+            <p className="text-xs text-muted-foreground">
+              {this.state.error?.message || "An unexpected error occurred while rendering the dashboard."}
+            </p>
+            <button
+              onClick={() => {
+                this.setState({ hasError: false, error: null });
+                window.location.href = "/dashboard";
+              }}
+              className="px-4 py-2 rounded-xl bg-violet-600 text-white font-bold text-xs hover:bg-violet-500 transition-all shadow-md"
+            >
+              Reload Management Console
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return this.props.children;
+  }
+}
+
 export const Auth0ProviderWithHistory = ({ children }: { children: React.ReactNode }) => {
   const navigate = useNavigate();
 
@@ -32,12 +84,8 @@ export const Auth0ProviderWithHistory = ({ children }: { children: React.ReactNo
   const audience = (window as any)._env_?.VITE_AUTH0_AUDIENCE || import.meta.env.VITE_AUTH0_AUDIENCE || "";
 
   if (!domain || !clientId) {
-    console.error("Auth0 configuration error: domain and clientId must be set.");
-    return (
-      <div data-testid="auth0-error">
-        Missing required Auth0 configuration
-      </div>
-    );
+    console.warn("Auth0 configuration missing: domain or clientId not set. Rendering in offline/mock mode.");
+    return <ErrorBoundary>{children}</ErrorBoundary>;
   }
 
   const onRedirectCallback = (appState: any) => {
@@ -45,18 +93,20 @@ export const Auth0ProviderWithHistory = ({ children }: { children: React.ReactNo
   };
 
   return (
-    <Auth0Provider
-      domain={domain}
-      clientId={clientId}
-      authorizationParams={{
-        redirect_uri: window.location.origin,
-        audience: audience,
-        scope: "openid profile email"
-      }}
-      onRedirectCallback={onRedirectCallback}
-    >
-      {children}
-    </Auth0Provider>
+    <ErrorBoundary>
+      <Auth0Provider
+        domain={domain}
+        clientId={clientId}
+        authorizationParams={{
+          redirect_uri: window.location.origin,
+          audience: audience,
+          scope: "openid profile email"
+        }}
+        onRedirectCallback={onRedirectCallback}
+      >
+        {children}
+      </Auth0Provider>
+    </ErrorBoundary>
   );
 };
 
