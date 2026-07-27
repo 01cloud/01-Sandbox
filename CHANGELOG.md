@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.7.6](https://github.com/01cloud/01-Sandbox/compare/v0.7.5...v0.7.6) (2026-07-27)
+
+
+### 🐛 Bug Fixes
+
+* postgresql fixes ([94808c5](https://github.com/01cloud/01-Sandbox/commit/94808c54541e054085a7803df978a0948df6d239))
+* postgresql fixes ([f26dc53](https://github.com/01cloud/01-Sandbox/commit/f26dc53f5d09f7ae53753cd587cad5d7ccdfece7))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.5 [skip ci] ([e2b6ebd](https://github.com/01cloud/01-Sandbox/commit/e2b6ebd38c6c6923b1132bc506803ab3d520a95e))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.5 [skip ci] ([31f41ae](https://github.com/01cloud/01-Sandbox/commit/31f41aec72c65138c8ee58799cfca8da3ff381a0))
+
 ## [0.7.5](https://github.com/01cloud/01-Sandbox/compare/v0.7.4...v0.7.5) (2026-07-27)
 
 
