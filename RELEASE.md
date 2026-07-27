@@ -1,3 +1,44 @@
+## Release v0.7.6 — 01-Sandbox
+**Release Date:** July 27, 2026
+
+---
+
+### Summary
+v0.7.6 focuses on reliability, bug resolution, and maintenance. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* postgresql fixes ([94808c5](https://github.com/01cloud/01-Sandbox/commit/94808c54541e054085a7803df978a0948df6d239))
+* postgresql fixes ([f26dc53](https://github.com/01cloud/01-Sandbox/commit/f26dc53f5d09f7ae53753cd587cad5d7ccdfece7))
+* generate RELEASE.md for v0.7.5 [skip ci] ([e2b6ebd](https://github.com/01cloud/01-Sandbox/commit/e2b6ebd38c6c6923b1132bc506803ab3d520a95e))
+* bump versions to v0.7.5 [skip ci] ([31f41ae](https://github.com/01cloud/01-Sandbox/commit/31f41aec72c65138c8ee58799cfca8da3ff381a0))
+
+### Changes
+## [0.7.6](https://github.com/01cloud/01-Sandbox/compare/v0.7.5...v0.7.6) (2026-07-27)
+
+
+### 🐛 Bug Fixes
+
+* postgresql fixes ([94808c5](https://github.com/01cloud/01-Sandbox/commit/94808c54541e054085a7803df978a0948df6d239))
+* postgresql fixes ([f26dc53](https://github.com/01cloud/01-Sandbox/commit/f26dc53f5d09f7ae53753cd587cad5d7ccdfece7))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.5 [skip ci] ([e2b6ebd](https://github.com/01cloud/01-Sandbox/commit/e2b6ebd38c6c6923b1132bc506803ab3d520a95e))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.5 [skip ci] ([31f41ae](https://github.com/01cloud/01-Sandbox/commit/31f41aec72c65138c8ee58799cfca8da3ff381a0))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.7.6)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.7.5 — 01-Sandbox
 **Release Date:** July 27, 2026
 
