@@ -1,3 +1,52 @@
+## Release v0.7.4 — 01-Sandbox
+**Release Date:** July 27, 2026
+
+---
+
+### Summary
+v0.7.4 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* programming languages ([abdc195](https://github.com/01cloud/01-Sandbox/commit/abdc195505c9173315d457ed2c813496bd6694f0))
+* programming languages ([d2b8248](https://github.com/01cloud/01-Sandbox/commit/d2b82480bb16d7b24f5bcc0c6f9aa4aa67424272))
+* concurrent pods provisioning ([60c3c06](https://github.com/01cloud/01-Sandbox/commit/60c3c0648107d7eed73185acc28c0f4ce7f5a19b))
+* generate RELEASE.md for v0.7.3 [skip ci] ([45ece36](https://github.com/01cloud/01-Sandbox/commit/45ece36cec908ea2f9eec08c795dd686533a5ebf))
+
+### Changes
+## [0.7.4](https://github.com/01cloud/01-Sandbox/compare/v0.7.3...v0.7.4) (2026-07-27)
+
+
+### 🚀 New Features
+
+* programming languages ([abdc195](https://github.com/01cloud/01-Sandbox/commit/abdc195505c9173315d457ed2c813496bd6694f0))
+* programming languages ([d2b8248](https://github.com/01cloud/01-Sandbox/commit/d2b82480bb16d7b24f5bcc0c6f9aa4aa67424272))
+
+
+### 🐛 Bug Fixes
+
+* concurrent pods provisioning ([60c3c06](https://github.com/01cloud/01-Sandbox/commit/60c3c0648107d7eed73185acc28c0f4ce7f5a19b))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.3 [skip ci] ([45ece36](https://github.com/01cloud/01-Sandbox/commit/45ece36cec908ea2f9eec08c795dd686533a5ebf))
+* **readme:** update reamde file ([16b5f51](https://github.com/01cloud/01-Sandbox/commit/16b5f51f6530ca86c07a706c7084ef538415aada))
+* **readme:** update reamde file ([50cf763](https://github.com/01cloud/01-Sandbox/commit/50cf7631bc8221dff40de3d9cec249ee8b7f2911))
+* **readme:** update the readme file ([9aa2277](https://github.com/01cloud/01-Sandbox/commit/9aa22774ce18c4277d70f5ff5658fae813513070))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.3 [skip ci] ([a207283](https://github.com/01cloud/01-Sandbox/commit/a207283670e3ccca9cf8197513919de4f70d17fc))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.7.4)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.7.3 — 01-Sandbox
 **Release Date:** July 24, 2026
 
