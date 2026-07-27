@@ -3,6 +3,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
+# Status Response
 class StatusResponse(BaseModel):
     """Reports configuration matching backend instances health correctly."""
 
