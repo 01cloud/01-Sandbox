@@ -48,6 +48,80 @@ graph TD
 
 ---
 
+## 2.5 Detailed End-to-End Execution Flow of `kata-fc`
+
+When a user selects **KATA FC** in the platform UI or sets `runtime: "kata-fc"` in API requests, the system executes the following end-to-end sequence across the 01-Sandbox stack:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant UI as Website / CLI
+    participant API as sandbox-api
+    participant OS_Server as opensandbox-server
+    participant K8s as Kubernetes / Kubelet
+    participant Containerd as Containerd CRI
+    participant DevMapper as LVM DevMapper ThinPool
+    participant KataShim as containerd-shim-kata-v2
+    participant KVM as Linux KVM (/dev/kvm)
+    participant MicroVM as Firecracker Guest MicroVM
+
+    UI->>API: POST /v1/repo-scan { runtime: "kata-fc" }
+    API->>OS_Server: POST /scan-jobs { runtimeClassName: "kata-fc" }
+    OS_Server->>K8s: Create Pod (spec.runtimeClassName: "kata-fc")
+    K8s->>Containerd: Delegate to CRI handler "kata-fc"
+    Containerd->>DevMapper: Allocate CoW block volume (ubuntu--vg-containerd--pool)
+    Containerd->>KataShim: Invoke containerd-shim-kata-v2
+    KataShim->>KVM: Open /dev/kvm (Intel VT-x / AMD-V)
+    KataShim->>MicroVM: Spawn Firecracker process & boot vmlinux guest kernel
+    MicroVM->>MicroVM: Start kata-agent & run scanner (Bandit / Semgrep / Gosec)
+    MicroVM->>OS_Server: Write security_scan_report.json to PVC (/data)
+    MicroVM->>K8s: Pod completes → Destroy MicroVM & deallocate block device
+```
+
+### Detailed Lifecycle Steps
+
+#### 1. Request Initiation & Runtime Hint
+- The UI or CLI submits `POST /v1/repo-scan` with `"runtime": "kata-fc"`.
+- `sandbox-api` receives the request and forwards the runtime metadata to `opensandbox-server`.
+
+#### 2. Kubernetes RuntimeClass Dispatch
+- `opensandbox-server` provisions a `BatchSandbox` Custom Resource (CRD) or Pod with `spec.runtimeClassName: "kata-fc"`.
+- The Kubernetes API server matches `kata-fc` against the cluster's `RuntimeClass` resource:
+  ```yaml
+  apiVersion: node.k8s.io/v1
+  kind: RuntimeClass
+  metadata:
+    name: kata-fc
+  handler: kata-fc
+  ```
+
+#### 3. Containerd CRI Handler & DevMapper Snapshotter
+- Kubelet hands the pod spec to **Containerd**.
+- Containerd reads `/var/lib/rancher/rke2/agent/etc/containerd/config.toml`:
+  ```toml
+  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc]
+    runtime_type = "io.containerd.kata.v2"
+    snapshotter = "devmapper"
+  ```
+- Firecracker MicroVMs require raw block storage (they cannot use `overlayfs`). Containerd invokes the **`devmapper` snapshotter**, which allocates a thin copy-on-write (CoW) block device volume from the host's LVM thin pool (`ubuntu--vg-containerd--pool`).
+
+#### 4. Spawning the Firecracker MicroVM (via KVM)
+- Containerd delegates execution to `/opt/kata/bin/containerd-shim-kata-v2`.
+- `containerd-shim-kata-v2` reads `/etc/kata-containers/configuration.toml` and launches an isolated **Firecracker VMM process** (`/usr/local/bin/firecracker`).
+- Firecracker opens `/dev/kvm` and uses hardware CPU virtualization flags (**Intel VT-x** or **AMD-V**) to boot a dedicated, lightweight guest Linux kernel (`vmlinux`).
+
+#### 5. Guest MicroVM Boot & Isolated Execution
+- Inside the guest MicroVM, the guest Linux kernel boots in **~150ms**.
+- The guest init process (`kata-agent`) starts inside the VM and communicates with the host shim via an encrypted `vsock` socket.
+- `kata-agent` mounts the `devmapper` block volume and executes the scanner image (e.g. `01sandbox-scanner-python` or `01sandbox-scanner-go`).
+- Static analysis tools (**Bandit**, **Semgrep**, **Gosec**, **PMD**, **Trivy**) run completely trapped inside the hardware MicroVM.
+
+#### 6. Results Storage & Automatic Destruction
+- The scanner writes its findings JSON to the shared host PVC volume at `/data/<job_id>/reports/security_scan_report.json`.
+- Once finished, the Firecracker MicroVM terminates immediately (`autoTerminationSeconds: 0`), releasing guest RAM back to the host system and deallocating the ephemeral `devmapper` block volume.
+
+---
+
 ## 3. Why `kata-fc` Spikes CPU and Memory (and Why `gVisor` Does Not)
 
 When running multi-language static repository scans, `apiServer` dispatches security auditing tasks across all detected languages. Under `kata-fc`, cluster memory and CPU usage spike dramatically, whereas under `gvisor`, the system remains stable. Below are the core technical reasons for this difference:

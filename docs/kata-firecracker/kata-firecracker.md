@@ -106,20 +106,87 @@ To support Firecracker's block-storage requirement, we must create a dedicated *
 
 Depending on your host's partitioning, choose one of the following options:
 
-### Option A: Standard LVM Setup (When LVM is pre-configured on host)
-If your primary disk is already partition-managed using LVM (e.g. Ubuntu's default LVM installer layout):
-1. Check for available free space in your Volume Group (e.g. `ubuntu-vg`):
+---
+
+### Option A: Standard LVM Setup (When LVM has free space in `ubuntu-vg`)
+If your primary disk is partition-managed using LVM and has **unallocated free extents** (`VFree >= 15G`):
+
+1. **Check available free space** in your Volume Group (`ubuntu-vg`):
    ```bash
    sudo vgs
    ```
-2. Create the thin-pool `containerd-pool` inside your volume group:
+2. **Create the thin-pool (`containerd-pool`)**:
    ```bash
    sudo lvcreate --size 15G --thinpool containerd-pool ubuntu-vg
    ```
 
 ---
 
-### Option B: Loopback-Backed LVM Setup (When LVM is NOT pre-configured)
+### Option B: Pre-configured LVM with Insufficient Free Space (`0 extents`) *(Most Common Ubuntu Installer Setup)*
+
+> [!NOTE]
+> **Understanding the `0 extents` Error (Filesystem Free Space vs LVM Unallocated Space):**
+> On default Ubuntu LVM installations, the installer creates a Volume Group (`ubuntu-vg`) and assigns **100% of its size** to a single Logical Volume (`ubuntu-lv`) mounted at root (`/`).
+> - `df -h` shows **Filesystem Free Space** (unused space for files *inside* `/`).
+> - `sudo vgs` shows **LVM Unallocated Space** (`VFree`), which is 0 because `ubuntu-lv` claimed the entire Volume Group.
+>
+> When running `sudo lvcreate --size 15G --thinpool containerd-pool ubuntu-vg`, LVM checks for *unallocated space* in `ubuntu-vg`. Because 100% was assigned to `ubuntu-lv`, LVM fails with:
+> ```text
+> Volume group "ubuntu-vg" has insufficient free space (0 extents): 4 required.
+> ```
+> Since mounted `ext4` partitions cannot be shrunk online, creating a file-backed loop device inside `/var/lib/` adds **new unallocated physical volume space** into `ubuntu-vg` safely without affecting running applications or requiring VM configuration changes.
+
+1. **Create a 15GB backing image file**:
+   ```bash
+   sudo fallocate -l 15G /var/lib/containerd-pool-disk.img
+   ```
+
+2. **Attach the file as a loop device**:
+   ```bash
+   LOOP_DEV=$(sudo losetup -fP --show /var/lib/containerd-pool-disk.img)
+   ```
+
+3. **Initialize the Physical Volume and extend `ubuntu-vg`**:
+   ```bash
+   sudo pvcreate $LOOP_DEV
+   sudo vgextend ubuntu-vg $LOOP_DEV
+   ```
+
+4. **Create the Thin-Pool (`containerd-pool`)**:
+   ```bash
+   sudo lvcreate --size 14.5G --thinpool containerd-pool ubuntu-vg
+   ```
+
+5. **Persist the loopback device on boot**:
+   Create a systemd service at `/etc/systemd/system/containerd-loopback.service`:
+   ```ini
+   [Unit]
+   Description=Setup loopback device for containerd devmapper thinpool
+   DefaultDependencies=no
+   After=systemd-modules-load.service
+   Before=rke2-server.service rke2-agent.service containerd.service
+
+   [Service]
+   Type=oneshot
+   RemainAfterExit=yes
+   ExecStart=/bin/sh -c 'if ! losetup -a | grep -q "/var/lib/containerd-pool-disk.img"; then \
+     LOOP_DEV=$(losetup -fP --show /var/lib/containerd-pool-disk.img); \
+     pvscan; \
+     vgchange -ay ubuntu-vg; \
+   fi'
+
+   [Install]
+   WantedBy=multi-user.target
+   ```
+   Enable the service:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable containerd-loopback.service
+   ```
+
+---
+
+### Option C: Non-LVM Host (Plain `ext4`/`xfs` Partition Layout)
 If your host partition layout is standard `ext4`/`xfs` on a plain partition (no Volume Group or LVM initialized):
 
 1. **Create a backing file** (e.g. 20GB sparse file) to serve as physical storage:
@@ -157,6 +224,7 @@ If your host partition layout is standard `ext4`/`xfs` on a plain partition (no 
    RemainAfterExit=yes
    ExecStart=/bin/sh -c 'if ! losetup -a | grep -q "/var/lib/containerd-loopback.img"; then \
      LOOP_DEV=$(losetup -fP --show /var/lib/containerd-loopback.img); \
+     pvscan; \
      vgchange -ay ubuntu-vg; \
    fi'
 
