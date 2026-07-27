@@ -1,3 +1,46 @@
+## Release v0.7.5 — 01-Sandbox
+**Release Date:** July 27, 2026
+
+---
+
+### Summary
+v0.7.5 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* scan-report scanner UI ([3f28baf](https://github.com/01cloud/01-Sandbox/commit/3f28baf9ac0042c81596856ca5ac4fb6eadc2b48))
+* scan-report scanner UI ([02c91ff](https://github.com/01cloud/01-Sandbox/commit/02c91ff447dbe8c71cda9dbcb82d9410d49a499d))
+* status response ([c61d57a](https://github.com/01cloud/01-Sandbox/commit/c61d57a82133239e4aada7b80e650cdcaaeab926))
+* status response ([a1765a7](https://github.com/01cloud/01-Sandbox/commit/a1765a7066c9fa52d3b66f585202f2b8aaaf39cc))
+
+### Changes
+## [0.7.5](https://github.com/01cloud/01-Sandbox/compare/v0.7.4...v0.7.5) (2026-07-27)
+
+
+### 🐛 Bug Fixes
+
+* scan-report scanner UI ([3f28baf](https://github.com/01cloud/01-Sandbox/commit/3f28baf9ac0042c81596856ca5ac4fb6eadc2b48))
+* scan-report scanner UI ([02c91ff](https://github.com/01cloud/01-Sandbox/commit/02c91ff447dbe8c71cda9dbcb82d9410d49a499d))
+* status response ([c61d57a](https://github.com/01cloud/01-Sandbox/commit/c61d57a82133239e4aada7b80e650cdcaaeab926))
+* status response ([a1765a7](https://github.com/01cloud/01-Sandbox/commit/a1765a7066c9fa52d3b66f585202f2b8aaaf39cc))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.4 [skip ci] ([3cc466e](https://github.com/01cloud/01-Sandbox/commit/3cc466e9f332fd934cd367c6936cd75faebd1eaf))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.4 [skip ci] ([2a4ac37](https://github.com/01cloud/01-Sandbox/commit/2a4ac37bb529cbadc8b2ade12822b7363d752ac9))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.7.5)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.7.4 — 01-Sandbox
 **Release Date:** July 27, 2026
 
