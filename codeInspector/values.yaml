@@ -118,7 +118,7 @@ apiServer:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-api
-      tag: "v0.7.3"
+      tag: "v0.7.4"
       pullPolicy: Always
     resources:
       requests:
@@ -230,7 +230,7 @@ opensandbox:
     runtimeClassName: "gvisor"
     image:
       repository: 01community/01sandbox-opensandbox-server
-      tag: "v0.7.3"
+      tag: "v0.7.4"
       pullPolicy: Always
     resources:
       requests:
