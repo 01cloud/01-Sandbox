@@ -18,6 +18,7 @@ YAML handling:
 
 from __future__ import annotations
 
+import asyncio
 import collections
 import contextvars
 import json
@@ -231,28 +232,35 @@ current_parent_job_id = contextvars.ContextVar("current_parent_job_id", default=
 
 
 async def cleanup_child_jobs(job_ids: set[str]) -> None:
-    """Sends DELETE requests to opensandbox-server to destroy dangling child jobs and their sandboxes."""
+    """Sends parallel DELETE requests to opensandbox-server to destroy dangling child jobs and their sandboxes concurrently."""
+    if not job_ids:
+        return
+
     base_url = opensandbox_base_url()
     prefix = opensandbox_route_prefix()
+
     async with httpx.AsyncClient(timeout=10.0) as client:
-        for jid in list(job_ids):
+
+        async def _delete_single_job(jid: str):
             try:
                 url = f"{base_url.rstrip('/')}{prefix}/scan-jobs/{jid}"
                 await client.delete(
                     url, params={"terminate": "true"}, headers=opensandbox_headers()
                 )
                 print(f"{_TAG} [CLEANUP] Deleted dangling child job {jid}")
-                # Purge child job from Redis/job_tracker
+            except Exception as e:
+                print(f"{_TAG} [CLEANUP] Failed to delete child job {jid}: {e}")
+            finally:
                 try:
                     from core import state
 
                     state.job_tracker.delete_job(jid)
-                except Exception as tracker_err:
-                    print(
-                        f"{_TAG} [CLEANUP] Failed to purge child job {jid} from tracker: {tracker_err}"
-                    )
-            except Exception as e:
-                print(f"{_TAG} [CLEANUP] Failed to delete child job {jid}: {e}")
+                except Exception:
+                    pass
+
+        await asyncio.gather(
+            *[_delete_single_job(jid) for jid in list(job_ids)], return_exceptions=True
+        )
 
 
 async def _submit_scan_job(
