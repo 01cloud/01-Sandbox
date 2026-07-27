@@ -108,9 +108,6 @@ export function UnifiedPipelineView({
   const isDoneOrComplete =
     job.status === "DONE" ||
     job.status === "COMPLETE" ||
-    job.progress >= 100 ||
-    job.stepMessage === "Scan complete" ||
-    job.stepMessage === "All scans complete" ||
     isLogsFinished;
 
   const currentStep = isDoneOrComplete ? "DONE" : job.status;
@@ -146,16 +143,13 @@ export function UnifiedPipelineView({
   };
 
   // When the scan is completed or rich result is available, render the final security report
-  const activeReport = result || job.detail;
+  const activeReport = result || (isDoneOrComplete ? job.detail : null);
   const hasReportPayload = activeReport && (
-    activeReport.owner !== undefined ||
-    activeReport.total_findings !== undefined ||
-    activeReport.scan_duration_seconds !== undefined ||
-    activeReport.total_files !== undefined ||
-    activeReport.languages !== undefined ||
-    activeReport.critical_count !== undefined
+    activeReport.total_findings !== undefined &&
+    activeReport.scan_duration_seconds !== undefined &&
+    activeReport.total_files !== undefined
   );
-  if (isDoneOrComplete && (hasReportPayload || activeReport)) {
+  if (isDoneOrComplete && hasReportPayload) {
     return (
       <div className="animate-in fade-in duration-500">
         {onResultRender(activeReport)}

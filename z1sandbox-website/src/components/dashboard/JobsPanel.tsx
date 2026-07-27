@@ -62,7 +62,7 @@ export function JobsPanel({
           <div className="divide-y divide-border">
             {jobs.map((job) => {
               const isSelected = job.job_id === selectedJobId;
-              const isDone = job.status === "DONE" || job.status === "COMPLETE" || job.progress >= 100 || job.stepMessage?.toLowerCase().includes("complete") || (job.summary !== null && job.summary !== undefined);
+              const isDone = job.status === "DONE" || job.status === "COMPLETE";
               const isError = job.status === "ERROR";
               const isCancelled = job.status === "CANCELLED";
               const isActive = !isDone && !isError && !isCancelled;

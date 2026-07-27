@@ -310,9 +310,10 @@ export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline 
 
   // Find currently selected job record
   const selectedJob = jobs.find((j) => j.job_id === selectedJobId) || null;
-  // Use volatile RAM result first (freshly fetched), fall back to job.detail only if it contains full scan report.
-  const selectedResult = (selectedJobId ? volatileResults[selectedJobId] : null) ?? (
-    selectedJob?.detail && (selectedJob.detail.languages || selectedJob.detail.total_findings !== undefined)
+  // Use volatile RAM result first (freshly fetched), fall back to job.detail only if job is DONE and contains full scan report.
+  const isSelectedDone = selectedJob?.status === "DONE" || selectedJob?.status === "COMPLETE";
+  const selectedResult = (selectedJobId && isSelectedDone ? volatileResults[selectedJobId] : null) ?? (
+    isSelectedDone && selectedJob?.detail && selectedJob.detail.total_findings !== undefined
       ? selectedJob.detail
       : null
   );
