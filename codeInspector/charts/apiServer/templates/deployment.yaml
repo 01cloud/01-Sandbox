@@ -129,7 +129,7 @@ spec:
             httpGet:
               path: /health
               port: 8000
-            failureThreshold: 10
+            failureThreshold: 60
             periodSeconds: 5
 
           resources:
