@@ -82,6 +82,7 @@ apiServer:
     SCANNER_IMAGE_RUST: "199012118961/01sandbox-scanner-rust:dev"
     SCANNER_IMAGE_CPP: "199012118961/01sandbox-scanner-cpp:dev"
     SCANNER_IMAGE_RUBY: "199012118961/01sandbox-scanner-ruby:dev"
+    SCANNER_IMAGE_TERRAFORM: "199012118961/01sandbox-scanner-terraform:dev"
     SCANNER_IMAGE_DEFAULT: "199012118961/01sandbox-codeinterpreter:dev"
     PORT: "8000"
     BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"

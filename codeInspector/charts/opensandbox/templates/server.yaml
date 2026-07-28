@@ -89,6 +89,8 @@ spec:
               value: {{ .Values.server.scannerImageCpp | default "199012118961/01sandbox-scanner-cpp:dev" | quote }}
             - name: SCANNER_IMAGE_RUBY
               value: {{ .Values.server.scannerImageRuby | default "199012118961/01sandbox-scanner-ruby:dev" | quote }}
+            - name: SCANNER_IMAGE_TERRAFORM
+              value: {{ .Values.server.scannerImageTerraform | default "199012118961/01sandbox-scanner-terraform:dev" | quote }}
             - name: SANDBOX_CPU
               value: {{ .Values.server.sandboxCpu | default "200m" | quote }}
             - name: SANDBOX_MEMORY
