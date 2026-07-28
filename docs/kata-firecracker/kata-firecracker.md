@@ -124,24 +124,18 @@ If your primary disk is partition-managed using LVM and has **unallocated free e
 
 ### Option B: Pre-configured LVM with Insufficient Free Space (`0 extents`) *(Most Common Ubuntu Installer Setup)*
 
-> [!NOTE]
-> **Understanding the `0 extents` Error (Filesystem Free Space vs LVM Unallocated Space):**
-> On default Ubuntu LVM installations, the installer creates a Volume Group (`ubuntu-vg`) and assigns **100% of its size** to a single Logical Volume (`ubuntu-lv`) mounted at root (`/`).
-> - `df -h` shows **Filesystem Free Space** (unused space for files *inside* `/`).
-> - `sudo vgs` shows **LVM Unallocated Space** (`VFree`), which is 0 because `ubuntu-lv` claimed the entire Volume Group.
->
-> When running `sudo lvcreate --size 15G --thinpool containerd-pool ubuntu-vg`, LVM checks for *unallocated space* in `ubuntu-vg`. Because 100% was assigned to `ubuntu-lv`, LVM fails with:
-> ```text
-> Volume group "ubuntu-vg" has insufficient free space (0 extents): 4 required.
-> ```
-> Since mounted `ext4` partitions cannot be shrunk online, creating a file-backed loop device inside `/var/lib/` adds **new unallocated physical volume space** into `ubuntu-vg` safely without affecting running applications or requiring VM configuration changes.
+> [!IMPORTANT]
+> **Critical Architectural Rule: Use a Dedicated Volume Group (`containerd-vg`)**
+> Never add a file-backed loop device (e.g. `/var/lib/containerd-pool-disk.img`) to the primary root OS volume group (`ubuntu-vg`).
+> During early boot, `initramfs` runs before `/` is mounted, so `/var/lib/containerd-pool-disk.img` cannot be read. If `ubuntu-vg` expects this loop device to assemble root (`/`), early boot will fail and drop to an `(initramfs)` shell.
+> Creating a **separate, dedicated Volume Group (`containerd-vg`)** isolates containerd storage from early boot entirely.
 
 1. **Create a 15GB backing image file**:
    ```bash
    sudo fallocate -l 15G /var/lib/containerd-pool-disk.img
    ```
 
-2. **Attach the file as a single loop device (reusing existing loop if already attached)**:
+2. **Attach the file as a single loop device**:
    ```bash
    LOOP_DEV=$(sudo losetup -j /var/lib/containerd-pool-disk.img | cut -d: -f1)
    if [ -z "$LOOP_DEV" ]; then
@@ -149,91 +143,76 @@ If your primary disk is partition-managed using LVM and has **unallocated free e
    fi
    ```
 
-3. **Force-initialize the Physical Volume and extend `ubuntu-vg`**:
+3. **Initialize Physical Volume and create dedicated `containerd-vg`**:
    ```bash
    sudo pvcreate -ff -y $LOOP_DEV
-   sudo vgextend ubuntu-vg $LOOP_DEV
+   sudo vgcreate containerd-vg $LOOP_DEV
    ```
 
-4. **Create the Thin-Pool (`containerd-pool`)**:
+4. **Create Thin-Pool (`containerd-pool`) and control thin volume**:
    ```bash
-   sudo lvcreate --size 14.5G --thinpool containerd-pool ubuntu-vg
+   sudo lvcreate -l 90%FREE --thinpool containerd-pool containerd-vg
+   sudo lvcreate -V 100M -T containerd-vg/containerd-pool -n containerd-init
    ```
 
-5. **Persist the loopback device on boot**:
-   Create a systemd service at `/etc/systemd/system/containerd-loop.service`:
-   ```ini
-   [Unit]
-   Description=Attach Loop Device for Containerd LVM Thin Pool
-   DefaultDependencies=no
-   After=systemd-udev-settle.service
-   Before=lvm2-pvscan@.service lvm2-monitor.service containerd.service rke2-server.service rke2-agent.service
-
-   [Service]
-   Type=oneshot
-   ExecStart=/sbin/losetup -fP /var/lib/containerd-pool-disk.img
-   RemainAfterExit=yes
-
-   [Install]
-   WantedBy=sysinit.target
-   ```
-   Enable the service:
+5. **Create Idempotent Self-Healing Script**:
+   Create `/usr/local/sbin/ensure-containerd-loopback.sh`:
    ```bash
-   sudo systemctl daemon-reload
-   sudo systemctl enable containerd-loop.service
+   sudo tee /usr/local/sbin/ensure-containerd-loopback.sh > /dev/null << 'EOF'
+   #!/bin/sh
+   set -e
+
+   IMG="/var/lib/containerd-pool-disk.img"
+   VG="containerd-vg"
+
+   if ! losetup -a | grep -qF "$IMG"; then
+     losetup -fP --show "$IMG"
+   fi
+
+   pvscan --cache
+   vgchange -ay "$VG"
+   EOF
+
+   sudo chmod +x /usr/local/sbin/ensure-containerd-loopback.sh
    ```
 
----
-
-### Option C: Non-LVM Host (Plain `ext4`/`xfs` Partition Layout)
-If your host partition layout is standard `ext4`/`xfs` on a plain partition (no Volume Group or LVM initialized):
-
-1. **Create a backing file** (e.g. 20GB sparse file) to serve as physical storage:
-   ```bash
-   sudo truncate -s 20G /var/lib/containerd-loopback.img
-   ```
-
-2. **Associate a loopback device** with the file:
-   ```bash
-   LOOP_DEV=$(sudo losetup -fP --show /var/lib/containerd-loopback.img)
-   ```
-
-3. **Initialize the Physical Volume and create the Volume Group (`ubuntu-vg`)**:
-   ```bash
-   sudo pvcreate $LOOP_DEV
-   sudo vgcreate ubuntu-vg $LOOP_DEV
-   ```
-
-4. **Create the Thin-Pool (`containerd-pool`)**:
-   ```bash
-   sudo lvcreate --size 15G --thinpool containerd-pool ubuntu-vg
-   ```
-
-5. **Persist the loopback device on boot**:
-   Create a systemd service at `/etc/systemd/system/containerd-loopback.service`:
+6. **Create Systemd Service & Watchdog Timer**:
+   Create `/etc/systemd/system/containerd-loopback.service`:
    ```ini
    [Unit]
    Description=Setup loopback device for containerd devmapper thinpool
    DefaultDependencies=no
-   After=systemd-modules-load.service
-   Before=rke2-server.service rke2-agent.service containerd.service
+   After=systemd-modules-load.service local-fs.target
+   Before=containerd.service rke2-server.service rke2-agent.service
+   Requires=local-fs.target
 
    [Service]
    Type=oneshot
    RemainAfterExit=yes
-   ExecStart=/bin/sh -c 'if ! losetup -a | grep -q "/var/lib/containerd-loopback.img"; then \
-     LOOP_DEV=$(losetup -fP --show /var/lib/containerd-loopback.img); \
-     pvscan; \
-     vgchange -ay ubuntu-vg; \
-   fi'
+   ExecStart=/usr/local/sbin/ensure-containerd-loopback.sh
 
    [Install]
    WantedBy=multi-user.target
    ```
-   Enable the service:
+
+   Create `/etc/systemd/system/containerd-loopback.timer` (runs watchdog check every 5 mins):
+   ```ini
+   [Unit]
+   Description=Periodically ensure containerd loopback + VG stay active
+
+   [Timer]
+   OnBootSec=2min
+   OnUnitActiveSec=5min
+
+   [Install]
+   WantedBy=timers.target
+   ```
+
+   Enable and start the service and timer:
    ```bash
    sudo systemctl daemon-reload
-   sudo systemctl enable containerd-loopback.service
+   sudo systemctl enable --now containerd-loopback.service
+   sudo systemctl enable --now containerd-loopback.timer
    ```
 
 ---
@@ -242,9 +221,8 @@ If your host partition layout is standard `ext4`/`xfs` on a plain partition (no 
 Verify that the thin pool device was created and mapper link exists:
 ```bash
 ls -la /dev/mapper/
-# You should see: ubuntu--vg-containerd--pool
+# You should see: containerd--vg-containerd--pool-tpool
 ```
-The device mapper name for our pool is `ubuntu--vg-containerd--pool`.
 
 ---
 
@@ -290,19 +268,12 @@ EOF
 ## 9. Configure RKE2 containerd
 Because RKE2 dynamically generates `/var/lib/rancher/rke2/agent/etc/containerd/config.toml` on startup, we must use a **custom containerd template** (`config.toml.tmpl`) to inject both our `devmapper` snapshotter configuration and the `kata-fc` runtime settings.
 
-> **Important:** RKE2 reads `config.toml.tmpl` — **not** `config-v3.toml.tmpl`. Using the wrong filename means changes are silently ignored and the auto-generated `config.toml` retains its old values.
-
 Create the template directory (if not exists):
 ```bash
 sudo mkdir -p /var/lib/rancher/rke2/agent/etc/containerd
 ```
 
-Create/edit the config template file:
-```bash
-sudo nano /var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl
-```
-
-Paste the following configuration. The `{{ template "base" . }}` directive tells RKE2 to inject its own generated base config, and we only append the additional stanzas for `kata-fc` and `devmapper` below it:
+Create/edit the config template file `/var/lib/rancher/rke2/agent/etc/containerd/config.toml.tmpl`:
 ```toml
 {{ template "base" . }}
 
@@ -317,8 +288,8 @@ Paste the following configuration. The `{{ template "base" . }}` directive tells
 # Configure devmapper snapshotter plugin
 [plugins."io.containerd.snapshotter.v1.devmapper"]
   root_path = "/var/lib/rancher/rke2/agent/containerd/io.containerd.snapshotter.v1.devmapper"
-  pool_name = "ubuntu--vg-containerd--pool"
-  base_image_size = "2GB"
+  pool_name = "containerd--vg-containerd--pool-tpool"
+  base_image_size = "4GB"
   discard_blocks = true
   fs_type = "ext4"
 ```
@@ -337,7 +308,7 @@ sudo systemctl restart rke2-agent
 
 ---
 
-## 11. Verification Steps
+## 11. Verification & Troubleshooting Guide
 
 ### Step 11.1 Verify containerd plugins
 Ensure that the `devmapper` snapshotter plugin is loaded successfully and reports an `ok` status:
@@ -348,6 +319,39 @@ sudo /var/lib/rancher/rke2/bin/ctr --address /run/k3s/containerd/containerd.sock
 ```text
 io.containerd.snapshotter.v1              devmapper                linux/amd64    ok
 ```
+
+---
+
+### Step 11.2 Troubleshooting Common Issues
+
+#### Issue A: Boot Drops to `(initramfs)` BusyBox Shell
+- **Cause**: Loop device was added directly to `ubuntu-vg` (root OS VG). Early boot cannot find the loop file before `/` is mounted.
+- **Fix**:
+  1. At `(initramfs)` prompt, run: `vgchange -ay --partial` and `exit`.
+  2. Once logged into Ubuntu, remove missing PV from root VG:
+     ```bash
+     sudo vgreduce --removemissing --force ubuntu-vg
+     sudo update-initramfs -u -k all
+     ```
+
+#### Issue B: Duplicate Loop Device Warnings (`Cannot use device with duplicates`)
+- **Cause**: Multiple loop devices (`/dev/loop0`, `/dev/loop1`) attached to the same file.
+- **Fix**:
+  ```bash
+  sudo losetup -D
+  sudo losetup -a | grep containerd-pool-disk | cut -d: -f1 | xargs -r sudo losetup -d
+  sudo systemctl restart containerd-loopback.service
+  ```
+
+#### Issue C: Expanding Backing Disk Image & Thin Pool Size
+- **To expand the backing image to 15GB and thin pool to 14.5GB**:
+  ```bash
+  sudo truncate -s 15G /var/lib/containerd-pool-disk.img
+  LOOP_DEV=$(sudo losetup -j /var/lib/containerd-pool-disk.img | cut -d: -f1)
+  sudo losetup -c $LOOP_DEV
+  sudo pvresize $LOOP_DEV
+  sudo lvextend -L 14.5G containerd-vg/containerd-pool
+  ```
 
 ### Step 11.2 Verify registration
 Verify that `kata-fc` and the correct `base_image_size` are present in the live generated config:
