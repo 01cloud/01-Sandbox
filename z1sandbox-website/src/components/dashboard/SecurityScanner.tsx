@@ -205,7 +205,7 @@ spec:
   },
   {
     name: "Terraform",
-    lang: "yaml",
+    lang: "terraform",
     icon: "🏗️",
     code: `# Terraform IaC Security Issues Example
 resource "aws_s3_bucket" "data" {
@@ -246,6 +246,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       case "js": return "index.js";
       case "k8s": return "pod.yaml";
       case "yaml": return "config.yaml";
+      case "terraform":
+      case "tf": return "main.tf";
       case "sh": return "script.sh";
       case "json": return "data.json";
       default: return "snippet.txt";
@@ -294,7 +296,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       k8s: 0,
       js: 0,
       go: 0,
-      sh: 0
+      sh: 0,
+      terraform: 0,
     };
 
     if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
@@ -305,6 +308,10 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
     }
 
     if (text.startsWith("#!")) return "sh";
+
+    if (/\b(resource|provider|variable|output|module|terraform|data)\s+["\w]+/.test(text)) {
+      scores.terraform += 25;
+    }
 
     if (/\b(import|from)\s+\w+/.test(text)) scores.py += 10;
     if (/\bdef\s+\w+\(/.test(text)) scores.py += 10;
@@ -356,7 +363,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       setIsScanning(true);
 
       const lang = detectLanguage(code);
-      const apiExt = lang === 'k8s' ? 'yaml' : lang;
+      const apiExt = lang === 'k8s' ? 'yaml' : (lang === 'terraform' ? 'tf' : lang);
       const filename = `input.${apiExt}`;
 
       // POST asynchronously to support SSE streams
@@ -457,6 +464,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       else if (ext === "ts" || ext === "tsx") langName = "TypeScript";
       else if (ext === "sh" || ext === "bash") langName = "Shell";
       else if (ext === "json") langName = "JSON";
+      else if (ext === "tf" || ext === "tfvars" || ext === "terraform") langName = "Terraform";
       else if (ext === "yaml" || ext === "yml") {
         const hasK8sTool = findings.some(f => {
           const fileVal = f.file || "";
@@ -488,6 +496,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       else if (ext === "ts" || ext === "tsx") langName = "TypeScript";
       else if (ext === "sh" || ext === "bash") langName = "Shell";
       else if (ext === "json") langName = "JSON";
+      else if (ext === "tf" || ext === "tfvars" || ext === "terraform") langName = "Terraform";
       else if (ext === "yaml" || ext === "yml") {
         const toolVal = finding.tool || "";
         const isK8s = ["kubelinter", "kubeconform", "kubescore"].includes(toolVal.toLowerCase());

@@ -556,6 +556,12 @@ async def create_scan_job(
                     "SCANNER_IMAGE_RUST", "199012118961/01sandbox-scanner-rust:dev"
                 )
                 break
+            elif ext in ("tf", "tfvars", "terraform"):
+                detected_image = os.environ.get(
+                    "SCANNER_IMAGE_TERRAFORM",
+                    "199012118961/01sandbox-scanner-terraform:dev",
+                )
+                break
             elif ext in ("c", "cpp", "cc", "h", "hpp"):
                 detected_image = os.environ.get(
                     "SCANNER_IMAGE_CPP", "199012118961/01sandbox-scanner-cpp:dev"

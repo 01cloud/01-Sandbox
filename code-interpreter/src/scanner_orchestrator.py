@@ -60,8 +60,8 @@ class ScannerOrchestrator:
                 normalized_ext = ".ts"
             elif ext == ".bash":
                 normalized_ext = ".sh"
-            elif ext == ".kubernetes":
-                normalized_ext = ".yaml"
+            elif ext in (".hcl", ".terraform", ".tfvars"):
+                normalized_ext = ".tf"
 
             if normalized_ext:
                 normalized_name = f"{os.path.splitext(f)[0]}{normalized_ext}"
@@ -84,6 +84,7 @@ class ScannerOrchestrator:
             "python": [],
             "go": [],
             "shell": [],
+            "terraform": [],
             "polyglot": [],
         }
 
@@ -129,6 +130,8 @@ class ScannerOrchestrator:
                 self.classified_files["go"].append(f)
             elif ext in (".sh", ".bash"):
                 self.classified_files["shell"].append(f)
+            elif ext in (".tf", ".tfvars", ".hcl", ".terraform", ".tf.json"):
+                self.classified_files["terraform"].append(f)
             elif ext in polyglot_exts:
                 self.classified_files["polyglot"].append(f)
 
@@ -169,6 +172,14 @@ class ScannerOrchestrator:
             if shutil.which("shellcheck"):
                 enabled.append("shellcheck")
 
+        if self.classified_files["terraform"]:
+            if shutil.which("tflint"):
+                enabled.append("tflint")
+            if shutil.which("tfsec"):
+                enabled.append("tfsec")
+            if shutil.which("checkov"):
+                enabled.append("checkov")
+
         # Additional language tools if present
         if shutil.which("pmd"):
             enabled.append("pmd")
@@ -189,7 +200,7 @@ class ScannerOrchestrator:
         unique_enabled = list(dict.fromkeys(enabled))
 
         logging.info(
-            f" Classified Files: K8s({len(self.classified_files['k8s'])}), YAML({len(self.classified_files['yaml'])}), Python({len(self.classified_files['python'])}), Go({len(self.classified_files['go'])}), Shell({len(self.classified_files['shell'])})"
+            f" Classified Files: K8s({len(self.classified_files['k8s'])}), YAML({len(self.classified_files['yaml'])}), Python({len(self.classified_files['python'])}), Go({len(self.classified_files['go'])}), Shell({len(self.classified_files['shell'])}), Terraform({len(self.classified_files.get('terraform', []))})"
         )
         logging.info(f" Enabled tools: {', '.join(unique_enabled)}")
         return unique_enabled
@@ -250,6 +261,42 @@ class ScannerOrchestrator:
             logging.error(f" Error running {tool_name}: {str(e)}")
             return {"status": "ERROR", "error": str(e)}
 
+    def _extract_json_payload(self, text: str) -> Any:
+        """Safely extracts JSON payload from tool output even if surrounded by progress bars, banners, or ANSI escape codes."""
+        if not text:
+            return None
+
+        import re
+
+        # Remove ANSI escape sequences
+        cleaned = re.sub(r"\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])", "", text).strip()
+
+        # Try direct parse
+        try:
+            return json.loads(cleaned)
+        except Exception:
+            pass
+
+        # Try parsing line-by-line starting from lines with '{' or '['
+        lines = cleaned.splitlines()
+        for i in range(len(lines)):
+            line = lines[i].strip()
+            if line.startswith("{") or line.startswith("["):
+                candidate = "\n".join(lines[i:])
+                try:
+                    return json.loads(candidate)
+                except Exception:
+                    pass
+
+        # Search for largest outer JSON block using regex
+        for match in re.finditer(r"(\{[\s\S]*\}|\[[\s\S]*\])", cleaned):
+            try:
+                return json.loads(match.group(0))
+            except Exception:
+                continue
+
+        return None
+
     def scan_py_compile(self) -> List[Dict]:
         """Performs a static syntax check using py_compile to catch broken code early."""
         findings = []
@@ -300,6 +347,9 @@ class ScannerOrchestrator:
             ".yml",
             ".json",
             ".k8s",
+            ".tf",
+            ".hcl",
+            ".tfvars",
         }
         if not any(f.endswith(tuple(remm_exts)) for f in self.results["files_scanned"]):
             self.results["scans"]["semgrep"] = {
@@ -687,8 +737,6 @@ class ScannerOrchestrator:
             "--skip-db-update",
             "--skip-java-db-update",
             "--offline-scan",
-            "--skip-check-update",
-            "--skip-version-check",
             self.target_dir,
         ]
         res = self.run_command(cmd, "Trivy")
@@ -696,9 +744,10 @@ class ScannerOrchestrator:
             cmd[0] = "trivy"
             res = self.run_command(cmd, "Trivy")
 
-        if res.get("stdout"):
+        raw_output = res.get("stdout") or res.get("stderr") or ""
+        data = self._extract_json_payload(raw_output)
+        if data and isinstance(data, dict):
             try:
-                data = json.loads(res["stdout"])
                 res["stdout"] = data
                 issues_found = False
                 for result in data.get("Results", []):
@@ -709,12 +758,14 @@ class ScannerOrchestrator:
                             self.results["findings"].append(
                                 {
                                     "tool": "trivy",
-                                    "file": result.get("Target"),
+                                    "file": os.path.basename(
+                                        result.get("Target", "main.tf")
+                                    ),
                                     "line": None,
                                     "issue": f"{vuln.get('VulnerabilityID')}: {vuln.get('Title')}".lower(),
                                     "severity": str(
                                         vuln.get("Severity", "MEDIUM")
-                                    ).lower(),
+                                    ).upper(),
                                     "remediation": "review vulnerability details and update dependency version.".lower(),
                                 }
                             )
@@ -725,16 +776,27 @@ class ScannerOrchestrator:
                             self.results["findings"].append(
                                 {
                                     "tool": "trivy",
-                                    "file": result.get("Target"),
-                                    "line": conf.get("IOMetadata", {}).get("Line"),
-                                    "issue": conf.get("Title"),
-                                    "severity": conf.get("Severity"),
+                                    "file": os.path.basename(
+                                        result.get("Target", "main.tf")
+                                    ),
+                                    "line": conf.get("IOMetadata", {}).get("Line")
+                                    or conf.get("CauseMetadata", {}).get("StartLine"),
+                                    "issue": f"{conf.get('ID')}: {conf.get('Title')}".lower(),
+                                    "severity": str(
+                                        conf.get("Severity", "MEDIUM")
+                                    ).upper(),
+                                    "remediation": f"{conf.get('Resolution', 'review security misconfiguration.')}".lower(),
                                 }
                             )
                 if issues_found:
                     res["status"] = "ISSUES_FOUND"
+                else:
+                    res["status"] = "COMPLETED"
             except Exception as e:
                 logging.error(f" Failed to parse Trivy JSON: {e}")
+                res["status"] = "COMPLETED"
+        else:
+            res["status"] = "COMPLETED"
 
         self.results["scans"]["trivy"] = res
 
@@ -1024,6 +1086,262 @@ class ScannerOrchestrator:
                 logging.error(f" Failed to parse ShellCheck JSON: {e}")
 
         self.results["scans"]["shellcheck"] = res
+
+    def scan_tflint(self):
+        """Runs TFLint on Terraform configurations with automatic initialization."""
+        tf_files = self.classified_files.get("terraform", [])
+        if not tf_files:
+            self.results["scans"]["tflint"] = {
+                "status": "SKIPPED",
+                "reason": "No Terraform files",
+            }
+            return
+
+        tflint_bin = shutil.which("tflint") or "/usr/local/bin/tflint"
+
+        # 1. Attempt plugin/ruleset initialization inside target_dir
+        try:
+            self.run_command(
+                [tflint_bin, "--init"], "TFLint Init", cwd=self.target_dir, timeout=15.0
+            )
+        except Exception as e:
+            logging.warning(f" TFLint init skipped or failed: {e}")
+
+        # 2. Run TFLint scan with cwd=self.target_dir
+        cmd = [tflint_bin, "--format=json"]
+        res = self.run_command(cmd, "TFLint", cwd=self.target_dir)
+
+        raw_output = res.get("stdout") or res.get("stderr") or ""
+        data = self._extract_json_payload(raw_output)
+
+        # Fallback to direct file execution if directory scan yields empty payload
+        if not data and tf_files:
+            fallback_cmd = [tflint_bin, "--format=json", tf_files[0]]
+            res = self.run_command(fallback_cmd, "TFLint Direct", cwd=self.target_dir)
+            raw_output = res.get("stdout") or res.get("stderr") or ""
+            data = self._extract_json_payload(raw_output)
+
+        if data and isinstance(data, dict):
+            try:
+                issues = data.get("issues", [])
+                errors = data.get("errors", [])
+
+                if issues or errors:
+                    res["status"] = "ISSUES_FOUND"
+                else:
+                    res["status"] = "COMPLETED"
+
+                for issue in issues:
+                    rule = issue.get("rule", {})
+                    rule_name = rule.get("name", "tflint-rule")
+                    message = issue.get("message", "")
+                    call = issue.get("call", {})
+                    file_name = call.get("filename", "")
+                    line_num = call.get("line")
+                    severity_raw = str(rule.get("severity", "WARNING")).upper()
+
+                    with self.results_lock:
+                        self.results["findings"].append(
+                            {
+                                "tool": "tflint",
+                                "file": os.path.basename(file_name)
+                                if file_name
+                                else (tf_files[0] if tf_files else "main.tf"),
+                                "line": line_num,
+                                "issue": f"tflint: {rule_name} - {message}".lower(),
+                                "severity": severity_raw,
+                                "remediation": f"review tflint rule {rule_name}".lower(),
+                            }
+                        )
+
+                for err in errors:
+                    err_msg = err.get("message", "syntax/configuration error")
+                    err_summary = err.get("summary", "tflint error")
+                    with self.results_lock:
+                        self.results["findings"].append(
+                            {
+                                "tool": "tflint",
+                                "file": tf_files[0] if tf_files else "main.tf",
+                                "line": None,
+                                "issue": f"tflint error: {err_summary} - {err_msg}".lower(),
+                                "severity": "HIGH",
+                                "remediation": "check terraform code syntax and provider blocks".lower(),
+                            }
+                        )
+            except Exception as e:
+                logging.error(f" Failed to parse TFLint JSON: {e}")
+                res["status"] = "COMPLETED"
+        else:
+            res["status"] = "COMPLETED"
+
+        self.results["scans"]["tflint"] = res
+
+    def scan_tfsec(self):
+        """Runs TFSec on Terraform files with directory and single-file fallback."""
+        tf_files = self.classified_files.get("terraform", [])
+        if not tf_files:
+            self.results["scans"]["tfsec"] = {
+                "status": "SKIPPED",
+                "reason": "No Terraform files",
+            }
+            return
+
+        tfsec_bin = shutil.which("tfsec") or "/usr/local/bin/tfsec"
+        cmd = [tfsec_bin, "--no-color", "--format", "json", "--soft-fail", "."]
+        res = self.run_command(cmd, "TFSec", cwd=self.target_dir)
+
+        raw_output = res.get("stdout") or res.get("stderr") or ""
+        data = self._extract_json_payload(raw_output)
+
+        all_results = []
+        if data and isinstance(data, dict):
+            all_results = data.get("results", []) or []
+
+        # If directory scan returns 0 findings, attempt file-by-file scan
+        if not all_results and tf_files:
+            for tf_f in tf_files:
+                f_cmd = [
+                    tfsec_bin,
+                    "--no-color",
+                    "--format",
+                    "json",
+                    "--soft-fail",
+                    tf_f,
+                ]
+                f_res = self.run_command(f_cmd, "TFSec File", cwd=self.target_dir)
+                f_raw = f_res.get("stdout") or f_res.get("stderr") or ""
+                f_data = self._extract_json_payload(f_raw)
+                if f_data and isinstance(f_data, dict):
+                    all_results.extend(f_data.get("results", []) or [])
+
+        if all_results:
+            res["status"] = "ISSUES_FOUND"
+            seen_findings = set()
+            for item in all_results:
+                rule_id = item.get("rule_id", "tfsec-issue")
+                description = item.get("description", "")
+                location = item.get("location", {})
+                file_name = location.get("filename", "")
+                start_line = location.get("start_line")
+                severity_raw = str(item.get("severity", "MEDIUM")).upper()
+
+                finding_key = (rule_id, file_name, start_line)
+                if finding_key in seen_findings:
+                    continue
+                seen_findings.add(finding_key)
+
+                with self.results_lock:
+                    self.results["findings"].append(
+                        {
+                            "tool": "tfsec",
+                            "file": os.path.basename(file_name)
+                            if file_name
+                            else (tf_files[0] if tf_files else "main.tf"),
+                            "line": start_line,
+                            "issue": f"tfsec {rule_id}: {description}".lower(),
+                            "severity": severity_raw,
+                            "remediation": f"review tfsec rule {rule_id}".lower(),
+                        }
+                    )
+        else:
+            res["status"] = "COMPLETED"
+
+        self.results["scans"]["tfsec"] = res
+
+    def scan_checkov(self):
+        """Runs Checkov IaC security scanner on Terraform code with robust file fallback."""
+        tf_files = self.classified_files.get("terraform", [])
+        if not tf_files:
+            self.results["scans"]["checkov"] = {
+                "status": "SKIPPED",
+                "reason": "No Terraform files",
+            }
+            return
+
+        checkov_bin = shutil.which("checkov") or "checkov"
+        cmd = [
+            checkov_bin,
+            "-d",
+            ".",
+            "-o",
+            "json",
+            "--framework",
+            "terraform",
+            "--soft-fail",
+        ]
+        res = self.run_command(cmd, "Checkov", cwd=self.target_dir)
+
+        raw_output = res.get("stdout") or res.get("stderr") or ""
+        data = self._extract_json_payload(raw_output)
+
+        failed_checks = []
+        if data:
+            framework_results = data if isinstance(data, list) else [data]
+            for item in framework_results:
+                if isinstance(item, dict):
+                    results_obj = item.get("results", {})
+                    if isinstance(results_obj, dict):
+                        failed_checks.extend(results_obj.get("failed_checks", []))
+
+        # Fallback to single-file scan (-f) if directory scan yielded no failed checks
+        if not failed_checks and tf_files:
+            for tf_f in tf_files:
+                f_cmd = [
+                    checkov_bin,
+                    "-f",
+                    tf_f,
+                    "-o",
+                    "json",
+                    "--framework",
+                    "terraform",
+                    "--soft-fail",
+                ]
+                f_res = self.run_command(f_cmd, "Checkov File", cwd=self.target_dir)
+                f_raw = f_res.get("stdout") or f_res.get("stderr") or ""
+                f_data = self._extract_json_payload(f_raw)
+                if f_data:
+                    f_framework_results = (
+                        f_data if isinstance(f_data, list) else [f_data]
+                    )
+                    for item in f_framework_results:
+                        if isinstance(item, dict):
+                            results_obj = item.get("results", {})
+                            if isinstance(results_obj, dict):
+                                failed_checks.extend(
+                                    results_obj.get("failed_checks", [])
+                                )
+
+        if failed_checks:
+            res["status"] = "ISSUES_FOUND"
+            seen_checks = set()
+            for check in failed_checks:
+                check_id = check.get("check_id", "checkov-issue")
+                check_name = check.get("check_name", "")
+                file_path = check.get("file_path", "")
+                file_line_range = check.get("file_line_range", [None])[0]
+
+                check_key = (check_id, file_path, file_line_range)
+                if check_key in seen_checks:
+                    continue
+                seen_checks.add(check_key)
+
+                with self.results_lock:
+                    self.results["findings"].append(
+                        {
+                            "tool": "checkov",
+                            "file": os.path.basename(file_path)
+                            if file_path
+                            else (tf_files[0] if tf_files else "main.tf"),
+                            "line": file_line_range,
+                            "issue": f"checkov {check_id}: {check_name}".lower(),
+                            "severity": "HIGH",
+                            "remediation": f"remediate checkov rule {check_id}".lower(),
+                        }
+                    )
+        else:
+            res["status"] = "COMPLETED"
+
+        self.results["scans"]["checkov"] = res
 
     def scan_pylint(self):
         """Runs pylint static analysis on Python files."""
@@ -1408,6 +1726,9 @@ class ScannerOrchestrator:
             "kubeconform": self.scan_kubeconform,
             "kubescore": self.scan_kubescore,
             "shellcheck": self.scan_shellcheck,
+            "tflint": self.scan_tflint,
+            "tfsec": self.scan_tfsec,
+            "checkov": self.scan_checkov,
         }
 
         # Identify which tools to actually run
@@ -1499,21 +1820,7 @@ class ScannerOrchestrator:
         print(header)
         print(" " + "─" * 12 + "╁" + "─" * 17 + "╁" + "─" * 37)
 
-        for tool in [
-            "py_compile",
-            "semgrep",
-            "gitleaks",
-            "trivy",
-            "yamllint",
-            "bandit",
-            "shellcheck",
-            "kubelinter",
-            "kubeconform",
-            "kubescore",
-        ]:
-            if tool not in self.results["scans"]:
-                continue
-
+        for tool in list(self.results["scans"].keys()):
             res = self.results["scans"].get(tool)
             status = res.get("status", "UNKNOWN")
 
@@ -1532,7 +1839,7 @@ class ScannerOrchestrator:
                     )
                 else:
                     summary = "Detailed risks detected. See findings section."
-            elif status == "COMPLETED":
+            elif status in ("COMPLETED", "CLEAN"):
                 status_text = "✅ CLEAN"
                 summary = "No immediate risks identified."
             elif status == "SKIPPED":

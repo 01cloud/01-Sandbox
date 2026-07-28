@@ -296,6 +296,12 @@ def scanner_images() -> dict[str, str]:
         "ruby": os.environ.get(
             "SCANNER_IMAGE_RUBY", "199012118961/01sandbox-scanner-ruby:dev"
         ),
+        "terraform": os.environ.get(
+            "SCANNER_IMAGE_TERRAFORM", "199012118961/01sandbox-scanner-terraform:dev"
+        ),
+        "hcl": os.environ.get(
+            "SCANNER_IMAGE_TERRAFORM", "199012118961/01sandbox-scanner-terraform:dev"
+        ),
         "default": os.environ.get(
             "SCANNER_IMAGE_DEFAULT", "199012118961/01sandbox-codeinterpreter:dev"
         ),
