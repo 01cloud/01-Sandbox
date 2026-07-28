@@ -119,7 +119,7 @@ apiServer:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-api
-      tag: "v0.7.5"
+      tag: "v0.7.8"
       pullPolicy: Always
     resources:
       requests:
@@ -215,7 +215,7 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
-    sandboxImage: "01community/01sandbox-codeinterpreter:v0.7.3"
+    sandboxImage: "01community/01sandbox-codeinterpreter:v0.7.8"
     scannerImagePython: "01community/01sandbox-scanner-python:1.0.0"
     scannerImageGo: "01community/01sandbox-scanner-go:1.0.0"
     scannerImageJava: "01community/01sandbox-scanner-java:1.0.0"
@@ -231,7 +231,7 @@ opensandbox:
     runtimeClassName: "gvisor"
     image:
       repository: 01community/01sandbox-opensandbox-server
-      tag: "v0.7.4"
+      tag: "v0.7.8"
       pullPolicy: Always
     resources:
       requests:
