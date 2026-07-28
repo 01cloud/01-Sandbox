@@ -81,7 +81,6 @@ def get_api_keys_router(state, validate_token: Callable) -> APIRouter:
         user_id = payload.get("sub")
         conn = state.get_db_conn()
 
-        # Handle dict behavior difference between sqlite3 and psycopg2
         now_iso = datetime.datetime.now(datetime.UTC).isoformat()
         cursor = conn.cursor(cursor_factory=RealDictCursor)
         query = "SELECT * FROM api_keys WHERE LOWER(user_id) = LOWER(%s) AND expires_at > %s"

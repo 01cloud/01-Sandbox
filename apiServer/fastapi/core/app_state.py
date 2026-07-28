@@ -85,92 +85,44 @@ class AppState:
                 self.use_redis = False
 
     def get_db_conn(self):
-        if os.environ.get("PG_HOST"):
-            conn = psycopg2.connect(
-                host=os.environ.get("PG_HOST"),
-                port=os.environ.get("PG_PORT"),
-                user=os.environ.get("PG_USER"),
-                password=os.environ.get("PG_PASSWORD"),
-                dbname=os.environ.get("PG_DATABASE"),
+        pg_host = os.environ.get("PG_HOST")
+        if not pg_host:
+            raise RuntimeError(
+                "CRITICAL: PostgreSQL environment variable 'PG_HOST' is missing. "
+                "PostgreSQL is strictly required across all environments."
             )
-            return InstrumentedConnection(conn)
-
-        import sqlite3
-
-        class SQLiteCursor:
-            def __init__(self, cursor):
-                self._cursor = cursor
-
-            def execute(self, query, params=None):
-                query = query.replace("%s", "?")
-                if params is not None:
-                    self._cursor.execute(query, params)
-                else:
-                    self._cursor.execute(query)
-
-            def fetchone(self):
-                row = self._cursor.fetchone()
-                if row is None:
-                    return None
-                return row
-
-            def fetchall(self):
-                return self._cursor.fetchall()
-
-            @property
-            def rowcount(self):
-                return self._cursor.rowcount
-
-            def close(self):
-                self._cursor.close()
-
-        class SQLiteConnection:
-            def __init__(self, conn):
-                self._conn = conn
-
-            def cursor(self, cursor_factory=None):
-                self._conn.row_factory = sqlite3.Row
-                return SQLiteCursor(self._conn.cursor())
-
-            def commit(self):
-                self._conn.commit()
-
-            def rollback(self):
-                self._conn.rollback()
-
-            def close(self):
-                self._conn.close()
-
-        db_path = os.environ.get("SQLITE_DB_PATH", "/tmp/test_apikeys.db")
-        sqlite_conn = sqlite3.connect(db_path)
-        return SQLiteConnection(sqlite_conn)
+        conn = psycopg2.connect(
+            host=pg_host,
+            port=os.environ.get("PG_PORT", "5432"),
+            user=os.environ.get("PG_USER", "postgres"),
+            password=os.environ.get("PG_PASSWORD", ""),
+            dbname=os.environ.get("PG_DATABASE", "postgres"),
+        )
+        return InstrumentedConnection(conn)
 
     def init_db(self):
         import time
 
-        if os.environ.get("PG_HOST"):
-            retries = 30
-            conn = None
-            for i in range(retries):
-                try:
-                    conn = self.get_db_conn()
+        retries = 30
+        conn = None
+        for i in range(retries):
+            try:
+                conn = self.get_db_conn()
+                print(
+                    "[startup] Successfully connected to PostgreSQL for database initialization."
+                )
+                break
+            except Exception as e:
+                if i < retries - 1:
                     print(
-                        "[startup] Successfully connected to PostgreSQL for database initialization."
+                        f"[startup] Waiting for PostgreSQL ({e}). Retrying in 2 seconds... ({i+1}/{retries})"
                     )
-                    break
-                except Exception as e:
-                    if i < retries - 1:
-                        print(
-                            f"[startup] Waiting for PostgreSQL ({e}). Retrying in 2 seconds... ({i+1}/{retries})"
-                        )
-                        time.sleep(2)
-                    else:
-                        print(
-                            f"[startup] Crucial: Failed to connect to PostgreSQL after {retries} retries. Raising error."
-                        )
-                        raise e
-        else:
-            conn = self.get_db_conn()
+                    time.sleep(2)
+                else:
+                    print(
+                        f"[startup] Crucial: Failed to connect to PostgreSQL after {retries} retries. Raising error."
+                    )
+                    raise e
 
         cursor = conn.cursor()
 
