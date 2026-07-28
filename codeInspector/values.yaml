@@ -95,10 +95,11 @@ apiServer:
     SCANNER_IMAGE_NODE: "01community/01sandbox-scanner-node:1.0.0"
     SCANNER_IMAGE_K8S: "01community/01sandbox-scanner-k8s:1.0.0"
     SCANNER_IMAGE_RUST: "01community/01sandbox-scanner-rust:1.0.0"
+    SCANNER_IMAGE_SHELL: "01community/01sandbox-scanner-shell:1.0.0"
     SCANNER_IMAGE_CPP: "01community/01sandbox-scanner-cpp:1.0.0"
     SCANNER_IMAGE_RUBY: "01community/01sandbox-scanner-ruby:1.0.0"
     SCANNER_IMAGE_TERRAFORM: "01community/01sandbox-scanner-terraform:1.0.0"
-    SCANNER_IMAGE_DEFAULT: "01community/01sandbox-codeinterpreter:v0.6.15"
+    SCANNER_IMAGE_DEFAULT: "01community/01sandbox-scanner-python:1.0.0"
     SENDGRID_FROM_EMAIL: "sandbox@01security.com"
   secret:
     E2B_API_KEY: ""

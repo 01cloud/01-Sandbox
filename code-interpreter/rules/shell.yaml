@@ -1,0 +1,30 @@
+rules:
+  - id: bash-eval-command-injection
+    pattern-regex: "eval\\s+.*\\$|eval\\s+[\"'].*\\$"
+    message: "dangerous eval execution: evaluated string contains unquoted or user-controlled variable expansion."
+    languages: [bash, sh, generic]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      remediation: "avoid eval execution on dynamic user inputs."
+
+  - id: bash-curl-pipe-sh
+    pattern-regex: "curl\\s+.*\\|\\s*(ba)?sh|wget\\s+.*\\|\\s*(ba)?sh"
+    message: "insecure remote execution: piping remote web content directly into shell processor."
+    languages: [bash, sh, generic]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-494: Download of Code Without Integrity Check"
+      remediation: "download scripts locally, verify checksums/signatures before execution."
+
+  - id: bash-unquoted-rm-rf
+    pattern-regex: "rm\\s+-rf\\s+[\"']?\\$[a-zA-Z0-9_]+[\"']?"
+    message: "dangerous directory deletion: unquoted variable in rm -rf can expand to root '/' if empty."
+    languages: [bash, sh, generic]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-73: External Control of File Name or Path"
+      remediation: "ensure variables in rm -rf are validated for non-empty paths and safe root prefixes."

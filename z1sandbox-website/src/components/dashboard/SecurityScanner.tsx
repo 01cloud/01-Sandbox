@@ -143,7 +143,7 @@ func main() {
   },
   {
     name: "Rust",
-    lang: "sh",
+    lang: "rs",
     icon: "🦀",
     code: `// Rust unsafe memory & command injection example
 use std::process::Command;
@@ -236,13 +236,14 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
   const effectiveApiKey = apiKey || "";
   const [code, setCode] = useState("# Simple Code Example\ndef greet(name):\n    return f\"Hello, {name}!\"\n\nprint(greet(\"User\"))");
   const [isScanning, setIsScanning] = useState(false);
-  const [isEditorFocused, setIsEditorFocused] = useState(false);
   const [runtime, setRuntime] = useState<string>("gvisor");
 
   const getFilename = (lang: string) => {
     switch (lang) {
       case "py": return "main.py";
       case "go": return "main.go";
+      case "rs":
+      case "rust": return "main.rs";
       case "js": return "index.js";
       case "k8s": return "pod.yaml";
       case "yaml": return "config.yaml";
@@ -253,6 +254,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       default: return "snippet.txt";
     }
   };
+
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [expandedLang, setExpandedLang] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"dashboard" | "telemetry">("dashboard");
@@ -296,6 +298,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       k8s: 0,
       js: 0,
       go: 0,
+      rs: 0,
       sh: 0,
       terraform: 0,
     };
@@ -335,6 +338,12 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
     if (/\bpackage\s+\w+/.test(text)) scores.go += 15;
     if (/\bfunc\s+\w+\(/.test(text)) scores.go += 10;
 
+    if (/\bfn\s+\w+\(/.test(text)) scores.rs += 15;
+    if (/\buse\s+std::/.test(text)) scores.rs += 15;
+    if (/\blet\s+(mut\s+)?\w+/.test(text)) scores.rs += 10;
+    if (/\bprintln!/.test(text)) scores.rs += 10;
+    if (/\bunsafe\s+fn/.test(text)) scores.rs += 15;
+
     if (/\b(sudo|apt-get|yum|export|grep|awk|sed)\b/.test(text)) scores.sh += 5;
 
     let maxScore = -1;
@@ -363,7 +372,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       setIsScanning(true);
 
       const lang = detectLanguage(code);
-      const apiExt = lang === 'k8s' ? 'yaml' : (lang === 'terraform' ? 'tf' : lang);
+      const apiExt = lang === 'k8s' ? 'yaml' : (lang === 'terraform' ? 'tf' : (lang === 'rust' ? 'rs' : lang));
       const filename = `input.${apiExt}`;
 
       // POST asynchronously to support SSE streams

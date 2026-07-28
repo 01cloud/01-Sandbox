@@ -567,6 +567,11 @@ async def create_scan_job(
                     "SCANNER_IMAGE_CPP", "199012118961/01sandbox-scanner-cpp:dev"
                 )
                 break
+            elif ext in ("sh", "bash", "zsh"):
+                detected_image = os.environ.get(
+                    "SCANNER_IMAGE_SHELL", "199012118961/01sandbox-scanner-shell:dev"
+                )
+                break
             elif ext in ("rb", "ruby"):
                 detected_image = os.environ.get(
                     "SCANNER_IMAGE_RUBY", "199012118961/01sandbox-scanner-ruby:dev"
@@ -574,7 +579,10 @@ async def create_scan_job(
                 break
 
         target_image = detected_image or os.environ.get(
-            "SANDBOX_IMAGE", "199012118961/01sandbox-codeinterpreter:dev"
+            "SANDBOX_IMAGE",
+            os.environ.get(
+                "SCANNER_IMAGE_DEFAULT", "199012118961/01sandbox-scanner-python:dev"
+            ),
         )
 
     if not target_image:

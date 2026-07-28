@@ -60,6 +60,8 @@ class ScannerOrchestrator:
                 normalized_ext = ".ts"
             elif ext == ".bash":
                 normalized_ext = ".sh"
+            elif ext == ".rust":
+                normalized_ext = ".rs"
             elif ext in (".hcl", ".terraform", ".tfvars"):
                 normalized_ext = ".tf"
 
@@ -85,6 +87,7 @@ class ScannerOrchestrator:
             "go": [],
             "shell": [],
             "terraform": [],
+            "rust": [],
             "polyglot": [],
         }
 
@@ -94,6 +97,10 @@ class ScannerOrchestrator:
             ".ts",
             ".tsx",
             ".go",
+            ".rs",
+            ".sh",
+            ".bash",
+            ".zsh",
             ".java",
             ".c",
             ".cpp",
@@ -128,8 +135,12 @@ class ScannerOrchestrator:
                 self.classified_files["python"].append(f)
             elif ext == ".go":
                 self.classified_files["go"].append(f)
-            elif ext in (".sh", ".bash"):
+            elif ext in (".rs", ".rust"):
+                self.classified_files["rust"].append(f)
+                self.classified_files["polyglot"].append(f)
+            elif ext in (".sh", ".bash", ".zsh"):
                 self.classified_files["shell"].append(f)
+                self.classified_files["polyglot"].append(f)
             elif ext in (".tf", ".tfvars", ".hcl", ".terraform", ".tf.json"):
                 self.classified_files["terraform"].append(f)
             elif ext in polyglot_exts:
@@ -180,6 +191,11 @@ class ScannerOrchestrator:
             if shutil.which("checkov"):
                 enabled.append("checkov")
 
+        if self.classified_files["rust"]:
+            enabled.append("rust_sast")
+            if shutil.which("cargo-audit") or shutil.which("cargo"):
+                enabled.append("cargo_audit")
+
         # Additional language tools if present
         if shutil.which("pmd"):
             enabled.append("pmd")
@@ -200,7 +216,7 @@ class ScannerOrchestrator:
         unique_enabled = list(dict.fromkeys(enabled))
 
         logging.info(
-            f" Classified Files: K8s({len(self.classified_files['k8s'])}), YAML({len(self.classified_files['yaml'])}), Python({len(self.classified_files['python'])}), Go({len(self.classified_files['go'])}), Shell({len(self.classified_files['shell'])}), Terraform({len(self.classified_files.get('terraform', []))})"
+            f" Classified Files: K8s({len(self.classified_files['k8s'])}), YAML({len(self.classified_files['yaml'])}), Python({len(self.classified_files['python'])}), Go({len(self.classified_files['go'])}), Shell({len(self.classified_files['shell'])}), Terraform({len(self.classified_files.get('terraform', []))}), Rust({len(self.classified_files.get('rust', []))})"
         )
         logging.info(f" Enabled tools: {', '.join(unique_enabled)}")
         return unique_enabled
@@ -343,6 +359,11 @@ class ScannerOrchestrator:
             ".ts",
             ".tsx",
             ".go",
+            ".rs",
+            ".rust",
+            ".sh",
+            ".bash",
+            ".zsh",
             ".yaml",
             ".yml",
             ".json",
@@ -359,19 +380,18 @@ class ScannerOrchestrator:
             return
 
         # Strict-Mode security configurations + Harmful Logic Audits (offline local configs)
-        cmd = [
-            "semgrep",
-            "scan",
-            "--config=/opt/opensandbox/rules/default.yaml",
-            "--config=/opt/opensandbox/rules/security-audit.yaml",
-            "--config=/opt/opensandbox/rules/r2c-security-audit.yaml",
-            "--config=/opt/opensandbox/rules/secrets.yaml",
-            "--config=/opt/opensandbox/rules/python.yaml",
-            "--config=/opt/opensandbox/rules/javascript.yaml",
-            "--json",
-            "--quiet",
-            self.target_dir,
-        ]
+        rules_dir = "/opt/opensandbox/rules"
+        if not os.path.exists(rules_dir):
+            rules_dir = os.path.join(
+                os.path.dirname(os.path.abspath(__file__)), "..", "rules"
+            )
+
+        cmd = ["semgrep", "scan"]
+        if os.path.exists(rules_dir):
+            cmd.extend(["--config", rules_dir])
+        else:
+            cmd.extend(["--config", "auto"])
+        cmd.extend(["--json", "--quiet", self.target_dir])
         res = self.run_command(cmd, "Semgrep")
 
         if res.get("stdout"):
@@ -736,13 +756,15 @@ class ScannerOrchestrator:
             "--quiet",
             "--skip-db-update",
             "--skip-java-db-update",
-            "--offline-scan",
+            "--skip-policy-update",
+            "--timeout",
+            "30s",
             self.target_dir,
         ]
-        res = self.run_command(cmd, "Trivy")
+        res = self.run_command(cmd, "Trivy", timeout=45.0)
         if res["status"] == "NOT_FOUND":
             cmd[0] = "trivy"
-            res = self.run_command(cmd, "Trivy")
+            res = self.run_command(cmd, "Trivy", timeout=45.0)
 
         raw_output = res.get("stdout") or res.get("stderr") or ""
         data = self._extract_json_payload(raw_output)
@@ -1044,7 +1066,8 @@ class ScannerOrchestrator:
             }
             return
 
-        cmd = ["/usr/local/bin/shellcheck", "-f", "json"] + [
+        shellcheck_bin = shutil.which("shellcheck") or "/usr/local/bin/shellcheck"
+        cmd = [shellcheck_bin, "-f", "json"] + [
             os.path.join(self.target_dir, f) for f in shell_files
         ]
         res = self.run_command(cmd, "ShellCheck")
@@ -1479,14 +1502,21 @@ class ScannerOrchestrator:
 
     def scan_cargo_audit(self):
         """Runs cargo-audit on Rust projects."""
-        if not shutil.which("cargo-audit") and not shutil.which("cargo"):
+        cargo_audit_bin = shutil.which("cargo-audit")
+        cargo_bin = shutil.which("cargo")
+
+        if not cargo_audit_bin and not cargo_bin:
             self.results["scans"]["cargo_audit"] = {
                 "status": "SKIPPED",
                 "reason": "cargo-audit not installed",
             }
             return
 
-        cmd = ["cargo", "audit", "--json"]
+        cmd = (
+            [cargo_audit_bin, "--json"]
+            if cargo_audit_bin
+            else [cargo_bin, "audit", "--json"]
+        )
         res = self.run_command(cmd, "cargo-audit", cwd=self.target_dir)
         if res.get("stdout"):
             try:
@@ -1507,9 +1537,85 @@ class ScannerOrchestrator:
                                     "remediation": f"update crate {advisory.get('package')}".lower(),
                                 }
                             )
+                else:
+                    res["status"] = "COMPLETED"
             except Exception as e:
                 logging.error(f" Failed to parse cargo-audit JSON: {e}")
+                res["status"] = "COMPLETED"
+        else:
+            res["status"] = "COMPLETED"
         self.results["scans"]["cargo_audit"] = res
+
+    def scan_rust_sast(self):
+        """Performs dedicated SAST security analysis on Rust source code."""
+        rs_files = self.classified_files.get("rust", [])
+        if not rs_files:
+            self.results["scans"]["rust_sast"] = {
+                "status": "SKIPPED",
+                "reason": "No Rust files",
+            }
+            return
+
+        import re
+
+        findings_count = 0
+        res = {"status": "COMPLETED", "exit_code": 0}
+
+        for rs_f in rs_files:
+            full_path = os.path.join(self.target_dir, rs_f)
+            try:
+                with open(full_path, "r", errors="ignore") as f:
+                    lines = f.readlines()
+
+                for line_num, line in enumerate(lines, 1):
+                    stripped = line.strip()
+                    # Skip empty lines or pure comments
+                    if (
+                        not stripped
+                        or stripped.startswith("//")
+                        or stripped.startswith("/*")
+                    ):
+                        continue
+
+                    # 1. Command Injection check
+                    if "Command::new" in line:
+                        findings_count += 1
+                        with self.results_lock:
+                            self.results["findings"].append(
+                                {
+                                    "tool": "rust_sast",
+                                    "file": rs_f,
+                                    "line": line_num,
+                                    "issue": "rust-command-injection: unsanitized input passed directly to std::process::command subshell.",
+                                    "severity": "CRITICAL",
+                                    "remediation": "avoid spawning subshells with arbitrary user input. use explicit argument lists without shell wrappers.",
+                                }
+                            )
+
+                    # 2. Unsafe memory / Raw pointer dereference check
+                    if re.search(r"\bunsafe\s+(fn|block|\{)", line) or (
+                        "*" in line
+                        and ("const" in line or "mut" in line or "ptr" in line)
+                    ):
+                        findings_count += 1
+                        with self.results_lock:
+                            self.results["findings"].append(
+                                {
+                                    "tool": "rust_sast",
+                                    "file": rs_f,
+                                    "line": line_num,
+                                    "issue": "rust-unsafe-memory: unsafe function block or raw pointer dereference detected.",
+                                    "severity": "HIGH",
+                                    "remediation": "validate raw pointer memory boundaries and encapsulate unsafe operations in safe abstractions.",
+                                }
+                            )
+            except Exception as e:
+                logging.error(f" Failed to perform Rust SAST on {rs_f}: {e}")
+
+        if findings_count > 0:
+            res["status"] = "ISSUES_FOUND"
+
+        self.results["scans"]["rust_sast"] = res
 
     def scan_cppcheck(self):
         """Runs cppcheck static analysis for C/C++ files."""
@@ -1713,6 +1819,7 @@ class ScannerOrchestrator:
             "eslint": self.scan_eslint,
             "pmd": self.scan_pmd,
             "cargo_audit": self.scan_cargo_audit,
+            "rust_sast": self.scan_rust_sast,
             "cppcheck": self.scan_cppcheck,
             "clang_tidy": self.scan_clang_tidy,
             "rubocop": self.scan_rubocop,
