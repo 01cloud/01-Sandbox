@@ -141,14 +141,17 @@ If your primary disk is partition-managed using LVM and has **unallocated free e
    sudo fallocate -l 15G /var/lib/containerd-pool-disk.img
    ```
 
-2. **Attach the file as a loop device**:
+2. **Attach the file as a single loop device (reusing existing loop if already attached)**:
    ```bash
-   LOOP_DEV=$(sudo losetup -fP --show /var/lib/containerd-pool-disk.img)
+   LOOP_DEV=$(sudo losetup -j /var/lib/containerd-pool-disk.img | cut -d: -f1)
+   if [ -z "$LOOP_DEV" ]; then
+     LOOP_DEV=$(sudo losetup -fP --show /var/lib/containerd-pool-disk.img)
+   fi
    ```
 
-3. **Initialize the Physical Volume and extend `ubuntu-vg`**:
+3. **Force-initialize the Physical Volume and extend `ubuntu-vg`**:
    ```bash
-   sudo pvcreate $LOOP_DEV
+   sudo pvcreate -ff -y $LOOP_DEV
    sudo vgextend ubuntu-vg $LOOP_DEV
    ```
 
@@ -158,30 +161,26 @@ If your primary disk is partition-managed using LVM and has **unallocated free e
    ```
 
 5. **Persist the loopback device on boot**:
-   Create a systemd service at `/etc/systemd/system/containerd-loopback.service`:
+   Create a systemd service at `/etc/systemd/system/containerd-loop.service`:
    ```ini
    [Unit]
-   Description=Setup loopback device for containerd devmapper thinpool
+   Description=Attach Loop Device for Containerd LVM Thin Pool
    DefaultDependencies=no
-   After=systemd-modules-load.service
-   Before=rke2-server.service rke2-agent.service containerd.service
+   After=systemd-udev-settle.service
+   Before=lvm2-pvscan@.service lvm2-monitor.service containerd.service rke2-server.service rke2-agent.service
 
    [Service]
    Type=oneshot
+   ExecStart=/sbin/losetup -fP /var/lib/containerd-pool-disk.img
    RemainAfterExit=yes
-   ExecStart=/bin/sh -c 'if ! losetup -a | grep -q "/var/lib/containerd-pool-disk.img"; then \
-     LOOP_DEV=$(losetup -fP --show /var/lib/containerd-pool-disk.img); \
-     pvscan; \
-     vgchange -ay ubuntu-vg; \
-   fi'
 
    [Install]
-   WantedBy=multi-user.target
+   WantedBy=sysinit.target
    ```
    Enable the service:
    ```bash
    sudo systemctl daemon-reload
-   sudo systemctl enable containerd-loopback.service
+   sudo systemctl enable containerd-loop.service
    ```
 
 ---
