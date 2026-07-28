@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.7.8](https://github.com/01cloud/01-Sandbox/compare/v0.7.7...v0.7.8) (2026-07-28)
+
+
+### 🚀 New Features
+
+* implement terraform security scans tools ([eae1a4c](https://github.com/01cloud/01-Sandbox/commit/eae1a4cf14e30bd824d6d9d710d704375dea7cfe))
+* implement terraform security scans tools ([82d04b2](https://github.com/01cloud/01-Sandbox/commit/82d04b2ad9517382a627c55cf235ca155d8cdca2))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.7 [skip ci] ([c846db0](https://github.com/01cloud/01-Sandbox/commit/c846db0b4d758694cb12409a1accb50f63521d06))
+* **readme:** update readme file ([0932f2b](https://github.com/01cloud/01-Sandbox/commit/0932f2b66470bdee55b24864acc2dcc2cf13bdf0))
+* **readme:** update readme file ([b45dc31](https://github.com/01cloud/01-Sandbox/commit/b45dc31f40199ff6718a38d17d5245886436b3b5))
+
 ## [0.7.7](https://github.com/01cloud/01-Sandbox/compare/v0.7.6...v0.7.7) (2026-07-27)
 
 
