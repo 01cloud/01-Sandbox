@@ -1,3 +1,41 @@
+## Release v0.7.8 — 01-Sandbox
+**Release Date:** July 28, 2026
+
+---
+
+### Summary
+v0.7.8 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* implement terraform security scans tools ([eae1a4c](https://github.com/01cloud/01-Sandbox/commit/eae1a4cf14e30bd824d6d9d710d704375dea7cfe))
+* implement terraform security scans tools ([82d04b2](https://github.com/01cloud/01-Sandbox/commit/82d04b2ad9517382a627c55cf235ca155d8cdca2))
+* generate RELEASE.md for v0.7.7 [skip ci] ([c846db0](https://github.com/01cloud/01-Sandbox/commit/c846db0b4d758694cb12409a1accb50f63521d06))
+* **readme:** update readme file ([0932f2b](https://github.com/01cloud/01-Sandbox/commit/0932f2b66470bdee55b24864acc2dcc2cf13bdf0))
+
+### Changes
+## [0.7.8](https://github.com/01cloud/01-Sandbox/compare/v0.7.7...v0.7.8) (2026-07-28)
+
+
+### 🚀 New Features
+
+* implement terraform security scans tools ([eae1a4c](https://github.com/01cloud/01-Sandbox/commit/eae1a4cf14e30bd824d6d9d710d704375dea7cfe))
+* implement terraform security scans tools ([82d04b2](https://github.com/01cloud/01-Sandbox/commit/82d04b2ad9517382a627c55cf235ca155d8cdca2))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.7 [skip ci] ([c846db0](https://github.com/01cloud/01-Sandbox/commit/c846db0b4d758694cb12409a1accb50f63521d06))
+* **readme:** update readme file ([0932f2b](https://github.com/01cloud/01-Sandbox/commit/0932f2b66470bdee55b24864acc2dcc2cf13bdf0))
+* **readme:** update readme file ([b45dc31](https://github.com/01cloud/01-Sandbox/commit/b45dc31f40199ff6718a38d17d5245886436b3b5))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.7.8)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.7.7 — 01-Sandbox
 **Release Date:** July 27, 2026
 
