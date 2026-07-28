@@ -1,3 +1,44 @@
+## Release v0.7.9 — 01-Sandbox
+**Release Date:** July 28, 2026
+
+---
+
+### Summary
+v0.7.9 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* fix the scanner tools for shell and terraform ([38b124a](https://github.com/01cloud/01-Sandbox/commit/38b124a5f4a549874b473ed161666df39f38e22a))
+* fix the scanner tools for shell and terraform ([f3f6082](https://github.com/01cloud/01-Sandbox/commit/f3f60828a3182490cf0997dbfbf4bf8e896c7287))
+* generate RELEASE.md for v0.7.8 [skip ci] ([3fcc553](https://github.com/01cloud/01-Sandbox/commit/3fcc553d04ffb4ca3898e7e92ae181b8c5b48b63))
+* bump versions to v0.7.8 [skip ci] ([fb4dbcc](https://github.com/01cloud/01-Sandbox/commit/fb4dbcc94bb433cd8baf31e556f23ccf4335e051))
+
+### Changes
+## [0.7.9](https://github.com/01cloud/01-Sandbox/compare/v0.7.8...v0.7.9) (2026-07-28)
+
+
+### 🚀 New Features
+
+* fix the scanner tools for shell and terraform ([38b124a](https://github.com/01cloud/01-Sandbox/commit/38b124a5f4a549874b473ed161666df39f38e22a))
+* fix the scanner tools for shell and terraform ([f3f6082](https://github.com/01cloud/01-Sandbox/commit/f3f60828a3182490cf0997dbfbf4bf8e896c7287))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.8 [skip ci] ([3fcc553](https://github.com/01cloud/01-Sandbox/commit/3fcc553d04ffb4ca3898e7e92ae181b8c5b48b63))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.8 [skip ci] ([fb4dbcc](https://github.com/01cloud/01-Sandbox/commit/fb4dbcc94bb433cd8baf31e556f23ccf4335e051))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.7.9)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.7.8 — 01-Sandbox
 **Release Date:** July 28, 2026
 
