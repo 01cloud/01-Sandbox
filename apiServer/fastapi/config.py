@@ -279,7 +279,10 @@ def scanner_images() -> dict[str, str]:
             "SCANNER_IMAGE_K8S", "199012118961/01sandbox-scanner-k8s:dev"
         ),
         "shell": os.environ.get(
-            "SCANNER_IMAGE_K8S", "199012118961/01sandbox-scanner-k8s:dev"
+            "SCANNER_IMAGE_SHELL", "199012118961/01sandbox-scanner-shell:dev"
+        ),
+        "bash": os.environ.get(
+            "SCANNER_IMAGE_SHELL", "199012118961/01sandbox-scanner-shell:dev"
         ),
         "rust": os.environ.get(
             "SCANNER_IMAGE_RUST", "199012118961/01sandbox-scanner-rust:dev"
@@ -303,7 +306,7 @@ def scanner_images() -> dict[str, str]:
             "SCANNER_IMAGE_TERRAFORM", "199012118961/01sandbox-scanner-terraform:dev"
         ),
         "default": os.environ.get(
-            "SCANNER_IMAGE_DEFAULT", "199012118961/01sandbox-codeinterpreter:dev"
+            "SCANNER_IMAGE_DEFAULT", "199012118961/01sandbox-scanner-python:dev"
         ),
     }
 

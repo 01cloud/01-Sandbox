@@ -1,0 +1,45 @@
+rules:
+  - id: rust-command-injection
+    pattern-either:
+      - pattern: Command::new(...)
+      - pattern: Command::new("sh")
+      - pattern: Command::new("bash")
+    message: "command injection vulnerability: unsanitized input passed directly to process command execution."
+    languages: [rust]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      remediation: "avoid spawning subshells with arbitrary user input."
+
+  - id: rust-unsafe-pointer-dereference
+    pattern-either:
+      - pattern: unsafe fn $FUNC(...) { ... }
+      - pattern: unsafe { ... }
+    message: "unsafe raw pointer dereference or unsafe block detected: potential memory corruption or arbitrary memory access."
+    languages: [rust]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-119: Memory Buffer Operations"
+      remediation: "validate raw pointer memory boundaries before dereferencing."
+
+  - id: rust-generic-command-injection
+    pattern-regex: "Command::new\\(\"sh\"\\)|Command::new\\(\"bash\"\\)"
+    message: "command injection vulnerability: unsanitized input passed directly to process command execution."
+    languages: [generic]
+    severity: ERROR
+    metadata:
+      category: security
+      cwe: "CWE-78: OS Command Injection"
+      remediation: "avoid spawning subshells with arbitrary user input."
+
+  - id: rust-generic-unsafe-pointer
+    pattern-regex: "unsafe\\s+(fn|block|\\{)"
+    message: "unsafe raw pointer dereference or unsafe block detected: potential memory corruption or arbitrary memory access."
+    languages: [generic]
+    severity: WARNING
+    metadata:
+      category: security
+      cwe: "CWE-119: Memory Buffer Operations"
+      remediation: "validate raw pointer memory boundaries before dereferencing."
