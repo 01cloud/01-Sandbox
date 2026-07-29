@@ -1,3 +1,46 @@
+## Release v0.7.10 — 01-Sandbox
+**Release Date:** July 29, 2026
+
+---
+
+### Summary
+v0.7.10 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* js and go fixes ([3c8c318](https://github.com/01cloud/01-Sandbox/commit/3c8c31890098aacd7cb40204298d83377dfe1231))
+* js and go fixes ([815048d](https://github.com/01cloud/01-Sandbox/commit/815048d26f67c28713644497175725556b84f323))
+* generate RELEASE.md for v0.7.9 [skip ci] ([6ca6e0c](https://github.com/01cloud/01-Sandbox/commit/6ca6e0c4dcd93f22e915a77eed3cf4f7b07b3bde))
+* **readme:** update readme file ([64fd6cc](https://github.com/01cloud/01-Sandbox/commit/64fd6cc798a581dc8d37f727cc0803793630a654))
+
+### Changes
+## [0.7.10](https://github.com/01cloud/01-Sandbox/compare/v0.7.9...v0.7.10) (2026-07-29)
+
+
+### 🐛 Bug Fixes
+
+* js and go fixes ([3c8c318](https://github.com/01cloud/01-Sandbox/commit/3c8c31890098aacd7cb40204298d83377dfe1231))
+* js and go fixes ([815048d](https://github.com/01cloud/01-Sandbox/commit/815048d26f67c28713644497175725556b84f323))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.9 [skip ci] ([6ca6e0c](https://github.com/01cloud/01-Sandbox/commit/6ca6e0c4dcd93f22e915a77eed3cf4f7b07b3bde))
+* **readme:** update readme file ([64fd6cc](https://github.com/01cloud/01-Sandbox/commit/64fd6cc798a581dc8d37f727cc0803793630a654))
+* **readme:** update readme file ([e688729](https://github.com/01cloud/01-Sandbox/commit/e68872930062e65510af07fdd907c4233be8eb29))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.9 [skip ci] ([d952a16](https://github.com/01cloud/01-Sandbox/commit/d952a1633d7b30a78f8177abd55ceb43a8f25cc2))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.7.10)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.7.9 — 01-Sandbox
 **Release Date:** July 28, 2026
 
