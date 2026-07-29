@@ -24,13 +24,18 @@ class ScannerOrchestrator:
     """Orchestrates security scanning tools for code-interpreter sandboxes."""
 
     def __init__(self, target_dir: str):
-        self.target_dir = target_dir
+        self.target_dir = os.path.abspath(target_dir)
+        if os.path.exists(self.target_dir):
+            try:
+                os.chdir(self.target_dir)
+            except Exception as e:
+                logging.warning(f"Failed to chdir to {self.target_dir}: {e}")
         self.results_lock = threading.Lock()
         self.results = {
             "summary": {},
             "findings": [],
             "files_scanned": [],
-            "target": target_dir,
+            "target": self.target_dir,
             "scans": {},
         }
         self.enabled_tools = self._get_enabled_tools()
@@ -246,6 +251,8 @@ class ScannerOrchestrator:
         self, cmd: List[str], tool_name: str, cwd: str = None, timeout: float = 120.0
     ) -> Dict[str, Any]:
         """Runs a scanning command and returns its exit code and summary."""
+        if cwd is None:
+            cwd = self.target_dir
         logging.info(f" Running {tool_name} scan...")
         try:
             process = subprocess.run(
@@ -710,7 +717,6 @@ class ScannerOrchestrator:
             }
             return
 
-        # Disable all-default to avoid too many noisy linters, or keep simple
         cmd = ["golangci-lint", "run", "--out-format", "json", "./..."]
         res = self.run_command(cmd, "GolangCI-Lint", cwd=self.target_dir)
 
@@ -1423,7 +1429,33 @@ class ScannerOrchestrator:
             }
             return
 
-        cmd = ["npx", "eslint", "--format=json"] + js_ts_files
+        cmd = ["npx", "eslint", "--format=json"]
+
+        # Pass fallback config if workspace lacks custom eslint config
+        has_user_config = any(
+            os.path.exists(os.path.join(self.target_dir, f))
+            for f in [
+                "eslint.config.js",
+                "eslint.config.mjs",
+                "eslint.config.cjs",
+                ".eslintrc",
+                ".eslintrc.json",
+                ".eslintrc.js",
+            ]
+        )
+        if not has_user_config:
+            fallback_config = "/opt/opensandbox/rules/eslint.config.js"
+            if not os.path.exists(fallback_config):
+                fallback_config = os.path.join(
+                    os.path.dirname(os.path.abspath(__file__)),
+                    "..",
+                    "rules",
+                    "eslint.config.js",
+                )
+            if os.path.exists(fallback_config):
+                cmd.extend(["--config", fallback_config])
+
+        cmd.extend(js_ts_files)
         res = self.run_command(cmd, "eslint")
         if res.get("stdout"):
             try:
@@ -1781,7 +1813,10 @@ class ScannerOrchestrator:
             if status in ("ERROR", "ISSUES_FOUND"):
                 # Check if this tool already has findings
                 tool_findings = [
-                    f for f in self.results["findings"] if f.get("tool") == tool
+                    f
+                    for f in self.results["findings"]
+                    if f.get("tool")
+                    in (tool, tool.replace("_", "-"), tool.replace("-", "_"))
                 ]
 
                 if not tool_findings:
@@ -1841,11 +1876,28 @@ class ScannerOrchestrator:
         # Identify which tools to actually run
         tools_to_run = [tool for tool in self.enabled_tools if tool in scanner_map]
 
-        logging.info(f"Starting parallel execution for {len(tools_to_run)} tools...")
+        # If Go files exist but no go.mod is present, temporarily create a dummy go.mod
+        # so Go tools (go build, gosec, golangci-lint, staticcheck) can inspect ASTs without module errors.
+        created_dummy_gomod = False
+        gomod_path = os.path.join(self.target_dir, "go.mod")
+        if self.classified_files.get("go") and not os.path.exists(gomod_path):
+            try:
+                with open(gomod_path, "w") as f:
+                    f.write("module workspace\n\ngo 1.22\n")
+                created_dummy_gomod = True
+            except Exception as e:
+                logging.warning(f"Could not create dummy go.mod: {e}")
 
-        with ThreadPoolExecutor(max_workers=len(tools_to_run) or 1) as executor:
-            for tool in tools_to_run:
-                executor.submit(scanner_map[tool])
+        try:
+            with ThreadPoolExecutor(max_workers=len(tools_to_run) or 1) as executor:
+                for tool in tools_to_run:
+                    executor.submit(scanner_map[tool])
+        finally:
+            if created_dummy_gomod and os.path.exists(gomod_path):
+                try:
+                    os.remove(gomod_path)
+                except Exception:
+                    pass
 
         # Enforce that all failures result in dashboard insights
         self._ensure_vulnerability_insights()

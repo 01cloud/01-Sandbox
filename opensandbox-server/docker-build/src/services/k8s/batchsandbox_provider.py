@@ -201,6 +201,9 @@ class BatchSandboxProvider(WorkloadProvider):
                 if target_container:
                     image_pull_policy = target_container.get("imagePullPolicy")
 
+        if not image_pull_policy:
+            image_pull_policy = "IfNotPresent"
+
         # Build init container for execd installation
         init_container = self._build_execd_init_container(execd_image)
 

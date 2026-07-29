@@ -102,7 +102,7 @@ app.listen(3000);
   },
   {
     name: "TypeScript",
-    lang: "js",
+    lang: "ts",
     icon: "🔷",
     code: `// TypeScript unsafe any & eval example
 const express = require('express');
@@ -245,6 +245,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       case "rs":
       case "rust": return "main.rs";
       case "js": return "index.js";
+      case "ts":
+      case "typescript": return "index.ts";
       case "k8s": return "pod.yaml";
       case "yaml": return "config.yaml";
       case "terraform":
@@ -297,6 +299,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       yaml: 0,
       k8s: 0,
       js: 0,
+      ts: 0,
       go: 0,
       rs: 0,
       sh: 0,
@@ -312,16 +315,23 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
 
     if (text.startsWith("#!")) return "sh";
 
-    if (/\b(resource|provider|variable|output|module|terraform|data)\s+["\w]+/.test(text)) {
+    // Terraform / HCL: Must be top-level blocks or HCL definitions
+    if (
+      /^[ \t]*(?:resource|provider|variable|output|module|data)\s+"[^"]+"/m.test(text) ||
+      /^[ \t]*terraform\s*\{/m.test(text) ||
+      /^[ \t]*(?:resource|provider|variable|output|module)\s+[\w"-]+/m.test(text)
+    ) {
       scores.terraform += 25;
     }
 
+    // Python
     if (/\b(import|from)\s+\w+/.test(text)) scores.py += 10;
-    if (/\bdef\s+\w+\(/.test(text)) scores.py += 10;
+    if (/\bdef\s+\w+\s*\(/.test(text)) scores.py += 15;
     if (/\bclass\s+\w+[:\(]/.test(text)) scores.py += 10;
     if (/\bprint\(/.test(text)) scores.py += 5;
     if (/\bif\s+__name__\s*==/.test(text)) scores.py += 20;
 
+    // YAML / Kubernetes
     if (text.startsWith("---")) scores.yaml += 15;
     const hasApiVersion = /apiVersion:/m.test(text);
     const hasKind = /kind:/m.test(text);
@@ -331,19 +341,36 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       scores.yaml += 10;
     }
 
-    if (/\b(const|let|var)\s+\w+\s*=/.test(text)) scores.js += 5;
-    if (/\bimport\s+.*from\s+['"]/.test(text)) scores.js += 10;
-    if (/\bconsole\.log\(/.test(text)) scores.js += 5;
+    // JS & TS Shared Patterns
+    if (/\b(const|let|var)\s+\w+\s*=/.test(text)) { scores.js += 10; scores.ts += 10; }
+    if (/\brequire\s*\(\s*['"]/.test(text)) { scores.js += 15; scores.ts += 15; }
+    if (/\bimport\s+.*from\s+['"]/.test(text)) { scores.js += 15; scores.ts += 15; }
+    if (/\bexport\s+(default|const|let|function|class|\{)/.test(text)) { scores.js += 10; scores.ts += 10; }
+    if (/\bfunction\s+\w+\s*\(/.test(text)) { scores.js += 10; scores.ts += 10; }
+    if (/\bconsole\.(log|error|warn|info)\(/.test(text)) { scores.js += 10; scores.ts += 10; }
+    if (/\bapp\.(get|post|put|delete|listen|use)\(/.test(text)) { scores.js += 15; scores.ts += 15; }
+    if (/\b(req|res|next)\b/.test(text)) { scores.js += 10; scores.ts += 10; }
+    if (/=>\s*\{?/.test(text)) { scores.js += 5; scores.ts += 5; }
 
+    // TypeScript Specific Patterns
+    if (/:\s*(any|string|number|boolean|void|never|unknown|object|\[\])\b/.test(text)) scores.ts += 25;
+    if (/\binterface\s+\w+\s*\{/.test(text)) scores.ts += 20;
+    if (/\btype\s+\w+\s*=/.test(text)) scores.ts += 20;
+    if (/\bas\s+(any|string|number|unknown)\b/.test(text)) scores.ts += 15;
+
+    // Go
     if (/\bpackage\s+\w+/.test(text)) scores.go += 15;
-    if (/\bfunc\s+\w+\(/.test(text)) scores.go += 10;
+    if (/\bfunc\s+\w+\s*\(/.test(text)) scores.go += 10;
 
-    if (/\bfn\s+\w+\(/.test(text)) scores.rs += 15;
+    // Rust
+    if (/\bfn\s+\w+\s*\(/.test(text)) scores.rs += 15;
     if (/\buse\s+std::/.test(text)) scores.rs += 15;
-    if (/\blet\s+(mut\s+)?\w+/.test(text)) scores.rs += 10;
+    if (/\blet\s+mut\s+\w+/.test(text)) scores.rs += 15;
     if (/\bprintln!/.test(text)) scores.rs += 10;
-    if (/\bunsafe\s+fn/.test(text)) scores.rs += 15;
+    if (/\bunsafe\s+(fn|block|\{)/.test(text)) scores.rs += 15;
+    if (/\bCommand::new\(/.test(text)) scores.rs += 15;
 
+    // Shell
     if (/\b(sudo|apt-get|yum|export|grep|awk|sed)\b/.test(text)) scores.sh += 5;
 
     let maxScore = -1;
@@ -939,7 +966,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                       onClick={() => setCode(tmpl.code)}
                       className={cn(
                         "px-2.5 py-1.5 rounded-lg border border-border/50 bg-background/50 hover:bg-secondary/40 text-[10px] font-bold text-muted-foreground hover:text-foreground transition-all flex items-center gap-1.5",
-                        detectLanguage(code) === tmpl.lang ? "border-violet-500/30 bg-violet-500/5 text-violet-500" : ""
+                        detectLanguage(code) === tmpl.lang && code === tmpl.code ? "border-violet-500/30 bg-violet-500/5 text-violet-500" : ""
                       )}
                     >
                       <span className="text-xs">{tmpl.icon}</span>
