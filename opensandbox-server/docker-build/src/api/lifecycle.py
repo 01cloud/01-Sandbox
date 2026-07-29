@@ -190,7 +190,7 @@ def stream_pod_logs_to_file(
         return k8s_client.CoreV1Api()
 
     def _wait_for_pod(
-        v1: k8s_client.CoreV1Api, pod_name: str, timeout: int = 90
+        v1: k8s_client.CoreV1Api, pod_name: str, timeout: int = 180
     ) -> bool:
         """Poll until the pod exists and is Running/Succeeded (or timeout)."""
         deadline = _time.monotonic() + timeout

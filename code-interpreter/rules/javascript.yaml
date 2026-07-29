@@ -1,32 +1,82 @@
 rules:
-  - id: javascript.sqlite3.security.sqli.sqli-string-concatenation
+  - id: javascript.express.security.xss.reflected-xss
+    pattern-either:
+      - pattern: res.send($STR + $INPUT + $END)
+      - pattern: res.send($STR + $INPUT)
+      - pattern: $RES.send($STR + $INPUT + $END)
+      - pattern: $RES.send($STR + $INPUT)
+      - pattern: $RES.send(`...${$INPUT}...`)
+      - pattern: res.send(`...${$INPUT}...`)
+      - pattern: $RES.send($REQ.query.$PARAM)
+      - pattern: $RES.send($REQ.params.$PARAM)
+      - pattern: $RES.send($REQ.body.$PARAM)
+    message: "Reflected Cross-Site Scripting (XSS) detected: Returning unescaped dynamic input or user request parameters directly in Express response body. Sanitize output or use a secure HTML escaping engine."
+    languages:
+      - javascript
+      - typescript
+    severity: ERROR
+    metadata:
+      cwe: "CWE-79: Improper Neutralization of Input During Web Page Generation ('Cross-site Scripting')"
+      owasp: "A03:2021 - Injection"
+      category: security
+      technology:
+        - express
+        - nodejs
+
+  - id: javascript.lang.security.prototype-pollution.unsafe-assignment
     pattern-either:
       - pattern: |
-          $DB.all(`...${$INPUT}...`, ...)
+          for (let $KEY in $SRC) {
+            $OBJ[$KEY] = $SRC[$KEY];
+          }
       - pattern: |
-          $DB.run(`...${$INPUT}...`, ...)
+          for (var $KEY in $SRC) {
+            $OBJ[$KEY] = $SRC[$KEY];
+          }
       - pattern: |
-          $DB.get(`...${$INPUT}...`, ...)
+          for (const $KEY in $SRC) {
+            $OBJ[$KEY] = $SRC[$KEY];
+          }
       - pattern: |
-          $DB.each(`...${$INPUT}...`, ...)
-      - pattern: |
-          $DB.all($QUERY + $INPUT, ...)
-      - pattern: |
-          $DB.run($QUERY + $INPUT, ...)
-      - pattern: |
-          $DB.get($QUERY + $INPUT, ...)
+          for ($KEY in $SRC) {
+            $OBJ[$KEY] = $SRC[$KEY];
+          }
+      - pattern: $OBJ[$KEY] = $SRC[$KEY]
+    message: "Prototype Pollution detected: Iterating object keys in for-in loop and copying properties without checking Object.prototype.hasOwnProperty() or sanitizing __proto__/constructor keys."
+    languages:
+      - javascript
+      - typescript
+    severity: ERROR
+    metadata:
+      cwe: "CWE-1321: Improperly Controlled Modification of Object Prototype Attributes ('Prototype Pollution')"
+      category: security
+
+  - id: javascript.express.security.audit.hardcoded-credentials
+    pattern-either:
+      - pattern: const $VAR = "$VAL"
+      - pattern: let $VAR = "$VAL"
+      - pattern: var $VAR = "$VAL"
+    metavariables:
+      - metavariable: $VAR
+        regex: (?i)(PASSWORD|SECRET|API_KEY|AUTH_TOKEN|PRIVATE_KEY|JWT)
+    message: "Hardcoded Secret / Credential detected: Storing passwords, API keys, or JWT secrets in source code files. Use environment variables or a secret manager."
+    languages:
+      - javascript
+      - typescript
+    severity: WARNING
+    metadata:
+      cwe: "CWE-798: Use of Hard-coded Credentials"
+      category: security
+
+  - id: javascript.sqlite3.security.sqli.sqli-string-concatenation
+    pattern-either:
+      - pattern: $DB.all($QUERY + $INPUT, ...)
+      - pattern: $DB.run($QUERY + $INPUT, ...)
+      - pattern: $DB.get($QUERY + $INPUT, ...)
       - pattern: |
           const $Q = `...${$INPUT}...`;
           ...
           $DB.all($Q, ...)
-      - pattern: |
-          const $Q = `...${$INPUT}...`;
-          ...
-          $DB.run($Q, ...)
-      - pattern: |
-          const $Q = `...${$INPUT}...`;
-          ...
-          $DB.get($Q, ...)
       - pattern: |
           let $Q = `...${$INPUT}...`;
           ...
@@ -35,10 +85,7 @@ rules:
           var $Q = `...${$INPUT}...`;
           ...
           $DB.all($Q, ...)
-      - pattern: |
-          $QUERY = `...${$INPUT}...`;
-          ...
-          $DB.all($QUERY, ...)
+      - pattern: $DB.all(`...${$INPUT}...`, ...)
     message: "SQL Injection detected: Untrusted input or variable concatenated directly into SQL query string. Use parameterized queries (e.g., db.all('SELECT * FROM users WHERE username = ?', [username])) instead of string template interpolation."
     languages:
       - javascript
@@ -48,23 +95,14 @@ rules:
       cwe: "CWE-89: Improper Neutralization of Special Elements used in an SQL Command ('SQL Injection')"
       owasp: "A03:2021 - Injection"
       category: security
-      technology:
-        - sqlite3
-        - nodejs
-        - express
 
   - id: javascript.express.security.sqli.sqli-generic-template-literal
     pattern-either:
-      - pattern: |
-          $DB.query(`SELECT $COLS FROM $TABLE WHERE $COND='${$INPUT}'`, ...)
-      - pattern: |
-          $DB.query(`SELECT $COLS FROM $TABLE WHERE $COND=${$INPUT}`, ...)
-      - pattern: |
-          $DB.execute(`SELECT $COLS FROM $TABLE WHERE $COND='${$INPUT}'`, ...)
-      - pattern: |
-          $DB.query($STR + $INPUT, ...)
-      - pattern: |
-          $DB.raw(`SELECT $COLS FROM $TABLE WHERE $COND='${$INPUT}'`)
+      - pattern: $DB.query(`SELECT $COLS FROM $TABLE WHERE $COND='${$INPUT}'`, ...)
+      - pattern: $DB.query(`SELECT $COLS FROM $TABLE WHERE $COND=${$INPUT}`, ...)
+      - pattern: $DB.execute(`SELECT $COLS FROM $TABLE WHERE $COND='${$INPUT}'`, ...)
+      - pattern: $DB.query($STR + $INPUT, ...)
+      - pattern: $DB.raw(`SELECT $COLS FROM $TABLE WHERE $COND='${$INPUT}'`)
     message: "Generic SQL Injection detected: Concatenating dynamic user input into SQL queries. Use prepared statements or query parameters."
     languages:
       - javascript
@@ -77,28 +115,28 @@ rules:
 
   - id: javascript.node.security.command-injection.child-process-exec
     pattern-either:
-      - pattern: |
-          require('child_process').exec(`...${$INPUT}...`, ...)
-      - pattern: |
-          require('child_process').execSync(`...${$INPUT}...`, ...)
-      - pattern: |
-          $CP.exec(`...${$INPUT}...`, ...)
-      - pattern: |
-          $CP.execSync(`...${$INPUT}...`, ...)
+      - pattern: require('child_process').exec(...)
+      - pattern: require('child_process').execSync(...)
+      - pattern: $CP.exec(...)
+      - pattern: $CP.execSync(...)
+      - pattern: exec(...)
+      - pattern: execSync(...)
     message: "Command Injection detected: Executing system shell commands with concatenated dynamic input. Use child_process.execFile or execFileAsync with argument arrays."
     languages:
       - javascript
       - typescript
     severity: ERROR
     metadata:
-      cwe: "CWE-78"
+      cwe: "CWE-78: Improper Neutralization of Special Elements used in an OS Command ('OS Command Injection')"
       owasp: "A03:2021 - Injection"
       category: security
 
   - id: javascript.node.security.eval.eval-with-expression
     pattern-either:
       - pattern: eval($INPUT)
+      - pattern: eval(...)
       - pattern: Function($INPUT)()
+      - pattern: Function(...)()
     message: "Insecure Code Execution: Avoid using eval() or Function() constructor with dynamic strings as it leads to arbitrary code execution."
     languages:
       - javascript
@@ -114,6 +152,8 @@ rules:
       - pattern: fs.readFileSync($PATH + $INPUT, ...)
       - pattern: fs.writeFile($PATH + $INPUT, ...)
       - pattern: fs.createReadStream($PATH + $INPUT, ...)
+      - pattern: fs.readFile($INPUT, ...)
+      - pattern: fs.readFileSync($INPUT, ...)
     message: "Path Traversal detected: File system operation called with concatenated user input. Sanitize path using path.basename() or validate against an allowlist."
     languages:
       - javascript

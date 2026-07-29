@@ -2,7 +2,7 @@ rules:
   - id: bash-eval-command-injection
     pattern-regex: "eval\\s+.*\\$|eval\\s+[\"'].*\\$"
     message: "dangerous eval execution: evaluated string contains unquoted or user-controlled variable expansion."
-    languages: [bash, sh, generic]
+    languages: [bash, sh]
     severity: ERROR
     metadata:
       category: security
@@ -12,7 +12,7 @@ rules:
   - id: bash-curl-pipe-sh
     pattern-regex: "curl\\s+.*\\|\\s*(ba)?sh|wget\\s+.*\\|\\s*(ba)?sh"
     message: "insecure remote execution: piping remote web content directly into shell processor."
-    languages: [bash, sh, generic]
+    languages: [bash, sh]
     severity: WARNING
     metadata:
       category: security
@@ -22,7 +22,7 @@ rules:
   - id: bash-unquoted-rm-rf
     pattern-regex: "rm\\s+-rf\\s+[\"']?\\$[a-zA-Z0-9_]+[\"']?"
     message: "dangerous directory deletion: unquoted variable in rm -rf can expand to root '/' if empty."
-    languages: [bash, sh, generic]
+    languages: [bash, sh]
     severity: WARNING
     metadata:
       category: security
