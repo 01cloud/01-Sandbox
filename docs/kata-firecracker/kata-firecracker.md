@@ -277,7 +277,11 @@ Create/edit the config template file `/var/lib/rancher/rke2/agent/etc/containerd
 ```toml
 {{ template "base" . }}
 
-# Configure kata-fc runtime to use devmapper snapshotter
+# 1. gVisor Runtime (runsc)
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runsc]
+  runtime_type = "io.containerd.runsc.v1"
+
+# 2. Kata Firecracker Runtime (kata-fc) using devmapper snapshotter
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc]
   runtime_type = "io.containerd.kata.v2"
   snapshotter = "devmapper"
@@ -285,7 +289,7 @@ Create/edit the config template file `/var/lib/rancher/rke2/agent/etc/containerd
 [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc.options]
   ConfigPath = "/etc/kata-containers/configuration.toml"
 
-# Configure devmapper snapshotter plugin
+# 3. Devmapper Snapshotter Plugin for Kata
 [plugins."io.containerd.snapshotter.v1.devmapper"]
   root_path = "/var/lib/rancher/rke2/agent/containerd/io.containerd.snapshotter.v1.devmapper"
   pool_name = "containerd--vg-containerd--pool-tpool"
@@ -339,7 +343,7 @@ io.containerd.snapshotter.v1              devmapper                linux/amd64  
 - **Fix**:
   ```bash
   sudo losetup -D
-  sudo losetup -a | grep containerd-pool-disk | cut -d: -f1 | xargs -r sudo losetup -d
+  sudo losetup -a | grep containerd-pool-disk | cut -d: -f1 | xargs -r sudo losetup -d 2>/dev/null || true
   sudo systemctl restart containerd-loopback.service
   ```
 
@@ -351,6 +355,45 @@ io.containerd.snapshotter.v1              devmapper                linux/amd64  
   sudo losetup -c $LOOP_DEV
   sudo pvresize $LOOP_DEV
   sudo lvextend -L 14.5G containerd-vg/containerd-pool
+  ```
+
+#### Issue D: `failed to query device metadata` / `snapshot does not exist: not found`
+- **Cause**: Stale snapshotter metadata DB or image layers pulled using `overlayfs` instead of `devmapper`.
+- **Fix**:
+  ```bash
+  sudo systemctl stop rke2-server
+  sudo rm -rf /var/lib/rancher/rke2/agent/containerd/io.containerd.snapshotter.v1.devmapper
+  sudo systemctl start rke2-server
+  sudo /var/lib/rancher/rke2/bin/ctr -n k8s.io images pull --snapshotter devmapper <IMAGE_NAME>
+  ```
+
+#### Issue E: `failed to get reader from content store: content digest not found`
+- **Cause**: Incomplete or corrupted image content blob entry in containerd's content store.
+- **Fix**:
+  ```bash
+  sudo systemctl stop rke2-server
+  sudo rm -rf /var/lib/rancher/rke2/agent/containerd/io.containerd.content.v1.content
+  sudo rm -rf /var/lib/rancher/rke2/agent/containerd/io.containerd.metadata.v1.bolt
+  sudo systemctl start rke2-server
+  ```
+
+#### Issue F: `Pod for kube-apiserver not synced (waiting for termination of old pod sandbox)`
+- **Cause**: Orphan container shim process remaining after rapid RKE2 restarts.
+- **Fix**:
+  ```bash
+  sudo pkill -9 -f containerd-shim
+  sudo systemctl restart rke2-server
+  ```
+
+#### Issue G: `etcd context deadline exceeded` / Defragmentation Lock
+- **Cause**: RKE2 restarted while `etcd` was defragmenting, leaving stale `etcd` process locking port `2379`.
+- **Fix**:
+  ```bash
+  sudo systemctl stop rke2-server
+  sudo pkill -9 -f etcd 2>/dev/null || true
+  sudo pkill -9 -f rke2 2>/dev/null || true
+  sudo rm -f /run/k3s/containerd/containerd.sock 2>/dev/null || true
+  sudo systemctl start rke2-server
   ```
 
 ### Step 11.2 Verify registration
