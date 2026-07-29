@@ -41,16 +41,16 @@ flowchart TD
         Un["User N (1000+ Concurrent)"]
     end
 
-    subgraph Ingress Layer["Ingress & Gateway"]
+    subgraph IngressLayer["Ingress & Gateway"]
         NLB["Cloud Load Balancer / NGINX Ingress"]
     end
 
-    subgraph Control Plane["HA RKE2 Control Plane (3 Masters)"]
+    subgraph ControlPlane["HA RKE2 Control Plane (3 Masters)"]
         API["kube-apiserver"]
         ETCD[("etcd Cluster")]
     end
 
-    subgraph Core Services["Management Services Node Pool"]
+    subgraph CoreServices["Management Services Node Pool"]
         GW["API Gateway (01-Sandbox)"]
         MQ[("RabbitMQ Queue Cluster")]
         DB[("PostgreSQL / Redis")]
@@ -58,11 +58,11 @@ flowchart TD
         CA["Cluster Autoscaler"]
     end
 
-    subgraph Execution Pool["Dynamic Worker Node Pools (Auto-Scaling)"]
+    subgraph ExecPool["Dynamic Worker Node Pools (Auto-Scaling)"]
         direction TB
-        N1["Worker Node 1\n(Sandbox Pods 1..N)"]
-        N2["Worker Node 2\n(Sandbox Pods 1..N)"]
-        NX["Worker Node N\n(Dynamically Provisioned)"]
+        N1["Worker Node 1<br/>(Sandbox Pods 1..N)"]
+        N2["Worker Node 2<br/>(Sandbox Pods 1..N)"]
+        NX["Worker Node N<br/>(Dynamically Provisioned)"]
     end
 
     U1 --> NLB
@@ -75,10 +75,15 @@ flowchart TD
     KEDA -- "Monitors Queue Depth" --> MQ
     KEDA -- "Triggers HPA Scale-Out" --> API
     CA -- "Monitors Pending Pods" --> API
-    CA -- "Provisions Compute VMs" --> Execution Pool
+    CA -- "Provisions Compute VMs" --> N1
+    CA -- "Provisions Compute VMs" --> NX
 
-    MQ -- "Consumes Scan Jobs" --> Execution Pool
-    Execution Pool -- "Reports Status / Logs" --> DB
+    MQ -- "Consumes Scan Jobs" --> N1
+    MQ -- "Consumes Scan Jobs" --> N2
+    MQ -- "Consumes Scan Jobs" --> NX
+    N1 -- "Reports Status / Logs" --> DB
+    N2 -- "Reports Status / Logs" --> DB
+    NX -- "Reports Status / Logs" --> DB
 ```
 
 ### Key Components & Mechanics
@@ -119,7 +124,7 @@ flowchart TD
         Users["1,000+ Concurrent Scan Requests"]
     end
 
-    subgraph Hub ["Central Management Hub (RKE2 Control Cluster)"]
+    subgraph Hub["Central Management Hub (RKE2 Control Cluster)"]
         direction TB
         APIGW["Global API Gateway"]
         Auth["Auth & Billing Service"]
@@ -129,18 +134,18 @@ flowchart TD
         Fleet["Rancher Fleet / GitOps Controller"]
     end
 
-    subgraph ClusterPool ["Stateless Execution Clusters (RKE2 Spokes)"]
-        subgraph Spoke1 ["Worker Cluster 1 (Region A)"]
+    subgraph ClusterPool["Stateless Execution Clusters (RKE2 Spokes)"]
+        subgraph Spoke1["Worker Cluster 1 (Region A)"]
             W1_API["Local Worker Agent"]
             W1_Pods["Sandbox Pod Pool (100-300 Pods)"]
         end
 
-        subgraph Spoke2 ["Worker Cluster 2 (Region B)"]
+        subgraph Spoke2["Worker Cluster 2 (Region B)"]
             W2_API["Local Worker Agent"]
             W2_Pods["Sandbox Pod Pool (100-300 Pods)"]
         end
 
-        subgraph SpokeN ["Worker Cluster N (Auto-Provisioned)"]
+        subgraph SpokeN["Worker Cluster N (Auto-Provisioned)"]
             WN_API["Local Worker Agent"]
             WN_Pods["Sandbox Pod Pool (100-300 Pods)"]
         end
@@ -163,9 +168,9 @@ flowchart TD
     W2_Pods -- "Stream Scan Results & Logs" --> CentralDB
     WN_Pods -- "Stream Scan Results & Logs" --> CentralDB
 
-    Fleet -. "Manages Configurations & Deployments" .-> Spoke1
-    Fleet -. "Manages Configurations & Deployments" .-> Spoke2
-    Fleet -. "Manages Configurations & Deployments" .-> SpokeN
+    Fleet -. "Manages Configurations & Deployments" .-> W1_API
+    Fleet -. "Manages Configurations & Deployments" .-> W2_API
+    Fleet -. "Manages Configurations & Deployments" .-> WN_API
 ```
 
 ### Key Components & Mechanics
@@ -202,11 +207,11 @@ For enterprise global scale (thousands of global users with strict SLA requireme
 
 ```mermaid
 flowchart TD
-    subgraph GlobalDNS ["Global Traffic Management"]
+    subgraph GlobalDNS["Global Traffic Management"]
         GSLB["Cloudflare Anycast GSLB / AWS Route 53 Latency Routing"]
     end
 
-    subgraph RegionUS ["Region 1: US-East (Active)"]
+    subgraph RegionUS["Region 1: US-East (Active)"]
         direction TB
         US_GW["US Ingress / API Server"]
         US_MQ[("US Local RabbitMQ")]
@@ -214,7 +219,7 @@ flowchart TD
         US_Pods["US Sandbox Runner Pods"]
     end
 
-    subgraph RegionEU ["Region 2: EU-Central (Active)"]
+    subgraph RegionEU["Region 2: EU-Central (Active)"]
         direction TB
         EU_GW["EU Ingress / API Server"]
         EU_MQ[("EU Local RabbitMQ")]
@@ -222,7 +227,7 @@ flowchart TD
         EU_Pods["EU Sandbox Runner Pods"]
     end
 
-    subgraph RegionAP ["Region 3: AP-South (Active)"]
+    subgraph RegionAP["Region 3: AP-South (Active)"]
         direction TB
         AP_GW["AP Ingress / API Server"]
         AP_MQ[("AP Local RabbitMQ")]
@@ -230,9 +235,9 @@ flowchart TD
         AP_Pods["AP Sandbox Runner Pods"]
     end
 
-    subgraph DataSync ["Global Data Synchronization Layer"]
-        GlobalDB[("Distributed DB\n(CockroachDB / AWS Aurora Global)")]
-        ObjectStore[("Global Object Store\n(S3 / MinIO Replicated)")]
+    subgraph DataSync["Global Data Synchronization Layer"]
+        GlobalDB[("Distributed DB<br/>(CockroachDB / AWS Aurora Global)")]
+        ObjectStore[("Global Object Store<br/>(S3 / MinIO Replicated)")]
     end
 
     Users["Global Users & Webhooks (1,000s Concurrent)"] --> GSLB
