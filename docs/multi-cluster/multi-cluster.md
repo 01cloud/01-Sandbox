@@ -1275,3 +1275,1199 @@ No central coordinator. No routing table. No human decision.
 | Queue spikes are short bursts only | Tune KEDA `cooldownPeriod` before adding more VMs |
 | All VMs at < 50% utilization most of the time | You have enough servers; reduce `maxReplicaCount` to save cost |
 | Need more than ~10 VMs regularly | Consider migrating to OVH Public Cloud for auto-provisioned elastic nodes |
+
+---
+
+# Transparent Multi-Cluster Topology: Manager's Architectural Requirement
+
+> **Manager's Requirement (verbatim):**
+> *"The core challenge is not scaling nodes within a single cluster, but rather managing
+> multiple clusters across different regions transparently. The objective is for the
+> application to handle workload scheduling across various clusters without needing to be
+> aware of the underlying multi-cluster topology, ensuring that agents can consistently
+> reach the nearest data center for performance."*
+
+This is a fundamentally different problem from the N-server overflow approach described
+above. It requires a dedicated **multi-cluster control plane** — software that sits above
+individual clusters and makes them appear as a single unified compute surface to the
+application.
+
+---
+
+## What "Transparent Multi-Cluster" Actually Means
+
+In a transparent multi-cluster setup:
+
+| Without Transparency | With Transparency |
+|:---|:---|
+| `sandbox-api` on VM1 knows it talks to a specific RabbitMQ on VM1 | `sandbox-api` talks to a `rabbitmq-service` — it doesn't know which cluster serves it |
+| Jobs are routed manually to specific clusters | Jobs flow to the nearest/least-loaded cluster automatically |
+| Adding a new cluster requires updating application config | Adding a new cluster is a control-plane operation; app sees nothing |
+| An agent in Europe talks to a server in Asia (high latency) | An agent in Europe always resolves to the nearest European cluster |
+
+The application code — your `sandbox-api`, `consumer.py`, queue publishers — **does not
+change at all**. The multi-cluster control plane handles everything underneath.
+
+---
+
+## The Three Layers Required
+
+To fully satisfy the manager's requirement, three independent layers must work together:
+
+```
+Layer 1: Geo-DNS / Anycast Routing
+   └─ Users & agents reach the nearest regional entry point automatically
+         │
+Layer 2: Multi-Cluster Control Plane (Karmada)
+   └─ Workloads are scheduled to the right cluster without app awareness
+         │
+Layer 3: Cross-Cluster Networking (Cilium Cluster Mesh / Submariner)
+   └─ Services in any cluster are reachable from any other cluster transparently
+```
+
+---
+
+## Layer 1: Geo-DNS / Anycast — Nearest Datacenter Routing
+
+### What It Solves
+When a user in Germany submits a scan, their API request should go to the nearest
+European cluster — not bounce to a server in Asia or the US.
+
+### How It Works
+A **GeoDNS resolver** (Cloudflare or AWS Route 53) maps the same domain name
+(`api-sandbox.01security.com`) to different IP addresses based on where the request
+originates.
+
+```
+User in Germany → DNS resolve api-sandbox.01security.com
+    → Cloudflare GeoDNS checks origin: Europe
+    → Returns IP of EU Cluster entry point
+
+User in Singapore → DNS resolve api-sandbox.01security.com
+    → Cloudflare GeoDNS checks origin: Asia-Pacific
+    → Returns IP of AP Cluster entry point
+```
+
+The user and the application see the **same domain name**. The network handles geography.
+
+### Architecture Diagram
+
+```mermaid
+flowchart TD
+    subgraph Users["Global Users"]
+        EU_User["User in Europe"]
+        US_User["User in USA"]
+        AP_User["User in Asia"]
+    end
+
+    subgraph DNS["Cloudflare GeoDNS / Route 53 Latency Routing"]
+        GEO["api-sandbox.01security.com<br/>Same domain — different IP per region<br/>Health-check based failover included"]
+    end
+
+    subgraph RegionEU["EU Cluster Entry Point"]
+        EU_LB["Load Balancer<br/>EU Public IP"]
+    end
+
+    subgraph RegionUS["US Cluster Entry Point"]
+        US_LB["Load Balancer<br/>US Public IP"]
+    end
+
+    subgraph RegionAP["AP Cluster Entry Point"]
+        AP_LB["Load Balancer<br/>AP Public IP"]
+    end
+
+    EU_User -- "DNS query" --> GEO
+    US_User -- "DNS query" --> GEO
+    AP_User -- "DNS query" --> GEO
+
+    GEO -- "Returns EU IP (lowest latency)" --> EU_User
+    GEO -- "Returns US IP (lowest latency)" --> US_User
+    GEO -- "Returns AP IP (lowest latency)" --> AP_User
+
+    EU_User --> EU_LB
+    US_User --> US_LB
+    AP_User --> AP_LB
+```
+
+### Cloudflare Setup (Zero-Touch After Initial Config)
+
+```
+1. Add your clusters' public IPs as A records in Cloudflare:
+   api-sandbox.01security.com → EU IP  (Cloudflare location: Europe)
+   api-sandbox.01security.com → US IP  (Cloudflare location: North America)
+   api-sandbox.01security.com → AP IP  (Cloudflare location: Asia Pacific)
+
+2. Enable "Load Balancing" with "Geo-steering" in Cloudflare dashboard.
+
+3. Add health checks: if EU cluster is down, EU traffic auto-routes to US.
+
+Result: All clusters use the same domain. No application config changes.
+```
+
+---
+
+## Layer 2: Karmada — Transparent Multi-Cluster Workload Scheduling
+
+### What Karmada Is
+
+**Karmada** (Kubernetes Armada) is a CNCF project that provides a **unified Kubernetes
+API** on top of multiple member clusters. You deploy your workloads (Deployments,
+Services, ConfigMaps) to the **Karmada control plane** using standard `kubectl` — and
+Karmada automatically distributes them to member clusters based on policies you define
+once.
+
+**The application never knows which cluster it runs on.** It sees one Kubernetes API.
+
+### How Karmada Achieves Topology Transparency
+
+```
+You (DevOps) submit:                    Karmada decides:
+                                              │
+kubectl apply -f sandbox-api.yaml →    ┌─────┴──────────────────────┐
+                                       │ Karmada Scheduler           │
+                                       │ - EU cluster: 40% load      │
+                                       │ - US cluster: 20% load      │
+                                       │ - AP cluster: 80% load      │
+                                       │                              │
+                                       │ → Send 60% replicas to US   │
+                                       │ → Send 30% replicas to EU   │
+                                       │ → Send 10% replicas to AP   │
+                                       └─────────────────────────────┘
+                                              │
+                         sandbox-api runs across all clusters.
+                         The Deployment YAML you submitted was unmodified.
+```
+
+### Architecture Diagram
+
+```mermaid
+flowchart TD
+    subgraph DevOps["DevOps / CI-CD Pipeline"]
+        Dev["kubectl apply -f sandbox-api.yaml<br/>One command. Standard Kubernetes YAML.<br/>No cluster-specific changes."]
+    end
+
+    subgraph KarmadaHub["Karmada Control Plane (Management Cluster)"]
+        KarmadaAPI["Karmada API Server<br/>(drop-in replacement for kubectl target)"]
+        Scheduler["Karmada Scheduler<br/>Reads PropagationPolicy<br/>Decides which clusters get which workloads"]
+        PropPolicy["PropagationPolicy<br/>(defined once — governs all scheduling forever)"]
+        OverridePolicy["OverridePolicy<br/>(per-cluster config overrides if needed)"]
+    end
+
+    subgraph ClusterEU["Member Cluster: EU (RKE2)"]
+        EU_API["kube-apiserver"]
+        EU_Pods["sandbox-api pods<br/>scanner pods<br/>RabbitMQ consumers"]
+    end
+
+    subgraph ClusterUS["Member Cluster: US (RKE2)"]
+        US_API["kube-apiserver"]
+        US_Pods["sandbox-api pods<br/>scanner pods<br/>RabbitMQ consumers"]
+    end
+
+    subgraph ClusterAP["Member Cluster: AP (RKE2)"]
+        AP_API["kube-apiserver"]
+        AP_Pods["sandbox-api pods<br/>scanner pods<br/>RabbitMQ consumers"]
+    end
+
+    Dev --> KarmadaAPI
+    KarmadaAPI --> Scheduler
+    Scheduler -- "Reads policy" --> PropPolicy
+    PropPolicy -- "Propagates to EU" --> EU_API
+    PropPolicy -- "Propagates to US" --> US_API
+    PropPolicy -- "Propagates to AP" --> AP_API
+    EU_API --> EU_Pods
+    US_API --> US_Pods
+    AP_API --> AP_Pods
+```
+
+### Karmada PropagationPolicy for 01-Sandbox
+
+This is defined **once** in Karmada and governs all future scheduling automatically:
+
+```yaml
+# Define how sandbox-api is spread across all clusters
+apiVersion: policy.karmada.io/v1alpha1
+kind: PropagationPolicy
+metadata:
+  name: sandbox-api-propagation
+  namespace: opensandbox-system
+spec:
+  resourceSelectors:
+    - apiVersion: apps/v1
+      kind: Deployment
+      name: sandbox-api             # your existing deployment — unchanged
+    - apiVersion: v1
+      kind: Service
+      name: sandbox-api-service
+    - apiVersion: v1
+      kind: ConfigMap
+      name: sandbox-api-config
+  placement:
+    clusterAffinity:
+      clusterNames:
+        - cluster-eu
+        - cluster-us
+        - cluster-ap
+    replicaScheduling:
+      replicaSchedulingType: Divided
+      replicaDivisionPreference: Weighted
+      weightPreference:
+        staticClusterWeight:
+          - targetCluster:
+              clusterNames: [cluster-eu]
+            weight: 3               # EU gets 3/9 = 33% of replicas
+          - targetCluster:
+              clusterNames: [cluster-us]
+            weight: 3               # US gets 3/9 = 33% of replicas
+          - targetCluster:
+              clusterNames: [cluster-ap]
+            weight: 3               # AP gets 3/9 = 33% of replicas
+```
+
+To use **dynamic load-based scheduling** instead of static weights:
+
+```yaml
+spec:
+  placement:
+    replicaScheduling:
+      replicaSchedulingType: Divided
+      replicaDivisionPreference: Aggregated   # fill one cluster before using next
+    clusterTolerations:
+      - key: "cluster.karmada.io/load"
+        operator: Lt
+        value: "80"   # only schedule to clusters with < 80% load
+```
+
+### Joining RKE2 Clusters to Karmada
+
+```bash
+# Install Karmada on a dedicated management VM (or any existing cluster)
+kubectl karmada init
+
+# Register EU RKE2 cluster
+kubectl karmada join cluster-eu \
+  --cluster-kubeconfig=/path/to/eu-rke2.yaml \
+  --cluster-context=default
+
+# Register US RKE2 cluster
+kubectl karmada join cluster-us \
+  --cluster-kubeconfig=/path/to/us-rke2.yaml \
+  --cluster-context=default
+
+# Register AP RKE2 cluster
+kubectl karmada join cluster-ap \
+  --cluster-kubeconfig=/path/to/ap-rke2.yaml \
+  --cluster-context=default
+
+# Verify all clusters are registered and healthy
+kubectl get clusters
+# NAME         VERSION   MODE   READY   AGE
+# cluster-eu   v1.29.0   Push   True    2m
+# cluster-us   v1.29.0   Push   True    1m
+# cluster-ap   v1.29.0   Push   True    45s
+```
+
+From this point, `kubectl apply` to the Karmada API server distributes workloads across
+all three clusters automatically — no application changes, no cluster-specific targeting.
+
+---
+
+## Layer 3: Cilium Cluster Mesh — Transparent Cross-Cluster Service Networking
+
+### What It Solves
+
+When `sandbox-api` on the EU cluster wants to write scan results to PostgreSQL, it calls
+`postgresql-service.opensandbox-system.svc.cluster.local`. In a single cluster, this
+works. In a multi-cluster setup, this DNS name only resolves within the same cluster.
+
+**Cilium Cluster Mesh** solves this by making services globally discoverable across all
+clusters using the **same service name** — the application never changes its connection
+string.
+
+### How It Works
+
+When you annotate a service with `service.cilium.io/global: "true"`, Cilium:
+1. Exports the service's backend endpoints to all other clusters in the mesh.
+2. Each cluster's local DNS still resolves `postgresql-service` — but the traffic
+   is load-balanced across all clusters' backends, preferring local ones first.
+3. If the local cluster's backend is unhealthy, traffic transparently flows to a
+   healthy backend in another cluster — with no app awareness.
+
+### Global Service with Local Affinity (Nearest DC First)
+
+```yaml
+# PostgreSQL service — annotate once, Cilium handles the rest
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-service
+  namespace: opensandbox-system
+  annotations:
+    service.cilium.io/global: "true"           # visible to all clusters in mesh
+    service.cilium.io/shared: "true"           # share endpoints cross-cluster
+    service.cilium.io/affinity: "local"        # prefer local cluster backend FIRST
+                                               # fall back to remote only if local is down
+spec:
+  selector:
+    app: postgresql
+  ports:
+    - port: 5432
+```
+
+```yaml
+# RabbitMQ service — same pattern
+apiVersion: v1
+kind: Service
+metadata:
+  name: rabbitmq-service
+  namespace: opensandbox-system
+  annotations:
+    service.cilium.io/global: "true"
+    service.cilium.io/affinity: "local"       # EU workers use EU RabbitMQ by default
+spec:
+  selector:
+    app: rabbitmq
+  ports:
+    - port: 5672
+```
+
+With `affinity: local`:
+- EU `sandbox-api` workers connect to EU RabbitMQ → lowest latency
+- If EU RabbitMQ goes down → Cilium transparently routes to US or AP RabbitMQ
+- No `RABBITMQ_URL` changes. No deployment restarts.
+
+### Cluster Mesh Setup (One-Time)
+
+```bash
+# Enable Cluster Mesh on each RKE2 cluster
+# (Cilium must be the CNI on all clusters — install via helm if not already)
+
+cilium clustermesh enable --context cluster-eu
+cilium clustermesh enable --context cluster-us
+cilium clustermesh enable --context cluster-ap
+
+# Connect all clusters into the mesh
+cilium clustermesh connect \
+  --context cluster-eu \
+  --destination-context cluster-us
+
+cilium clustermesh connect \
+  --context cluster-eu \
+  --destination-context cluster-ap
+
+cilium clustermesh connect \
+  --context cluster-us \
+  --destination-context cluster-ap
+
+# Verify mesh health
+cilium clustermesh status --context cluster-eu
+```
+
+---
+
+## Alternative to Cilium: Submariner (CNI-Agnostic)
+
+If you cannot use Cilium as the CNI (e.g., you're already using Flannel or Calico with
+RKE2), **Submariner** provides equivalent cross-cluster service discovery without
+requiring a CNI change.
+
+Submariner uses a **Lighthouse** DNS component that makes remote services resolvable
+as `service.namespace.svc.clusterset.local`:
+
+```bash
+# Install Submariner broker (on the management cluster or any cluster)
+subctl deploy-broker --context cluster-eu
+
+# Join all clusters to the broker
+subctl join --context cluster-eu broker-info.subm
+subctl join --context cluster-us broker-info.subm
+subctl join --context cluster-ap broker-info.subm
+
+# Export a service so it's visible cross-cluster
+kubectl --context cluster-eu apply -f - <<EOF
+apiVersion: multicluster.x-k8s.io/v1alpha1
+kind: ServiceExport
+metadata:
+  name: rabbitmq-service
+  namespace: opensandbox-system
+EOF
+```
+
+After export, other clusters resolve:
+`rabbitmq-service.opensandbox-system.svc.clusterset.local` → EU RabbitMQ
+
+---
+
+## Full Combined Architecture: All Three Layers Together
+
+```mermaid
+flowchart TD
+    subgraph Users["Global Users & CI/CD Agents"]
+        EU_User["EU User / Agent"]
+        US_User["US User / Agent"]
+        AP_User["AP User / Agent"]
+    end
+
+    subgraph GeoDNS["Layer 1: Cloudflare GeoDNS"]
+        DNS["api-sandbox.01security.com<br/>Routes to nearest region automatically"]
+    end
+
+    subgraph KarmadaCP["Layer 2: Karmada Control Plane"]
+        Karmada["Karmada API + Scheduler<br/>PropagationPolicy drives all scheduling<br/>DevOps applies one YAML — runs everywhere"]
+    end
+
+    subgraph CiliumMesh["Layer 3: Cilium Cluster Mesh"]
+        CM["Global Services<br/>service.cilium.io/global: true<br/>affinity: local — use nearest DC first<br/>Cross-cluster failover is automatic"]
+    end
+
+    subgraph EU["EU RKE2 Cluster (Member)"]
+        EU_GW["API Gateway<br/>(EU entry point)"]
+        EU_RMQ[("EU RabbitMQ<br/>(local-affinity primary)")]
+        EU_DB[("EU PostgreSQL")]
+        EU_Workers["sandbox-api workers<br/>Scanner pods"]
+    end
+
+    subgraph US["US RKE2 Cluster (Member)"]
+        US_GW["API Gateway"]
+        US_RMQ[("US RabbitMQ")]
+        US_DB[("US PostgreSQL")]
+        US_Workers["sandbox-api workers<br/>Scanner pods"]
+    end
+
+    subgraph AP["AP RKE2 Cluster (Member)"]
+        AP_GW["API Gateway"]
+        AP_RMQ[("AP RabbitMQ")]
+        AP_DB[("AP PostgreSQL")]
+        AP_Workers["sandbox-api workers<br/>Scanner pods"]
+    end
+
+    EU_User -- "DNS resolves to EU" --> DNS
+    US_User -- "DNS resolves to US" --> DNS
+    AP_User -- "DNS resolves to AP" --> DNS
+
+    DNS --> EU_GW
+    DNS --> US_GW
+    DNS --> AP_GW
+
+    Karmada -- "Propagates Deployments<br/>to all member clusters" --> EU
+    Karmada -- "Propagates Deployments" --> US
+    Karmada -- "Propagates Deployments" --> AP
+
+    CM -- "Global service mesh<br/>local-first routing" --> EU_RMQ
+    CM -- "Global service mesh" --> US_RMQ
+    CM -- "Global service mesh" --> AP_RMQ
+
+    EU_GW --> EU_RMQ --> EU_Workers --> EU_DB
+    US_GW --> US_RMQ --> US_Workers --> US_DB
+    AP_GW --> AP_RMQ --> AP_Workers --> AP_DB
+```
+
+---
+
+## Tool Comparison for the Manager's Requirement
+
+| Tool | Problem It Solves | Topology Transparency | Application Changes? |
+|:---|:---|:---|:---|
+| **Karmada** | Workload scheduling across clusters | ✅ Full — app submits to one API | None |
+| **Cilium Cluster Mesh** | Cross-cluster service discovery + locality routing | ✅ Full — same service names | None |
+| **Submariner** | Cross-cluster service DNS (CNI-agnostic) | ✅ Full — `svc.clusterset.local` DNS | None |
+| **Cloudflare GeoDNS** | Route users to nearest datacenter | ✅ Full — same domain name | None |
+| **Karmada OverridePolicy** | Per-cluster config customization | ✅ Full — base YAML unchanged | None |
+| **WireGuard (previous approach)** | Cross-VM encrypted networking (VPS only) | ❌ Partial — requires env var changes | RABBITMQ_URL per VM |
+| **Competing consumers (previous)** | RabbitMQ overflow across VMs | ❌ Partial — app must share same queue | Env var change |
+
+---
+
+## Implementation Roadmap for the Manager's Requirement
+
+```mermaid
+flowchart LR
+    A["Phase 0: Now<br/>Single RKE2 on OVH VPS<br/>Manual everything"] --> B
+
+    B["Phase 1: 2–4 weeks<br/>Karmada Control Plane<br/>Join existing + new clusters<br/>PropagationPolicy defined<br/>App topology is now invisible to devs"] --> C
+
+    C["Phase 2: 2–3 weeks<br/>Cilium Cluster Mesh<br/>Global services with local affinity<br/>RabbitMQ, PostgreSQL, Redis<br/>all route to nearest DC automatically"] --> D
+
+    D["Phase 3: 1 week<br/>Cloudflare GeoDNS<br/>Users reach nearest entry point<br/>Automatic failover to next region<br/>Full zero-touch multi-region active-active"]
+```
+
+### What DevOps Does After Full Implementation
+
+```bash
+# Deploy sandbox-api update to ALL clusters simultaneously:
+kubectl apply -f sandbox-api-deployment.yaml   # <-- Karmada API target
+
+# That's it. Karmada distributes it. Cilium routes traffic.
+# DNS sends users to the right region. No cluster-specific steps.
+```
+
+### What the Application Code Does
+
+```python
+# consumer.py — UNCHANGED
+RABBITMQ_URL = os.environ.get("RABBITMQ_URL", "")
+# Value: amqp://admin:pass@rabbitmq-service:5672/
+# Cilium Cluster Mesh resolves "rabbitmq-service" to the LOCAL cluster's RabbitMQ.
+# If local RabbitMQ is down, Cilium silently routes to the nearest healthy one.
+# consumer.py never knows this happened.
+```
+
+Zero application changes. Full multi-cluster transparency. Agents always reach the
+nearest datacenter. This is exactly what the manager's requirement describes.
+
+---
+
+# BerryBytes k8s-multicluster-handbook: Ready-Made Implementation
+
+> **Repository:** [https://github.com/BerryBytes/k8s-multicluster-handbook](https://github.com/BerryBytes/k8s-multicluster-handbook)
+>
+> *"A beginner-friendly, automated multi-cluster setup using Open Cluster Management (OCM),
+> and Cilium — deploy and manage Kubernetes workloads across clusters with ease."*
+
+This repository is a **turnkey reference implementation** of the exact architecture
+described in the previous sections. It provides working scripts, Helm chart values,
+cluster configurations, and examples that can be adapted for production OVH RKE2 clusters.
+
+---
+
+## How the Handbook Maps to Our Architecture
+
+| Architecture Layer (Previous Section) | What the Handbook Provides |
+|:---|:---|
+| **Layer 2: Multi-cluster control plane** | **Open Cluster Management (OCM)** — hub-spoke model replacing Karmada. Equivalent workload distribution and placement policies. |
+| **Layer 3: Cross-cluster networking** | **Cilium Cluster Mesh** — identical to what was described. Same `service.cilium.io/global` annotations. Same `affinity: local`. |
+| **GitOps deployment** | **ArgoCD** installed on hub, with addons pushed to spoke clusters automatically |
+| **Load balancing** | **MetalLB** on each cluster — equivalent to your existing MetalLB in `values.yaml` |
+| **Ingress** | **NGINX Ingress Controller** — equivalent to your existing agentgateway setup |
+
+**Key difference from the Karmada approach:** OCM (Open Cluster Management) is the
+CNCF-standard alternative. Both achieve full workload transparency. OCM uses a
+**hub-spoke** model with `ManagedCluster`, `Placement`, and `ManifestWorkReplicaSet`
+resources instead of Karmada's `PropagationPolicy`.
+
+---
+
+## Repository Structure
+
+```
+k8s-multicluster-handbook/
+├── scripts/
+│   ├── multicluster_bootstrap.sh     # One-command full environment setup
+│   ├── install_metallb.sh            # Per-cluster MetalLB setup with IP pools
+│   └── setup_cluster_certs.sh        # TLS + cert-manager setup (optional)
+├── charts/
+│   └── cilium/
+│       └── cilium-values.yaml        # Cilium cluster mesh config per cluster
+├── cluster-config/
+│   ├── hub.config                    # KinD config: hub cluster (pods 10.12.0.0/16)
+│   ├── east.config                   # KinD config: east spoke (pods 10.16.0.0/16)
+│   └── west.config                   # KinD config: west spoke (pods 10.18.0.0/16)
+├── examples/                         # Sample workloads and placement policies
+├── docs/
+│   └── CONTRIBUTING.md
+└── README.md
+```
+
+---
+
+## What the Stack Provides
+
+| Component | Role | Applied To |
+|:---|:---|:---|
+| **Open Cluster Management (OCM)** | Hub manages spoke clusters — distribute workloads, apply policies, track health | Hub only |
+| **ArgoCD** | GitOps delivery — deployed on hub, agent pushed to each spoke automatically | Hub + spokes via OCM addon |
+| **Cilium Cluster Mesh** | Cross-cluster pod-to-pod networking + global service discovery with local affinity | All clusters |
+| **MetalLB** | LoadBalancer service IPs for bare-metal/VPS clusters | All clusters |
+| **NGINX Ingress Controller** | External HTTP/HTTPS access to services | All clusters |
+| **cert-manager** | Automatic TLS certificate issuance | All clusters (optional) |
+| **MCS API CRDs** | `ServiceExport`/`ServiceImport` for standard cross-cluster service sharing | All clusters |
+
+---
+
+## Network Configuration (Pre-Configured, Non-Overlapping CIDRs)
+
+Each cluster uses isolated network ranges to avoid IP conflicts across the mesh:
+
+| Cluster | Role | Pod CIDR | Service CIDR | API Port |
+|:---|:---|:---|:---|:---|
+| `hub` | Control plane | `10.12.0.0/16` | `10.13.0.0/16` | `6443` |
+| `east` | Spoke / worker | `10.16.0.0/16` | `10.17.0.0/16` | `9443` |
+| `west` | Spoke / worker | `10.18.0.0/16` | `10.19.0.0/16` | `10443` |
+
+> [!IMPORTANT]
+> When adapting to OVH RKE2 clusters, use these same non-overlapping CIDRs.
+> RKE2 cluster CIDR is set in `/etc/rancher/rke2/config.yaml` with `cluster-cidr`
+> and `service-cidr` keys. Each cluster must have unique, non-overlapping ranges.
+
+---
+
+## Quick Start: Local Lab Setup (KinD — for Testing)
+
+Use this to test the full stack locally before deploying to OVH:
+
+```bash
+# Clone the repository
+git clone https://github.com/BerryBytes/k8s-multicluster-handbook.git
+cd k8s-multicluster-handbook
+
+# Make the bootstrap script executable
+chmod +x scripts/multicluster_bootstrap.sh
+
+# Run the complete automated setup (creates hub + east + west clusters)
+./scripts/multicluster_bootstrap.sh
+```
+
+The script runs **12 automated steps** that mirror a full production setup:
+
+```
+Step  1/12: Create hub cluster
+Step  2/12: Create east spoke cluster
+Step  3/12: Create west spoke cluster
+Step  4/12: Install Cilium on all clusters
+Step  5/12: Configure MetalLB on all clusters
+Step  6/12: Install NGINX Ingress on all clusters
+Step  7/12: Install ArgoCD on hub
+Step  8/12: Initialize OCM hub
+Step  9/12: Join east + west spokes to hub
+Step 10/12: Accept managed clusters on hub
+Step 11/12: Enable ArgoCD addon on all spokes
+Step 12/12: Connect Cilium Cluster Mesh between all clusters
+```
+
+---
+
+## Detailed Setup Phases (Manual / Production)
+
+### Phase 1: Cluster Creation + MCS API CRDs
+
+```bash
+# Create KinD clusters (for local lab)
+kind create cluster --name hub  --config cluster-config/hub.config
+kind create cluster --name east --config cluster-config/east.config
+kind create cluster --name west --config cluster-config/west.config
+
+# Install Multi-Cluster Services API CRDs on ALL clusters
+# (enables ServiceExport / ServiceImport — needed by Cilium for global services)
+for ctx in kind-hub kind-east kind-west; do
+  kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/mcs-api/master/config/crd/multicluster.x-k8s.io_serviceexports.yaml --context $ctx
+  kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/mcs-api/master/config/crd/multicluster.x-k8s.io_serviceimports.yaml --context $ctx
+done
+```
+
+### Phase 2: Cilium CNI + Cluster Mesh Networking
+
+Each cluster needs Cilium installed with a **unique `cluster.id` and `cluster.name`**
+to enable cluster mesh. The `cilium-values.yaml` in the repo pre-configures this:
+
+```bash
+helm repo add cilium https://helm.cilium.io/
+helm repo update
+
+# Install Cilium on each cluster with unique IDs
+helm install cilium cilium/cilium \
+  --namespace kube-system \
+  --kube-context kind-hub \
+  -f charts/cilium/cilium-values.yaml
+
+helm install cilium cilium/cilium \
+  --namespace kube-system \
+  --kube-context kind-east \
+  -f charts/cilium/cilium-values.yaml
+
+helm install cilium cilium/cilium \
+  --namespace kube-system \
+  --kube-context kind-west \
+  -f charts/cilium/cilium-values.yaml
+```
+
+Install MetalLB for LoadBalancer services on each cluster:
+
+```bash
+./scripts/install_metallb.sh kind-hub  hub
+./scripts/install_metallb.sh kind-east east
+./scripts/install_metallb.sh kind-west west
+```
+
+### Phase 3: Open Cluster Management (OCM) + ArgoCD
+
+```bash
+# Install ArgoCD on hub
+kubectl create namespace argocd --context kind-hub
+kubectl apply -n argocd \
+  -f https://raw.githubusercontent.com/argoproj/argo-cd/stable/manifests/install.yaml \
+  --context kind-hub
+
+# Initialize OCM hub control plane
+clusteradm init --wait --context kind-hub
+
+# Generate join token from hub and join spoke clusters
+join_cmd=$(clusteradm get token --context kind-hub)
+clusteradm join $join_cmd --cluster-name east --context kind-east --force-internal-endpoint-lookup
+clusteradm join $join_cmd --cluster-name west --context kind-west --force-internal-endpoint-lookup
+
+# Wait ~30 seconds, then accept join requests on hub
+sleep 30
+clusteradm accept --clusters east,west --context kind-hub
+
+# Label clusters for placement policies (e.g. by geographic location)
+kubectl --context kind-hub label managedcluster east \
+  cluster.open-cluster-management.io/clusterset=location-es --overwrite
+kubectl --context kind-hub label managedcluster west \
+  cluster.open-cluster-management.io/clusterset=location-es --overwrite
+
+# Deploy ArgoCD agent on spokes via OCM addon
+kubectl config use-context kind-hub
+clusteradm install hub-addon --names argocd
+clusteradm addon enable --names argocd --clusters east,west
+```
+
+### Phase 4: Enable Cilium Cluster Mesh Cross-Cluster Connectivity
+
+```bash
+# Connect all clusters into the mesh (bidirectional)
+cilium clustermesh connect --context kind-hub  --destination-context kind-east
+cilium clustermesh connect --context kind-hub  --destination-context kind-west
+cilium clustermesh connect --context kind-east --destination-context kind-west
+```
+
+After this step, pods in any cluster can reach services in any other cluster.
+
+---
+
+## Verification Commands
+
+```bash
+# 1. Check all KinD clusters exist
+kind get clusters
+# hub
+# east
+# west
+
+# 2. Verify OCM managed clusters are ready
+kubectl --context kind-hub get managedclusters
+# NAME   HUB ACCEPTED   MANAGED CLUSTER URLS   JOINED   AVAILABLE   AGE
+# east   true           ...                    True     True        5m
+# west   true           ...                    True     True        5m
+
+# 3. Verify ArgoCD addon deployed on spokes
+kubectl --context kind-hub get managedclusteraddons -A
+
+# 4. Check Cilium cluster mesh status on each cluster
+cilium clustermesh status --context kind-hub
+cilium clustermesh status --context kind-east
+cilium clustermesh status --context kind-west
+
+# 5. Check OCM placement decisions
+kubectl --context kind-hub get placementdecisions -A
+
+# 6. Access ArgoCD UI (hub)
+kubectl --context kind-hub -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath="{.data.password}" | base64 -d
+kubectl --context kind-hub port-forward svc/argocd-server -n argocd 8080:443
+# Open: https://localhost:8080 | user: admin
+```
+
+---
+
+## OCM vs Karmada: Which to Use
+
+Both OCM and Karmada achieve full workload transparency. The choice depends on your
+existing tooling:
+
+| | Open Cluster Management (OCM) | Karmada |
+|:---|:---|:---|
+| **Origin** | Red Hat / IBM (CNCF) | Huawei (CNCF) |
+| **Model** | Hub-spoke with `ManagedCluster` | Hub-spoke with `PropagationPolicy` |
+| **GitOps** | ArgoCD addon built-in | Bring your own GitOps |
+| **Placement API** | `Placement` + `PlacementDecision` | `PropagationPolicy` (more flexible) |
+| **Workload push** | `ManifestWork` / `ManifestWorkReplicaSet` | Native `PropagationPolicy` |
+| **This handbook** | ✅ Fully covered | Not covered (use handbook for OCM) |
+| **Rancher/RKE2 integration** | Good — Rancher has MCM built on OCM | Good — standalone |
+
+**For this project:** Use OCM if you want the handbook's automation scripts.
+Use Karmada if you want simpler YAML-only placement policies.
+
+---
+
+## Adapting the Handbook for OVH RKE2 (Production)
+
+The handbook uses KinD for local testing. For OVH RKE2 clusters, replace the KinD
+cluster creation steps with your existing RKE2 clusters:
+
+### Step 1: Skip KinD — Use Your RKE2 Clusters
+
+```bash
+# Your existing RKE2 cluster on VM1 = hub context
+export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+kubectl config rename-context default kind-hub   # rename to match handbook scripts
+
+# Your VM2 RKE2 cluster = east context
+KUBECONFIG=/path/to/vm2-rke2.yaml kubectl config rename-context default kind-east
+
+# Your VM3 RKE2 cluster = west context
+KUBECONFIG=/path/to/vm3-rke2.yaml kubectl config rename-context default kind-west
+```
+
+### Step 2: Set Non-Overlapping CIDRs on Each RKE2 Cluster
+
+Edit `/etc/rancher/rke2/config.yaml` on each server **before** first RKE2 start:
+
+```yaml
+# On VM1 (hub):
+cluster-cidr: "10.12.0.0/16"
+service-cidr: "10.13.0.0/16"
+
+# On VM2 (east):
+cluster-cidr: "10.16.0.0/16"
+service-cidr: "10.17.0.0/16"
+
+# On VM3 (west):
+cluster-cidr: "10.18.0.0/16"
+service-cidr: "10.19.0.0/16"
+```
+
+### Step 3: Run the Handbook Steps (Phases 2–4)
+
+With your RKE2 kubeconfigs merged and renamed to match handbook context names, you
+can run Phases 2, 3, and 4 from the handbook **unchanged** — Cilium install, OCM
+init, cluster join, ArgoCD addon, and Cluster Mesh connect all work the same.
+
+```bash
+# Install MCS API CRDs on your RKE2 clusters
+for ctx in kind-hub kind-east kind-west; do
+  kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/mcs-api/master/config/crd/multicluster.x-k8s.io_serviceexports.yaml --context $ctx
+  kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/mcs-api/master/config/crd/multicluster.x-k8s.io_serviceimports.yaml --context $ctx
+done
+
+# Install MetalLB (you already have this — skip or reuse existing)
+# Install Cilium (RKE2 ships with its own CNI — override with Cilium)
+# Install OCM + ArgoCD (same commands as handbook Phase 3)
+# Connect Cilium Cluster Mesh (same commands as handbook Phase 4)
+```
+
+### Step 4: Annotate Your Existing Services for Cluster Mesh
+
+After mesh is connected, annotate your existing services so they are globally
+discoverable with local-first routing:
+
+```yaml
+# rabbitmq-service — in codeInspector/charts/apiServer/templates/rabbitmq.yaml
+# Add these annotations:
+metadata:
+  annotations:
+    service.cilium.io/global: "true"
+    service.cilium.io/affinity: "local"   # EU workers use EU RabbitMQ first
+```
+
+```yaml
+# postgresql-service and redis-service — same pattern
+metadata:
+  annotations:
+    service.cilium.io/global: "true"
+    service.cilium.io/affinity: "local"
+```
+
+### Step 5: Create OCM Placement Policy for sandbox-api
+
+```yaml
+# Deploy this on the hub cluster after OCM is initialized
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: Placement
+metadata:
+  name: sandbox-api-placement
+  namespace: opensandbox-system
+spec:
+  numberOfClusters: 3
+  clusterSets:
+    - location-es
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchExpressions:
+            - key: cluster.open-cluster-management.io/clusterset
+              operator: In
+              values: [location-es]
+---
+apiVersion: work.open-cluster-management.io/v1alpha1
+kind: ManifestWorkReplicaSet
+metadata:
+  name: sandbox-api-workload
+  namespace: opensandbox-system
+spec:
+  placementRefs:
+    - name: sandbox-api-placement
+      rolloutStrategy:
+        type: RollingUpdate
+  manifestWorkTemplate:
+    spec:
+      workload:
+        manifests:
+          - apiVersion: apps/v1
+            kind: Deployment
+            metadata:
+              name: sandbox-api
+              namespace: opensandbox-system
+            spec:
+              # ... your existing sandbox-api deployment spec unchanged
+```
+
+OCM reads this and pushes `sandbox-api` to all clusters matching the `Placement`.
+**Your Deployment YAML is unchanged. Application code is unchanged.**
+
+---
+
+## Troubleshooting (From the Handbook)
+
+### Cluster Creation Fails
+```bash
+# Ensure Docker/container runtime is running
+sudo systemctl start docker
+# Check resource availability
+docker system df
+# Fix inotify limits if KinD cluster creation stalls
+sudo sysctl fs.inotify.max_user_watches=100000
+sudo sysctl fs.inotify.max_user_instances=100000
+```
+
+### OCM Join Fails
+- Check network connectivity between clusters (WireGuard tunnel if on OVH VPS)
+- Verify API server endpoints are accessible from other clusters
+- Review cluster join token — tokens expire after ~24 hours
+
+### Cilium Cluster Mesh Issues
+```bash
+# Check Cilium pod health on each cluster
+kubectl get pods -n kube-system --context kind-hub
+# Check full Cilium status
+cilium status --context kind-hub
+# View Cilium logs
+kubectl logs -n kube-system -l k8s-app=cilium --context kind-east
+# Verify cluster mesh connectivity
+cilium clustermesh status --context kind-hub
+```
+
+---
+
+## Reference Links (from the Handbook)
+
+| Resource | URL |
+|:---|:---|
+| Open Cluster Management docs | https://open-cluster-management.io/docs/ |
+| ArgoCD docs | https://argo-cd.readthedocs.io/ |
+| Cilium Cluster Mesh guide | https://docs.cilium.io/en/stable/gettingstarted/clustermesh/ |
+| KinD docs | https://kind.sigs.k8s.io/ |
+| MCS API (ServiceExport/Import) | https://github.com/kubernetes-sigs/mcs-api |
+| KinD docs | https://kind.sigs.k8s.io/ |
+| MCS API (ServiceExport/Import) | https://github.com/kubernetes-sigs/mcs-api |
+| k8s-multicluster-handbook repo | https://github.com/BerryBytes/k8s-multicluster-handbook |
+
+---
+
+# Applicability to Current Configuration: What Actually Changes
+
+> [!IMPORTANT]
+> This section documents the confirmed state of the **live RKE2 cluster** and gives a
+> precise, honest answer on what must change for each approach — so you can make
+> an informed decision between OCM (handbook) and Karmada.
+
+## Confirmed Current Cluster State
+
+Running `kubectl get nodes` and `kubectl get pods -n kube-system` on the live cluster confirms:
+
+| Property | Current Value |
+|:---|:---|
+| **Node** | `bb-mp-plat-03` (single node) |
+| **RKE2 version** | `v1.30.5+rke2r1` |
+| **OS** | Ubuntu 24.04.4 LTS |
+| **Pod CIDR** | `10.42.0.0/24` |
+| **API server** | `https://127.0.0.1:6443` |
+| **CNI** | **Cilium** (already installed — `cilium-mn8zt`, `cilium-operator` both Running) |
+| **Clusters** | 1 (single cluster, single node) |
+| **Karmada installed** | No |
+| **OCM installed** | No |
+| **ArgoCD installed** | No |
+
+### This Confirms the Most Important Thing
+
+**You already run Cilium.** This removes the largest obstacle to the entire
+multi-cluster architecture. Cilium Cluster Mesh can be enabled on your existing
+cluster without any CNI migration, without any downtime, and without touching a
+single line of application code.
+
+---
+
+## Is the Handbook (OCM + Cilium) Applicable Without Major Changes?
+
+**Yes. The minimum change set is tiny.**
+
+### Changes to VM1 (Your Existing Cluster) — All Non-Destructive
+
+```bash
+# 1. Enable Cilium Cluster Mesh (1 command, zero downtime)
+cilium clustermesh enable
+
+# 2. Install MCS API CRDs (2 kubectl applies, no restarts)
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/mcs-api/master/config/crd/multicluster.x-k8s.io_serviceexports.yaml
+kubectl apply -f https://raw.githubusercontent.com/kubernetes-sigs/mcs-api/master/config/crd/multicluster.x-k8s.io_serviceimports.yaml
+
+# 3. Install OCM hub (new namespace, no impact on existing workloads)
+clusteradm init --wait
+```
+
+### Changes to Helm Templates — 3 Files, 2 Lines Each
+
+In `codeInspector/charts/apiServer/templates/rabbitmq.yaml` (the Service object):
+```yaml
+# Add only this — nothing else changes:
+  annotations:
+    service.cilium.io/global: "true"
+    service.cilium.io/affinity: "local"
+```
+
+Same 2 lines added to the PostgreSQL service and Redis service templates.
+**That is the only change to your Helm chart.** Application code: zero changes.
+
+### What Does NOT Change
+
+| What | Status |
+|:---|:---|
+| `consumer.py` and all Python code | ✅ Unchanged |
+| `RABBITMQ_URL` env var | ✅ Unchanged on VM1 |
+| Docker images | ✅ Unchanged |
+| Helm chart structure | ✅ Unchanged (3 annotation lines added) |
+| RabbitMQ queues and topology | ✅ Unchanged |
+| PostgreSQL schema | ✅ Unchanged |
+| JWT/Auth0 config | ✅ Unchanged |
+| MetalLB (already installed) | ✅ Unchanged |
+| Existing scan jobs in progress | ✅ Unaffected |
+
+---
+
+## Is Karmada Applicable Without Major Changes?
+
+**Also yes — and Karmada has fewer moving parts than OCM for the control plane.**
+
+Karmada is **CNI-agnostic** — it does not touch networking at all. It only manages
+**which cluster runs which workload**. Cross-cluster networking is handled separately
+(by Cilium Cluster Mesh, which you already have).
+
+### What Karmada Needs
+
+```bash
+# 1. Install Karmada control plane (on VM1 or a separate VM)
+helm repo add karmada-charts https://raw.githubusercontent.com/karmada-io/karmada/master/charts
+helm install karmada karmada-charts/karmada \
+  --namespace karmada-system \
+  --create-namespace
+
+# 2. Register VM1's RKE2 cluster as a member
+kubectl karmada join vm1-cluster --cluster-kubeconfig=/etc/rancher/rke2/rke2.yaml
+
+# 3. Register VM2 when you add it
+kubectl karmada join vm2-cluster --cluster-kubeconfig=/path/to/vm2.yaml
+
+# 4. Apply PropagationPolicy (new YAML file, doesn't change existing deployments)
+kubectl apply -f sandbox-api-propagation.yaml
+```
+
+### What Karmada Does NOT Need
+
+| What | Karmada Requirement |
+|:---|:---|
+| CNI change | ❌ Not needed — CNI-agnostic |
+| Cilium Cluster Mesh | ❌ Not needed for scheduling — optional for cross-cluster networking |
+| ArgoCD | ❌ Not needed — use your existing Helm deploy |
+| Application code changes | ❌ None |
+| Image rebuilds | ❌ None |
+| Changes to consumer.py | ❌ None |
+| Existing RabbitMQ setup | ❌ Unchanged |
+
+> [!NOTE]
+> Karmada handles **where** the workload runs. Cilium Cluster Mesh handles **how**
+> services talk across clusters. You need both for full transparency — but Karmada
+> alone gives you workload distribution immediately, and you add Cluster Mesh
+> networking on top as a separate, independent step.
+
+---
+
+## Decision Guide: OCM (Handbook) vs Karmada
+
+Both work with your current setup. Both require no application code changes.
+Here is the honest trade-off:
+
+| Criteria | OCM + Handbook | Karmada |
+|:---|:---|:---|
+| **Automation scripts available** | ✅ `multicluster_bootstrap.sh` automates everything | ❌ Manual steps only |
+| **Control plane complexity** | Higher — OCM hub + ArgoCD addon + clusteradm CLI | Lower — single Karmada chart |
+| **Placement policy syntax** | `ManifestWorkReplicaSet` + `Placement` (verbose) | `PropagationPolicy` (simpler YAML) |
+| **GitOps** | ✅ ArgoCD built-in via addon | Bring your own (or add ArgoCD separately) |
+| **Cross-cluster networking** | Cilium Cluster Mesh (already have it) | Cilium Cluster Mesh or Submariner (separate step) |
+| **Requires Cilium** | For Cluster Mesh: yes. OCM itself: no | No — CNI-agnostic |
+| **Works with your Helm chart** | ✅ Yes — YAML unchanged | ✅ Yes — YAML unchanged |
+| **Time to first working multi-cluster** | ~1-2 hours (script does it) | ~30-60 min (simpler setup) |
+| **Community support** | CNCF, Red Hat-backed | CNCF, Huawei-backed |
+| **Learning curve** | Medium — new `clusteradm` CLI, OCM concepts | Low — uses standard `kubectl` |
+| **Best for** | Full GitOps multi-cluster out of the box | Simple workload distribution first, add networking later |
+
+---
+
+## Recommended Path for Your Scenario
+
+Given you have **one existing cluster**, **Cilium already running**, and want to move
+to multi-cluster **without disrupting anything currently working**:
+
+```mermaid
+flowchart TD
+    A["Current State: 1 RKE2 Cluster<br/>VM1: Cilium running<br/>Pod CIDR: 10.42.0.0/24<br/>Everything working"]
+
+    A --> B{"Do you want ArgoCD<br/>for GitOps right now?"}
+
+    B -- "Yes / Already planned" --> C["Use OCM Handbook<br/>Run multicluster_bootstrap.sh locally first<br/>Then adapt Phases 2-4 for RKE2<br/>Full stack: OCM + Cilium Mesh + ArgoCD"]
+
+    B -- "No / Keep Helm for now" --> D["Use Karmada<br/>Simpler control plane<br/>PropagationPolicy for scheduling<br/>Add Cilium Cluster Mesh separately<br/>Keep existing Helm workflow"]
+
+    C --> E["Both paths result in:<br/>Zero application code changes<br/>Same service names in consumer.py<br/>Workers find nearest RabbitMQ automatically<br/>New clusters join with 1 command"]
+
+    D --> E
+```
+
+### If You Choose OCM (Handbook)
+
+Start here (local test, zero risk to production):
+```bash
+git clone https://github.com/BerryBytes/k8s-multicluster-handbook.git
+cd k8s-multicluster-handbook
+./scripts/multicluster_bootstrap.sh
+# Test the full stack locally with KinD clusters
+# When satisfied, apply Phases 2-4 to your OVH RKE2 clusters
+```
+
+### If You Choose Karmada
+
+Start here (directly on your existing cluster):
+```bash
+helm repo add karmada-charts https://raw.githubusercontent.com/karmada-io/karmada/master/charts
+helm install karmada karmada-charts/karmada \
+  --namespace karmada-system --create-namespace
+kubectl karmada join current-cluster \
+  --cluster-kubeconfig=/etc/rancher/rke2/rke2.yaml \
+  --cluster-context default
+```
+
+Then apply your first `PropagationPolicy` — your `sandbox-api` immediately becomes
+multi-cluster aware without any other changes.
+
+### The One Thing Both Need
+
+After either is set up, both still need **Cilium Cluster Mesh** enabled for
+cross-cluster service transparency. Since you already run Cilium, this is:
+
+```bash
+# Enable on VM1 (your existing cluster)
+cilium clustermesh enable
+# Enable on VM2 (when you add it)
+KUBECONFIG=/path/to/vm2.yaml cilium clustermesh enable
+# Connect them
+cilium clustermesh connect --destination-context vm2-context
+```
+
+**Three commands. Zero application changes. Done.**
