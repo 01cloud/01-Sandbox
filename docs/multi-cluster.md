@@ -795,3 +795,483 @@ After this, VM2 reaches VM1's services at:
 | **Automatic VM deletion (save money)** | ❌ VPS bill is always fixed | ✅ Hourly billing stops when VM deleted |
 | **Add 3rd or 4th cluster on demand** | ❌ Manual RKE2 install required each time | ✅ CAPO auto-provisions new clusters |
 | **Setup complexity** | Low — WireGuard + KEDA only | Medium — OpenStack or MKS setup |
+
+---
+
+## Deep Dive: Answers to Specific Questions
+
+---
+
+### Q1: Is "Central RabbitMQ" a New Queue or Your Existing One?
+
+**It is your existing RabbitMQ. You do not create a new one.**
+
+Looking at your actual codebase:
+
+- Your RabbitMQ runs as a pod inside the `opensandbox-system` namespace on VM1,
+  defined in [`codeInspector/charts/apiServer/templates/rabbitmq.yaml`](../codeInspector/charts/apiServer/templates/rabbitmq.yaml).
+- Your `sandbox-api` pods connect to it via the environment variable `RABBITMQ_URL`
+  as seen in [`apiServer/fastapi/core/queue/connection.py`](../apiServer/fastapi/core/queue/connection.py):
+  ```python
+  RABBITMQ_URL = os.environ.get("RABBITMQ_URL", "")
+  ```
+- Your `values.yaml` sets the host as `rabbitmq-service` on port `5672` in the
+  `opensandbox-system` namespace:
+  ```yaml
+  rabbitmq:
+    enabled: true
+    host: "rabbitmq-service"
+    port: 5672
+  ```
+
+**When you add VM2, you simply point VM2's `sandbox-api` workers at
+VM1's RabbitMQ using its WireGuard private IP instead of the internal cluster DNS name.**
+
+No second RabbitMQ. No queue duplication. No data sync needed. One queue, two consumers.
+
+```
+VM1 RabbitMQ (rabbitmq-service, port 5672)
+         │
+         ├── VM1 sandbox-api workers  →  RABBITMQ_URL = amqp://admin:pass@rabbitmq-service:5672
+         │                                (uses Kubernetes DNS — same cluster)
+         │
+         └── VM2 sandbox-api workers  →  RABBITMQ_URL = amqp://admin:pass@10.99.0.1:5672
+                                         (uses WireGuard tunnel private IP — cross-cluster)
+```
+
+The queues (`quick_scan_queue`, `repo_scan_queue`, `delete_scan_queue`,
+`email_notification_queue`) already exist in your RabbitMQ. VM2's workers subscribe
+to the same queues and compete for messages automatically. No changes to VM1.
+
+---
+
+### Q2: What Is KEDA and How Does It Enable Automatic Overflow?
+
+#### What KEDA Is
+
+**KEDA** (Kubernetes Event-Driven Autoscaling) is a Kubernetes operator that watches
+an **external metric** (in your case, RabbitMQ queue depth) and automatically adjusts
+the **replica count** of your `sandbox-api` Deployment — without you running any command.
+
+Your current `values.yaml` has an `hpa` section:
+```yaml
+hpa:
+  enabled: true
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80
+```
+
+This is the default Kubernetes **HPA** (Horizontal Pod Autoscaler) — it scales based on
+**CPU/Memory usage**. The problem: CPU rises only *after* pods are already overloaded.
+By then, users are already waiting.
+
+**KEDA replaces this** with queue-depth-driven scaling — it scales *before* pods are
+overloaded, the moment messages pile up. It is more predictive and faster to respond.
+
+#### How KEDA Works With Your Existing Code
+
+Your [`consumer.py`](../apiServer/fastapi/core/queue/consumer.py) already uses prefetch:
+```python
+prefetch_env_key = f"PREFETCH_{jt.job_type.upper()}"
+# ...
+await ch.set_qos(prefetch_count=prefetch)
+```
+
+This means each `sandbox-api` pod holds exactly `prefetch` messages at a time.
+Your `values.yaml` sets:
+```yaml
+maxQuickScanWorkers: "1"
+maxRepoScanWorkers: "1"
+```
+
+So currently each pod holds 1 job at a time. With KEDA, when 20 jobs are in the queue:
+- KEDA sees: `queue_depth (20) / queueLength_threshold (5) = 4 pods needed`
+- KEDA tells Kubernetes to scale to 4 replicas
+- Each pod picks up 1 job via prefetch → 4 jobs run concurrently
+- When queue drains → KEDA scales back to `minReplicaCount`
+
+#### KEDA on VM1 vs VM2 — The Overflow Trigger
+
+| | VM1 KEDA | VM2 KEDA |
+|:---|:---|:---|
+| **Watches** | Same RabbitMQ queue | Same RabbitMQ queue |
+| **`minReplicaCount`** | `2` (always 2 warm workers) | `0` (zero workers when idle) |
+| **`maxReplicaCount`** | `20` (VM1 hardware ceiling) | `20` (VM2 hardware ceiling) |
+| **Trigger** | Queue depth > 0 | Queue depth > 0 |
+| **Effect** | VM1 workers scale up first | VM2 workers also scale — overflow |
+
+Both KEDA controllers see the same queue. Both scale up when the queue fills.
+VM1 workers consume up to their prefetch limit. VM2 workers take the rest.
+**No coordination logic. No routing rules. Pure queue-driven competition.**
+
+When traffic stops:
+- Queue drains → depth = 0
+- VM1 KEDA scales to `minReplicaCount: 2` (keeps 2 warm)
+- VM2 KEDA scales to `minReplicaCount: 0` (VM2 runs no workload pods at all)
+
+#### KEDA Installation (One Command)
+
+```bash
+# Install KEDA on VM1's RKE2 cluster
+helm repo add kedacore https://kedacore.github.io/charts
+helm install keda kedacore/keda \
+  --namespace keda \
+  --create-namespace
+
+# Install KEDA on VM2's RKE2 cluster (same command, different kubeconfig)
+KUBECONFIG=/path/to/vm2-kubeconfig.yaml helm install keda kedacore/keda \
+  --namespace keda \
+  --create-namespace
+```
+
+#### KEDA ScaledObject for VM2 (Replaces the HPA on VM2)
+
+```yaml
+# Deploy this on VM2's RKE2 cluster
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: sandbox-worker-scaler
+  namespace: opensandbox-system      # same namespace as your existing deployment
+spec:
+  scaleTargetRef:
+    name: sandbox-api                # same deployment name as VM1
+  minReplicaCount: 0                 # scale to zero when VM1 handles all load
+  maxReplicaCount: 20
+  cooldownPeriod: 300                # 5 min grace before scaling to 0
+  triggers:
+    - type: rabbitmq
+      metadata:
+        protocol: amqp
+        # VM2 reaches VM1's RabbitMQ via WireGuard tunnel
+        host: amqp://admin:changeme@10.99.0.1:5672/
+        queueName: repo_scan_queue
+        queueLength: "5"
+    - type: rabbitmq
+      metadata:
+        protocol: amqp
+        host: amqp://admin:changeme@10.99.0.1:5672/
+        queueName: quick_scan_queue
+        queueLength: "3"
+```
+
+---
+
+### Q3: What Is WireGuard VPN and Why Is It Needed?
+
+#### The Problem Without WireGuard
+
+Your RabbitMQ runs as a Kubernetes ClusterIP service (`rabbitmq-service:5672`).
+`ClusterIP` services are **only accessible from within the same Kubernetes cluster**.
+VM2's pods are in a completely separate RKE2 cluster — they cannot reach
+`rabbitmq-service:5672` on VM1 at all.
+
+Without a private network tunnel between VM1 and VM2, you would have to expose
+RabbitMQ (and PostgreSQL) on a public IP with open ports — which is a **serious
+security vulnerability**.
+
+#### What WireGuard Does
+
+WireGuard creates a **private, encrypted Layer-3 VPN tunnel** between VM1 and VM2.
+Once set up, VM2 sees VM1's services as if they were on a local private network:
+
+```
+VM2 pod → 10.99.0.1:5672 (WireGuard IP) → WireGuard tunnel → VM1 → rabbitmq-service:5672
+```
+
+- **Encrypted:** All traffic between the VMs is encrypted with modern cryptography (ChaCha20)
+- **Fast:** WireGuard lives in the Linux kernel — near-zero overhead vs IPSec or OpenVPN
+- **Permanent:** Set up once, stays running across reboots via systemd
+- **Narrow scope:** Only routes traffic for the specific IPs you define — nothing else leaks
+
+#### Exactly What Traffic Goes Through the Tunnel
+
+| Service | VM1 Internal Address | VM2 Accesses Via Tunnel |
+|:---|:---|:---|
+| RabbitMQ | `rabbitmq-service:5672` | `10.99.0.1:5672` |
+| PostgreSQL | `postgresql-service:5432` | `10.99.0.1:5432` |
+| Redis | `redis-service:6379` | `10.99.0.1:6379` |
+
+For this to work, VM1 needs to expose these ports on its `wg0` interface (`10.99.0.1`).
+The simplest way: add `iptables` DNAT rules on VM1 that forward WireGuard traffic to
+the Kubernetes NodePort or a MetalLB IP.
+
+#### One-Time WireGuard Setup
+
+```bash
+# === ON VM1 ===
+
+# 1. Install WireGuard
+apt install wireguard
+
+# 2. Generate keypair
+wg genkey | tee /etc/wireguard/vm1_private.key | wg pubkey > /etc/wireguard/vm1_public.key
+chmod 600 /etc/wireguard/vm1_private.key
+
+# 3. Create /etc/wireguard/wg0.conf
+cat > /etc/wireguard/wg0.conf << EOF
+[Interface]
+PrivateKey = $(cat /etc/wireguard/vm1_private.key)
+Address = 10.99.0.1/24
+ListenPort = 51820
+# Forward WireGuard traffic to Kubernetes services
+PostUp = iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 5672 -j DNAT --to-destination <K8S_NODE_IP>:5672
+PostUp = iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 5432 -j DNAT --to-destination <K8S_NODE_IP>:5432
+PostUp = iptables -t nat -A PREROUTING -i wg0 -p tcp --dport 6379 -j DNAT --to-destination <K8S_NODE_IP>:6379
+PostDown = iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 5672 -j DNAT --to-destination <K8S_NODE_IP>:5672
+PostDown = iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 5432 -j DNAT --to-destination <K8S_NODE_IP>:5432
+PostDown = iptables -t nat -D PREROUTING -i wg0 -p tcp --dport 6379 -j DNAT --to-destination <K8S_NODE_IP>:6379
+
+[Peer]
+# VM2's public key (fill in after generating on VM2)
+PublicKey = <VM2_PUBLIC_KEY>
+AllowedIPs = 10.99.0.2/32
+EOF
+
+# 4. Enable and start (survives reboots)
+systemctl enable --now wg-quick@wg0
+```
+
+```bash
+# === ON VM2 ===
+
+# 1. Install WireGuard
+apt install wireguard
+
+# 2. Generate keypair
+wg genkey | tee /etc/wireguard/vm2_private.key | wg pubkey > /etc/wireguard/vm2_public.key
+chmod 600 /etc/wireguard/vm2_private.key
+
+# 3. Create /etc/wireguard/wg0.conf
+cat > /etc/wireguard/wg0.conf << EOF
+[Interface]
+PrivateKey = $(cat /etc/wireguard/vm2_private.key)
+Address = 10.99.0.2/24
+
+[Peer]
+# VM1's public key
+PublicKey = <VM1_PUBLIC_KEY>
+# VM1's public IP address (the OVH VPS public IP, not the private IP)
+Endpoint = <VM1_OVH_PUBLIC_IP>:51820
+AllowedIPs = 10.99.0.1/32
+# Keeps the tunnel alive through NAT
+PersistentKeepalive = 25
+EOF
+
+# 4. Enable and start
+systemctl enable --now wg-quick@wg0
+
+# 5. Test — should return RabbitMQ banner or connection
+nc -zv 10.99.0.1 5672 && echo "RabbitMQ reachable via tunnel"
+nc -zv 10.99.0.1 5432 && echo "PostgreSQL reachable via tunnel"
+```
+
+After completing setup, copy VM1's public key to VM2's config and vice versa,
+then run `wg show` on both machines to confirm the tunnel is established.
+
+#### Verifying the Complete Setup Works End-to-End
+
+```bash
+# On VM2, test RabbitMQ connectivity through WireGuard
+python3 -c "
+import pika
+conn = pika.BlockingConnection(
+    pika.URLParameters('amqp://admin:changeme@10.99.0.1:5672/')
+)
+print('RabbitMQ connected successfully via WireGuard tunnel')
+conn.close()
+"
+```
+
+If this returns successfully, VM2's `sandbox-api` workers can connect to VM1's RabbitMQ.
+Deploy your `sandbox-api` Helm chart on VM2 with:
+```yaml
+# Override for VM2 deployment
+RABBITMQ_URL: "amqp://admin:changeme@10.99.0.1:5672/"
+PG_HOST: "10.99.0.1"
+REDIS_HOST: "10.99.0.1"
+```
+
+From this point, VM2 workers compete with VM1 workers for scan jobs automatically.
+KEDA manages scale-up and scale-down on both clusters.
+No further manual action is ever needed to handle traffic overflow.
+
+---
+
+## Scaling to N Servers: Adding VM3, VM4, VM5...
+
+**Yes — you can add as many OVH VPS servers as you need, all running the same RKE2
+configuration.** Each new server joins the worker pool automatically the moment it is
+set up. VM1's RabbitMQ never changes. The competing consumers pattern scales linearly
+with every server you add.
+
+### How Capacity Grows With Each Server
+
+Assuming each OVH VPS has 16 cores / 32 GB RAM (same as VM1), and each sandbox pod
+uses `0.5 CPU + 0.5 GiB RAM`:
+
+| Servers Active | Max Concurrent Pods | Max Concurrent Scans | Approximate User Capacity |
+|:---|:---|:---|:---|
+| VM1 only | ~29 pods | ~29 scans | ~10–30 users |
+| VM1 + VM2 | ~58 pods | ~58 scans | ~30–60 users |
+| VM1 + VM2 + VM3 | ~87 pods | ~87 scans | ~60–90 users |
+| VM1 + VM4 servers | ~116 pods | ~116 scans | ~100–120 users |
+| VM1 + 9 servers (10 total) | ~290 pods | ~290 scans | ~250–300 users |
+| VM1 + 34 servers (35 total) | ~1,000 pods | ~1,000 scans | ~1,000 users |
+
+Every server added is additive. No architectural changes. No changes to VM1.
+
+### Architecture: N-Server Worker Pool
+
+```mermaid
+flowchart TD
+    subgraph Users["Users & API Clients"]
+        Traffic["Concurrent Scan Requests (scaling with demand)"]
+    end
+
+    subgraph VM1["OVH VPS — VM1 (Primary)"]
+        APIGW["API Gateway (public endpoint)"]
+        RMQ[("RabbitMQ — single shared queue<br/>NEVER changes, regardless of how many VMs join")]
+        DB[("PostgreSQL + Redis")]
+        KEDA1["KEDA (minReplicas: 2)"]
+        W1["sandbox-api workers"]
+        WG1["WireGuard hub\n10.99.0.1"]
+    end
+
+    subgraph VM2["VM2 (Overflow)"]
+        KEDA2["KEDA (minReplicas: 0)"]
+        W2["sandbox-api workers"]
+        WG2["10.99.0.2"]
+    end
+
+    subgraph VM3["VM3 (Overflow)"]
+        KEDA3["KEDA (minReplicas: 0)"]
+        W3["sandbox-api workers"]
+        WG3["10.99.0.3"]
+    end
+
+    subgraph VMN["VM-N (Overflow — add as many as needed)"]
+        KEDA_N["KEDA (minReplicas: 0)"]
+        W_N["sandbox-api workers"]
+        WG_N["10.99.0.N"]
+    end
+
+    Traffic --> APIGW
+    APIGW --> RMQ
+
+    RMQ -- "Competing consumers" --> W1
+    RMQ -- "Competing consumers" --> W2
+    RMQ -- "Competing consumers" --> W3
+    RMQ -- "Competing consumers" --> W_N
+
+    KEDA1 --> W1
+    KEDA2 --> W2
+    KEDA3 --> W3
+    KEDA_N --> W_N
+
+    W1 -- "Results" --> DB
+    W2 -- "Results via tunnel" --> DB
+    W3 -- "Results via tunnel" --> DB
+    W_N -- "Results via tunnel" --> DB
+
+    WG1 <-- "Encrypted tunnel" --> WG2
+    WG1 <-- "Encrypted tunnel" --> WG3
+    WG1 <-- "Encrypted tunnel" --> WG_N
+```
+
+### Repeatable Checklist: Adding Any New Server
+
+Every new server (VM3, VM4, VM5...) follows the **exact same steps**.
+Only two things change: the WireGuard IP and the public key exchange.
+
+#### On the New Server (VMx)
+
+```bash
+# Step 1 — Install RKE2 agent (joins no cluster yet)
+curl -sfL https://get.rke2.io | INSTALL_RKE2_TYPE="agent" sh -
+
+# Step 2 — Configure RKE2 to point at VM1's control plane
+mkdir -p /etc/rancher/rke2
+cat > /etc/rancher/rke2/config.yaml << EOF
+server: https://<VM1_IP>:9345
+token: <SAME_RKE2_TOKEN_AS_VM1>
+node-label:
+  - "role=sandbox-worker"
+  - "cluster=overflow"
+EOF
+
+# Step 3 — Start RKE2 agent — node automatically joins VM1's cluster
+systemctl enable --now rke2-agent
+
+# Step 4 — Install WireGuard
+apt install wireguard
+
+# Step 5 — Generate keypair
+wg genkey | tee /etc/wireguard/vmx_private.key | wg pubkey > /etc/wireguard/vmx_public.key
+
+# Step 6 — Configure WireGuard (use next available IP: .3, .4, .5...)
+cat > /etc/wireguard/wg0.conf << EOF
+[Interface]
+PrivateKey = $(cat /etc/wireguard/vmx_private.key)
+Address = 10.99.0.X/24         # replace X with next available: 3, 4, 5...
+
+[Peer]
+PublicKey = <VM1_PUBLIC_KEY>
+Endpoint = <VM1_OVH_PUBLIC_IP>:51820
+AllowedIPs = 10.99.0.1/32
+PersistentKeepalive = 25
+EOF
+
+systemctl enable --now wg-quick@wg0
+
+# Step 7 — Deploy KEDA + sandbox-api via Helm (same chart as VM1)
+KUBECONFIG=/etc/rancher/rke2/rke2.yaml helm upgrade --install codeInspector ./codeInspector \
+  --set apiServer.configMap.RABBITMQ_URL="amqp://admin:changeme@10.99.0.1:5672/" \
+  --set apiServer.configMap.PG_HOST="10.99.0.1" \
+  --set apiServer.configMap.REDIS_HOST="10.99.0.1" \
+  --set apiServer.hpa.enabled=false    # disable CPU HPA — KEDA handles scaling
+```
+
+#### On VM1 — Register the New Peer (30 seconds)
+
+```bash
+# Add the new server as a WireGuard peer on VM1
+# Run once per new server added
+wg set wg0 peer <VMx_PUBLIC_KEY> allowed-ips 10.99.0.X/32
+
+# Make it persistent across reboots
+wg-quick save wg0
+
+# Verify the tunnel is up
+wg show
+# Output will show the new peer with "latest handshake" timestamp
+```
+
+That is the complete process. **No changes to RabbitMQ, PostgreSQL, Redis, or the API Gateway on VM1.**
+
+### How the Load Distributes Automatically
+
+When all servers are running and load increases:
+
+```
+Queue depth = 0        → All VM2..VMN have 0 pods (KEDA minReplicas: 0)
+Queue depth = 1–50     → VM1 KEDA scales VM1 workers up. Others stay at 0.
+Queue depth = 51–100   → VM1 is full. VM2 KEDA activates. VM2 workers scale up.
+Queue depth = 101–150  → VM1 + VM2 full. VM3 KEDA activates. VM3 workers scale up.
+Queue depth = 150+     → All VMs active, consuming in parallel.
+Queue drains           → KEDA scales VM2..VMN back to 0. VM1 stays at minReplicas: 2.
+```
+
+The queue is the universal signal. Every KEDA instance reacts to it independently.
+No central coordinator. No routing table. No human decision.
+
+### When to Add Another Server vs. Upgrading Existing Ones
+
+| Situation | Action |
+|:---|:---|
+| Consistent high queue depth, VM1 + VM2 both full | Add VM3 |
+| Queue spikes are short bursts only | Tune KEDA `cooldownPeriod` before adding more VMs |
+| All VMs at < 50% utilization most of the time | You have enough servers; reduce `maxReplicaCount` to save cost |
+| Need more than ~10 VMs regularly | Consider migrating to OVH Public Cloud for auto-provisioned elastic nodes |
