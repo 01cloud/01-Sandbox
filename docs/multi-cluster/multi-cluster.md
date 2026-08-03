@@ -1816,16 +1816,10 @@ nearest datacenter. This is exactly what the manager's requirement describes.
 
 ---
 
-# BerryBytes k8s-multicluster-handbook: Ready-Made Implementation
+# k8s-multicluster
 
-> **Repository:** [https://github.com/BerryBytes/k8s-multicluster-handbook](https://github.com/BerryBytes/k8s-multicluster-handbook)
->
 > *"A beginner-friendly, automated multi-cluster setup using Open Cluster Management (OCM),
 > and Cilium — deploy and manage Kubernetes workloads across clusters with ease."*
-
-This repository is a **turnkey reference implementation** of the exact architecture
-described in the previous sections. It provides working scripts, Helm chart values,
-cluster configurations, and examples that can be adapted for production OVH RKE2 clusters.
 
 ---
 
@@ -2470,4 +2464,560 @@ KUBECONFIG=/path/to/vm2.yaml cilium clustermesh enable
 cilium clustermesh connect --destination-context vm2-context
 ```
 
+```
+
 **Three commands. Zero application changes. Done.**
+
+---
+
+# Running KinD Alongside Your Existing RKE2 on the Same Local PC
+
+> **Your Scenario:**
+> 1. Local PC runs the RKE2 server — currently working, provisioning scan pods
+> 2. You want to create KinD clusters on the same PC to test multi-cluster
+> 3. Cilium + MetalLB already configured on RKE2 — you don't want to destroy anything
+
+## Key Fact: The Handbook Script Does NOT Touch Your RKE2 Cluster
+
+The `multicluster_bootstrap.sh` script **only creates KinD clusters inside Docker**.
+It uses `kind create cluster --name hub/east/west` and applies everything only to
+`--context kind-hub`, `--context kind-east`, `--context kind-west` contexts.
+
+It has **zero awareness** of your existing RKE2 cluster. It will never:
+- Run `kubectl` against your RKE2 API server
+- Modify your existing Cilium installation
+- Modify your existing MetalLB or its IP pool
+- Touch any running scan pods or application workloads
+
+**Your existing application will not be affected.** The KinD clusters are isolated
+Docker environments.
+
+---
+
+## Confirmed Live State: Conflicts Found
+
+Running checks on the actual machine confirms the following:
+
+### 🔴 Port 6443 — CONFLICT (must fix before running script)
+
+```
+RKE2 API server:  *:6443   (listening on ALL interfaces)
+KinD hub default: HOST_IP:6443  ← will FAIL — port already in use
+```
+
+The RKE2 API server listens on port `6443` on all network interfaces (`*:6443`).
+The handbook script defaults to port `6443` for the hub cluster API server.
+Running the script without change will fail at cluster creation.
+
+**Required fix:** Change the hub API port in the script from `6443` to `7443`.
+
+### ✅ Pod CIDR — No Conflict
+
+| Network | CIDR | Status |
+|:---|:---|:---|
+| RKE2 existing pods | `10.42.0.0/24` | — |
+| KinD hub pods | `10.12.0.0/16` | ✅ No overlap |
+| KinD east pods | `10.16.0.0/16` | ✅ No overlap |
+| KinD west pods | `10.18.0.0/16` | ✅ No overlap |
+
+### ✅ MetalLB — No Conflict (Different Scope)
+
+Your existing RKE2 MetalLB pool: `10.0.8.9–10.0.8.9` (single IP, assigned to
+`agentgateway-proxy` LoadBalancer service).
+
+KinD MetalLB pools are assigned from Docker bridge networks (e.g. `172.18.x.x` range)
+which are completely separate from your RKE2 network. The `install_metallb.sh`
+script in the handbook reads Docker bridge IPs and assigns pools from that range —
+no collision with `10.0.8.0/24`.
+
+### ✅ Cilium — No Conflict (Different Runtime)
+
+Your RKE2 Cilium runs on the RKE2 node using `containerd`.
+KinD clusters run inside Docker containers with their own Cilium inside.
+These are **completely isolated** — different network namespaces, different control
+planes, different etcds. They don't see each other.
+
+### ✅ Docker — Available
+
+Docker is installed and running (confirmed: `bridge`, `host`, `none` networks visible,
+no conflicting containers). KinD requires Docker — this is satisfied.
+
+---
+
+## Step-by-Step: Running the Handbook Safely Alongside RKE2
+
+### Step 1 — Clone the Handbook
+
+```bash
+git clone https://github.com/BerryBytes/k8s-multicluster-handbook.git
+cd k8s-multicluster-handbook
+chmod +x scripts/multicluster_bootstrap.sh
+```
+
+### Step 2 — Fix the Port Conflict (Required)
+
+Open `scripts/multicluster_bootstrap.sh` and change **one line**:
+
+```bash
+# FIND this line (around line 27):
+HUB_API_PORT=6443
+
+# CHANGE it to:
+HUB_API_PORT=7443
+```
+
+That is the **only change needed** before running the script.
+
+### Step 3 — Run the Script
+
+```bash
+./scripts/multicluster_bootstrap.sh
+```
+
+The script will:
+1. Create 3 KinD clusters (`hub`, `east`, `west`) inside Docker — entirely separate from RKE2
+2. Install Cilium **inside each KinD cluster** (does NOT touch RKE2's Cilium)
+3. Install MetalLB **inside each KinD cluster** (does NOT touch RKE2's MetalLB)
+4. Install NGINX Ingress **inside each KinD cluster** (does NOT touch your agentgateway)
+5. Install ArgoCD on the `kind-hub` cluster
+6. Initialize OCM on `kind-hub`, join `east` and `west` as managed clusters
+7. Connect Cilium Cluster Mesh between `hub ↔ east`, `hub ↔ west`, `east ↔ west`
+
+Your RKE2 cluster's context (`default` or `bb-mp-plat-03`) is never touched.
+
+### Step 4 — Verify Both Environments Are Alive
+
+```bash
+# Verify KinD clusters exist and are healthy
+kind get clusters
+# hub
+# east
+# west
+
+kubectl --context kind-hub get nodes
+kubectl --context kind-east get nodes
+kubectl --context kind-west get nodes
+
+# Verify your RKE2 cluster is STILL healthy (use your RKE2 context)
+kubectl --context default get nodes
+# bb-mp-plat-03   Ready   control-plane,etcd,master   ...
+
+# Verify your application is still running on RKE2
+kubectl --context default get pods -n opensandbox-system
+kubectl --context default get pods -n agentgateway-system
+```
+
+### Step 5 — Access ArgoCD on the KinD Hub
+
+```bash
+# Get ArgoCD password from kind-hub
+kubectl --context kind-hub -n argocd get secret argocd-initial-admin-secret \
+  -o jsonpath="{.data.password}" | base64 -d
+
+# Port forward to access UI (different port from anything RKE2 uses)
+kubectl --context kind-hub port-forward svc/argocd-server -n argocd 8080:443
+# Open: https://localhost:8080 | user: admin
+```
+
+### Step 6 — Test Cross-Cluster Connectivity in KinD
+
+```bash
+# Check Cilium Cluster Mesh health between KinD clusters
+cilium clustermesh status --context kind-hub
+cilium clustermesh status --context kind-east
+cilium clustermesh status --context kind-west
+
+# Check OCM managed clusters
+kubectl --context kind-hub get managedclusters
+# east   True   True
+# west   True   True
+```
+
+---
+
+## What Does and Does NOT Happen to Your Existing Application
+
+| Component | During Script | After Script |
+|:---|:---|:---|
+| RKE2 `sandbox-api` pods | ✅ Untouched | ✅ Still running |
+| RKE2 scan pods (scanner namespace) | ✅ Untouched | ✅ Still running |
+| RKE2 Cilium (`cilium-mn8zt`) | ✅ Untouched | ✅ Still running |
+| RKE2 MetalLB (`10.0.8.9`) | ✅ Untouched | ✅ Still assigned |
+| `agentgateway-proxy` LoadBalancer | ✅ Untouched | ✅ Still accessible |
+| RabbitMQ on RKE2 | ✅ Untouched | ✅ Still processing jobs |
+| PostgreSQL on RKE2 | ✅ Untouched | ✅ Still serving data |
+| KinD hub cluster | ❌ Doesn't exist | ✅ Created — isolated |
+| KinD east cluster | ❌ Doesn't exist | ✅ Created — isolated |
+| KinD west cluster | ❌ Doesn't exist | ✅ Created — isolated |
+
+---
+
+## Optional: Connect Your RKE2 Cluster as an OCM Spoke
+
+After the KinD environment is working, you can optionally join your existing RKE2
+cluster as a 4th managed cluster (spoke) under the KinD hub's OCM control plane.
+This is optional and non-destructive — OCM only installs a small agent on the spoke.
+
+```bash
+# On the KinD hub — generate join token
+join_cmd=$(clusteradm get token --context kind-hub)
+
+# On your LOCAL MACHINE — join the RKE2 cluster (using its context)
+clusteradm join $join_cmd \
+  --cluster-name rke2-local \
+  --context default \                       # your RKE2 context name
+  --force-internal-endpoint-lookup
+
+# Wait ~30 seconds, then accept from hub
+clusteradm accept --clusters rke2-local --context kind-hub
+
+# Verify
+kubectl --context kind-hub get managedclusters
+# NAME         HUB ACCEPTED   JOINED   AVAILABLE
+# east         true           True     True
+# west         true           True     True
+# rke2-local   true           True     True     ← your existing cluster is now a spoke
+```
+
+This installs only a small `klusterlet` agent on your RKE2 cluster. The agent
+reports cluster status to the hub. Your existing workloads are completely unaffected.
+
+---
+
+## TL;DR — The Minimum You Need to Do
+
+```bash
+# 1. Clone
+git clone https://github.com/BerryBytes/k8s-multicluster-handbook.git
+cd k8s-multicluster-handbook
+chmod +x scripts/multicluster_bootstrap.sh
+
+# 2. Fix the one port conflict (line ~27 in the script)
+sed -i 's/HUB_API_PORT=6443/HUB_API_PORT=7443/' scripts/multicluster_bootstrap.sh
+
+# 3. Run
+./scripts/multicluster_bootstrap.sh
+
+# 4. Verify RKE2 is still alive (it will be)
+kubectl --context default get nodes
+kubectl --context default get pods -n opensandbox-system
+```
+
+**One `sed` command to fix the port. One script to run everything else.
+Your existing application is unaffected.**
+
+---
+
+# Application-Specific Visual Architecture: 01-Sandbox + k8s-multicluster-handbook
+
+> **Your Topology:**
+> - **Hub Cluster (Control Plane):** Runs OCM Hub + ArgoCD (can run as a lightweight KinD cluster or management node).
+> - **Spoke 1 (Local PC RKE2 - `bb-mp-plat-03`):** Your existing working cluster running `agentgateway`, `sandbox-api`, local `rabbitmq-service`, `postgresql-service`, and sandbox scan pods.
+> - **Spoke 2 & Spoke N (Remote OVH Clusters):** RKE2 clusters running worker scan pods, `sandbox-api` replicas, and local RabbitMQ instances connected via Cilium Cluster Mesh.
+
+---
+
+## 1. High-Level Multi-Cluster Topology Diagram
+
+```mermaid
+flowchart TD
+    subgraph Users["Global Users & CI/CD GitHub Webhooks"]
+        Client["Users / GitHub Webhooks / CLI Agents"]
+    end
+
+    subgraph GeoLayer["Layer 1: External Routing (Cloudflare GeoDNS / NGINX Ingress)"]
+        Ingress["api-sandbox.01security.com<br/>Routes to nearest cluster gateway"]
+    end
+
+    subgraph HubCluster["Layer 2: Management / Hub Cluster (KinD or Dedicated VM)"]
+        OCM_Hub["Open Cluster Management (OCM) Hub<br/>- clusteradm control plane<br/>- ManagedClusterSet ('location-es')"]
+        ArgoCD_Hub["ArgoCD Control Plane<br/>- Pushes Helm manifests to all spokes<br/>- Synchronizes Git repo -> clusters"]
+    end
+
+    subgraph MeshNetwork["Layer 3: Cross-Cluster Mesh (Cilium Cluster Mesh)"]
+        CM["eBPF Encrypted Tunnel Network<br/>- Multi-Cluster Services API (MCS)<br/>- Global service discovery with local-first affinity<br/>- Transparent failover if local service fails"]
+    end
+
+    subgraph Spoke1["Spoke 1: Local PC RKE2 Cluster (bb-mp-plat-03)"]
+        S1_GW["agentgateway-proxy<br/>(LoadBalancer IP: 10.0.8.9)"]
+        S1_API["sandbox-api<br/>(FastAPI application)"]
+        S1_RMQ[("RabbitMQ Service<br/>(service.cilium.io/affinity: local)")]
+        S1_DB[("PostgreSQL Database")]
+        S1_Workers["Sandbox Pods / Repo Scanners<br/>(Kata / Firecracker Runtime)"]
+    end
+
+    subgraph Spoke2["Spoke 2: Remote OVH VPS Cluster 1"]
+        S2_GW["Ingress Gateway"]
+        S2_API["sandbox-api<br/>(Identical app deployment)"]
+        S2_RMQ[("RabbitMQ Service<br/>(service.cilium.io/affinity: local)")]
+        S2_Workers["Sandbox Pods / Repo Scanners<br/>(Kata / Firecracker Runtime)"]
+    end
+
+    subgraph Spoke3["Spoke 3: Remote OVH VPS Cluster 2"]
+        S3_GW["Ingress Gateway"]
+        S3_API["sandbox-api<br/>(Identical app deployment)"]
+        S3_RMQ[("RabbitMQ Service<br/>(service.cilium.io/affinity: local)")]
+        S3_Workers["Sandbox Pods / Repo Scanners<br/>(Kata / Firecracker Runtime)"]
+    end
+
+    %% Client requests
+    Client --> Ingress
+    Ingress -- "Local PC users" --> S1_GW
+    Ingress -- "Remote / Overflow users" --> S2_GW
+    Ingress -- "Overflow users" --> S3_GW
+
+    %% OCM / ArgoCD management connections
+    ArgoCD_Hub -- "OCM ManifestWork / GitOps" --> S1_API
+    ArgoCD_Hub -- "OCM ManifestWork / GitOps" --> S2_API
+    ArgoCD_Hub -- "OCM ManifestWork / GitOps" --> S3_API
+
+    OCM_Hub -- "ManagedCluster Agent" --> Spoke1
+    OCM_Hub -- "ManagedCluster Agent" --> Spoke2
+    OCM_Hub -- "ManagedCluster Agent" --> Spoke3
+
+    %% Cilium Cluster Mesh connections
+    CM <===> S1_RMQ
+    CM <===> S2_RMQ
+    CM <===> S3_RMQ
+
+    %% Local cluster execution flows
+    S1_GW --> S1_API --> S1_RMQ --> S1_Workers --> S1_DB
+    S2_GW --> S2_API --> S2_RMQ --> S2_Workers
+    S3_GW --> S3_API --> S3_RMQ --> S3_Workers
+
+    %% Cross-cluster failover paths
+    S2_Workers -. "Write scan results back<br/>via Cilium Mesh" .-> S1_DB
+    S3_Workers -. "Write scan results back<br/>via Cilium Mesh" .-> S1_DB
+```
+
+---
+
+## 2. Scan Job Execution & Service Mesh Routing Flow
+
+This diagram shows how a code/repo scan request flows from input to sandbox execution across clusters **without changing a single line of your application code**:
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as User / GitHub Webhook
+    participant GW as Gateway / Ingress
+    participant API as sandbox-api (FastAPI)
+    participant Mesh as Cilium Cluster Mesh
+    participant RMQ as RabbitMQ (Global Service)
+    participant Worker as Consumer / Sandbox Pod
+    participant DB as PostgreSQL (Local PC)
+
+    User->>GW: POST /api/v1/scan (Repo URL / Code Payload)
+    GW->>API: Route HTTP Request to sandbox-api
+    API->>Mesh: Publish scan task to "rabbitmq-service:5672"
+
+    Note over Mesh,RMQ: Cilium evaluates service.cilium.io/affinity: local<br/>Routes to LOCAL cluster's RabbitMQ instance
+    Mesh->>RMQ: Enqueue scan job into 'scan_queue'
+
+    alt Local Cluster Has Capacity
+        RMQ->>Worker: Local worker pod picks up scan job
+        Worker->>Worker: Provision Kata/Firecracker sandbox pod & run scan
+    else Local Workers Overloaded (Queue Depth High)
+        RMQ-->>Mesh: Overflow job unconsumed in local queue
+        Mesh->>Worker: Remote cluster worker (Spoke 2) picks up job via Cluster Mesh
+        Worker->>Worker: Remote cluster provisions sandbox pod & runs scan
+    end
+
+    Worker->>Mesh: Save scan findings to "postgresql-service:5432"
+    Mesh->>DB: Transparently route DB write back to primary PostgreSQL
+    Worker-->>User: Return scan status / completion webhook
+```
+
+---
+
+## 3. How the 3 Architecture Layers Work Together
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 1: TRAFFIC ENTRY (Cloudflare GeoDNS / Ingress)                       │
+│ - Directs incoming HTTP scan requests to nearest cluster gateway            │
+│ - If Local PC gateway is unreachable, auto-routes to OVH VPS gateway       │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 2: WORKLOAD DEPLOYMENT (OCM + ArgoCD from Handbook)                   │
+│ - Single 'git push' or ArgoCD sync deploys 'codeInspector' Helm chart        │
+│ - OCM ManifestWorkReplicaSet pushes manifests to Local PC + all OVH clusters │
+│ - You manage ONE Git repo — OCM handles multi-cluster distribution          │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                      │
+                                      ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ LAYER 3: SERVICE NETWORKING (Cilium Cluster Mesh)                           │
+│ - 'rabbitmq-service' annotated with service.cilium.io/affinity: local       │
+│ - Workers prefer local RabbitMQ first; overflow jobs served cross-cluster   │
+│ - 'postgresql-service' reachable from ALL clusters with standard DNS name   │
+│ - Zero application code changes — RABBITMQ_URL and DB_URL stay identical     │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 4. Key Architectural Guarantees for Your Application
+
+1. **Zero Application Changes:**
+   - `consumer.py` uses `amqp://admin:pass@rabbitmq-service:5672/` — unchanged.
+   - FastAPI backend uses `postgresql-service:5432` — unchanged.
+   - Cilium Cluster Mesh resolves these service names locally with cross-cluster fallback.
+
+2. **Isolated Sandbox Safety:**
+   - Sandbox scan pods (Kata/Firecracker) run locally on whichever cluster picks up the job.
+   - High-load scanning on Spoke 2 or Spoke 3 never impacts the CPU/memory performance of your local PC RKE2 server.
+
+3. **Centralized GitOps Management:**
+   - The OCM Hub (from the `BerryBytes/k8s-multicluster-handbook`) tracks cluster health.
+   - Adding a new server (VM2, VM3...) requires **zero app reconfigurations** — just join the new cluster to OCM (`clusteradm join`) and Cilium Mesh (`cilium clustermesh connect`).
+
+---
+
+## 5. Detailed Component & Data-Flow Narrative
+
+### 🌟 The Core Problem Solved
+Currently, your local PC (`bb-mp-plat-03`) runs **one single RKE2 cluster** handling API requests, PostgreSQL, RabbitMQ, and Kata/Firecracker sandbox scan pods. Under heavy load (100s/1000s of concurrent scans), CPU and RAM max out.
+
+In this architecture, your local PC remains **Spoke 1**, while remote OVH servers act as **Spoke 2, Spoke 3, etc.**
+
+---
+
+### 🧱 Layer-by-Layer Functionality
+
+#### Layer 1: Traffic Entry (Cloudflare GeoDNS & Ingress)
+- Directs incoming HTTP scan requests and GitHub webhooks to the nearest cluster gateway (`agentgateway-proxy`).
+- If your local PC is busy or offline, requests auto-route to an OVH server gateway without downtime.
+
+#### Layer 2: Management & Deployment (OCM + ArgoCD)
+- **Open Cluster Management (OCM):** Runs on the **Hub Cluster** (KinD or dedicated VM). Tracks cluster health and manages cluster registration (`clusteradm join`).
+- **ArgoCD (GitOps):** Connects to your GitHub repository. When you update your Helm charts, ArgoCD + OCM automatically push the updated `sandbox-api` manifests to **all clusters simultaneously**.
+
+#### Layer 3: Cross-Cluster Network Mesh (Cilium Cluster Mesh)
+- **Global Services (`service.cilium.io/global: "true"`):** `rabbitmq-service` and `postgresql-service` are resolvable across all clusters using standard Kubernetes DNS names.
+- **Local First (`service.cilium.io/affinity: "local"`):** `sandbox-api` on your local PC publishes jobs to the local RabbitMQ instance first for minimum latency.
+- **Overflow & Remote Processing:** If local workers are overloaded, remote worker pods on OVH (Spoke 2/3) pick up unconsumed jobs from the queue over an eBPF-encrypted tunnel.
+- **Centralized Storage:** Remote workers write scan results back to `postgresql-service:5432`. Cilium Cluster Mesh transparently routes that write back to your local PC database.
+
+---
+
+### 🔄 Life of a Scan Request
+
+1. **Request Received:** User sends a POST request with repo/code payload to `/api/v1/scan`.
+2. **API Processing:** `sandbox-api` receives the request.
+3. **Queue Publishing:** `sandbox-api` publishes the job to `rabbitmq-service:5672` (routed to local RabbitMQ via Cilium).
+4. **Workload Execution:**
+   - **Local Capacity:** Local worker provisions a Kata/Firecracker sandbox pod and scans the code.
+   - **Local Overloaded:** Remote OVH worker picks up the job via Cilium Mesh, provisions a Kata/Firecracker sandbox pod in OVH, and executes the scan.
+5. **Results Saved:** Worker writes findings back to `postgresql-service`. Response returned to user.
+
+---
+
+# 🎯 Deep-Dive: The Exact Purpose of OCM vs Cilium in This Architecture
+
+To understand the architecture deeply, you need to understand the fundamental difference between **Management (OCM)** and **Networking (Cilium)**.
+
+Think of it like a global company:
+- **OCM (Open Cluster Management)** is the **Management Headquarters**. It hires servers, tells each branch office (cluster) what jobs to run, and makes sure all offices follow the same rules.
+- **Cilium (Cluster Mesh)** is the **Private Telecom / Transport Network**. It builds secure, instant phone lines and highways between all branch offices so workers in different cities can talk to each other without knowing what city they are in.
+
+---
+
+## 1. Open Cluster Management (OCM) — The Control Plane ("The Manager")
+
+### What OCM Does
+OCM is a CNCF (Cloud Native Computing Foundation) project backed by Red Hat and IBM. It sits on your **Hub cluster** and acts as the central control plane for all your Kubernetes clusters.
+
+### Core Capabilities of OCM
+1. **Cluster Registration & Health Monitoring (`ManagedCluster`):**
+   - Every time you buy a new OVH server, you run `clusteradm join`.
+   - OCM registers the new cluster, verifies its health, and adds it to your active pool of servers.
+
+2. **Cluster Grouping & Targeting (`ManagedClusterSet` & `Placement`):**
+   - You can group your clusters using labels (e.g., `location=eu`, `type=high-cpu`).
+   - You define a `Placement` policy: *"Deploy 5 replicas of sandbox-api to any cluster labeled location=eu with <80% load."*
+
+3. **Workload Propagation (`ManifestWork` & `ManifestWorkReplicaSet`):**
+   - Instead of running `kubectl apply` or `helm install` on 10 separate servers manually, you submit your YAML manifest **once** to OCM on the Hub.
+   - OCM automatically pushes, installs, and updates that manifest across all 10 clusters.
+
+4. **GitOps Integration with ArgoCD:**
+   - OCM includes an **ArgoCD addon**. You push code updates to your GitHub repository, ArgoCD detects the push, and OCM deploys the changes fleet-wide.
+
+### What Happens Without OCM?
+- You would have to manually SSH into or configure `kubectl` contexts for every single server.
+- Updating `sandbox-api` would require running 10 manual Helm upgrades on 10 separate clusters.
+- If an OVH server dies, you wouldn't have automatic detection or workload re-routing at the cluster management level.
+
+---
+
+## 2. Cilium & Cilium Cluster Mesh — The Data Plane ("The Networking Fabric")
+
+### What Cilium Does
+Cilium is an eBPF-based Kubernetes CNI (Container Network Interface) and Service Mesh. **Cilium Cluster Mesh** connects the internal pod networks of multiple independent Kubernetes clusters into a single logical network.
+
+### Core Capabilities of Cilium in This Architecture
+1. **Cross-Cluster Pod-to-Pod Connectivity:**
+   - Standard Kubernetes only allows Pod A to talk to Pod B *inside the same cluster*.
+   - Cilium Cluster Mesh uses eBPF encrypted WireGuard/VXLAN tunnels so a pod in your Local PC cluster can send packets directly to a pod in an OVH cluster over a secure private network.
+
+2. **Global Service Discovery (`service.cilium.io/global: "true"`):**
+   - Annotating `rabbitmq-service` with `global: true` merges `rabbitmq-service` across all clusters into a single global endpoint.
+   - Any pod in any cluster can resolve `amqp://rabbitmq-service:5672` without knowing where RabbitMQ is hosted.
+
+3. **Locality-Aware Routing (`service.cilium.io/affinity: "local"`):**
+   - **Local Priority:** Cilium intelligently detects geography. When `sandbox-api` on your Local PC publishes a scan job, Cilium routes it to your **Local PC RabbitMQ first** (0.5ms latency).
+   - **Remote Fallback:** If your Local PC RabbitMQ is full or offline, Cilium transparently routes the traffic to the OVH RabbitMQ instance across the mesh.
+
+4. **Identity-Aware eBPF Security:**
+   - Cilium secures cross-cluster traffic at the Linux kernel level (eBPF) using cryptographic pod identities instead of fragile IP whitelist rules.
+
+### What Happens Without Cilium Cluster Mesh?
+- A worker pod on an OVH server **cannot talk to your local PostgreSQL database** using `postgresql-service:5432`.
+- You would have to expose your database to the public internet with NodePorts or public LoadBalancers (high security risk).
+- Your Python code (`consumer.py`) would need hardcoded IP addresses or separate environment variables per server (breaking zero-code-change guarantees).
+
+---
+
+## 3. Side-by-Side Comparison: OCM vs Cilium
+
+| Feature | Open Cluster Management (OCM) | Cilium Cluster Mesh |
+|:---|:---|:---|
+| **Primary Category** | Control Plane / Cluster Lifecycle | Networking / Service Mesh |
+| **Layer** | Management Layer (Layer 2) | Data & Network Layer (Layer 3) |
+| **Key Resource** | `ManagedCluster`, `Placement`, `ManifestWork` | `ServiceExport`, `CiliumNetworkPolicy`, eBPF |
+| **Answers the Question** | *"Which server should run this deployment?"* | *"How does this pod talk to that database?"* |
+| **Handles Deployment** | Yes — pushes YAML manifests to clusters | No — does not deploy workloads |
+| **Handles Traffic Routing**| No — does not route network packets | Yes — routes IP traffic via eBPF |
+| **Handles Security** | Access control for cluster management | Identity-aware eBPF network security policies |
+| **App Impact** | Devs interact with 1 management API | App code uses standard Kubernetes DNS names |
+
+---
+
+## 4. How OCM and Cilium Work Together in Your Application Flow
+
+Here is the exact step-by-step synergy when you add a new OVH server (Spoke 2) to your system:
+
+```
+STEP 1: REGISTRATION (OCM)
+   You run: clusteradm join --cluster-name ovh-server-1
+   └─ OCM Hub detects the new cluster, verifies health, adds it to 'location-es' set.
+
+STEP 2: DEPLOYMENT (OCM + ArgoCD)
+   OCM reads Placement policy -> pushes 'codeInspector' Helm chart to ovh-server-1.
+   └─ 'sandbox-api', 'rabbitmq', and worker pods are installed on ovh-server-1 automatically.
+
+STEP 3: MESH CONNECTION (Cilium)
+   You run: cilium clustermesh connect --destination-context ovh-server-1
+   └─ Cilium builds an eBPF encrypted tunnel between Local PC and ovh-server-1.
+
+STEP 4: LIVE TRAFFIC ROUTING (Cilium)
+   A scan job arrives. Local PC is overloaded.
+   └─ Cilium Mesh routes the job to ovh-server-1.
+   └─ OVH worker runs Kata sandbox scan.
+   └─ OVH worker writes scan results back to Local PC PostgreSQL via Cilium Mesh.
+```
+
+**Result:** OCM deployed the software without you logging into the new server. Cilium connected the network without you writing a single line of networking or application code.
