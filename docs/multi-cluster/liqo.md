@@ -161,6 +161,213 @@ flowchart TD
 
 ---
 
+### 3.2 Diagram Walkthrough: Explained Layer by Layer
+
+The diagram above shows how the **01-Sandbox** application uses Liqo to transparently spread scan workloads across three Kubernetes clusters — a local RKE2 primary and two remote OVH clusters — **without writing a single custom placement policy or changing any application code**.
+
+Below is a detailed breakdown of every component, arrow, and flow in the diagram.
+
+---
+
+#### 🧑‍💻 Top: Who Sends Requests?
+
+```
+Users & Webhooks
+└── API Clients / GitHub Webhooks
+```
+
+All external traffic — human users submitting code scan requests and GitHub CI/CD pipelines firing webhooks on push — originates here. Every request follows the same entry path into the primary RKE2 cluster.
+
+---
+
+#### 🖥️ Primary RKE2 Cluster (`bb-mp-plat-03`) — The Single Control Plane
+
+This is where **all core services live** and where every scan request is received and processed. In Liqo's design, you interact with only this one Kubernetes API server via `kubectl`. The remote clusters are invisible to you as an operator.
+
+##### ① `agentgateway-proxy` (10.0.8.9)
+
+The **public entry point** for all incoming traffic. It is the LoadBalancer-exposed gateway that receives HTTP requests from users and webhooks and forwards them into the cluster. The IP `10.0.8.9` is the MetalLB-assigned LoadBalancer address on the RKE2 node.
+
+```
+User/Webhook → agentgateway-proxy (10.0.8.9)
+```
+
+##### ② `sandbox-api` (FastAPI)
+
+The **application API layer**. It receives scan requests forwarded from the gateway, validates the request payload (repository URL, scan parameters), stores request state in Redis (not shown in diagram), and then does two things simultaneously:
+
+- Writes job metadata to the **PostgreSQL Database** (left arrow: `API → DB`)
+- Publishes the actual scan job task to the **RabbitMQ Service** (right arrow: `API → RabbitMQ`)
+
+```
+agentgateway-proxy → sandbox-api
+  ├──▶ PostgreSQL Database  (job record / audit log)
+  └──▶ RabbitMQ Service     (scan task queued for execution)
+```
+
+##### ③ `RabbitMQ Service` — The Job Dispatcher
+
+RabbitMQ holds the queue of pending scan jobs. This is where Liqo's **scheduling intelligence** becomes visible. When a job is dequeued and needs a worker pod, the Kubernetes scheduler decides **which node** to place it on. In a Liqo-enabled cluster, the scheduler sees three types of nodes:
+
+| Scheduling Target | Label | Arrow in Diagram |
+|:---|:---|:---|
+| `bb-mp-plat-03` (physical node) | `Schedule on Physical` | → Local Scan Pods |
+| `liqo-ovh-spoke-1` (virtual node) | `Schedule on VN1` | → Virtual Node: liqo-ovh-spoke-1 |
+| `liqo-ovh-spoke-2` (virtual node) | `Schedule on VN2` | → Virtual Node: liqo-ovh-spoke-2 |
+
+The **three arrows out of RabbitMQ** represent these three independent pod scheduling paths. Which path a job takes is controlled by standard Kubernetes `nodeSelector` or `nodeAffinity` rules — no Liqo-specific YAML needed.
+
+---
+
+#### 🔲 Liqo Virtual Node Abstraction — The Core Innovation
+
+```
+┌─────────────────────────────────────────┐
+│  Liqo Virtual Node Abstraction          │
+│  ┌─────────────────┐ ┌────────────────┐ │
+│  │ liqo-ovh-spoke-1│ │liqo-ovh-spoke-2│ │
+│  └─────────────────┘ └────────────────┘ │
+└─────────────────────────────────────────┘
+```
+
+This dashed box represents the **most fundamental concept in Liqo**: remote clusters are registered in the primary cluster's Kubernetes API as if they were regular worker nodes.
+
+When you run `kubectl get nodes` on the primary RKE2 cluster, you see something like:
+
+```
+NAME                  STATUS   ROLES
+bb-mp-plat-03         Ready    control-plane,master   ← real physical node
+liqo-ovh-spoke-1      Ready    agent                  ← Liqo virtual node (OVH EU)
+liqo-ovh-spoke-2      Ready    agent                  ← Liqo virtual node (OVH US)
+```
+
+`liqo-ovh-spoke-1` and `liqo-ovh-spoke-2` are **not real machines** from the primary cluster's perspective — they are **Virtual Kubelet nodes** backed by the Liqo controller. When the Kubernetes scheduler places a pod on one of these virtual nodes, the Liqo Virtual Kubelet intercepts the pod creation request and transparently forwards it to the **actual remote OVH cluster's API server** for real execution.
+
+> **Key insight:** The Kubernetes scheduler, `kubectl`, Helm charts, HorizontalPodAutoscalers — they all work on these virtual nodes exactly as they do on real nodes. No special API calls needed.
+
+---
+
+#### ✈️ Liqo Virtual Kubelet Offload — The Transport Layer
+
+```
+Virtual Node: liqo-ovh-spoke-1
+  ──(dashed)──▶ "Liqo Virtual Kubelet Offload"
+  ──▶ Liqo Cross-Cluster Fabric
+  ──▶ Kata/Firecracker Scan Pods on Remote OVH Cluster 1
+```
+
+The two dashed arrows labelled **"Liqo Virtual Kubelet Offload"** represent the actual mechanics of pod offloading:
+
+1. **Kubernetes scheduler** assigns a `scan-worker` pod to `liqo-ovh-spoke-1`
+2. **Liqo Virtual Kubelet** receives the pod `CREATE` event (it implements the Kubelet API)
+3. Virtual Kubelet **translates** the pod spec and calls the **remote OVH Cluster 1's API server** to create the pod there
+4. The pod runs on **real physical OVH hardware** — remote node's CPU, RAM, and kernel
+5. From the primary cluster's perspective, the pod shows as `Running` on `liqo-ovh-spoke-1`
+
+This is a one-way relationship: the primary cluster **dispatches** pods into remote clusters. The remote cluster does not know about the primary's application topology — it just runs the pods it receives.
+
+---
+
+#### ⚡ Liqo Cross-Cluster Fabric — WireGuard Tunnel & NAT Engine
+
+```
+WireGuard Tunnel & NAT Engine
+- Encrypted Pod-to-Pod Communication
+- Auto IP Collision Translation
+```
+
+This is the **network backbone** that connects the primary cluster to both remote OVH clusters. Unlike Cilium ClusterMesh which requires non-overlapping Pod CIDRs, Liqo's fabric handles overlapping subnets automatically.
+
+| Property | Technical Detail |
+|:---|:---|
+| **WireGuard Tunnel** | All cross-cluster pod traffic is encrypted using WireGuard (UDP port `51820`). Packets between the primary cluster and remote OVH nodes are indistinguishable from a secure VPN tunnel |
+| **Encrypted Pod-to-Pod Communication** | When an offloaded `Kata/Firecracker` pod on OVH needs to write to `postgresql-service:5432` on the primary cluster, the traffic travels through the WireGuard tunnel encrypted end-to-end |
+| **Auto IP Collision Translation** | Both your primary cluster and OVH clusters might use the same Pod CIDR (e.g., `10.42.0.0/16`). Liqo's IPAM subsystem performs **automatic NAT translation** — it remaps conflicting pod IPs on the fly so packets are routed correctly without any manual subnet re-planning |
+
+The Liqo fabric acts as a **transparent bridge** — offloaded pods and local pods communicate using standard Kubernetes DNS service names, and Liqo handles all the tunneling and address translation invisibly.
+
+---
+
+#### 🏭 Remote OVH Clusters — Where Scan Execution Happens
+
+##### Remote OVH Cluster 1 (Physical Compute)
+```
+Kata/Firecracker Scan Pods
+(Offloaded via VN1)
+```
+
+This cluster receives pods offloaded through `liqo-ovh-spoke-1`. The **Kata/Firecracker Scan Pods** run the actual untrusted code analysis inside isolated microVMs on OVH's physical hardware. The CPU-intensive workload — static analysis, AST parsing, container execution — runs **entirely on OVH's machines**, offloading the primary RKE2 node.
+
+##### Remote OVH Cluster 2 (Physical Compute)
+```
+Kata/Firecracker Scan Pods
+(Offloaded via VN2)
+```
+
+Identical to Cluster 1, but this is a **second independent remote cluster**. Jobs scheduled to `liqo-ovh-spoke-2` end up executing here. Having two remote clusters allows the system to distribute scan load across two separate geographic regions or availability zones.
+
+---
+
+#### 🔁 Reflected Database Write — Results Return to Primary
+
+```
+Kata/Firecracker Scan Pods (OVH Cluster 1)
+  ──(dashed)──▶ "Reflected Database Write"
+  ──▶ Liqo Cross-Cluster Fabric (WireGuard)
+  ──▶ PostgreSQL Database (Primary RKE2 Cluster)
+```
+
+The two dashed arrows labelled **"Reflected Database Write"** are the **return path** for scan results:
+
+1. An offloaded `Kata/Firecracker` pod on OVH finishes a code scan
+2. It calls `postgresql-service:5432` using the standard Kubernetes DNS name
+3. The **Liqo Resource Reflector** has already mirrored the `postgresql-service` Service object into the remote cluster's namespace — so the DNS name resolves correctly on the remote cluster too
+4. Liqo's WireGuard fabric intercepts the outbound TCP connection and **tunnels it back to the primary cluster's PostgreSQL pod**
+5. The scan findings are written to the **single authoritative PostgreSQL database** on the primary RKE2 node
+
+> **Why "Reflected"?** Liqo calls this process *Resource Reflection* — it copies Kubernetes `Service`, `ConfigMap`, and `Secret` objects from the primary cluster into the remote cluster's shadow namespace, so offloaded pods can discover and connect to primary-cluster services using standard Kubernetes DNS. The traffic itself is routed back through the WireGuard tunnel.
+
+---
+
+#### 📌 Complete End-to-End Request Journey
+
+```
+User submits scan request
+  ─[1]─▶ agentgateway-proxy (10.0.8.9) on primary RKE2
+  ─[2]─▶ sandbox-api (FastAPI) processes request
+  ─[3]─▶ PostgreSQL: job record written (audit log)
+  ─[4]─▶ RabbitMQ: scan task enqueued
+  ─[5]─▶ Kubernetes scheduler selects target node:
+          ├── Physical node (bb-mp-plat-03) → Local Scan Pod runs locally
+          ├── liqo-ovh-spoke-1 → Liqo Virtual Kubelet offloads to OVH EU
+          └── liqo-ovh-spoke-2 → Liqo Virtual Kubelet offloads to OVH US
+  ─[6]─▶ Liqo Virtual Kubelet forwards pod CREATE to remote OVH API server
+  ─[7]─▶ WireGuard tunnel carries pod traffic between primary ↔ remote
+  ─[8]─▶ Kata/Firecracker pod executes scan in isolated microVM on OVH hardware
+  ─[9]─▶ Scan result written to postgresql-service:5432
+          └── Liqo Resource Reflector resolves DNS → WireGuard tunnel → Primary PostgreSQL
+  ─[10]─▶ HTTP 200 OK returned to user
+```
+
+Total cross-cluster hops: **2** (pod dispatch outbound + database write inbound). All scan computation happens on OVH hardware.
+
+---
+
+#### 🔑 How This Differs From Cilium ClusterMesh
+
+| Aspect | Liqo (this doc) | Cilium ClusterMesh (`cilium-mesh.md`) |
+|:---|:---|:---|
+| **How remote clusters appear** | As virtual nodes in primary cluster's `kubectl get nodes` | As independent peers — no virtual node abstraction |
+| **Who controls scheduling** | Primary cluster's native Kubernetes scheduler | Each cluster schedules its own pods independently |
+| **Remote cluster runs** | Only offloaded scan pods (nothing else needed) | Full stack: API + RabbitMQ + workers per cluster |
+| **Pod CIDR requirement** | Overlapping CIDRs allowed — Liqo NAT handles it | Must be non-overlapping (Cilium requires unique CIDRs) |
+| **Service discovery (remote pods)** | Liqo Resource Reflector mirrors Services into remote namespace | Cilium ClusterMesh syncs endpoint IPs via etcd |
+| **How many API servers** | 1 — you only manage the primary cluster | 3 — each cluster has its own API server |
+| **Operator cognitive load** | Lower — single `kubectl` context | Higher — must manage contexts for all 3 clusters |
+| **Remote cluster autonomy** | Low — depends on primary for pod scheduling | High — each cluster independently serves its region |
+
+---
+
 ## 4. Prerequisites & Cluster Requirements
 
 ### 4.1 Cluster Requirements

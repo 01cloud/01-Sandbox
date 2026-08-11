@@ -168,6 +168,178 @@ flowchart TD
 
 ---
 
+### 3.2 Diagram Walkthrough: Explained Layer by Layer
+
+The diagram above depicts the full architecture of the **01-Sandbox** application running across three peer Kubernetes clusters connected purely via Cilium ClusterMesh — no OCM, no Karmada, no external control plane. Below is a detailed breakdown of every node, arrow, and layer in the diagram.
+
+---
+
+#### 🧑‍💻 Top: Who Sends Requests?
+
+```
+Users & GitHub Webhook Requests
+└── API Clients / GitHub Webhooks
+```
+
+These are the **external initiators** — human users hitting the scan API and GitHub CI/CD pipelines firing webhook payloads on every code push. Every request in the system originates from here.
+
+---
+
+#### 🌐 Layer 1: External Routing — Cloudflare GeoDNS / Ingress
+
+```
+api-sandbox.01security.com
+└── Routes to Nearest Cluster Gateway
+```
+
+This is **Cloudflare GeoDNS (geographic DNS steering)**. When any client queries `api-sandbox.01security.com`, Cloudflare inspects the client's IP geolocation and returns the IP of the **closest cluster's entry gateway** — without the client knowing which cluster answered.
+
+| Arrow Label | User Location | Routed To |
+|:---|:---|:---|
+| `Local traffic` | Asia Pacific (local PC) | **Cluster 1** — RKE2 local |
+| `EU traffic` | Europe | **Cluster 2** — Remote OVH EU |
+| `US traffic` | United States | **Cluster 3** — Remote OVH US |
+
+> **Key design point:** In this pure Cilium ClusterMesh setup, **all three clusters are equals** — each independently serves its own regional users. There is no central "hub" that all traffic passes through. This is the fundamental difference from the OCM hub-and-spoke design in `manual-setup-guide.md`.
+
+---
+
+#### ⚡ Layer 2: Cilium ClusterMesh — The eBPF Encrypted Tunnel
+
+```
+eBPF WireGuard Encrypted Tunnel
+- Synchronizes Endpoint IPs across clusters
+- Transparent Pod-to-Pod cross-cluster routing
+- Preserves Pod Source IPs across cluster boundary
+```
+
+This is the **core networking layer** that makes the three clusters behave as a single logical network. The `clustermesh-apiserver` (an embedded lightweight etcd) runs on each cluster and continuously **synchronizes service endpoint tables and pod IP addresses** to every other connected cluster over mutual TLS.
+
+What each bullet point in the diagram means technically:
+
+| Tunnel Property | Technical Meaning |
+|:---|:---|
+| **eBPF WireGuard Encrypted** | Packets are encrypted using WireGuard (UDP port `51871`) at the Linux kernel level via eBPF programs — no userspace VPN agent or sidecar proxy required |
+| **Synchronizes Endpoint IPs across clusters** | Cluster 1 knows the real pod IPs of Cluster 2's RabbitMQ pods and vice versa, kept live by `clustermesh-apiserver` etcd sync |
+| **Transparent Pod-to-Pod cross-cluster routing** | A pod calling `rabbitmq-service:5672` is silently redirected by eBPF to a pod in another cluster — zero application code changes needed |
+| **Preserves Pod Source IPs across cluster boundary** | The original pod IP (not a NAT-translated IP) survives the tunnel hop, so PostgreSQL and RabbitMQ audit logs show the actual caller pod IP |
+
+The **bidirectional `<===>` arrows** between the Mesh layer and each cluster's `RabbitMQ Service` represent this live endpoint synchronization. All three clusters constantly share their RabbitMQ endpoint state with each other so any cluster can route to any cluster's RabbitMQ when needed.
+
+---
+
+#### 🖥️ Cluster 1: Local RKE2 Cluster (`bb-mp-plat-03`) — The Primary Cluster
+
+This is the **primary cluster** and the only one that hosts PostgreSQL. It is the anchor for all persistent data.
+
+| Component | Role |
+|:---|:---|
+| `agentgateway-proxy` (LoadBalancer IP) | Public entry point. Receives `Local traffic` from Cloudflare GeoDNS and routes it into the cluster |
+| `sandbox-api` (FastAPI Replicas) | Processes incoming scan requests, validates payloads, and publishes jobs to `rabbitmq-service:5672` |
+| `RabbitMQ Service` (`global: true, affinity: local`) | The job queue, annotated as a **global service** visible to all 3 clusters. `affinity: local` means Cluster 1 pods prefer this local RabbitMQ first before going cross-cluster |
+| `Local Kata/Firecracker Scan Pods` | The workers that execute sandboxed code scans locally on this cluster's hardware. They consume jobs from the local RabbitMQ queue |
+| `PostgreSQL Database` (Primary Instance) | The **only database in the entire setup**. Cluster 2 and Cluster 3 workers write their scan results back to this instance over the Cilium Mesh tunnel |
+
+**Cluster 1 local execution flow (solid arrows):**
+```
+agentgateway-proxy
+  → sandbox-api
+  → RabbitMQ Service (local)
+  → Local Kata/Firecracker Workers
+  → PostgreSQL Database
+```
+This entire chain runs on a single cluster with zero network hops outside the machine.
+
+---
+
+#### 🌍 Cluster 2: Remote OVH Cluster 1 (EU)
+
+This cluster mirrors Cluster 1's **application stack** but intentionally has **no PostgreSQL** — all scan results are written back to Cluster 1's primary database over the Cilium Mesh.
+
+| Component | Role |
+|:---|:---|
+| `agentgateway-proxy` (LoadBalancer IP) | Receives EU user traffic from Cloudflare GeoDNS |
+| `sandbox-api` (FastAPI Replicas) | Same application code as Cluster 1 — processes EU scan requests from local users |
+| `RabbitMQ Service` (`global: true, affinity: local`) | EU-local job queue. EU workers consume from this first. If local queue is empty, competing consumers can pull from Cluster 1's queue via Cilium Mesh |
+| `Remote Kata/Firecracker Scan Pods` | EU workers — execute sandboxed code scans **locally on OVH EU hardware**, keeping CPU-intensive computation close to where the job originated |
+
+**The critical dashed arrow:**
+```
+Remote Kata/Firecracker Scan Pods
+  ──(dashed)──▶ "Write scan findings back via Cilium Mesh (postgresql-service)"
+  ──▶ PostgreSQL Database on Cluster 1
+```
+
+When a Cluster 2 worker finishes a scan, it calls `postgresql-service:5432` using the standard Kubernetes DNS name. Cilium's eBPF datapath intercepts this packet, looks up the BPF service map, and **transparently tunnels the TCP connection to Cluster 1's PostgreSQL pod** over the WireGuard encrypted tunnel — the application never knows it is writing to a different cluster.
+
+---
+
+#### 🇺🇸 Cluster 3: Remote OVH Cluster 2 (US)
+
+Identical topology to Cluster 2 but serving **US East users**. The same patterns apply:
+
+- Receives US traffic from Cloudflare GeoDNS
+- Runs its own `sandbox-api`, `RabbitMQ`, and `Kata/Firecracker` workers
+- **Writes PostgreSQL results back to Cluster 1** over the Cilium Mesh tunnel via the same dashed arrow pattern
+
+---
+
+#### 🔄 The Competing Consumer Overflow Pattern
+
+Because all three `RabbitMQ Service` instances carry `service.cilium.io/global: "true"`, Cilium merges them into a **single logical global service endpoint** across the mesh. With `affinity: local`, each cluster prefers its own queue — but when local workers are saturated:
+
+```
+Cluster 1's local workers at 100% CPU
+  → New jobs back up in Cluster 1's RabbitMQ
+  → Cilium eBPF detects unconsumed messages
+  → Cluster 2 or Cluster 3 workers pick up jobs
+    from Cluster 1's RabbitMQ over the WireGuard tunnel
+  → Remote workers execute the scan on OVH hardware
+  → Results written back to Cluster 1's PostgreSQL
+```
+
+This is **transparent horizontal scaling across geographic regions** — no code change, no DNS update, no load balancer reconfiguration.
+
+---
+
+#### 📌 Complete Request Journey — End to End
+
+```
+User (EU)
+  ─[1]─▶ Cloudflare GeoDNS detects EU client IP
+  ─[2]─▶ Returns Cluster 2 (OVH EU) LoadBalancer IP
+  ─[3]─▶ agentgateway-proxy on Cluster 2
+  ─[4]─▶ sandbox-api (FastAPI) on Cluster 2
+  ─[5]─▶ Publish job to rabbitmq-service:5672
+          └── Cilium eBPF: affinity=local → route to Cluster 2 local RabbitMQ
+  ─[6]─▶ Cluster 2 Kata/Firecracker worker picks up job
+  ─[7]─▶ Execute scan inside isolated microVM on OVH EU hardware
+  ─[8]─▶ Worker writes to postgresql-service:5432
+          └── Cilium eBPF: intercepts → WireGuard tunnel → Cluster 1 PostgreSQL
+  ─[9]─▶ Scan result stored in primary database on Cluster 1
+  ─[10]─▶ HTTP 200 OK returned to user
+```
+
+Total cross-cluster hops: **1** (only the PostgreSQL write). All compute stays on the EU cluster.
+
+---
+
+#### 🔑 How This Differs From the OCM Hub-and-Spoke Design
+
+| Aspect | Cilium ClusterMesh (this doc) | OCM + RKE2 Hub (`manual-setup-guide.md`) |
+|:---|:---|:---|
+| **User traffic entry point** | All 3 clusters equally (GeoDNS selects) | Hub only (`sandbox-api` on RKE2) |
+| **Where `sandbox-api` runs** | Every cluster | Hub only |
+| **Where RabbitMQ runs** | Every cluster (local-first affinity) | Hub only (shared via Cilium Mesh) |
+| **Where PostgreSQL runs** | Cluster 1 only, written to remotely | Hub only |
+| **What spokes run** | Full stack (API + queue + workers) | On-demand Kata workers provisioned per job |
+| **Control plane** | None — pure eBPF networking | OCM + ArgoCD on hub |
+| **Sandbox provisioning** | Workers always running, competing consumer pull | Pods provisioned on-demand by `ManifestWork`, destroyed after job |
+| **Complexity** | Lower — standard Kubernetes + Cilium annotations | Higher — OCM CRDs, `ManifestWork`, `Placement` API |
+| **Operational overhead** | Lower — no hub to manage | Higher — hub is a single point of control |
+
+---
+
 ## 4. Mandatory Prerequisites & Network Planning
 
 Before enabling Cilium ClusterMesh, your Kubernetes clusters **MUST** satisfy 4 strict network requirements:
