@@ -41,8 +41,12 @@ This stack is **80% already operational** — clusters, Cilium, OCM, and ArgoCD 
 2. [Multi-Cluster Approaches Evaluated](#2-multi-cluster-approaches-evaluated)
 3. [Deep-Dive Comparative Analysis](#3-deep-dive-comparative-analysis)
 4. [Pros and Cons of Evaluated Approaches](#4-pros-and-cons-of-evaluated-approaches)
+   - [4.10 Combined Stack Deep-Dive: Pros, Cons, and Limitations of OCM + MCS + KEDA + Cilium](#410-combined-stack-deep-dive-pros-cons-and-limitations-of-ocm--mcs--keda--cilium)
 5. [Architectural Comparison: Composite Stacks](#5-architectural-comparison-composite-stacks)
 6. [Comprehensive Justification of the Recommended Stack](#6-comprehensive-justification-of-the-recommended-stack)
+   - [6.1 Plain Language Explanation of the Architecture Layers](#61-plain-language-explanation-of-the-architecture-layers)
+   - [6.2 CEO Architectural Review: Trade-Offs, Network Connectivity Challenges & Mesh Requirements](#62-ceo-architectural-review-trade-offs-network-connectivity-challenges--mesh-requirements)
+   - [6.3 Evaluation & Justification: Does 01-Sandbox Require a Complex Cluster Mesh or Federated Control Plane?](#63-evaluation--justification-does-01-sandbox-require-a-complex-cluster-mesh-or-federated-control-plane)
 7. [Detailed Technical Architecture & Diagrams](#7-detailed-technical-architecture--diagrams)
 8. [Declarative Implementation Manifests & Configuration](#8-declarative-implementation-manifests--configuration)
 9. [Conclusion, Risk Register & Implementation Summary](#9-conclusion-risk-register--implementation-summary)
@@ -383,6 +387,47 @@ SCENARIO: kind-east at 90% CPU, kind-west at 15% CPU.
 
 ---
 
+### 4.10 Combined Stack Deep-Dive: Pros, Cons, and Limitations of OCM + MCS + KEDA + Cilium
+
+While individual components solve single layer problems, the composite stack (**Open Cluster Management + MCS API + KEDA + Cilium ClusterMesh**) acts as a unified 4-tier engine. Below is a rigorous analysis of the pros, cons, and operational limitations of this combined architecture for the 01-Sandbox workload:
+
+#### 🟢 Combined Architecture Pros
+
+1. **Modular Separation of Concerns:**
+   - Each tool operates at its optimal layer without functionality overlap: KEDA manages event queue triggers (*when and how many*), OCM manages dynamic cluster selection and pod lifecycle (*where and how*), MCS API standardizes DNS endpoint naming (*what address*), and Cilium ClusterMesh delivers kernel-speed encrypted packet transport (*how fast and secure*).
+2. **Scale-to-Zero Compute Efficiency:**
+   - KEDA monitors Hub RabbitMQ queue depth. When the queue is empty, worker replicas scale to `0`, causing OCM to purge `ManifestWork` CRDs and Spokes to delete active pods. Zero idle CPU/RAM is consumed on Spoke clusters during periods of inactivity.
+3. **Telemetry-Driven Real-Time Placement:**
+   - OCM's `work-manager` addon continuously reports allocatable vs. requested CPU and RAM metrics. Jobs are dynamically routed to the least-loaded Spoke cluster (e.g. routing to `kind-east` at 23% CPU instead of `kind-west` at 71% CPU), preventing node saturation and job queuing hotspots.
+4. **Ephemeral Zero-Residual Lifecycle:**
+   - Worker pods are declared on-demand via `ManifestWork` specs and deleted immediately upon scan task completion. This guarantees zero state leakage or persistent zombie containers on Spoke worker nodes.
+5. **Decoupled Application Layer (Zero Lock-In):**
+   - Application code (`consumer.py`) connects to standard MCS API DNS endpoints (`.svc.clusterset.local`). The application is entirely agnostic to the underlying networking fabric, allowing future swapping of Cilium ClusterMesh with Submariner or cloud CNI drivers without code changes.
+6. **Minimal Operational Footprint:**
+   - Extends pre-existing components (Cilium CNI and OCM Hub already deployed in 01-Sandbox) rather than introducing heavy federated control planes (such as Karmada with dedicated etcd instances) or memory-intensive proxy sidecars (Istio).
+
+#### 🔴 Combined Architecture Cons
+
+1. **Multi-Tier Debugging Complexity:**
+   - Troubleshooting a failed job requires inspecting state across four distinct CRD domains (`ScaledObject` in KEDA, `Placement` and `ManifestWork` in OCM, `ServiceExport`/`ServiceImport` in MCS API, and BPF map entries in Cilium). Engineers must understand the multi-layered flow to diagnose issues.
+2. **Asynchronous Telemetry & Scale Reaction Delay:**
+   - Telemetry collection (OCM 30-second loop) and queue depth polling (KEDA 15-second interval) introduce an aggregate reaction delay of ~15–30 seconds. Under extreme micro-burst traffic, workers may briefly queue on the Hub before Spokes scale up.
+3. **Hub Control Plane Dependency for Dispatching:**
+   - While Spoke data plane execution is autonomous (running pods continue executing even if the Hub disconnects), the creation of *new* worker pods depends on the Hub API server dispatching new `ManifestWork` CRDs.
+4. **Integration Operator Requirement:**
+   - Standard KEDA `ScaledObject` natively targets `Deployment` or `StatefulSet` resources. In this architecture, KEDA targets OCM's `ManifestWorkReplicaSet` CRD (or custom operator), requiring a lightweight Hub CRD mapping layer.
+
+#### ⚠️ Combined Architecture Limitations
+
+| Limitation Dimension | Detail & Mitigation |
+|:---|:---|
+| **CIDR Non-Overlap Constraint** | **Requirement:** Cilium ClusterMesh requires globally unique Pod and Service CIDRs across Hub and Spokes.<br>**Mitigation:** Pre-allocated in 01-Sandbox (Hub: `10.42.0.0/16`, East: `10.16.0.0/16`, West: `10.18.0.0/16`). If a future cloud Spoke has fixed overlapping CIDRs, Submariner Globalnet NAT must be added for that specific Spoke edge. |
+| **CNI Homogeneity Prerequisite** | **Requirement:** Cilium ClusterMesh operates via Cilium-specific eBPF BPF maps (`cilium_lb4_services_v2`) and requires Cilium CNI on all participating nodes.<br>**Mitigation:** All 01-Sandbox nodes currently run Cilium. Non-Cilium clusters cannot participate in direct eBPF socket routing without an overlay gateway bridge like Submariner. |
+| **Absence of L7 Traffic Control** | **Requirement:** The combined stack operates at L3/L4 (IP/TCP) layer.<br>**Mitigation:** Does not provide HTTP path routing, header-based canary splits, or HTTP circuit breaking. This is an intentional design choice since 01-Sandbox workloads rely strictly on L4 TCP connections (AMQP 5672, PostgreSQL 5432). |
+| **Hub-to-Spoke Network Latency Boundary** | **Requirement:** High cross-cluster network latency (>50ms WAN) degrades cross-cluster PostgreSQL transaction speeds.<br>**Mitigation:** All 01-Sandbox Spokes operate within low-latency LAN/VPC interconnects (< 2ms RTT). |
+
+---
+
 ## 5. Architectural Comparison: Composite Stacks
 
 Single tools solve only one layer of the multi-cluster problem. Production architectures combine tools across tiers:
@@ -538,6 +583,139 @@ Since Spokes have no local RabbitMQ or PostgreSQL pods, annotating Hub services 
 
 **Reason 7 — Future-Proof DNS Independence via MCS API:**
 By using `svc.clusterset.local` DNS names (KEP-1645 standard), `consumer.py` is decoupled from Cilium-specific annotations. If 01-Sandbox ever adds a cloud-managed cluster running Calico (incompatible with Cilium ClusterMesh), replacing Layer 1 with Submariner does not require any change to application configuration, environment variables, or service names.
+
+---
+
+### 6.2 CEO Architectural Review: Trade-Offs, Network Connectivity Challenges & Mesh Requirements
+
+In accordance with executive architectural directives, this section details the critical trade-offs inherent in multi-cluster design, analyzes severe network connectivity failure modes (CIDR overlaps and network partitions), and establishes why an eBPF-native mesh network powered by Cilium is mandatory.
+
+#### 6.2.1 Core Architectural Trade-Offs
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                ARCHITECTURAL TRADE-OFF BALANCE                                   │
+├───────────────────────────────────┬──────────────────────────────────────────────────────────────┤
+│ Single Cluster Architecture       │ Multi-Cluster Hub-and-Spoke Architecture                     │
+├───────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ • Simple single control plane     │ • Higher operational footprint (3 K8s control planes)        │
+│ • Hard node/CPU hardware limits   │ • Unlimited linear horizontal scaling across Spoke nodes     │
+│ • Untrusted code runs on main k8s │ • Zero blast radius — microVM execution isolated to Spokes  │
+│ • Shared blast radius for failure │ • Central core state (DB/Queue) completely isolated on Hub   │
+└───────────────────────────────────┴──────────────────────────────────────────────────────────────┘
+```
+
+1. **Multi-Cluster Hub-and-Spoke vs. Monolithic Single Cluster:**
+   - *Trade-Off:* Operating three Kubernetes clusters increases control plane maintenance overhead compared to a single large cluster. However, for 01-Sandbox, this trade-off is mandatory: single clusters impose strict hardware ceilings during high-concurrency security scanning, and running untrusted microVM containers on the same cluster as core databases creates catastrophic cross-tenant security risk. Multi-cluster achieves absolute blast-radius isolation.
+2. **eBPF-Native Mesh (Cilium) vs. Proxy Sidecar Mesh (Istio) vs. Userspace Gateway (Submariner):**
+   - *Trade-Off:* Istio provides advanced Layer 7 HTTP traffic control but forces a ~50MB Envoy sidecar process onto every pod, incurring 5–10ms proxy latency and destroying Kata/Firecracker microVM density. Submariner provides CNI independence but routes cross-cluster traffic through userspace gateway node processes (adding 2–5ms latency). Cilium ClusterMesh trades away unnecessary L7 features in exchange for kernel-level eBPF socket routing (`sock_ops`) and in-kernel WireGuard encryption (`cilium_wg0`) with <0.2ms overhead and zero sidecar memory consumption.
+3. **Declarative Telemetry-Driven Dispatch (OCM) vs. Full Control Plane Federation (Karmada):**
+   - *Trade-Off:* Karmada provides full Kubernetes API federation across clouds but requires deploying a heavy dedicated `karmada-apiserver` and `karmada-etcd` cluster. OCM provides lightweight, pull-agent-based fleet placement via `Klusterlet` and native `Placement` scoring based on live CPU/RAM allocatable capacity, matching 01-Sandbox's single-task pod dispatch needs without extra etcd clusters.
+
+#### 6.2.2 Potential Network Connectivity Challenges & Resiliency Analysis
+
+> [!WARNING]
+> Cross-cluster connectivity failure modes can silently degrade throughput or cause split-brain behavior if not explicitly designed for at the network layer.
+
+##### 1. CIDR Overlaps (Address Collision Risk)
+- **The Challenge:** Pod-to-pod cross-cluster routing requires globally routable, non-colliding IP addresses. If Hub Pod CIDR (`10.42.0.0/16`) overlaps with a Spoke Pod CIDR (e.g. `10.42.0.0/16`), eBPF routing tables (`cilium_lb4_services_v2`) cannot differentiate local from remote pod destinations, causing packet drops or routing loops.
+- **01-Sandbox Pre-Allocation Status:** 01-Sandbox already pre-allocates distinct subnets across clusters:
+  - Hub Cluster (`bb-mp-plat-03`): Pod CIDR `10.42.0.0/16` | Service CIDR `10.43.0.0/16`
+  - Spoke East (`kind-east`): Pod CIDR `10.16.0.0/16` | Service CIDR `10.96.0.0/16`
+  - Spoke West (`kind-west`): Pod CIDR `10.18.0.0/16` | Service CIDR `10.97.0.0/16`
+- **Cloud Expansion Resiliency Plan:** If 01-Sandbox expands to public cloud providers (e.g., AWS EKS or GCP GKE) where default VPC CIDRs cannot be modified (`10.0.0.0/16`), Submariner Globalnet NAT can be introduced specifically as an edge gateway for that cloud spoke. Globalnet translates overlapping IPs into virtual Global CIDRs without requiring any modification to the Hub's MCS API service definition layer (`.svc.clusterset.local`).
+
+##### 2. Network Partitions & Disconnection Scenarios
+
+```
+NETWORK PARTITION RESILIENCY FLOW:
+
+ Hub Cluster (bb-mp-plat-03)           [ PHYSICAL LINK DROP ]           Spoke East (kind-east)
+┌─────────────────────────────────┐               X                ┌─────────────────────────────────┐
+│ • KEDA continues queuing jobs   │         XXXXXXXXXXXXX          │ • Existing worker pods execute  │
+│ • OCM marks East "Unreachable"  │       XXXX           XXXX      │ • eBPF map routes active TCP    │
+│ • Score(East) set to -Infinity  │      XX                 XX     │ • Dispatches pause gracefully   │
+│ • Jobs re-routed to Spoke West  │       XXXX           XXXX      │ • Reconnect auto-resumes loop   │
+└─────────────────────────────────┘         XXXXXXXXXXXXX          └─────────────────────────────────┘
+```
+
+- **Scenario A: Spoke Disconnection from Hub Control Plane**
+  - *Data Plane Resilience:* Active Kata/gVisor worker pods running on Spoke East continue executing scan tasks to completion. Cilium eBPF socket maps remain cached in kernel memory. If physical L3 connectivity to Hub PostgreSQL remains reachable, results are committed successfully.
+  - *Control Plane Isolation:* OCM `Klusterlet` heartbeats fail to reach the Hub. After a 5-minute configurable timeout (`leaseDuration`), OCM Hub marks Spoke East status as `Unreachable`.
+  - *Fleet Placement Action:* KEDA continues enqueuing scan jobs into RabbitMQ. OCM's `Placement` engine automatically drops Spoke East from placement decisions and routes all new `ManifestWork` dispatches to healthy Spokes (`kind-west`).
+  - *Reconnection & Auto-Healing:* When physical network connectivity is restored, the `Klusterlet` re-establishes its gRPC control stream with the Hub, updates node capacity metrics, and automatically resumes accepting new job dispatches without manual operator intervention.
+- **Scenario B: Hub Core Service Interruption (RabbitMQ / PostgreSQL Brief Outage)**
+  - *Resiliency:* Cilium services annotated with `service.cilium.io/affinity: remote` direct traffic deterministically to Hub endpoints. If a database pod restarts, Cilium eBPF map connection tracking manages socket retries cleanly without falling back to non-existent local Spoke backends.
+
+#### 6.2.3 Technical Requirement for a Robust Mesh Network using Cilium
+
+A traditional `kube-proxy` setup or overlay tunnel is insufficient for high-concurrency microVM execution. Cilium's eBPF mesh network is mandatory for four specific technical reasons:
+
+1. **In-Kernel Socket Interception (`sock_ops`):** Bypasses Linux netfilter/iptables rules. TCP socket connections from worker pods are intercepted directly inside the kernel socket layer, eliminating userspace context switches and packet processing overhead.
+2. **In-Kernel WireGuard Tunneling (`cilium_wg0`):** Encrypts inter-cluster packet payloads using host Linux kernel crypto drivers, delivering sub-millisecond cross-cluster packet transport (<0.2ms overhead).
+3. **Kernel State Persistence Across Controller Restarts:** BPF map state (`cilium_lb4_services_v2`) resides in Linux kernel memory. Restarting `cilium-agent` or `clustermesh-apiserver` daemons does NOT disrupt active cross-cluster TCP streams.
+4. **Deterministic Service Endpoint Mapping:** Cilium's MCS API controller automatically synchronizes `EndpointSlice` objects across clusters, ensuring remote `ClusterSetIP` VIPs resolve instantly on Spokes.
+
+---
+
+### 6.3 Evaluation & Justification: Does 01-Sandbox Require a Complex Cluster Mesh or Federated Control Plane?
+
+> [!IMPORTANT]
+> **The Golden Architecture Rule for 01-Sandbox:**
+> *"Implement complex multi-cluster configurations ONLY if you can justify the need based on specific, identified technical requirements."*
+
+#### 6.3.1 Critical Evaluation of 01-Sandbox Needs vs. Multi-Cluster Complexity
+
+An objective evaluation of 01-Sandbox's workload profile demonstrates that **over-engineering the multi-cluster control plane will introduce fragility without providing business value**:
+
+1. **Current Scale & Topology:**
+   - 1 Hub cluster (`bb-mp-plat-03` RKE2) + 2 Spoke clusters (`kind-east`, `kind-west`).
+   - Located within a low-latency local network domain under single administrative ownership.
+2. **Workload Traffic Pattern:**
+   - **Unidirectional Client-Server:** Spoke worker pods make outbound L4 TCP calls back to Hub core services (RabbitMQ AMQP 5672, PostgreSQL TCP 5432).
+   - **Zero Inter-Spoke Communication:** Spoke East worker pods NEVER need to communicate with Spoke West worker pods. There is zero east-west cross-spoke traffic requirement.
+
+#### 6.3.2 Rejection of Unnecessary Complexities
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                 COMPLEXITY REJECTION ANALYSIS                                    │
+├───────────────────────────────────┬──────────────────────────────────────────────────────────────┤
+│ Evaluated Complex Option          │ Rejection Rationale for 01-Sandbox                           │
+├───────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ Federated Control Plane           │ ❌ REJECTED: Requires dedicated karmada-apiserver + etcd.   │
+│ (Karmada / KubeFed)               │ Designed for 50+ multi-cloud persistent app deployments.     │
+│                                   │ Overkill for single-task pod dispatch; adds massive ops debt.│
+├───────────────────────────────────┼──────────────────────────────────────────────────────────────┤
+│ Complex L7 Service Mesh           │ ❌ REJECTED: Requires ~50MB Envoy sidecar per microVM pod.  │
+│ (Istio Multi-Cluster)             │ L7 HTTP features (canary, header routes) useless for L4 TCP. │
+│                                   │ Degrades Kata microVM boot time & wastes memory at scale.   │
+└───────────────────────────────────┴──────────────────────────────────────────────────────────────┘
+```
+
+- **Why Karmada is Rejected:** Karmada is engineered for multi-cloud enterprises pushing persistent workloads across dozens of clusters using complex `PropagationPolicy` overrides. Using Karmada for 01-Sandbox would require managing a separate `karmada-apiserver` and `karmada-etcd` instance. OCM's pull-agent model is drastically lighter, uses standard Kubernetes CRDs, and natively computes dynamic CPU allocatable scoring out-of-the-box.
+- **Why Istio Multi-Cluster is Rejected:** Istio multi-primary gateway topologies are designed for HTTP/gRPC microservice micro-routing. For 01-Sandbox, Envoy sidecars add ~50MB RAM overhead per worker pod and 5–10ms proxy latency per call, directly crippling Kata microVM efficiency.
+
+#### 6.3.3 The Minimal Justified Architecture (Pragmatic Decision Framework)
+
+The table below maps every **specific identified requirement** of 01-Sandbox to the **absolute minimal technical implementation** required:
+
+| Specific Identified Requirement | Minimal Justified Technology | Architectural Justification | Is Complex Federated Mesh Needed? |
+|:---|:---|:---|:---:|
+| **Sub-millisecond L3/L4 cross-cluster packet encryption** | **Cilium ClusterMesh** | eBPF feature flag on existing Cilium CNI. Zero new daemons or sidecars. | ❌ NO (Kernel eBPF handles routing) |
+| **Standardized DNS for Hub DB/Queue (`.clusterset.local`)** | **Kubernetes MCS API (KEP-1645)** | Open SIG-Multicluster standard. 2 CRDs (`ServiceExport`/`Import`). Zero runtime overhead. | ❌ NO (MCS API is lightweight standard) |
+| **Real-time CPU/RAM-weighted job pod placement** | **Open Cluster Management (OCM)** | Lightweight pull-agent (`Klusterlet`). Natively scores CPU allocatable without extra etcd. | ❌ NO (OCM Hub handles placement) |
+| **RabbitMQ queue depth auto-scaling (0 ↔ N pods)** | **KEDA** | Single Helm chart on Hub. Event-driven queue watcher. | ❌ NO (KEDA handles autoscaling) |
+| **Cross-cluster L7 HTTP canary/header routing** | ❌ **NOT REQUIRED** | Workloads are raw L4 TCP (AMQP/PostgreSQL). | ❌ REJECT ISTIO |
+| **Multi-region policy overrides across 50 clusters** | ❌ **NOT REQUIRED** | Topology is 1 Hub + 2 Spokes in single network domain. | ❌ REJECT KARMADA |
+
+#### 6.3.4 Engineering Directive & CEO Recommendation Summary
+
+> [!TIP]
+> **Executive Summary Verdict:**
+> The recommended composite stack (**Cilium ClusterMesh + MCS API + OCM + KEDA**) represents the **exact minimal viable architecture** required to satisfy all 01-Sandbox operational goals. It delivers high concurrency, dynamic CPU scheduling, scale-to-zero compute, and microVM hardware isolation **without introducing unnecessary control plane federation or sidecar proxy overhead**.
+>
+> Engineering teams must reject any proposal to introduce Karmada etcd clusters or Istio Envoy gateways unless a new, explicit L7 or multi-region requirement is formally identified and approved by the architecture board.
 
 ---
 
@@ -891,7 +1069,54 @@ spec:
 
 ## 8. Declarative Implementation Manifests & Configuration
 
+### Where Does Everything Get Configured on the Hub?
+
+All MCS API and KEDA configuration lives **entirely on the Hub cluster (`bb-mp-plat-03`)** — Spokes require no manual configuration; they receive their configuration automatically from the Hub.
+
+| Component | Configured On | How | Namespace |
+|:---|:---:|:---|:---|
+| **Cilium ClusterMesh** | Hub + all Spokes | `cilium clustermesh enable` CLI | `kube-system` |
+| **MCS API support flag** | Hub + all Spokes | Helm upgrade `--set clustermesh.enableMCSAPISupport=true` | `kube-system` |
+| **ServiceExport** (expose Hub services) | **Hub only** | `kubectl apply` YAML | `opensandbox-system` |
+| **ServiceImport** (auto-created) | Spokes only | Auto-created by Cilium MCS controller — **no manual action** | `opensandbox-system` |
+| **Cilium `affinity: remote` annotation** | **Hub only** | `kubectl annotate` on Hub Services | `opensandbox-system` |
+| **OCM Placement** (CPU scoring rules) | **Hub only** | `kubectl apply` YAML | `opensandbox-system` |
+| **KEDA** (autoscaler engine) | **Hub only** | `helm install keda` | `keda` |
+| **KEDA ScaledObject** (RabbitMQ trigger) | **Hub only** | `kubectl apply` YAML | `opensandbox-system` |
+| **KEDA TriggerAuthentication** (RabbitMQ creds) | **Hub only** | `kubectl apply` YAML (Secret ref) | `opensandbox-system` |
+| **ManifestWorkReplicaSet** (KEDA scale target) | **Hub only** | `kubectl apply` YAML | `opensandbox-system` |
+
+> [!IMPORTANT]
+> **Spokes are fully passive** — they run the OCM `Klusterlet` agent (which was installed when the Spoke joined the Hub), and receive `ManifestWork` objects pushed from the Hub. You never `kubectl apply` to a Spoke directly for worker configuration.
+
+---
+
+### 8.0 Install KEDA on the Hub Cluster
+
+KEDA is a single Helm install on the Hub. It runs as a controller in the `keda` namespace and watches for `ScaledObject` resources across all namespaces.
+
+```bash
+# Add KEDA Helm repo
+helm repo add kedacore https://kedacore.github.io/charts
+helm repo update
+
+# Install KEDA on the Hub cluster
+helm install keda kedacore/keda \
+  --namespace keda \
+  --create-namespace \
+  --kube-context default   # Hub context (bb-mp-plat-03)
+
+# Verify KEDA pods are running
+kubectl get pods -n keda --context default
+# Expected output:
+# keda-operator-xxxxx           Running
+# keda-operator-metrics-xxxxx   Running
+```
+
+---
+
 ### 8.1 Enable Cilium ClusterMesh (Already Installed — 3 Commands)
+
 
 ```bash
 # Enable ClusterMesh on each cluster
