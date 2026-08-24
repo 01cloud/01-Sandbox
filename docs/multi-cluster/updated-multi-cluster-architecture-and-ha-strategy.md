@@ -439,16 +439,16 @@ flowchart TD
 You need two separate, working RKE2 Kubernetes clusters. Think of them as two independent control rooms. **Neither needs to exist yet** — you will build both from scratch in this phase. Run the Primary Hub steps on `bb-mp-plat-03`, then repeat on `bb-mp-plat-04` for the Secondary Hub.
 
 **Machines you need:**
-- `bb-mp-plat-03` (`10.0.8.9`) = Primary Hub — built first, serves all live traffic
-- `bb-mp-plat-04` (`10.0.8.10`) = Secondary Hub — built second, sits on hot standby
+- `primaryhub` (`192.168.122.225`) = Primary Hub — built first, serves all live traffic
+- `secondaryhub` (`192.168.122.143`) = Secondary Hub — built second, sits on hot standby
 
 ---
 
-### 🖥️ PRIMARY HUB — `bb-mp-plat-03` (`10.0.8.9`)
+### 🖥️ PRIMARY HUB — `primaryhub` (`192.168.122.225`)
 
-#### Step 1.1 — Bootstrap RKE2 on Primary Hub (`bb-mp-plat-03`)
+#### Step 1.1 — Bootstrap RKE2 on Primary Hub (`primaryhub`)
 
-SSH into `bb-mp-plat-03` and run:
+SSH into `primaryhub` and run:
 
 ```bash
 # Download and install RKE2
@@ -460,59 +460,68 @@ systemctl enable rke2-server.service
 # Write the RKE2 config file
 mkdir -p /etc/rancher/rke2
 cat > /etc/rancher/rke2/config.yaml <<EOF
-cluster-name: bb-mp-plat-03
-bind-address: 10.0.8.9
-advertise-address: 10.0.8.9
+cluster-init: true
+write-kubeconfig-mode: "0644"
+
+node-ip: "192.168.122.225"
+node-external-ip: "192.168.122.225"
+advertise-address: "192.168.122.225"
+
 cni: cilium
-disable-cloud-controller: true
+disable-kube-proxy: true
+
+cluster-cidr: "10.42.0.0/16"
+service-cidr: "10.43.0.0/16"
+
 tls-san:
-  - 10.0.8.9
-  - bb-mp-plat-03
-  - kubernetes.default.svc
+  - "192.168.122.225"
+  - "127.0.0.1"
+  - "localhost"
+
+disable:
+  - rke2-canal
+  - rke2-ingress-nginx
+
+kubelet-arg:
+  - "max-pods=250"
+  - "serialize-image-pulls=false"
 EOF
 
 # Start RKE2
 systemctl start rke2-server.service
 
-# Watch it come up (wait until you see "Node bb-mp-plat-03 status updated")
+# Watch it come up (wait until you see "Node primaryhub status updated")
 journalctl -u rke2-server -f
 ```
 
 #### Step 1.2 — Get the kubeconfig for Primary Hub
 
-Run this on `bb-mp-plat-03` (or copy the file to your local machine):
+Run this on `primaryhub`
 
 ```bash
-mkdir -p ~/.kube
-cp /etc/rancher/rke2/rke2.yaml ~/.kube/config-plat-03
-
-# Replace 127.0.0.1 with the real Primary Hub IP
-sed -i 's/127.0.0.1/10.0.8.9/g' ~/.kube/config-plat-03
-chmod 600 ~/.kube/config-plat-03
-
 # Test connectivity
-KUBECONFIG=~/.kube/config-plat-03 kubectl get nodes
+kubectl get nodes
 ```
 
 Expected output:
 ```
 NAME           STATUS   ROLES                  AGE   VERSION
-bb-mp-plat-03  Ready    control-plane,master   1m    v1.30.x
+primaryhub  Ready    control-plane,master   1m    v1.30.x
 ```
 
 #### Step 1.3 — Create the application namespace on Primary Hub
 
 ```bash
-KUBECONFIG=~/.kube/config-plat-03 kubectl create namespace opensandbox-system
+kubectl create namespace opensandbox-system
 ```
 
 ---
 
-### 🖥️ SECONDARY HUB — `bb-mp-plat-04` (`10.0.8.10`)
+### 🖥️ SECONDARY HUB — `secondaryhub` (`192.168.122.143`)
 
-#### Step 1.4 — Bootstrap RKE2 on Secondary Hub (`bb-mp-plat-04`)
+#### Step 1.4 — Bootstrap RKE2 on Secondary Hub (`secondaryhub`)
 
-SSH into `bb-mp-plat-04` and run:
+SSH into `secondaryhub` and run:
 
 ```bash
 # Download and install RKE2
@@ -524,15 +533,31 @@ systemctl enable rke2-server.service
 # Write the RKE2 config file
 mkdir -p /etc/rancher/rke2
 cat > /etc/rancher/rke2/config.yaml <<EOF
-cluster-name: bb-mp-plat-04
-bind-address: 10.0.8.10
-advertise-address: 10.0.8.10
+cluster-init: true
+write-kubeconfig-mode: "0644"
+
+node-ip: "192.168.122.143"
+node-external-ip: "192.168.122.143"
+advertise-address: "192.168.122.143"
+
 cni: cilium
-disable-cloud-controller: true
+disable-kube-proxy: true
+
+cluster-cidr: "10.142.0.0/16"
+service-cidr: "10.143.0.0/16"
+
 tls-san:
-  - 10.0.8.10
-  - bb-mp-plat-04
-  - kubernetes.default.svc
+  - "192.168.122.143"
+  - "127.0.0.1"
+  - "localhost"
+
+disable:
+  - rke2-canal
+  - rke2-ingress-nginx
+
+kubelet-arg:
+  - "max-pods=250"
+  - "serialize-image-pulls=false"
 EOF
 
 # Start RKE2
@@ -545,27 +570,20 @@ journalctl -u rke2-server -f
 #### Step 1.5 — Get the kubeconfig for Secondary Hub
 
 ```bash
-mkdir -p ~/.kube
-cp /etc/rancher/rke2/rke2.yaml ~/.kube/config-plat-04
-
-# Replace 127.0.0.1 with the real Secondary Hub IP
-sed -i 's/127.0.0.1/10.0.8.10/g' ~/.kube/config-plat-04
-chmod 600 ~/.kube/config-plat-04
-
 # Test connectivity
-KUBECONFIG=~/.kube/config-plat-04 kubectl get nodes
+kubectl get nodes
 ```
 
 Expected output:
 ```
 NAME           STATUS   ROLES                  AGE   VERSION
-bb-mp-plat-04  Ready    control-plane,master   1m    v1.30.x
+secondaryhub  Ready    control-plane,master   1m    v1.30.x
 ```
 
 #### Step 1.6 — Create the application namespace on Secondary Hub
 
 ```bash
-KUBECONFIG=~/.kube/config-plat-04 kubectl create namespace opensandbox-system
+kubectl create namespace opensandbox-system
 ```
 
 ---
@@ -576,16 +594,16 @@ Run this quick check from your local machine before moving to Phase 2:
 
 ```bash
 echo "=== Primary Hub Nodes ==="
-KUBECONFIG=~/.kube/config-plat-03 kubectl get nodes
+kubectl get nodes
 
 echo "=== Secondary Hub Nodes ==="
-KUBECONFIG=~/.kube/config-plat-04 kubectl get nodes
+kubectl get nodes
 
 echo "=== Primary Hub Namespace ==="
-KUBECONFIG=~/.kube/config-plat-03 kubectl get namespace opensandbox-system
+kubectl get namespace opensandbox-system
 
 echo "=== Secondary Hub Namespace ==="
-KUBECONFIG=~/.kube/config-plat-04 kubectl get namespace opensandbox-system
+kubectl get namespace opensandbox-system
 ```
 
 All four commands should return `Ready` / `Active` status before proceeding.
@@ -604,20 +622,20 @@ curl -L https://raw.githubusercontent.com/open-cluster-management-io/clusteradm/
 clusteradm version
 ```
 
-### Step 2.2 — Initialize OCM on Primary Hub (`bb-mp-plat-03`)
+### Step 2.2 — Initialize OCM on Primary Hub (`primaryhub`)
 
 ```bash
-KUBECONFIG=~/.kube/config-plat-03 clusteradm init \
+clusteradm init \
   --wait \
   --output-join-command-file /tmp/join-primary.txt
 
 cat /tmp/join-primary.txt
 ```
 
-### Step 2.3 — Initialize OCM on Secondary Hub (`bb-mp-plat-04`)
+### Step 2.3 — Initialize OCM on Secondary Hub (`secondaryhub`)
 
 ```bash
-KUBECONFIG=~/.kube/config-plat-04 clusteradm init \
+clusteradm init \
   --wait \
   --output-join-command-file /tmp/join-secondary.txt
 
@@ -630,9 +648,10 @@ cat /tmp/join-secondary.txt
 
 ### What you're doing
 
+
 This phase has **two parts**:
 
-1. **Create the Spoke clusters** (`kind-east` and `kind-west`) — these are the actual worker clusters that run microVM sandbox jobs.
+1. **Provision the Spoke clusters** (`rke2-east` and `rke2-west`) — these are dedicated VMs running RKE2, the actual worker clusters that run microVM sandbox jobs.
 2. **Install the OCM Klusterlet agent** on each Spoke and register them to **both** Hub clusters.
 
 > 💡 **OCM on Spokes ≠ OCM Hub.** You do **not** install the full OCM Hub on Spokes. Instead, `clusteradm join` installs a lightweight agent called the **Klusterlet** on the Spoke. The Klusterlet's only job is to:
@@ -642,73 +661,126 @@ This phase has **two parts**:
 >
 > The Hub does all the intelligence (placement, scheduling). The Spoke just executes.
 
+### Spoke VM Overview
+
+| Spoke Name | VM | Role |
+|:---|:---|:---|
+| `rke2-east` | Dedicated VM (e.g., `bb-spoke-east`) | RKE2 single-node cluster — East spoke worker |
+| `rke2-west` | Dedicated VM (e.g., `bb-spoke-west`) | RKE2 single-node cluster — West spoke worker |
+
+> Both spoke VMs must be network-reachable from the Hub VMs (`bb-mp-plat-03` and `bb-mp-plat-04`) on port **6443** (Kubernetes API).
+
 ---
 
-### 🖥️ PART A — Create the Spoke Clusters
+### 🖥️ PART A — Install RKE2 on Each Spoke VM
 
-#### Step 3.1 — Install `kind` on your local machine (if not already installed)
+> All commands in Part A are run **directly on each spoke VM** (SSH in first).
+
+#### Step 3.1 — Install RKE2 on `rke2-east` VM
+
+SSH into the `rke2-east` VM and run the following:
 
 ```bash
-# Download and install kind
-curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.23.0/kind-linux-amd64
-chmod +x ./kind
-sudo mv ./kind /usr/local/bin/kind
+ssh <your-user>@<rke2-east-vm-ip>
 
-# Verify
-kind version
+# Install RKE2 (server mode — single-node control-plane + worker)
+curl -sfL https://get.rke2.io | sh -
+
+# Enable and start the RKE2 server service
+systemctl enable rke2-server.service
+systemctl start rke2-server.service
+
+# Wait for the node to become Ready (may take ~1–2 minutes)
+export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+/var/lib/rancher/rke2/bin/kubectl get nodes --watch
 ```
 
-#### Step 3.2 — Create the `kind-east` Spoke cluster
+Expected output (once ready):
+```
+NAME           STATUS   ROLES                       AGE   VERSION
+bb-spoke-east  Ready    control-plane,etcd,master   2m    v1.30.x+rke2r1
+```
+
+#### Step 3.2 — Export `rke2-east` kubeconfig to the Hub / management host
+
+From the **`rke2-east` VM**, copy the kubeconfig to your management host (or whichever machine runs `clusteradm`):
 
 ```bash
-# Create the kind-east cluster
-kind create cluster \
-  --name kind-east \
-  --config - <<EOF
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-  - role: control-plane
-  - role: worker
-  - role: worker
-EOF
+# On rke2-east VM: print the kubeconfig
+sudo cat /etc/rancher/rke2/rke2.yaml
+```
 
-# Export its kubeconfig to a dedicated file
-kind get kubeconfig --name kind-east > ~/.kube/config-kind-east
-chmod 600 ~/.kube/config-kind-east
+On your **management host** (or Hub VM), save and adjust the server address:
 
-# Verify
-KUBECONFIG=~/.kube/config-kind-east kubectl get nodes
+```bash
+# Copy it from the VM
+ssh <your-user>@<rke2-east-vm-ip> "sudo cat /etc/rancher/rke2/rke2.yaml" \
+  > ~/.kube/config-rke2-east
+
+# Replace the default 127.0.0.1 with the actual VM IP
+sed -i 's/127.0.0.1/<rke2-east-vm-ip>/g' ~/.kube/config-rke2-east
+chmod 600 ~/.kube/config-rke2-east
+
+# Verify connectivity from the management host
+KUBECONFIG=~/.kube/config-rke2-east kubectl get nodes
 ```
 
 Expected output:
 ```
-NAME                      STATUS   ROLES           AGE   VERSION
-kind-east-control-plane   Ready    control-plane   1m    v1.30.x
-kind-east-worker          Ready    <none>          1m    v1.30.x
-kind-east-worker2         Ready    <none>          1m    v1.30.x
+NAME           STATUS   ROLES                       AGE   VERSION
+bb-spoke-east  Ready    control-plane,etcd,master   3m    v1.30.x+rke2r1
 ```
 
-#### Step 3.3 — Create the `kind-west` Spoke cluster
+> ⚠️ **Firewall / Security Group**: Ensure that port **6443** on the `rke2-east` VM is open and reachable from your management host and from the Hub VMs (`bb-mp-plat-03`, `bb-mp-plat-04`).
+
+---
+
+#### Step 3.3 — Install RKE2 on `rke2-west` VM
+
+Repeat the same process on the `rke2-west` VM:
 
 ```bash
-kind create cluster \
-  --name kind-west \
-  --config - <<EOF
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-  - role: control-plane
-  - role: worker
-  - role: worker
-EOF
+ssh <your-user>@<rke2-west-vm-ip>
 
-kind get kubeconfig --name kind-west > ~/.kube/config-kind-west
-chmod 600 ~/.kube/config-kind-west
+# Install RKE2
+curl -sfL https://get.rke2.io | sh -
+
+# Enable and start
+systemctl enable rke2-server.service
+systemctl start rke2-server.service
 
 # Verify
-KUBECONFIG=~/.kube/config-kind-west kubectl get nodes
+export KUBECONFIG=/etc/rancher/rke2/rke2.yaml
+/var/lib/rancher/rke2/bin/kubectl get nodes --watch
 ```
+
+Expected output:
+```
+NAME           STATUS   ROLES                       AGE   VERSION
+bb-spoke-west  Ready    control-plane,etcd,master   2m    v1.30.x+rke2r1
+```
+
+#### Step 3.4 — Export `rke2-west` kubeconfig to the management host
+
+```bash
+# On your management host
+ssh <your-user>@<rke2-west-vm-ip> "sudo cat /etc/rancher/rke2/rke2.yaml" \
+  > ~/.kube/config-rke2-west
+
+sed -i 's/127.0.0.1/<rke2-west-vm-ip>/g' ~/.kube/config-rke2-west
+chmod 600 ~/.kube/config-rke2-west
+
+# Verify
+KUBECONFIG=~/.kube/config-rke2-west kubectl get nodes
+```
+
+Expected output:
+```
+NAME           STATUS   ROLES                       AGE   VERSION
+bb-spoke-west  Ready    control-plane,etcd,master   3m    v1.30.x+rke2r1
+```
+
+> ⚠️ **Firewall / Security Group**: Ensure port **6443** on `rke2-west` is open from both Hub VMs and the management host.
 
 ---
 
@@ -721,16 +793,16 @@ KUBECONFIG=~/.kube/config-kind-west kubectl get nodes
 Here is the exact sequence of events when you run `clusteradm join` followed by `clusteradm accept`:
 
 ```
-YOUR MACHINE                    SPOKE (kind-east)              PRIMARY HUB (plat-03)
+MANAGEMENT HOST                SPOKE (rke2-east VM)           PRIMARY HUB (plat-03)
      │                               │                               │
      │── clusteradm join ──────────► │                               │
      │                               │                               │
      │                    [1] Klusterlet pods are installed          │
      │                        into open-cluster-management-agent     │
-     │                        namespace on kind-east                 │
+     │                        namespace on rke2-east                 │
      │                               │                               │
      │                    [2] Klusterlet sends a CSR ──────────────► │
-     │                        "Hi Hub, I am kind-east.               │
+     │                        "Hi Hub, I am rke2-east.               │
      │                         Here is my cert request.              │
      │                         Please approve me."                   │
      │                               │                               │
@@ -756,7 +828,7 @@ YOUR MACHINE                    SPOKE (kind-east)              PRIMARY HUB (plat
 
 | Step | Who runs it | What happens |
 |:---:|:---|:---|
-| `clusteradm join` | **You, targeting the Spoke kubeconfig** | Installs Klusterlet pods onto the Spoke. Klusterlet then sends a CSR to the Hub. |
+| `clusteradm join` | **You, on the management host using the Spoke kubeconfig** | Installs Klusterlet pods onto the Spoke. Klusterlet then sends a CSR to the Hub. |
 | `clusteradm accept` | **You, targeting the Hub kubeconfig** | Hub admin approves the CSR and signs a trusted certificate for this Spoke. |
 | Post-accept (automatic) | **Klusterlet (self-managed)** | Klusterlet receives the signed cert, opens a secure channel, begins sending CPU/RAM heartbeats to the Hub. |
 
@@ -764,83 +836,177 @@ YOUR MACHINE                    SPOKE (kind-east)              PRIMARY HUB (plat
 
 ---
 
-#### Step 3.4 — Register `kind-east` to the Primary Hub
-
-Run against the **kind-east** kubeconfig (this installs Klusterlet on `kind-east` and connects to Primary Hub):
+#### Step 3.5 — Install `clusteradm` CLI on the management host (if not already done)
 
 ```bash
-KUBECONFIG=~/.kube/config-kind-east \
-  clusteradm join \
-  --hub-token <TOKEN_FROM_PRIMARY_join-primary.txt> \
-  --hub-apiserver https://10.0.8.9:6443 \
-  --cluster-name kind-east \
-  --wait
+curl -L https://raw.githubusercontent.com/open-cluster-management-io/clusteradm/main/install.sh | bash
+clusteradm version
 ```
 
-#### Step 3.5 — Accept `kind-east` CSR on Primary Hub
+---
 
-On the **Primary Hub**, approve the Spoke's join request:
+#### Step 3.6 — Register `rke2-east` to the Primary Hub
+
+> **Spoke1 VM IP:** `192.168.122.52`
+
+Before registering with OCM, make sure the `rke2-east` spoke VM is fully configured with the correct RKE2 `config.yaml`. This ensures Cilium is used as the CNI, kube-proxy is disabled, and the node advertises the right external IP.
+
+##### Step 3.6.1 — Write the RKE2 config on `rke2-east` (`192.168.122.52`)
+
+SSH into the `rke2-east` VM and write the following config:
 
 ```bash
-KUBECONFIG=~/.kube/config-plat-03 \
-  clusteradm accept --clusters kind-east --wait
+ssh <your-user>@192.168.122.52
 
-# Verify kind-east appears as a ManagedCluster on Primary Hub
-KUBECONFIG=~/.kube/config-plat-03 kubectl get managedclusters
+# Create the RKE2 config directory (if not already present)
+mkdir -p /etc/rancher/rke2
+
+# Write the spoke1 config.yaml
+cat > /etc/rancher/rke2/config.yaml <<EOF
+node-external-ip: "192.168.122.52"
+advertise-address: "192.168.122.52"
+
+cni: cilium
+disable-kube-proxy: true
+
+# Unique CIDRs per cluster (Prevents Cilium ClusterMesh IP conflicts)
+cluster-cidr: "10.242.0.0/16"
+service-cidr: "10.243.0.0/16"
+
+tls-san:
+  - "192.168.122.52"
+  - "127.0.0.1"
+  - "localhost"
+
+disable:
+  - rke2-canal
+  - rke2-ingress-nginx
+
+kubelet-arg:
+  - "max-pods=250"
+  - "serialize-image-pulls=false"
+EOF
+```
+
+> ⚠️ **Important: Changing CIDRs on an already-started RKE2 cluster**
+> Simply editing `config.yaml` and running `systemctl restart rke2-server` **will NOT automatically update network ranges on an already initialized cluster**. Kubernetes node objects, etcd state, and CNI plugins retain the old CIDRs.
+>
+> If you have already started RKE2 with overlapping CIDRs (`10.42.0.0/16`), wipe and re-initialize RKE2 on the spoke before joining:
+> ```bash
+> systemctl stop rke2-server
+> /usr/local/bin/rke2-killall.sh
+> rm -rf /var/lib/rancher/rke2 /etc/cni/net.d
+> # Update /etc/rancher/rke2/config.yaml with the unique CIDRs above
+> systemctl start rke2-server
+> ```
+
+> 💡 **Why these settings?**
+> - `node-external-ip` & `advertise-address`: Ensures the node registers its reachable external IP (`192.168.122.52`) with the API server — essential for cross-cluster communication from the Hub.
+> - `cni: cilium` + `disable-kube-proxy: true`: Uses Cilium's eBPF-native routing in place of kube-proxy. Required for ClusterMesh and WireGuard tunnel support.
+> - `cluster-cidr` / `service-cidr`: Must not overlap with Hub CIDRs for correct ClusterMesh routing.
+> - `disable: rke2-canal, rke2-ingress-nginx`: Removes the default Canal CNI and NGINX ingress bundled with RKE2, since Cilium replaces Canal and Spokes don't need a public ingress.
+> - `kubelet-arg: max-pods=250`: Increases pod density per node to accommodate microVM worker pods. `serialize-image-pulls=false` enables parallel image pulls for faster sandbox boot.
+
+##### Step 3.6.2 — Start (or restart) RKE2 on `rke2-east`
+
+```bash
+# If RKE2 is not yet started:
+systemctl enable rke2-server.service
+systemctl start rke2-server.service
+
+# If RKE2 is already running and you updated config.yaml, restart it:
+systemctl restart rke2-server.service
+
+# Watch startup logs (wait until you see the node become Ready)
+journalctl -u rke2-server -f
+```
+
+##### Step 3.6.3 — Verify node is Ready
+
+```bash
+kubectl get nodes -o wide
 ```
 
 Expected output:
 ```
-NAME        HUB ACCEPTED   MANAGED CLUSTER URLS         JOINED   AVAILABLE   AGE
-kind-east   true           https://127.0.0.1:XXXXX      True     True        1m
+NAME           STATUS   ROLES                       AGE   VERSION          INTERNAL-IP       EXTERNAL-IP
+spoke1  Ready    control-plane,etcd,master   3m    v1.30.x+rke2r1   192.168.122.52   192.168.122.52
 ```
 
-#### Step 3.6 — Verify Klusterlet is running on `kind-east`
+##### Step 3.6.4 — Register `spoke1` with the Primary Hub via OCM
+
+Now run `clusteradm join` using the `spoke1` kubeconfig. This installs the Klusterlet agent on the spoke and sends a CSR to the Primary Hub:
+
+```bash
+clusteradm join \
+  --hub-token <TOKEN_FROM_PRIMARY_join-primary.txt> \
+  --hub-apiserver https://192.168.122.225:6443 \
+  --cluster-name spoke1 \
+  --wait
+```
+
+> ⚠️ Replace `<TOKEN_FROM_PRIMARY_join-primary.txt>` with the token output from **Step 2.2** (`cat /tmp/join-primary.txt`).
+> The `--hub-apiserver` address is your **Primary Hub's actual external IP** (`192.168.122.225`) — this must be reachable from the spoke VM on port **6443**.
+
+#### Step 3.7 — Accept `spoke1` CSR on Primary Hub
+
+On the **Primary Hub** (`192.168.122.225`), approve the Spoke's join request:
+
+```bash
+clusteradm accept --clusters spoke1 --wait
+
+# Verify rke2-east appears as a ManagedCluster on Primary Hub
+kubectl get managedclusters
+```
+
+Expected output:
+```
+NAME     HUB ACCEPTED   MANAGED CLUSTER URLS   JOINED   AVAILABLE   AGE
+spoke1   true                                  True     True        1m
+```
+
+#### Step 3.8 — Verify Klusterlet is running on `spoke1`
 
 Confirm the Klusterlet agent pods are actually running inside the Spoke:
 
 ```bash
-KUBECONFIG=~/.kube/config-kind-east \
-  kubectl get pods -n open-cluster-management-agent
+kubectl get pods -n open-cluster-management-agent
 ```
 
 Expected output:
 ```
 NAME                                             READY   STATUS    RESTARTS   AGE
-klusterlet-XXXXXXXXX-XXXXX                       1/1     Running   0          2m
 klusterlet-registration-agent-XXXXXXXXX-XXXXX    1/1     Running   0          2m
 klusterlet-work-agent-XXXXXXXXX-XXXXX            1/1     Running   0          2m
 ```
 
 ---
 
-#### Step 3.7 — Register `kind-east` to Secondary Hub (Dual Registration)
+#### Step 3.9 — Register `rke2-east` to Secondary Hub (Dual Registration)
 
-Now register the **same** `kind-east` Spoke to the Secondary Hub as well.
+Now register the **same** `rke2-east` Spoke to the Secondary Hub as well.
 This is what enables failover — Secondary Hub already knows about this Spoke and can dispatch to it without any reconfiguration:
 
 ```bash
-KUBECONFIG=~/.kube/config-kind-east \
-  clusteradm join \
+clusteradm join \
   --hub-token <TOKEN_FROM_SECONDARY_join-secondary.txt> \
-  --hub-apiserver https://10.0.8.10:6443 \
-  --cluster-name kind-east \
+  --hub-apiserver https://192.168.122.143:6443 \
+  --cluster-name spoke1 \
   --wait
 ```
 
-#### Step 3.8 — Accept `kind-east` CSR on Secondary Hub
+#### Step 3.10 — Accept `spoke1` CSR on Secondary Hub
 
 ```bash
-KUBECONFIG=~/.kube/config-plat-04 \
-  clusteradm accept --clusters kind-east --wait
+  clusteradm accept --clusters spoke1 --wait
 
-# Verify kind-east appears on Secondary Hub too
-KUBECONFIG=~/.kube/config-plat-04 kubectl get managedclusters
+# Verify spoke1 appears on Secondary Hub too
+kubectl get managedclusters
 ```
 
 ---
 
-> 🔁 **Repeat Steps 3.4–3.8 for `kind-west`**, replacing `kind-east` with `kind-west` in every command.
+> 🔁 **Repeat Steps 3.6–3.10 for `rke2-west`**, replacing `rke2-east` with `rke2-west` and `<rke2-east-vm-ip>` with `<rke2-west-vm-ip>` in every command.
 
 ---
 
@@ -850,18 +1016,16 @@ Run this full check to confirm both Spokes are registered to both Hubs:
 
 ```bash
 echo "=== Primary Hub — Managed Clusters ==="
-KUBECONFIG=~/.kube/config-plat-03 kubectl get managedclusters
+kubectl get managedclusters
 
 echo "=== Secondary Hub — Managed Clusters ==="
-KUBECONFIG=~/.kube/config-plat-04 kubectl get managedclusters
+kubectl get managedclusters
 
-echo "=== kind-east Klusterlet Agent Pods ==="
-KUBECONFIG=~/.kube/config-kind-east \
-  kubectl get pods -n open-cluster-management-agent
+echo "=== spoke1 Klusterlet Agent Pods ==="
+kubectl get pods -n open-cluster-management-agent
 
-echo "=== kind-west Klusterlet Agent Pods ==="
-KUBECONFIG=~/.kube/config-kind-west \
-  kubectl get pods -n open-cluster-management-agent
+echo "=== spoke2 Klusterlet Agent Pods ==="
+kubectl get pods -n open-cluster-management-agent
 ```
 
 All Spokes should show `JOINED=True` and `AVAILABLE=True` on **both** Hubs before moving to Phase 4.
@@ -875,7 +1039,7 @@ All Spokes should show `JOINED=True` and `AVAILABLE=True` on **both** Hubs befor
 **both Hub clusters** need Cilium ClusterMesh enabled, and WireGuard encryption turned on for each. Here is exactly what happens across both Hubs:
 
 ```
-  PRIMARY HUB (plat-03)                      SECONDARY HUB (plat-04)
+  PRIMARY HUB (primaryhub)                      SECONDARY HUB (secondaryhub)
   ─────────────────────                      ───────────────────────
   [Already installed in Phase 1]             [Already installed in Phase 1]
   Cilium CNI (cni: cilium in RKE2)           Cilium CNI (cni: cilium in RKE2)
@@ -903,167 +1067,289 @@ All Spokes should show `JOINED=True` and `AVAILABLE=True` on **both** Hubs befor
 
 ---
 
-### Step 4.1 — Verify Cilium is already running on both Hubs
+### Step 4.1 — Set Cluster Name & Cluster ID on both Hubs
 
-Before enabling ClusterMesh, confirm Cilium CNI is healthy on both clusters (it was installed automatically in Phase 1 by RKE2):
+Cilium ClusterMesh requires **every cluster in the mesh to have a unique `cluster.name` and a unique integer `cluster.id` (1–255)**. Without these, `clustermesh-apiserver` will fail to initialize (`2/3 CrashLoopBackOff`).
 
+#### 1. On `primaryhub` (`192.168.122.225`):
 ```bash
-# Install the Cilium CLI tool (if not already installed)
-CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
-curl -L --remote-name-all \
-  https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-amd64.tar.gz
-tar -xzf cilium-linux-amd64.tar.gz -C /usr/local/bin
-cilium version
+sudo cat <<EOF | sudo tee /var/lib/rancher/rke2/server/manifests/rke2-cilium-config.yaml
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: rke2-cilium
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    kubeProxyReplacement: true
+    k8sServiceHost: 192.168.122.225
+    k8sServicePort: 6443
+    cluster:
+      name: primaryhub
+      id: 1
+EOF
 
-# Check Cilium CNI status on Primary Hub
-KUBECONFIG=~/.kube/config-plat-03 cilium status --wait
-# Expected: All components healthy ✅
+sudo systemctl restart rke2-server
+```
 
-# Check Cilium CNI status on Secondary Hub
-KUBECONFIG=~/.kube/config-plat-04 cilium status --wait
-# Expected: All components healthy ✅
+#### 2. On `secondaryhub` (`192.168.122.143`):
+```bash
+sudo cat <<EOF | sudo tee /var/lib/rancher/rke2/server/manifests/rke2-cilium-config.yaml
+apiVersion: helm.cattle.io/v1
+kind: HelmChartConfig
+metadata:
+  name: rke2-cilium
+  namespace: kube-system
+spec:
+  valuesContent: |-
+    kubeProxyReplacement: true
+    k8sServiceHost: 192.168.122.143
+    k8sServicePort: 6443
+    cluster:
+      name: secondaryhub
+      id: 2
+EOF
+
+sudo systemctl restart rke2-server
 ```
 
 ---
 
-### Step 4.2 — Set up kubeconfig contexts (needed for the connect command)
+### Step 4.2 — Set up merged kubeconfig & patch `cilium-config` on `primaryhub`
 
-The `cilium clustermesh connect` command needs named **kubeconfig contexts** to identify both clusters. Set them up now:
+> 💡 **Note:** Phase 4 ClusterMesh is strictly between **`primaryhub`** and **`secondaryhub`**. Spokes do **not** participate in ClusterMesh.
+
+Run these steps on **`primaryhub`** (`192.168.122.225`):
 
 ```bash
-# Add Primary Hub context named "plat-03"
-KUBECONFIG=~/.kube/config-plat-03 \
-  kubectl config rename-context \
-  $(kubectl --kubeconfig ~/.kube/config-plat-03 config current-context) \
-  plat-03
+# 1. Create directory for configs
+mkdir -p ~/.kube
 
-# Add Secondary Hub context named "plat-04"
-KUBECONFIG=~/.kube/config-plat-04 \
-  kubectl config rename-context \
-  $(kubectl --kubeconfig ~/.kube/config-plat-04 config current-context) \
-  plat-04
+# 2. Prepare Primary Hub config (rename 'default' -> 'primaryhub')
+cp /etc/rancher/rke2/rke2.yaml ~/.kube/config-primaryhub
+sed -i 's/127.0.0.1/192.168.122.225/g' ~/.kube/config-primaryhub
+sed -i 's/name: default/name: primaryhub/g' ~/.kube/config-primaryhub
+sed -i 's/cluster: default/cluster: primaryhub/g' ~/.kube/config-primaryhub
+sed -i 's/user: default/user: primaryhub/g' ~/.kube/config-primaryhub
+chmod 600 ~/.kube/config-primaryhub
 
-# Merge both into a single kubeconfig file for convenience
-KUBECONFIG=~/.kube/config-plat-03:~/.kube/config-plat-04 \
-  kubectl config view --flatten > ~/.kube/config-hubs
+# 3. Copy Secondary Hub config and rename ('default' -> 'secondaryhub')
+scp secondaryhub@192.168.122.143:/etc/rancher/rke2/rke2.yaml ~/.kube/config-secondaryhub
+sed -i 's/127.0.0.1/192.168.122.143/g' ~/.kube/config-secondaryhub
+sed -i 's/name: default/name: secondaryhub/g' ~/.kube/config-secondaryhub
+sed -i 's/cluster: default/cluster: secondaryhub/g' ~/.kube/config-secondaryhub
+sed -i 's/user: default/user: secondaryhub/g' ~/.kube/config-secondaryhub
+chmod 600 ~/.kube/config-secondaryhub
 
-# Verify both contexts are visible
-KUBECONFIG=~/.kube/config-hubs kubectl config get-contexts
-```
+# 4. Merge both into a single config-hubs file
+KUBECONFIG=~/.kube/config-primaryhub:~/.kube/config-secondaryhub kubectl config view --flatten > ~/.kube/config-hubs
+chmod 600 ~/.kube/config-hubs
 
-Expected output:
-```
-CURRENT   NAME      CLUSTER        AUTHINFO        NAMESPACE
-          plat-03   bb-mp-plat-03  default-admin   default
-*         plat-04   bb-mp-plat-04  default-admin   default
+# 5. Patch ConfigMaps on both Hubs to ensure in-cluster pods reach API server on Node IPs
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub patch cm cilium-config -n kube-system --type merge -p '{"data":{"k8s-service-host":"192.168.122.225","k8s-service-port":"6443"}}'
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub patch cm cilium-config -n kube-system --type merge -p '{"data":{"k8s-service-host":"192.168.122.143","k8s-service-port":"6443"}}'
 ```
 
 ---
 
-### Step 4.3 — Enable ClusterMesh on Primary Hub (`bb-mp-plat-03`)
+### Step 4.3 — Enable ClusterMesh on Primary Hub (`primaryhub`)
 
-This deploys the `clustermesh-apiserver` pod inside `plat-03` and exposes it so `plat-04` can reach it:
+> 💡 **Where to run this:** Run this command while logged into **`primaryhub`**. The `--context primaryhub` flag targets the Primary Hub. Because your ~/.kube/config-hubs file on primaryhub contains the credentials for both clusters. Passing --context secondaryhub tells cilium to send the command over the network to secondaryhub for you.
+
+Deploys the `clustermesh-apiserver` pod on `primaryhub`:
 
 ```bash
-KUBECONFIG=~/.kube/config-plat-03 \
+KUBECONFIG=~/.kube/config-hubs \
   cilium clustermesh enable \
-  --service-type NodePort \
-  --wait
-
-# Confirm the clustermesh-apiserver pod is running on Primary Hub
-KUBECONFIG=~/.kube/config-plat-03 \
-  kubectl get pods -n kube-system -l app=clustermesh-apiserver
-```
-
-Expected output:
-```
-NAME                                  READY   STATUS    RESTARTS   AGE
-clustermesh-apiserver-XXXXXXXX-XXXXX  1/1     Running   0          1m
+  --context primaryhub \
+  --helm-release-name rke2-cilium \
+  --service-type NodePort
 ```
 
 ---
 
-### Step 4.4 — Enable ClusterMesh on Secondary Hub (`bb-mp-plat-04`)
+### Step 4.4 — Enable ClusterMesh on Secondary Hub (`secondaryhub`)
 
-Repeat the same on Secondary Hub — this deploys its own `clustermesh-apiserver`:
+> 💡 **Where to run this:** **Stay on `primaryhub`!** Do not SSH into `secondaryhub`. The `--context secondaryhub` flag reaches across the network to deploy ClusterMesh on `secondaryhub` automatically. Because your ~/.kube/config-hubs file on primaryhub contains the credentials for both clusters. Passing --context secondaryhub tells cilium to send the command over the network to secondaryhub for you.
+
+Deploys the `clustermesh-apiserver` pod on `secondaryhub`:
 
 ```bash
-KUBECONFIG=~/.kube/config-plat-04 \
+KUBECONFIG=~/.kube/config-hubs \
   cilium clustermesh enable \
-  --service-type NodePort \
-  --wait
-
-# Confirm the clustermesh-apiserver pod is running on Secondary Hub
-KUBECONFIG=~/.kube/config-plat-04 \
-  kubectl get pods -n kube-system -l app=clustermesh-apiserver
+  --context secondaryhub \
+  --helm-release-name rke2-cilium \
+  --service-type NodePort
 ```
 
 ---
 
-### Step 4.5 — Connect Primary ↔ Secondary ClusterMesh (Bidirectional)
+### Step 4.5 — Sync CA Certificate Secret & Connect Primary ↔ Secondary ClusterMesh
 
-Now that both Hubs have their ClusterMesh apiservers running, connect them together. This exchanges TLS certificates between both sides and establishes the peer mesh link:
-
+#### 1. Sync CA Certificate Secret from `primaryhub` to `secondaryhub`:
 ```bash
-# Use the merged kubeconfig with named contexts
+# Delete existing certificate on Secondary Hub if conflicting
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub delete secret clustermesh-apiserver-local-cert -n kube-system 2>/dev/null || true
+
+# Copy Primary Hub CA cert secret to Secondary Hub cleanly
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub get secret clustermesh-apiserver-local-cert -n kube-system -o yaml | \
+  grep -v -E "resourceVersion:|uid:|creationTimestamp:" | \
+  KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub create -f -
+```
+
+#### 2. Clear any locked Helm release secrets:
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub delete secret sh.helm.release.v1.rke2-cilium.v4 -n kube-system 2>/dev/null || true
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub delete secret sh.helm.release.v1.rke2-cilium.v4 -n kube-system 2>/dev/null || true
+```
+
+#### 3. Connect primaryhub to secondaryhub:
+```bash
 KUBECONFIG=~/.kube/config-hubs \
   cilium clustermesh connect \
-  --context plat-03 \
-  --destination-context plat-04
-
-# Wait and confirm the tunnel is up
-KUBECONFIG=~/.kube/config-hubs \
-  cilium clustermesh status \
-  --context plat-03 \
-  --wait
+  --context primaryhub \
+  --destination-context secondaryhub \
+  --helm-release-name rke2-cilium
 ```
 
 Expected output:
 ```
-✅ Service "clustermesh-apiserver" of type "NodePort" found
-✅ Cluster Connections: 1
-✅ All 2 nodes are connected. cilium_wg0 tunnel operational.
+✅ Connected cluster primaryhub <=> secondaryhub!
 ```
 
 ---
 
-### Step 4.6 — Enable WireGuard encryption on BOTH Hubs
+### Step 4.6 — Enable WireGuard Encryption between Hubs
 
-This turns on transparent kernel-level WireGuard encryption for **all** traffic crossing the `cilium_wg0` tunnel between the two Hubs — including PostgreSQL WAL, RabbitMQ, and Redis replication streams:
+Enables transparent kernel-level WireGuard encryption for all cross-cluster traffic:
 
 ```bash
 # Enable WireGuard on Primary Hub
-KUBECONFIG=~/.kube/config-plat-03 \
-  cilium config set enable-wireguard true
+KUBECONFIG=~/.kube/config-hubs \
+  cilium config set enable-wireguard true --context primaryhub
 
 # Enable WireGuard on Secondary Hub
-KUBECONFIG=~/.kube/config-plat-04 \
-  cilium config set enable-wireguard true
+KUBECONFIG=~/.kube/config-hubs \
+  cilium config set enable-wireguard true --context secondaryhub
 ```
 
 > ⚠️ **Both Hubs must have WireGuard enabled.** If only one side has it on, the tunnel negotiation fails and cross-cluster traffic drops.
 
----
-
 ### ✅ Phase 4 Verification — ClusterMesh + WireGuard Active
 
 ```bash
-# Full tunnel status from Primary Hub's perspective
+# Full ClusterMesh tunnel status from Primary Hub's perspective
 KUBECONFIG=~/.kube/config-hubs \
-  cilium clustermesh status --context plat-03
+  cilium clustermesh status --context primaryhub --helm-release-name rke2-cilium
 
 # Confirm WireGuard is active on Primary Hub nodes
-KUBECONFIG=~/.kube/config-plat-03 \
-  kubectl -n kube-system exec ds/cilium -- cilium-dbg status | grep -i wireguard
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context primaryhub -n kube-system exec ds/cilium -- cilium-dbg status | grep -i wireguard
 
 # Confirm WireGuard is active on Secondary Hub nodes
-KUBECONFIG=~/.kube/config-plat-04 \
-  kubectl -n kube-system exec ds/cilium -- cilium-dbg status | grep -i wireguard
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context secondaryhub -n kube-system exec ds/cilium -- cilium-dbg status | grep -i wireguard
 ```
 
-Both should show:
-```
+Expected output:
+```text
+✅ Service "clustermesh-apiserver" of type "NodePort" found
+✅ Cluster Connections: 1
+✅ All nodes connected. Operational.
+
 WireGuard:   OK, node encryption: Enabled, cilium_wg0 interface active
+```
+
+---
+
+### Step 4.7 — Production HA Strategy: MetalLB LoadBalancer Upgrade (Optional Future Step)
+
+> 💡 **Future Implementation Note:** The current NodePort setup (`192.168.122.225:32379`) works reliably for static-IP single-node/multi-node setups and does **not** need to be changed today.
+>
+> If you expand your Hub clusters into multi-node dynamic HA clusters in the future and want to eliminate the `⚠️ Service type NodePort` warning, follow these optional steps to deploy MetalLB and upgrade ClusterMesh to use a floating Virtual IP (VIP).
+
+#### 1. Install MetalLB on Primary Hub (`primaryhub`)
+```bash
+# Apply MetalLB manifest on Primary Hub
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
+
+# Wait for MetalLB controller to become Ready
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub -n metallb-system wait --for=condition=ready pod -l app=metallb --timeout=90s
+
+# Create IPAddressPool & L2Advertisement for Primary Hub VIP range
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub apply -f - <<EOF
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: hub-primary-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.122.230-192.168.122.235
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: hub-primary-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - hub-primary-pool
+EOF
+```
+
+#### 2. Install MetalLB on Secondary Hub (`secondaryhub`)
+```bash
+# Apply MetalLB manifest on Secondary Hub
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
+
+# Wait for MetalLB controller to become Ready
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub -n metallb-system wait --for=condition=ready pod -l app=metallb --timeout=90s
+
+# Create IPAddressPool & L2Advertisement for Secondary Hub VIP range
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub apply -f - <<EOF
+apiVersion: metallb.io/v1beta1
+kind: IPAddressPool
+metadata:
+  name: hub-secondary-pool
+  namespace: metallb-system
+spec:
+  addresses:
+  - 192.168.122.240-192.168.122.245
+---
+apiVersion: metallb.io/v1beta1
+kind: L2Advertisement
+metadata:
+  name: hub-secondary-l2
+  namespace: metallb-system
+spec:
+  ipAddressPools:
+  - hub-secondary-pool
+EOF
+```
+
+#### 3. Upgrade ClusterMesh to `--service-type LoadBalancer`
+```bash
+# Upgrade Primary Hub ClusterMesh service to LoadBalancer
+KUBECONFIG=~/.kube/config-hubs \
+  cilium clustermesh enable \
+  --context primaryhub \
+  --helm-release-name rke2-cilium \
+  --service-type LoadBalancer
+
+# Upgrade Secondary Hub ClusterMesh service to LoadBalancer
+KUBECONFIG=~/.kube/config-hubs \
+  cilium clustermesh enable \
+  --context secondaryhub \
+  --helm-release-name rke2-cilium \
+  --service-type LoadBalancer
+
+# Re-connect ClusterMesh using LoadBalancer VIP endpoints
+KUBECONFIG=~/.kube/config-hubs \
+  cilium clustermesh connect \
+  --context primaryhub \
+  --destination-context secondaryhub \
+  --helm-release-name rke2-cilium
 ```
 
 ---
@@ -2036,3 +2322,135 @@ Everything else (DNS failover via GSLB, RabbitMQ federation, Redis replication, 
 | `codeInspector/` | All-in-one Helm chart for deploying `sandbox-api`, Gateway, and system components |
 | `codeInspector/values.yaml` | Configuration values for `codeInspector` Helm chart deployment |
 | `manifests/failover-cronjob.yaml` | Auto-failover health check CronJob |
+
+---
+
+## 🛠️ Troubleshooting Guide
+
+### Issue: Spoke shows `AVAILABLE: Unknown` on Hub
+
+**Symptom:**
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub get managedcluster spoke1
+NAME     HUB ACCEPTED   MANAGED CLUSTER URLS   JOINED   AVAILABLE   AGE
+spoke1   true                                  True     Unknown     Xh
+```
+
+**Root Cause:**
+The `ManagedCluster` condition will show:
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub get managedcluster spoke1 -o yaml | grep -A 50 "conditions:"
+```
+```
+- message: Registration agent stopped updating its lease.
+  reason: ManagedClusterLeaseUpdateStopped
+  status: Unknown
+  type: ManagedClusterConditionAvailable
+```
+
+This happens when the klusterlet registration agent on the spoke **cannot reach the Hub's API server**. The most common causes are:
+
+| Cause | Symptom in agent logs |
+|:---|:---|
+| `hub-kubeconfig-secret` points to wrong Hub | `dial tcp 192.168.122.143:6443: connection refused` |
+| `bootstrap-hub-kubeconfig` points to `127.0.0.1` | `dial tcp 127.0.0.1:6443: connection refused` |
+| Wrong CA cert in `hub-kubeconfig-secret` | `x509: certificate signed by unknown authority` |
+| Spoke was originally joined to wrong Hub | All of the above |
+
+---
+
+#### Step-by-Step Diagnosis
+
+**1. Check what Hub the spoke's kubeconfig points to:**
+```bash
+# Run on the spoke (e.g. spoke1)
+kubectl get secret hub-kubeconfig-secret -n open-cluster-management-agent \
+  -o jsonpath='{.data.kubeconfig}' | base64 -d | grep server
+
+kubectl get secret bootstrap-hub-kubeconfig -n open-cluster-management-agent \
+  -o jsonpath='{.data.kubeconfig}' | base64 -d | grep server
+```
+
+Expected output (correct):
+```
+server: https://192.168.122.225:6443   # primaryhub IP
+server: https://192.168.122.225:6443   # primaryhub IP
+```
+
+**2. Check the exact error in registration agent logs:**
+```bash
+kubectl logs -n open-cluster-management-agent \
+  -l app=klusterlet-registration-agent --tail=20
+```
+
+**3. Check ManagedCluster conditions on the Hub:**
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub \
+  get managedcluster spoke1 -o yaml | grep -A 50 "conditions:"
+```
+
+---
+
+#### Fix: Completely Re-join the Spoke to the Correct Hub
+
+> **This is the most reliable fix.** Patching individual secrets is fragile because the Klusterlet operator restores them from the Klusterlet CR on pod restarts.
+
+**Step 1 — On the spoke: Delete the Klusterlet CR entirely**
+```bash
+kubectl delete klusterlet klusterlet
+```
+This removes all agent pods, secrets, and the namespace automatically.
+
+**Step 2 — On the Hub (primaryhub): Delete the stale ManagedCluster entry**
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub delete managedcluster spoke1
+```
+
+**Step 3 — On the Hub: Get a fresh join token**
+```bash
+KUBECONFIG=~/.kube/config-hubs clusteradm get token --context primaryhub
+```
+Copy the full token from the output.
+
+**Step 4 — On the spoke: Re-join pointing to the correct Hub**
+```bash
+clusteradm join \
+  --hub-token <TOKEN_FROM_STEP_3> \
+  --hub-apiserver https://192.168.122.225:6443 \
+  --cluster-name spoke1 \
+  --force-internal-endpoint-lookup
+```
+
+Wait for the output: `Klusterlet is now available. Managed cluster is created.`
+
+**Step 5 — On the Hub: Accept the spoke (with `--skip-approve-check` if multiple CSRs exist)**
+```bash
+KUBECONFIG=~/.kube/config-hubs clusteradm accept \
+  --clusters spoke1 \
+  --context primaryhub \
+  --skip-approve-check
+```
+
+**Step 6 — Verify**
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub get managedcluster spoke1
+```
+Expected:
+```
+NAME     HUB ACCEPTED   MANAGED CLUSTER URLS   JOINED   AVAILABLE   AGE
+spoke1   true                                  True     True        Xm
+```
+
+---
+
+#### Why `--skip-approve-check` May Be Needed
+
+If `clusteradm join` was run multiple times (during debugging), multiple CSRs accumulate on the Hub. `clusteradm accept` detects conflicting requesters and skips auto-approval. The `--skip-approve-check` flag tells it to approve all pending CSRs for the cluster regardless.
+
+---
+
+#### Key Lesson
+
+> Always run `clusteradm join` with `--hub-apiserver https://<HUB_REAL_IP>:6443` — **never** use `127.0.0.1` or `localhost`. The bootstrap kubeconfig defaults to `127.0.0.1` (the local RKE2 kubeconfig), which is unreachable from any external spoke.
+>
+> If a spoke was accidentally joined to the wrong Hub, **do not patch individual secrets** — delete the Klusterlet CR and re-join cleanly.
