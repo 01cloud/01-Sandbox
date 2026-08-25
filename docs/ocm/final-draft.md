@@ -1041,6 +1041,22 @@ KUBECONFIG=~/.kube/config-plat-04 \
   cilium config set enable-wireguard true
 ```
 
+To enable **Node-to-Node host encryption** and persist configuration across VM restarts:
+
+```bash
+# Enable Node Encryption on Primary Hub
+KUBECONFIG=~/.kube/config-plat-03 \
+  kubectl -n kube-system patch configmap cilium-config --type merge -p '{"data":{"encrypt-node":"true"}}'
+KUBECONFIG=~/.kube/config-plat-03 \
+  kubectl -n kube-system rollout restart daemonset/cilium
+
+# Enable Node Encryption on Secondary Hub
+KUBECONFIG=~/.kube/config-plat-04 \
+  kubectl -n kube-system patch configmap cilium-config --type merge -p '{"data":{"encrypt-node":"true"}}'
+KUBECONFIG=~/.kube/config-plat-04 \
+  kubectl -n kube-system rollout restart daemonset/cilium
+```
+
 > ⚠️ **Both Hubs must have WireGuard enabled.** If only one side has it on, the tunnel negotiation fails and cross-cluster traffic drops.
 
 ---
@@ -1063,8 +1079,12 @@ KUBECONFIG=~/.kube/config-plat-04 \
 
 Both should show:
 ```
-WireGuard:   OK, node encryption: Enabled, cilium_wg0 interface active
+WireGuard:   OK, node encryption: Enabled (or OptedOut), cilium_wg0 interface active
 ```
+
+> 💡 **NodeEncryption Status Note:**
+> - **`Disabled`**: Node encryption is off. Run the `encrypt-node: "true"` patch commands above to enable.
+> - **`OptedOut`**: Node encryption is enabled, but Control Plane nodes are safely excluded from host-level encryption by Cilium. Pod-to-Pod and cross-cluster WireGuard traffic (`cilium_wg0`) is fully encrypted and active.
 
 ---
 

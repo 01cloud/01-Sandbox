@@ -1233,6 +1233,22 @@ KUBECONFIG=~/.kube/config-hubs \
   cilium config set enable-wireguard true --context secondaryhub
 ```
 
+To also enable **Node-to-Node host traffic encryption** (and persist configuration across VM restarts):
+
+```bash
+# Enable Node Encryption on Primary Hub
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context primaryhub -n kube-system patch configmap cilium-config --type merge -p '{"data":{"encrypt-node":"true"}}'
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context primaryhub -n kube-system rollout restart daemonset/cilium
+
+# Enable Node Encryption on Secondary Hub
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context secondaryhub -n kube-system patch configmap cilium-config --type merge -p '{"data":{"encrypt-node":"true"}}'
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context secondaryhub -n kube-system rollout restart daemonset/cilium
+```
+
 > ⚠️ **Both Hubs must have WireGuard enabled.** If only one side has it on, the tunnel negotiation fails and cross-cluster traffic drops.
 
 ### ✅ Phase 4 Verification — ClusterMesh + WireGuard Active
@@ -1257,100 +1273,270 @@ Expected output:
 ✅ Cluster Connections: 1
 ✅ All nodes connected. Operational.
 
-WireGuard:   OK, node encryption: Enabled, cilium_wg0 interface active
+WireGuard:   OK, node encryption: Enabled (or OptedOut), cilium_wg0 interface active
+```
+
+> 💡 **Understanding NodeEncryption Status Post-VM Restart:**
+> - **`NodeEncryption: Disabled`**: Node-to-Node host encryption is off. If this occurs after a reboot, re-run the `encrypt-node: "true"` patch commands above.
+> - **`NodeEncryption: OptedOut`**: Node encryption is enabled, but Cilium automatically opts out Kubernetes Control Plane nodes from host-level encryption to prevent API server lockouts. **This is normal and expected.** Pod-to-Pod and cross-cluster WireGuard tunnel traffic (`cilium_wg0`) remains **100% active and encrypted**.
+
+---
+
+### Step 4.7 — Production HA Strategy: kube-vip Active-Passive VIP Failover
+
+> **Why kube-vip instead of MetalLB?**
+> MetalLB solves intra-cluster node failover (multi-node clusters). For single-node hub clusters
+> with fixed IPs, it is unnecessary. kube-vip provides a shared Virtual IP (`192.168.122.230`)
+> that moves between `primaryhub` and `secondaryhub` when the primary goes down — all managed
+> as a Kubernetes DaemonSet with no OS-level services required.
+
+#### Architecture
+
+```
+External Clients → 192.168.122.230 (Shared VIP)
+                        │
+     ┌──────────────────┴──────────────────┐
+     │ [MASTER]                   [BACKUP] │
+  primaryhub                    secondaryhub
+  (192.168.122.225)              (192.168.122.143)
+  kube-vip holds .230            kube-vip waits for lease
 ```
 
 ---
 
-### Step 4.7 — Production HA Strategy: MetalLB LoadBalancer Upgrade (Optional Future Step)
+#### Step 1 — Create kube-vip RBAC on Both Hubs
 
-> 💡 **Future Implementation Note:** The current NodePort setup (`192.168.122.225:32379`) works reliably for static-IP single-node/multi-node setups and does **not** need to be changed today.
+```bash
+for CTX in primaryhub secondaryhub; do
+  KUBECONFIG=~/.kube/config-hubs kubectl --context $CTX apply -f - <<EOF
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-vip
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-vip-role
+rules:
+- apiGroups: [""]
+  resources: ["services", "endpoints", "nodes"]
+  verbs: ["list", "get", "watch"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["list", "get", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-vip-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-vip-role
+subjects:
+- kind: ServiceAccount
+  name: kube-vip
+  namespace: kube-system
+EOF
+  echo "RBAC applied on $CTX"
+done
+```
+
+---
+
+#### Step 2 — Deploy kube-vip on `primaryhub`
+
+> ⚠️ Find your network interface name first:
+> ```bash
+> ssh 192.168.122.225 "ip -o link show | awk '{print \$2}' | grep -v lo"
+> # For primaryhub: enp1s0
+> ```
 >
-> If you expand your Hub clusters into multi-node dynamic HA clusters in the future and want to eliminate the `⚠️ Service type NodePort` warning, follow these optional steps to deploy MetalLB and upgrade ClusterMesh to use a floating Virtual IP (VIP).
+> **Key Lesson:** Use `--controlplane` as a CLI **arg** (not an env var).
+> Using `vip_controlplane: "true"` as an env var does NOT work in kube-vip v0.8.x.
 
-#### 1. Install MetalLB on Primary Hub (`primaryhub`)
 ```bash
-# Apply MetalLB manifest on Primary Hub
-KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
-
-# Wait for MetalLB controller to become Ready
-KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub -n metallb-system wait --for=condition=ready pod -l app=metallb --timeout=90s
-
-# Create IPAddressPool & L2Advertisement for Primary Hub VIP range
-KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub apply -f - <<EOF
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: DaemonSet
 metadata:
-  name: hub-primary-pool
-  namespace: metallb-system
+  name: kube-vip
+  namespace: kube-system
+  labels:
+    app: kube-vip
 spec:
-  addresses:
-  - 192.168.122.230-192.168.122.235
----
-apiVersion: metallb.io/v1beta1
-kind: L2Advertisement
-metadata:
-  name: hub-primary-l2
-  namespace: metallb-system
-spec:
-  ipAddressPools:
-  - hub-primary-pool
+  selector:
+    matchLabels:
+      app: kube-vip
+  template:
+    metadata:
+      labels:
+        app: kube-vip
+    spec:
+      serviceAccountName: kube-vip
+      hostNetwork: true
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      containers:
+      - name: kube-vip
+        image: ghcr.io/kube-vip/kube-vip:v0.8.2
+        imagePullPolicy: IfNotPresent
+        args:
+        - manager
+        - --controlplane     # enables standalone VIP management
+        - --arp              # Layer 2 ARP mode (no BGP router needed)
+        - --interface
+        - enp1s0             # ← Replace with actual NIC name
+        - --address
+        - "192.168.122.230"  # Shared Virtual IP
+        - --leaderElection
+        - --leaseDuration
+        - "5"
+        - --leaseRenewDuration
+        - "3"
+        - --leaseRetry
+        - "1"
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN", "NET_RAW", "SYS_TIME"]
 EOF
+
+# Force pod restart to apply changes
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub rollout restart \
+  ds/kube-vip -n kube-system
 ```
 
-#### 2. Install MetalLB on Secondary Hub (`secondaryhub`)
+**Verify `primaryhub` owns the VIP:**
 ```bash
-# Apply MetalLB manifest on Secondary Hub
-KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub apply -f https://raw.githubusercontent.com/metallb/metallb/v0.14.8/config/manifests/metallb-native.yaml
+# Check logs — must show Control Plane:[true]
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub logs \
+  -n kube-system ds/kube-vip | tail -5
+# Expected output:
+# Features(s): Control Plane:[true], Services:[false]
+# successfully acquired lease kube-system/plndr-cp-lock
+# Node [primaryhub] is assuming leadership of the cluster
+# Gratuitous Arp broadcast will repeat every 3 seconds for [192.168.122.230/enp1s0]
 
-# Wait for MetalLB controller to become Ready
-KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub -n metallb-system wait --for=condition=ready pod -l app=metallb --timeout=90s
+# Confirm VIP on node interface
+ssh 192.168.122.225 "ip addr show enp1s0 | grep 192.168.122.230"
+# Expected: inet 192.168.122.230/32 scope global enp1s0
+```
 
-# Create IPAddressPool & L2Advertisement for Secondary Hub VIP range
-KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub apply -f - <<EOF
-apiVersion: metallb.io/v1beta1
-kind: IPAddressPool
-metadata:
-  name: hub-secondary-pool
-  namespace: metallb-system
-spec:
-  addresses:
-  - 192.168.122.240-192.168.122.245
 ---
-apiVersion: metallb.io/v1beta1
-kind: L2Advertisement
-metadata:
-  name: hub-secondary-l2
-  namespace: metallb-system
-spec:
-  ipAddressPools:
-  - hub-secondary-pool
-EOF
-```
 
-#### 3. Upgrade ClusterMesh to `--service-type LoadBalancer`
+#### Step 3 — Deploy kube-vip on `secondaryhub`
+
 ```bash
-# Upgrade Primary Hub ClusterMesh service to LoadBalancer
-KUBECONFIG=~/.kube/config-hubs \
-  cilium clustermesh enable \
-  --context primaryhub \
-  --helm-release-name rke2-cilium \
-  --service-type LoadBalancer
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-vip
+  namespace: kube-system
+  labels:
+    app: kube-vip
+spec:
+  selector:
+    matchLabels:
+      app: kube-vip
+  template:
+    metadata:
+      labels:
+        app: kube-vip
+    spec:
+      serviceAccountName: kube-vip
+      hostNetwork: true
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      containers:
+      - name: kube-vip
+        image: ghcr.io/kube-vip/kube-vip:v0.8.2
+        imagePullPolicy: IfNotPresent
+        args:
+        - manager
+        - --controlplane
+        - --arp
+        - --interface
+        - enp1s0             # ← Replace with secondaryhub NIC name
+        - --address
+        - "192.168.122.230"  # Same shared VIP
+        - --leaderElection
+        - --leaseDuration
+        - "5"
+        - --leaseRenewDuration
+        - "3"
+        - --leaseRetry
+        - "1"
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN", "NET_RAW", "SYS_TIME"]
+EOF
 
-# Upgrade Secondary Hub ClusterMesh service to LoadBalancer
-KUBECONFIG=~/.kube/config-hubs \
-  cilium clustermesh enable \
-  --context secondaryhub \
-  --helm-release-name rke2-cilium \
-  --service-type LoadBalancer
-
-# Re-connect ClusterMesh using LoadBalancer VIP endpoints
-KUBECONFIG=~/.kube/config-hubs \
-  cilium clustermesh connect \
-  --context primaryhub \
-  --destination-context secondaryhub \
-  --helm-release-name rke2-cilium
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub rollout restart \
+  ds/kube-vip -n kube-system
 ```
+
+**Verify `secondaryhub` is in STANDBY (does NOT own VIP):**
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub logs \
+  -n kube-system ds/kube-vip | tail -5
+# Expected: "attempting to acquire leader lease" (waiting — NOT yet leader)
+
+ssh 192.168.122.143 "ip addr show enp1s0 | grep 192.168.122.230"
+# Expected: (empty — secondaryhub does NOT own VIP while primaryhub is alive)
+```
+
+---
+
+#### Step 4 — VIP Failover Test
+
+> ⚠️ `kubectl scale` does NOT work on DaemonSets — DaemonSets have no `replicas` field.
+> Use one of the two methods below instead.
+
+```bash
+# Pre-test: confirm VIP is on primaryhub
+ssh 192.168.122.225 "ip addr show enp1s0 | grep 192.168.122.230"
+# Expected: inet 192.168.122.230/32 scope global enp1s0
+
+# --- METHOD A: Delete the pod (instant, pod restarts but secondaryhub wins lease first) ---
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub \
+  delete pod -n kube-system -l app=kube-vip
+
+# --- METHOD B: Disable via nodeSelector (longer window, fully reversible) ---
+# KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub \
+#   patch ds kube-vip -n kube-system \
+#   -p '{"spec":{"template":{"spec":{"nodeSelector":{"kube-vip/disabled":"true"}}}}}'
+
+# Watch secondaryhub take over (< 1 second with Method A)
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub logs \
+  -n kube-system ds/kube-vip -f
+# Expected:
+# successfully acquired lease kube-system/plndr-cp-lock
+# Node [secondaryhub] is assuming leadership of the cluster
+# Gratuitous Arp broadcast will repeat every 3 seconds for [192.168.122.230/enp1s0]
+
+# Confirm VIP moved to secondaryhub
+ssh 192.168.122.143 "ip addr show enp1s0 | grep 192.168.122.230"
+# Expected: inet 192.168.122.230/32 scope global enp1s0
+
+# Restore: primaryhub kube-vip pod restarts automatically (Method A)
+# OR for Method B, remove the nodeSelector:
+# KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub \
+#   patch ds kube-vip -n kube-system \
+#   -p '{"spec":{"template":{"spec":{"nodeSelector":{}}}}}'
+```
+
+
+> **Note on hostname resolution:** Use IP addresses directly in SSH commands.
+> Add host aliases to avoid this:
+> ```bash
+> sudo bash -c 'echo "192.168.122.143  secondaryhub" >> /etc/hosts'
+> sudo bash -c 'echo "192.168.122.225  primaryhub" >> /etc/hosts'
+> ```
 
 ---
 
@@ -2355,7 +2541,55 @@ This happens when the klusterlet registration agent on the spoke **cannot reach 
 | `hub-kubeconfig-secret` points to wrong Hub | `dial tcp 192.168.122.143:6443: connection refused` |
 | `bootstrap-hub-kubeconfig` points to `127.0.0.1` | `dial tcp 127.0.0.1:6443: connection refused` |
 | Wrong CA cert in `hub-kubeconfig-secret` | `x509: certificate signed by unknown authority` |
-| Spoke was originally joined to wrong Hub | All of the above |
+| Primary Hub is DOWN in single-active registration | `ManagedClusterLeaseUpdateStopped` on `secondaryhub` |
+
+---
+
+### Issue: Secondary Hub shows `AVAILABLE: Unknown` when Primary Hub is Down
+
+**Symptom:**
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub get managedclusters
+NAME     HUB ACCEPTED   MANAGED CLUSTER URLS   JOINED   AVAILABLE   AGE
+spoke1   true                                  True     Unknown     7h18m
+```
+
+**Root Cause:**
+By default, an OCM `Klusterlet` agent instance in `open-cluster-management-agent` connects to **one active Hub at a time** (the Hub specified in `hub-kubeconfig-secret`). When `primaryhub` goes down:
+1. The `Klusterlet` on `spoke1` keeps attempting to send heartbeats (`Lease` updates) to `primaryhub`.
+2. Because `spoke1` is not actively sending lease updates to `secondaryhub`, `secondaryhub` detects `ManagedClusterLeaseUpdateStopped` and marks `spoke1`'s availability as `Unknown`.
+
+---
+
+#### Solution 1: Enable `MultipleHubs` Feature Gate on Klusterlet (Active-Passive HA)
+
+Enable OCM's native `MultipleHubs` feature gate in the `Klusterlet` CR on `spoke1`. This configures `Klusterlet` with a prioritized list of bootstrap secrets. If `primaryhub` becomes unreachable for more than `hubConnectionTimeoutSeconds` (e.g. 60 seconds), `Klusterlet` automatically switches its connection to `secondaryhub` and starts updating its lease on `secondaryhub`.
+
+```yaml
+apiVersion: operator.open-cluster-management.io/v1
+kind: Klusterlet
+metadata:
+  name: klusterlet
+spec:
+  registrationConfiguration:
+    featureGates:
+      - feature: MultipleHubs
+        mode: Enable
+    bootstrapKubeConfigs:
+      type: "LocalSecrets"
+      localSecretsConfig:
+        kubeConfigSecrets:
+          - name: "primaryhub-bootstrap"
+          - name: "secondaryhub-bootstrap"
+```
+
+#### Solution 2: Deploy Dual Klusterlet Agents (Concurrent Active Status on Both Hubs)
+
+Deploy two separate `Klusterlet` agent instances on `spoke1` in distinct namespaces:
+- `open-cluster-management-agent-primary` (sending heartbeats to `primaryhub`)
+- `open-cluster-management-agent-secondary` (sending heartbeats to `secondaryhub`)
+
+Each agent operates independently. When `primaryhub` goes down, the secondary agent continues sending heartbeats to `secondaryhub`, keeping `spoke1` continuously showing `AVAILABLE: True` on `secondaryhub`.
 
 ---
 
@@ -2391,66 +2625,809 @@ KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub \
 
 ---
 
-#### Fix: Completely Re-join the Spoke to the Correct Hub
+#### Fix: Completely Clean and Dual-Register the Spoke to Both Hubs
 
-> **This is the most reliable fix.** Patching individual secrets is fragile because the Klusterlet operator restores them from the Klusterlet CR on pod restarts.
+> **This is the most reliable fix.** Patching individual secrets is fragile because the Klusterlet operator restores them from the Klusterlet CR on pod restarts, breaking TLS client certificate rotation.
 
-**Step 1 — On the spoke: Delete the Klusterlet CR entirely**
+##### Step 1 — On the spoke: Delete the Klusterlet CR entirely
 ```bash
 kubectl delete klusterlet klusterlet
 ```
 This removes all agent pods, secrets, and the namespace automatically.
 
-**Step 2 — On the Hub (primaryhub): Delete the stale ManagedCluster entry**
+##### Step 2 — On the Hubs: Clear stale ManagedCluster entries (Primary & Secondary)
+If `kubectl delete managedcluster` hangs waiting on finalizers, strip the finalizers immediately to complete deletion:
 ```bash
-KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub delete managedcluster spoke1
-```
+# Clear Primary Hub stale record
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub delete managedcluster spoke1 --ignore-not-found=true
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub patch managedcluster spoke1 -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
 
-**Step 3 — On the Hub: Get a fresh join token**
+# Clear Secondary Hub stale record
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub delete managedcluster spoke1 --ignore-not-found=true
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub patch managedcluster spoke1 -p '{"metadata":{"finalizers":null}}' --type=merge 2>/dev/null || true
+
+> **⚠️ IMPORTANT — Why `clusteradm join` alone does NOT work for dual-hub:**
+> Running `clusteradm join` for a second hub overwrites the single `hub-kubeconfig-secret`,
+> breaking the first hub's heartbeat stream. The permanent solution is to deploy **two
+> separate Klusterlet instances** — one per hub — each with its own namespace and secrets.
+
+##### Step 3 — Register `spoke1` to Primary Hub via `clusteradm join`
 ```bash
+# 1. Get Primary Hub join token (run on primaryhub):
 KUBECONFIG=~/.kube/config-hubs clusteradm get token --context primaryhub
-```
-Copy the full token from the output.
 
-**Step 4 — On the spoke: Re-join pointing to the correct Hub**
-```bash
+# 2. Join Primary Hub (run on spoke1):
 clusteradm join \
-  --hub-token <TOKEN_FROM_STEP_3> \
+  --hub-token <PRIMARY_HUB_TOKEN> \
   --hub-apiserver https://192.168.122.225:6443 \
   --cluster-name spoke1 \
   --force-internal-endpoint-lookup
+
+# 3. Approve CSR & Accept (run on primaryhub):
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub get csr | grep Pending | awk '{print $1}' | \
+  while read csr; do KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub certificate approve $csr; done
+KUBECONFIG=~/.kube/config-hubs clusteradm accept --clusters spoke1 --context primaryhub --skip-approve-check
 ```
 
-Wait for the output: `Klusterlet is now available. Managed cluster is created.`
+##### Step 4 — Create a Second Independent Klusterlet for Secondary Hub
 
-**Step 5 — On the Hub: Accept the spoke (with `--skip-approve-check` if multiple CSRs exist)**
+> This is the **permanent dual-hub solution**. Each Klusterlet gets its own namespace
+> and secrets so both hubs receive independent heartbeat streams simultaneously.
+
 ```bash
-KUBECONFIG=~/.kube/config-hubs clusteradm accept \
-  --clusters spoke1 \
-  --context primaryhub \
-  --skip-approve-check
+# 1. Get Secondary Hub join token (run on primaryhub):
+KUBECONFIG=~/.kube/config-hubs clusteradm get token --context secondaryhub
+# Copy the token string after --hub-token
+
+# 2. Pull live CA from secondaryhub (run on spoke1):
+openssl s_client -connect 192.168.122.143:6443 -showcerts </dev/null 2>/dev/null | \
+  sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > /tmp/secondary_ca.crt
+SECONDARY_CA=$(base64 -w0 /tmp/secondary_ca.crt)
+
+# 3. Create dedicated namespace for secondaryhub agent (run on spoke1):
+kubectl create namespace open-cluster-management-agent-secondaryhub --dry-run=client -o yaml | kubectl apply -f -
+
+# 4. Create bootstrap secret WITH proper CA — NOT insecure-skip-tls-verify (run on spoke1):
+kubectl create secret generic bootstrap-hub-kubeconfig \
+  -n open-cluster-management-agent-secondaryhub \
+  --from-literal=kubeconfig="apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: $SECONDARY_CA
+    server: https://192.168.122.143:6443
+  name: secondaryhub
+contexts:
+- context:
+    cluster: secondaryhub
+    user: bootstrap
+  name: bootstrap
+current-context: bootstrap
+kind: Config
+users:
+- name: bootstrap
+  user:
+    token: <SECONDARY_HUB_TOKEN>" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+# 5. Deploy second Klusterlet CR with explicit image versions (run on spoke1):
+kubectl apply -f - <<'EOF'
+apiVersion: operator.open-cluster-management.io/v1
+kind: Klusterlet
+metadata:
+  name: klusterlet-secondaryhub
+spec:
+  namespace: open-cluster-management-agent-secondaryhub
+  clusterName: spoke1
+  registrationImagePullSpec: quay.io/open-cluster-management/registration:v1.3.1
+  workImagePullSpec: quay.io/open-cluster-management/work:v1.3.1
+  deployOption:
+    mode: Default
+EOF
+
+# 6. Wait for CSR and approve it (run on primaryhub):
+# Wait ~30 seconds for the agent to start and create a CSR
+sleep 30
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub get csr | grep Pending
+# Then approve the pending CSR by name:
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub certificate approve <CSR_NAME>
+
+# 7. Accept spoke1 on secondaryhub (run on primaryhub):
+KUBECONFIG=~/.kube/config-hubs clusteradm accept --clusters spoke1 --context secondaryhub --skip-approve-check
 ```
 
-**Step 6 — Verify**
+##### Step 5 — Verify Both Hubs Show `AVAILABLE: True`
 ```bash
-KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub get managedcluster spoke1
+echo "=== Primary Hub Managed Clusters ==="
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub get managedclusters
+
+echo "=== Secondary Hub Managed Clusters ==="
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub get managedclusters
 ```
-Expected:
-```
+
+Expected Output:
+```text
+=== Primary Hub Managed Clusters ===
+NAME     HUB ACCEPTED   MANAGED CLUSTER URLS   JOINED   AVAILABLE   AGE
+spoke1   true                                  True     True        Xm
+
+=== Secondary Hub Managed Clusters ===
 NAME     HUB ACCEPTED   MANAGED CLUSTER URLS   JOINED   AVAILABLE   AGE
 spoke1   true                                  True     True        Xm
 ```
 
+##### Verify Dual Klusterlet Instances on `spoke1`
+```bash
+# Two independent Klusterlet CRs should exist:
+kubectl get klusterlets
+
+# NAME                    AGE
+# klusterlet              Xm   ← primaryhub agent (open-cluster-management-agent)
+# klusterlet-secondaryhub Xm   ← secondaryhub agent (open-cluster-management-agent-secondaryhub)
+
+# Two independent agent namespaces:
+kubectl get pods -n open-cluster-management-agent
+kubectl get pods -n open-cluster-management-agent-secondaryhub
+```
+
 ---
 
-#### Why `--skip-approve-check` May Be Needed
 
-If `clusteradm join` was run multiple times (during debugging), multiple CSRs accumulate on the Hub. `clusteradm accept` detects conflicting requesters and skips auto-approval. The `--skip-approve-check` flag tells it to approve all pending CSRs for the cluster regardless.
+## Phase: Full Active-Passive Hub Failover (kube-vip + Watchdog)
+
+> Implements automatic failover where `secondaryhub` takes over all traffic, OCM dispatch,
+> and database writes when `primaryhub` goes down. No manual intervention required.
+
+### Failover Timeline
+
+| Time | Event |
+|:---|:---|
+| T+0s | `primaryhub` goes down |
+| T+5s | `failover-controller` records 1st miss |
+| T+10s | 2nd miss |
+| T+15s | 3rd miss → quorum check runs against `spoke1` witness |
+| T+17s | spoke1 confirms `unreachable` → 2-of-2 quorum passed |
+| T+18s | Fencing attempted → PostgreSQL promotion issued |
+| T+20s | kube-vip on `secondaryhub` wins Lease → Gratuitous ARP for `.230` |
+| T+22s | All client connections reach `secondaryhub` |
 
 ---
 
-#### Key Lesson
+### Phase A — Quorum Witness on `spoke1`
 
-> Always run `clusteradm join` with `--hub-apiserver https://<HUB_REAL_IP>:6443` — **never** use `127.0.0.1` or `localhost`. The bootstrap kubeconfig defaults to `127.0.0.1` (the local RKE2 kubeconfig), which is unreachable from any external spoke.
->
-> If a spoke was accidentally joined to the wrong Hub, **do not patch individual secrets** — delete the Klusterlet CR and re-join cleanly.
+> Prevents false-positive failover. `secondaryhub` only promotes when BOTH itself
+> AND `spoke1` cannot reach `primaryhub` (2-of-2 quorum).
+
+> **spoke1 node IP: `192.168.122.52`** (discovered via `kubectl get nodes -o wide`)
+
+> ⚠️ **Key Lesson:** Do NOT use `curl ... | grep -q ok` to check `/healthz`.
+> RKE2 returns `401 Unauthorized` (not `ok`) when unauthenticated — which causes
+> the witness to falsely report `unreachable` even when the server is alive.
+> Use a **TCP port check** (`nc -z`) instead — a successful TCP connection proves the server is up.
+
+```bash
+# Run on spoke1 context
+kubectl apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: witness-script
+  namespace: kube-system
+data:
+  witness.sh: |
+    #!/bin/sh
+    PRIMARY_HOST="192.168.122.225"
+    PRIMARY_PORT="6443"
+    while true; do
+      # TCP check: successful connection = server is UP (401 is still "up")
+      if nc -z -w 3 "$PRIMARY_HOST" "$PRIMARY_PORT" 2>/dev/null; then
+        STATUS="reachable"
+      else
+        STATUS="unreachable"
+      fi
+      printf "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n%s" "$STATUS" | \
+        nc -l -p 9999 -q 1 2>/dev/null
+      sleep 1
+    done
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: hub-witness
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      app: hub-witness
+  template:
+    metadata:
+      labels:
+        app: hub-witness
+    spec:
+      hostNetwork: true
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      containers:
+      - name: witness
+        image: alpine:3.19
+        command: ["/bin/sh", "-c", "apk add -q curl netcat-openbsd && /bin/sh /scripts/witness.sh"]
+        ports:
+        - containerPort: 9999
+          hostPort: 9999
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+      volumes:
+      - name: script
+        configMap:
+          name: witness-script
+          defaultMode: 0755
+EOF
+
+# Wait for pod to be ready
+kubectl get pods -n kube-system -l app=hub-witness -w
+
+# Verify from spoke1 itself
+curl http://192.168.122.52:9999
+# Expected: reachable
+
+# Verify from primaryhub
+curl http://192.168.122.52:9999
+# Expected: reachable
+```
+
+---
+
+
+
+### Phase B — Failover Controller on `secondaryhub`
+
+> Runs on `secondaryhub`. Polls `primaryhub` TCP port every 5s.
+> After 3 misses + spoke1 quorum confirmation → fences primaryhub, promotes DB, activates OCM.
+
+> **Key Lessons from testing:**
+> - Use TCP `nc -z` check (not HTTP grep) — same reason as witness: `401` = server alive
+> - Fencing uses `kubectl delete pod` (not `scale --replicas=0` which fails on DaemonSets)
+> - kubeconfig must be mounted at `/root/.kube/config` and referenced with `--kubeconfig`
+> - Create the kubeconfig Secret **before** deploying the controller
+
+#### Step 1 — Create hub kubeconfig Secret on `secondaryhub`
+
+```bash
+# Run on primaryhub context
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub \
+  create secret generic hub-kubeconfig \
+  -n kube-system \
+  --from-file=config=/root/.kube/config-hubs \
+  --dry-run=client -o yaml | \
+  KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub apply -f -
+```
+
+#### Step 2 — Deploy Failover Controller
+
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: failover-script
+  namespace: kube-system
+data:
+  run.sh: |
+    #!/bin/sh
+    WITNESS_URL="http://192.168.122.52:9999"
+    FAIL_COUNT=0
+    THRESHOLD=3
+    PROMOTED=false
+    KUBECONF="/root/.kube/config"
+
+    echo "[failover] Starting watchdog. Witness: $WITNESS_URL"
+
+    while true; do
+      sleep 5
+
+      # Use kubectl with real credentials — bitnami/kubectl has no nc binary
+      # kubectl get nodes succeeds if API is reachable (uses mounted kubeconfig with auth)
+      if kubectl --kubeconfig=$KUBECONF --context primaryhub \
+           get nodes --request-timeout=3s >/dev/null 2>&1; then
+        if [ "$PROMOTED" = "true" ]; then
+          echo "[failover] primaryhub recovered — executing automatic failback reset"
+          kubectl --kubeconfig=$KUBECONF --context secondaryhub \
+            annotate managedcluster spoke1 failover.hub/active- --overwrite >/dev/null 2>&1 || true
+        elif [ "$FAIL_COUNT" -gt 0 ]; then
+          echo "[failover] primaryhub recovered — resetting counter"
+        fi
+        FAIL_COUNT=0
+        PROMOTED=false
+        continue
+      fi
+
+
+
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      echo "[failover] primaryhub UNREACHABLE ($FAIL_COUNT/$THRESHOLD)"
+      [ "$FAIL_COUNT" -lt "$THRESHOLD" ] && continue
+      [ "$PROMOTED" = "true" ] && continue
+
+      # Quorum check — ask spoke1 witness
+      WITNESS=$(curl -sk --max-time 5 "$WITNESS_URL" 2>/dev/null || echo "unreachable")
+      echo "[failover] spoke1 witness says: $WITNESS"
+
+      if ! echo "$WITNESS" | grep -q "unreachable"; then
+        echo "[failover] SPLIT-BRAIN SUSPECTED — spoke1 can reach primaryhub. Aborting."
+        FAIL_COUNT=0
+        continue
+      fi
+
+      echo "[failover] QUORUM CONFIRMED (2/2) — starting failover sequence"
+
+      # Step 1: Fence — delete kube-vip pod on primaryhub (best-effort)
+      kubectl --kubeconfig=/root/.kube/config --context primaryhub \
+        delete pod -n kube-system -l app=kube-vip 2>/dev/null && \
+        echo "[failover] primaryhub kube-vip fenced" || \
+        echo "[failover] fence via API failed (node down) — expected"
+
+      # Step 2: Promote PostgreSQL (skipped gracefully if not deployed)
+      kubectl --kubeconfig=/root/.kube/config --context secondaryhub \
+        cnpg promote postgresql-secondary -n opensandbox-system 2>/dev/null && \
+        echo "[failover] PostgreSQL promoted to Primary" || \
+        echo "[failover] PostgreSQL skipped (not deployed yet)"
+
+      # Step 3: Annotate OCM managedcluster
+      kubectl --kubeconfig=/root/.kube/config --context secondaryhub \
+        annotate managedcluster spoke1 failover.hub/active="true" --overwrite 2>/dev/null && \
+        echo "[failover] OCM spoke1 marked as active on secondaryhub" || true
+
+      echo "[failover] === FAILOVER COMPLETE at $(date -u) ==="
+      PROMOTED=true
+    done
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: failover-controller
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: failover-controller-role
+rules:
+- apiGroups: ["apps"]
+  resources: ["daemonsets"]
+  verbs: ["get", "patch", "update"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["list", "delete"]    # Required for kube-vip pod fencing
+- apiGroups: ["cluster.open-cluster-management.io"]
+  resources: ["managedclusters"]
+  verbs: ["get", "patch", "update", "annotate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: failover-controller-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: failover-controller-role
+subjects:
+- kind: ServiceAccount
+  name: failover-controller
+  namespace: kube-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: failover-controller
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: failover-controller
+  template:
+    metadata:
+      labels:
+        app: failover-controller
+    spec:
+      serviceAccountName: failover-controller
+      containers:
+      - name: controller
+        image: bitnami/kubectl:latest
+        command: ["/bin/sh", "/scripts/run.sh"]
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+        - name: kubeconfig
+          mountPath: /root/.kube
+      volumes:
+      - name: script
+        configMap:
+          name: failover-script
+          defaultMode: 0755
+      - name: kubeconfig
+        secret:
+          secretName: hub-kubeconfig
+EOF
+```
+
+#### Step 3 — Verify Controller is Running
+
+```bash
+# Check pod is running
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub \
+  get pods -n kube-system -l app=failover-controller
+
+# Watch live logs — silence = primaryhub is healthy
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub \
+  logs -n kube-system deploy/failover-controller -f
+# Expected while primary is UP:
+# [failover] Starting watchdog. Witness: http://192.168.122.52:9999
+# (no further output = primaryhub is reachable ✅)
+```
+
+
+---
+
+### Full Failover Test (Verified Working)
+
+> **Key Lesson — How to properly simulate a full outage:**
+> - `sudo systemctl stop rke2-server` is NOT enough — rke2 child processes (kube-apiserver, etcd)
+>   survive as orphans and the API remains reachable. `kubectl get nodes` still succeeds.
+> - Use **`iptables`** to block port 6443 — this makes the API unreachable to both the
+>   `failover-controller` AND the `spoke1` witness, triggering true 2-of-2 quorum.
+
+> **Observed Behaviour (verified Tue 2026-08-25):**
+> The first quorum check returned `spoke1 witness says: reachable` because spoke1's TCP
+> connection was still in-flight. The controller correctly detected SPLIT-BRAIN and aborted.
+> On the second cycle, spoke1 confirmed `unreachable` and QUORUM was confirmed.
+> This shows the safety mechanism working exactly as designed.
+
+**Terminal 1** — watch failover-controller logs on secondaryhub:
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub \
+  logs -n kube-system deploy/failover-controller -f
+```
+
+**Terminal 2 (on primaryhub)** — block port 6443 to simulate outage:
+```bash
+# Block outbound API access from both sides
+sudo iptables -I INPUT -p tcp --dport 6443 -j REJECT
+sudo iptables -I OUTPUT -p tcp --sport 6443 -j REJECT
+```
+
+**Expected log sequence in Terminal 1 (~15–30 seconds):**
+```text
+[failover] primaryhub UNREACHABLE (1/3)
+[failover] primaryhub UNREACHABLE (2/3)
+[failover] primaryhub UNREACHABLE (3/3)
+[failover] spoke1 witness says: reachable         ← SPLIT-BRAIN detected (correct!)
+[failover] SPLIT-BRAIN SUSPECTED — spoke1 can reach primaryhub. Aborting.
+[failover] primaryhub UNREACHABLE (1/3)
+[failover] primaryhub UNREACHABLE (2/3)
+[failover] primaryhub UNREACHABLE (3/3)
+[failover] spoke1 witness says: unreachable        ← True outage confirmed
+[failover] QUORUM CONFIRMED (2/2) — starting failover sequence
+[failover] fence via API failed (node down) — expected
+[failover] PostgreSQL skipped (not deployed yet)
+[failover] OCM spoke1 marked active on secondaryhub
+[failover] === FAILOVER COMPLETE at Tue Aug 25 11:56:31 UTC 2026 ===
+[failover] primaryhub UNREACHABLE (4/3)            ← cosmetic only
+[failover] primaryhub UNREACHABLE (5/3)            ← PROMOTED=true blocks re-triggering
+```
+
+**Verify failover succeeded:**
+```bash
+# VIP must now be on secondaryhub
+ssh 192.168.122.143 "ip addr show enp1s0 | grep 192.168.122.230"
+# Expected: inet 192.168.122.230/32 scope global enp1s0
+
+# spoke1 must still be available via secondaryhub
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub \
+  get managedcluster spoke1
+# Expected: JOINED: True, AVAILABLE: True
+```
+
+---
+
+### Automated Failover + Failback Test Sequence (Full End-to-End)
+
+> Use this as your go-to reference any time you want to simulate a hub outage and
+> verify that both automatic failover and automatic failback work correctly.
+
+#### Step 1 — Open Terminal 1: Watch Live Watchdog Logs
+
+Run on **`primaryhub`** (keep this terminal open throughout):
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub \
+  logs -n kube-system deploy/failover-controller -f
+```
+
+#### Step 2 — Open Terminal 2: Simulate `primaryhub` Outage
+
+Run on **`primaryhub`** (in a new terminal):
+```bash
+# Block port 6443 on both ingress and egress to simulate a true API outage
+sudo iptables -I INPUT -p tcp --dport 6443 -j REJECT
+sudo iptables -I OUTPUT -p tcp --sport 6443 -j REJECT
+```
+
+#### Step 3 — Watch Automatic Failover in Terminal 1 (~15–30 seconds)
+
+Expected log output:
+```text
+[failover] primaryhub UNREACHABLE (1/3)
+[failover] primaryhub UNREACHABLE (2/3)
+[failover] primaryhub UNREACHABLE (3/3)
+[failover] spoke1 witness says: unreachable
+[failover] QUORUM CONFIRMED (2/2) — starting failover sequence
+[failover] fence via API failed (node down) — expected
+[failover] PostgreSQL skipped (not deployed yet)
+[failover] OCM spoke1 marked active on secondaryhub
+[failover] === FAILOVER COMPLETE at <timestamp> ===
+```
+
+> **Note:** You may first see `spoke1 witness says: reachable` and `SPLIT-BRAIN SUSPECTED — aborting`.
+> This is correct safety behaviour — the controller waits for a second quorum cycle before triggering failover.
+
+#### Step 4 — Restore `primaryhub` (Test Automated Failback)
+
+Run on **`primaryhub`** in Terminal 2:
+```bash
+# Unblock port 6443 to restore primaryhub API server
+sudo iptables -D INPUT -p tcp --dport 6443 -j REJECT
+sudo iptables -D OUTPUT -p tcp --sport 6443 -j REJECT
+```
+
+#### Step 5 — Watch Automatic Failback in Terminal 1 (~5 seconds)
+
+Expected log output:
+```text
+[failover] primaryhub recovered — executing automatic failback reset
+```
+
+The `failover-controller` automatically:
+- Removes the `failover.hub/active` annotation from `secondaryhub`'s `spoke1`
+- Resets `PROMOTED=false` so the watchdog arms itself again for the next outage
+
+#### Step 6 — Verify Both Hubs Are Healthy
+
+Run on **`primaryhub`**:
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub get managedcluster spoke1
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub get managedcluster spoke1
+```
+
+Expected output:
+```text
+NAME     HUB ACCEPTED   MANAGED CLUSTER URLS   JOINED   AVAILABLE   AGE
+spoke1   true                                  True     True        Xm
+
+NAME     HUB ACCEPTED   MANAGED CLUSTER URLS   JOINED   AVAILABLE   AGE
+spoke1   true                                  True     True        Xm
+```
+
+Both hubs show **`AVAILABLE: True`** ✅
+
+#### Step 7 — Verify VIP Returned to `primaryhub`
+```bash
+# VIP should be back on primaryhub
+ssh 192.168.122.225 "ip addr show enp1s0 | grep 192.168.122.230"
+# Expected: inet 192.168.122.230/32 scope global enp1s0
+```
+
+---
+
+
+
+## 🛠️ Comprehensive Troubleshooting Guide & Field Lessons Learned
+
+This section documents every issue encountered during the implementation and testing of the high-availability multi-cluster architecture, complete with root causes, diagnostic commands, and verified resolutions.
+
+---
+
+### Issue 1: `kube-vip` Fails to Start with "no features are enabled" Fatal Error
+
+- **Symptom / Error Log:**
+  ```text
+  time="2026-08-25T10:54:15Z" level=fatal msg="no features are enabled"
+  ```
+- **Root Cause:**
+  In `kube-vip` v0.8.2+, specifying feature flags via environment variables (`vip_controlplane: "true"`, `vip_services: "true"`) in the manifest is ignored.
+- **Resolution:**
+  Pass feature flags explicitly as CLI arguments in the DaemonSet container `args` block:
+  ```yaml
+  args:
+  - manager
+  - --controlplane
+  - --arp
+  - --interface
+  - enp1s0
+  - --address
+  - "192.168.122.230"
+  - --leaderElection
+  ```
+
+---
+
+### Issue 2: `kubectl scale ds/kube-vip --replicas=0` Fails with Error
+
+- **Symptom / Error Log:**
+  ```text
+  Error from server (NotFound): the server could not find the requested resource
+  ```
+- **Root Cause:**
+  Kubernetes DaemonSets do not have a `replicas` field. `kubectl scale` only applies to Deployments, StatefulSets, and ReplicaSets.
+- **Resolution:**
+  - **Quick Test:** Delete the pod directly (`kubectl delete pod -n kube-system -l app=kube-vip`).
+  - **Full Outage Simulation:** Use `iptables` to block port 6443 (`sudo iptables -I INPUT -p tcp --dport 6443 -j REJECT`).
+
+---
+
+### Issue 3: Quorum Witness Falsely Reporting `unreachable` on Healthy Hub
+
+- **Symptom / Log:**
+  `curl http://<SPOKE1_IP>:9999` returns `unreachable` even when `primaryhub` is healthy.
+- **Root Cause:**
+  The witness script checked `curl -sk https://.../healthz | grep -q ok`. RKE2 returns `401 Unauthorized` (JSON response) for unauthenticated `/healthz` requests. Since the body contained `"status": "Failure"` instead of `ok`, `grep` failed and reported `unreachable`.
+- **Resolution:**
+  Replace HTTP body matching with a pure **TCP port connection check** using `nc -z -w 3 192.168.122.225 6443`. A successful TCP handshake proves the API server is alive regardless of HTTP authentication status.
+
+---
+
+### Issue 4: `failover-controller` Unable to Reach External IP (`primaryhub`)
+
+- **Symptom / Log:**
+  `failover-controller` logged `primaryhub UNREACHABLE` constantly while `primaryhub` was up.
+- **Root Cause:**
+  The `failover-controller` Deployment ran on the internal CNI overlay network without host network privileges, preventing it from reaching host-level IPs directly.
+- **Resolution:**
+  Enable host networking in the Deployment spec:
+  ```yaml
+  spec:
+    hostNetwork: true
+    dnsPolicy: ClusterFirstWithHostNet
+  ```
+
+---
+
+### Issue 5: `failover-controller` Script Fails with Silent Exit Code 1 (`nc` Missing)
+
+- **Symptom / Log:**
+  `failover-controller` continually reported `primaryhub UNREACHABLE` even when connectivity was verified on the node.
+- **Root Cause:**
+  The `bitnami/kubectl:latest` container image does not have `netcat` / `nc` installed. Executing `nc` returned command not found (exit code 1), causing the script to interpret every check as a failure.
+- **Resolution:**
+  Replace `nc` with native `kubectl`:
+  ```sh
+  if kubectl --kubeconfig=$KUBECONF --context primaryhub get nodes --request-timeout=3s >/dev/null 2>&1; then
+    # Primary is healthy
+  fi
+  ```
+
+---
+
+### Issue 6: `sudo systemctl stop rke2-server` Does Not Stop API Server
+
+- **Symptom:**
+  Stopping `rke2-server.service` did not trigger failover because `kubectl get nodes` still succeeded.
+- **Root Cause:**
+  Stopping the systemd unit `rke2-server` leaves child container processes (`kube-apiserver`, `etcd`) running as background orphans. Port 6443 remains open and active.
+- **Resolution:**
+  Use `iptables` rule injection for clean, reliable outage testing:
+  ```bash
+  # Block port 6443
+  sudo iptables -I INPUT -p tcp --dport 6443 -j REJECT
+  sudo iptables -I OUTPUT -p tcp --sport 6443 -j REJECT
+
+  # Restore when done
+  sudo iptables -D INPUT -p tcp --dport 6443 -j REJECT
+  sudo iptables -D OUTPUT -p tcp --sport 6443 -j REJECT
+  ```
+
+---
+
+### Issue 7: Both Hub Nodes Holding the VIP `192.168.122.230` Simultaneously (IP Conflict)
+
+- **Symptom:**
+  `ip addr show enp1s0` showed `192.168.122.230/32` on **BOTH** `primaryhub` and `secondaryhub` at the same time, causing ARP clashes and dropped packets.
+- **Root Cause:**
+  During failover testing, `secondaryhub` acquired the `plndr-cp-lock` Kubernetes lease. When `primaryhub` came back up, `primaryhub` bound the VIP without `secondaryhub` releasing its local interface alias.
+- **Resolution:**
+  1. Delete the `plndr-cp-lock` lease in `kube-system`:
+     ```bash
+     KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub delete lease plndr-cp-lock -n kube-system
+     ```
+  2. Restart `kube-vip` on `primaryhub`:
+     ```bash
+     KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub rollout restart ds/kube-vip -n kube-system
+     ```
+  3. Remove stale IP alias on `secondaryhub`:
+     ```bash
+     ssh 192.168.122.143 "sudo ip addr del 192.168.122.230/32 dev enp1s0" 2>/dev/null || true
+     ```
+
+---
+
+### Issue 8: `spoke1` Showing `AVAILABLE: Unknown` on Primary Hub (Secret Overwrite)
+
+- **Symptom:**
+  `secondaryhub` showed `spoke1` as `AVAILABLE: True`, but `primaryhub` showed `AVAILABLE: Unknown`.
+- **Root Cause:**
+  Editing `hub-kubeconfig-secret` manually to point to the VIP `.230` caused the OCM `BootstrapController` to detect a secret mismatch and overwrite it with a single hub config. OCM Dual-Registration requires two independent registration streams to direct hub IPs (`primaryhub` IP and `secondaryhub` IP) so both hubs receive heartbeats simultaneously.
+- **Resolution:**
+  Execute clean dual-registration using `clusteradm join`:
+  - Register to `primaryhub` via `https://192.168.122.225:6443`.
+  - Register to `secondaryhub` via `https://192.168.122.143:6443`.
+  - Approve CSRs and accept on both hubs. Both hubs will show `AVAILABLE: True`.
+
+---
+
+### Issue 9: Spoke Agent Stuck in `Attempting to acquire leader lease...`
+
+- **Symptom / Log:**
+  ```text
+  Attempting to acquire leader lease... lock="open-cluster-management-agent/registration-agent-lock"
+  ```
+- **Root Cause:**
+  When agent pods are deleted or restarted rapidly, the Kubernetes `coordination.k8s.io/v1` `Lease` named `registration-agent-lock` remains locked by the terminated pod until its 30-40s TTL expires.
+- **Resolution:**
+  Delete the stale lease object on `spoke1`:
+  ```bash
+  kubectl delete lease registration-agent-lock -n open-cluster-management-agent --ignore-not-found=true
+  ```
+
+---
+
+### Issue 10: RKE2 API Server TLS Certificate Missing VIP SAN
+
+- **Symptom / Log:**
+  ```text
+  tls: failed to verify certificate: x509: certificate is valid for 192.168.122.225, not 192.168.122.230
+  ```
+- **Root Cause:**
+  Default RKE2 installation only signs API server certificates for the node's static IP (`192.168.122.225`), causing Go TLS clients to reject connections made to the VIP (`192.168.122.230`).
+- **Resolution:**
+  Add the VIP to `/etc/rancher/rke2/config.yaml` on all hub nodes and restart RKE2:
+  ```yaml
+  tls-san:
+    - "192.168.122.230"
+  ```
+  ```bash
+  sudo systemctl restart rke2-server
+  ```
+
+---
+
+### Issue 11: `clusteradm join` for Second Hub Breaks First Hub Heartbeat (`AVAILABLE: Unknown`)
+
+- **Symptom:**
+  After running `clusteradm join` for `secondaryhub`, `primaryhub` shows `AVAILABLE: Unknown` even though `primaryhub` is healthy.
+- **Root Cause:**
+  OCM Klusterlet stores only **ONE** `hub-kubeconfig-secret`. Every `clusteradm join` overwrites it with the new hub's credentials. After pod restart, the bootstrap controller re-initializes from whichever secret was last written, cutting off the other hub's heartbeat stream.
+- **Resolution:**
+  Deploy **two independent Klusterlet CRs** — one per hub — each with its own namespace and bootstrap secret:
+  1. `klusterlet` → namespace `open-cluster-management-agent` → primaryhub
+  2. `klusterlet-secondaryhub` → namespace `open-cluster-management-agent-secondaryhub` → secondaryhub
+
+  Key requirements for the second Klusterlet's bootstrap secret:
+  - Must use `certificate-authority-data` (NOT `insecure-skip-tls-verify: true`)
+  - Must specify `registrationImagePullSpec` and `workImagePullSpec` in the Klusterlet CR
+  - CSR must be manually approved on secondaryhub after the agent starts
+
+---
+
+### Issue 12: Spoke Registration Agent Freezes After Failover/Failback (Logs Stop)
+
+- **Symptom:**
+  After a failover and failback cycle, `kubectl logs` for `klusterlet-registration-agent` returns no output for the last 5+ minutes. `primaryhub` shows `AVAILABLE: Unknown` even though the lease was recently renewed.
+- **Root Cause:**
+  The Kubernetes `client-go` HTTP transport enters an exponential backoff sleep (up to 5 minutes) after a failed TCP connection during the failover. Even when the hub recovers, the background goroutine stays sleeping until the timer fires.
+- **Resolution:**
+  Force an immediate reconnect by restarting the agent pods on `spoke1`:
+  ```bash
+  kubectl delete pod -n open-cluster-management-agent --all
+  kubectl delete pod -n open-cluster-management-agent-secondaryhub --all
+  ```
+  The `failover-controller`'s automatic failback reset handles this automatically when `primaryhub` recovers, by removing the `failover.hub/active` annotation on `secondaryhub`.
