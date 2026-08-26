@@ -3633,3 +3633,25 @@ This section documents every issue encountered during the implementation and tes
   # On secondaryhub: sudo cp /etc/rancher/rke2/rke2.yaml /tmp/rke2.yaml && sudo chmod 644 /tmp/rke2.yaml
   # On primaryhub:   scp secondaryhub@10.100.0.2:/tmp/rke2.yaml ~/.kube/config-secondaryhub
   ```
+
+---
+
+### Issue 21: TLS SAN Verification Failure on WireGuard Overlay IPs (`10.100.0.x`)
+
+- **Symptom:**
+  ```text
+  Unable to connect to the server: tls: failed to verify certificate:
+  x509: certificate is valid for 10.1.0.10, 127.0.0.1... not 10.100.0.1
+  ```
+- **Root Cause:**
+  When connecting to RKE2 API servers via WireGuard Overlay IPs (`10.100.0.1` / `10.100.0.2`), Go TLS client rejects the connection if those IPs are not explicitly listed under `tls-san` in `/etc/rancher/rke2/config.yaml`.
+- **Resolution:**
+  1. Add the WireGuard IP to `tls-san` in `/etc/rancher/rke2/config.yaml` on both hubs:
+     - `primaryhub`: include `"10.100.0.1"`
+     - `secondaryhub`: include `"10.100.0.2"`
+  2. Rotate RKE2 certificates and restart:
+     ```bash
+     sudo systemctl stop rke2-server
+     sudo rke2 certificate rotate
+     sudo systemctl start rke2-server
+     ```

@@ -186,6 +186,45 @@ kubelet-arg:
   - "serialize-image-pulls=false"
 ```
 
+**Correct `/etc/rancher/rke2/config.yaml` on `secondaryhub`:**
+
+```yaml
+write-kubeconfig-mode: "0644"
+
+node-ip: "10.2.0.10"
+node-external-ip: "10.2.0.10"
+advertise-address: "10.2.0.10"
+
+cni: cilium
+disable-kube-proxy: true
+
+cluster-cidr: "10.42.0.0/16"
+service-cidr: "10.43.0.0/16"
+
+tls-san:
+  - "10.2.0.10"
+  - "10.100.0.2"
+  - "127.0.0.1"
+  - "localhost"
+  - "secondaryhub"
+
+disable:
+  - rke2-canal
+  - rke2-ingress-nginx
+
+kubelet-arg:
+  - "max-pods=250"
+  - "serialize-image-pulls=false"
+```
+
+**Certificate Rotation Command (run after editing `config.yaml` on each hub):**
+
+```bash
+sudo systemctl stop rke2-server
+sudo rke2 certificate rotate
+sudo systemctl start rke2-server
+```
+
 ### 4.2 Resolving `etcd` Peer URL Mismatch
 
 **Symptom:**
