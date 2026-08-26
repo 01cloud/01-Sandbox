@@ -1,33 +1,33 @@
-# Multi-Cluster Architecture & High-Availability Implementation Guide (Post-CIDR Migration)
+# Multi-Cluster Architecture & High-Availability Implementation Guide (Final Production Edition)
 
 ## Executive Overview
 
-This document serves as the complete operational runbook for the high-availability multi-cluster setup following the network migration from a single L2 subnet (`192.168.122.0/24`) to **separate per-VM CIDR blocks** backed by a **WireGuard encrypted mesh overlay network**.
+This document serves as the final, complete operational runbook for the high-availability multi-cluster setup. It covers the end-to-end architecture following network isolation into **separate per-VM CIDR subnets**, **WireGuard kernel-level encrypted mesh overlay**, **Cilium ClusterMesh with shared Root CA**, **OCM Dual Klusterlet registration**, and **Automated 2-of-2 Quorum Failover/Failback**.
 
 ---
 
-## 1. Network Topology & CIDR Breakdown
+## 1. Complete Network Topology & Subnet Mapping
 
-Each VM resides on a distinct libvirt bridge and `/24` subnet. Communication between VMs is encrypted end-to-end using WireGuard (`wg0`).
+Each virtual machine operates on an isolated libvirt bridge network. Cross-subnet communication is fully encrypted and routed over a dedicated WireGuard mesh interface (`wg0`).
 
-| Node | Libvirt Network | Bridge Interface | Gateway | Physical IP | WireGuard Overlay IP | Role |
+| Node | Libvirt Network | Bridge Interface | Gateway IP | Physical IP | WireGuard Overlay IP | Role |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **primaryhub** | `net-primaryhub` | `virbr-phub` | `10.1.0.1` | `10.1.0.10` | `10.100.0.1/24` | Primary Hub |
-| **secondaryhub** | `net-secondaryhub` | `virbr-shub` | `10.2.0.1` | `10.2.0.10` | `10.100.0.2/24` | Standby Hub / Controller |
-| **spoke1** | `net-spoke1` | `virbr-spoke1` | `10.3.0.1` | `10.3.0.10` | `10.100.0.3/24` | Managed Workload Cluster |
+| **primaryhub** | `net-primaryhub` | `virbr-phub` | `10.1.0.1` | `10.1.0.10` | `10.100.0.1/24` | Active Primary Control Plane |
+| **secondaryhub** | `net-secondaryhub` | `virbr-shub` | `10.2.0.1` | `10.2.0.10` | `10.100.0.2/24` | Standby Control Plane / Watchdog |
+| **spoke1** | `net-spoke1` | `virbr-spoke1` | `10.3.0.1` | `10.3.0.10` | `10.100.0.3/24` | Managed Workload Cluster / Witness |
 
 ---
 
-## 2. Host Level Prerequisites (Libvirt Bridge Routing)
+## 2. Host Level Network Routing (WireGuard UDP Port 51820 Only)
 
-Because each VM is on a separate bridge, raw cross-bridge traffic is isolated. To allow WireGuard UDP handshakes while keeping data encrypted, enable IP forwarding for **UDP Port 51820 only** on the **HOST machine**:
+To allow WireGuard UDP handshakes while keeping raw inter-VM traffic isolated on host bridges, enable IP forwarding for **UDP Port 51820 only** on the **HOST machine**:
 
 ```bash
-# On the HOST Machine:
+# Run on the HOST machine (laptop/hypervisor):
 sudo sysctl -w net.ipv4.ip_forward=1
 echo "net.ipv4.ip_forward = 1" | sudo tee -a /etc/sysctl.d/99-wireguard.conf
 
-# Allow WireGuard UDP traffic (port 51820) between bridges:
+# Allow ONLY WireGuard UDP traffic (port 51820) between bridges:
 sudo iptables -I FORWARD -i virbr-phub  -o virbr-shub   -p udp --dport 51820 -j ACCEPT
 sudo iptables -I FORWARD -i virbr-shub  -o virbr-phub   -p udp --dport 51820 -j ACCEPT
 sudo iptables -I FORWARD -i virbr-phub  -o virbr-spoke1 -p udp --dport 51820 -j ACCEPT
@@ -35,7 +35,7 @@ sudo iptables -I FORWARD -i virbr-spoke1 -o virbr-phub  -p udp --dport 51820 -j 
 sudo iptables -I FORWARD -i virbr-shub  -o virbr-spoke1 -p udp --dport 51820 -j ACCEPT
 sudo iptables -I FORWARD -i virbr-spoke1 -o virbr-shub  -p udp --dport 51820 -j ACCEPT
 
-# Save iptables rules permanently:
+# Save rules permanently:
 sudo apt install -y iptables-persistent
 sudo netfilter-persistent save
 ```
@@ -44,9 +44,9 @@ sudo netfilter-persistent save
 
 ## 3. WireGuard Encrypted Mesh Setup
 
-### Step 3.1: Generate Keypairs on Each VM
+### Step 3.1: Install & Generate Keys (All 3 VMs)
 
-Run on each VM (`primaryhub`, `secondaryhub`, `spoke1`):
+Run on **`primaryhub`**, **`secondaryhub`**, and **`spoke1`**:
 
 ```bash
 sudo apt update && sudo apt install -y wireguard wireguard-tools
@@ -78,7 +78,6 @@ AllowedIPs = 10.100.0.3/32
 PersistentKeepalive = 25
 ```
 
-Enable and start:
 ```bash
 sudo sed -i "s|PRIVKEY_PLACEHOLDER|$(sudo cat /etc/wireguard/privatekey)|" /etc/wireguard/wg0.conf
 sudo systemctl enable --now wg-quick@wg0
@@ -109,7 +108,6 @@ AllowedIPs = 10.100.0.3/32
 PersistentKeepalive = 25
 ```
 
-Enable and start:
 ```bash
 sudo sed -i "s|PRIVKEY_PLACEHOLDER|$(sudo cat /etc/wireguard/privatekey)|" /etc/wireguard/wg0.conf
 sudo systemctl enable --now wg-quick@wg0
@@ -140,69 +138,98 @@ AllowedIPs = 10.100.0.2/32
 PersistentKeepalive = 25
 ```
 
-Enable and start:
 ```bash
 sudo sed -i "s|PRIVKEY_PLACEHOLDER|$(sudo cat /etc/wireguard/privatekey)|" /etc/wireguard/wg0.conf
 sudo systemctl enable --now wg-quick@wg0
 ```
 
-### Step 3.5: Cilium In-Cluster WireGuard Encryption Setup
+---
 
-In addition to Host OS-level WireGuard (`wg0`), Cilium's native eBPF-managed WireGuard encryption is enabled inside the Kubernetes clusters for container Pod-to-Pod and Node-to-Node security.
+## 4. Cilium In-Cluster Encryption & ClusterMesh Setup
 
-#### Configuration Commands:
+### Step 4.1: Enable Cilium In-Cluster WireGuard & Node Encryption
+
+Run on **`primaryhub`**:
 
 ```bash
-# Enable WireGuard & Node Encryption on primaryhub:
-KUBECONFIG=~/.kube/config-hubs \
+KUBECONFIG=/home/primaryhub/.kube/config-hubs \
   kubectl --context primaryhub -n kube-system patch configmap cilium-config \
   --type merge -p '{"data":{"enable-wireguard":"true","encrypt-node":"true"}}'
 
-KUBECONFIG=~/.kube/config-hubs \
+KUBECONFIG=/home/primaryhub/.kube/config-hubs \
   kubectl --context primaryhub -n kube-system rollout restart daemonset/cilium
 
-# Enable WireGuard & Node Encryption on secondaryhub:
-KUBECONFIG=~/.kube/config-hubs \
+KUBECONFIG=/home/primaryhub/.kube/config-hubs \
   kubectl --context secondaryhub -n kube-system patch configmap cilium-config \
   --type merge -p '{"data":{"enable-wireguard":"true","encrypt-node":"true"}}'
 
-KUBECONFIG=~/.kube/config-hubs \
+KUBECONFIG=/home/primaryhub/.kube/config-hubs \
   kubectl --context secondaryhub -n kube-system rollout restart daemonset/cilium
 ```
 
-#### Verification:
+### Step 4.2: Synchronize Cilium Root CA between Hubs
+
+To prevent mTLS certificate handshake failures between ClusterMesh API servers:
 
 ```bash
-KUBECONFIG=~/.kube/config-hubs \
-  kubectl --context primaryhub -n kube-system exec ds/cilium -- cilium-dbg status | grep -i wireguard
+# Export CA from primaryhub:
+KUBECONFIG=/home/primaryhub/.kube/config-hubs kubectl --context primaryhub \
+  get secret -n kube-system cilium-ca -o yaml > /tmp/cilium-ca.yaml
+
+# Replace CA on secondaryhub:
+KUBECONFIG=/home/primaryhub/.kube/config-hubs kubectl --context secondaryhub \
+  replace --force -f /tmp/cilium-ca.yaml
+
+# Restart Cilium Operator and ClusterMesh API Server on secondaryhub:
+KUBECONFIG=/home/primaryhub/.kube/config-hubs kubectl --context secondaryhub \
+  rollout restart deploy/cilium-operator -n kube-system
+
+KUBECONFIG=/home/primaryhub/.kube/config-hubs kubectl --context secondaryhub \
+  rollout restart deploy/clustermesh-apiserver -n kube-system
 ```
 
-Expected output:
-```text
-Encryption: Wireguard [NodeEncryption: OptedOut, cilium_wg0 (Pubkey: ..., Port: 51871, Peers: 0)]
+### Step 4.3: Connect ClusterMesh over WireGuard IPs
+
+```bash
+# Connect primaryhub -> secondaryhub over 10.100.0.2:32379:
+KUBECONFIG=/home/primaryhub/.kube/config-hubs \
+  cilium clustermesh connect \
+    --context primaryhub \
+    --destination-context secondaryhub \
+    --destination-endpoint 10.100.0.2:32379 \
+    --helm-release-name rke2-cilium
+
+# Connect secondaryhub -> primaryhub over 10.100.0.1:32379:
+KUBECONFIG=/home/primaryhub/.kube/config-hubs \
+  cilium clustermesh connect \
+    --context secondaryhub \
+    --destination-context primaryhub \
+    --destination-endpoint 10.100.0.1:32379 \
+    --helm-release-name rke2-cilium
+```
+
+Verify status:
+```bash
+KUBECONFIG=/home/primaryhub/.kube/config-hubs \
+  cilium clustermesh status --context primaryhub --helm-release-name rke2-cilium
+# Expected: 1/1 connected, KVStoreMesh 1/1 connected
 ```
 
 ---
 
-## 4. RKE2 Configuration Updates & Troubleshooting
+## 5. RKE2 Control Plane & Certificate Configuration
 
-### 4.1 Consolidating `tls-san` Entries in `config.yaml`
+### Step 5.1: Consolidated `/etc/rancher/rke2/config.yaml`
 
-A critical issue occurs when multiple `tls-san:` keys are appended to `/etc/rancher/rke2/config.yaml`. YAML parsers overwrite earlier keys, leading to server boot failure.
-
-**Correct `/etc/rancher/rke2/config.yaml` on `primaryhub`:**
-
+#### `primaryhub`
 ```yaml
 cluster-init: true
 write-kubeconfig-mode: "0644"
-
 node-ip: "10.1.0.10"
 node-external-ip: "10.1.0.10"
 advertise-address: "10.1.0.10"
-
 cni: cilium
 disable-kube-proxy: true
-
 cluster-cidr: "10.42.0.0/16"
 service-cidr: "10.43.0.0/16"
 
@@ -222,18 +249,14 @@ kubelet-arg:
   - "serialize-image-pulls=false"
 ```
 
-**Correct `/etc/rancher/rke2/config.yaml` on `secondaryhub`:**
-
+#### `secondaryhub`
 ```yaml
 write-kubeconfig-mode: "0644"
-
 node-ip: "10.2.0.10"
 node-external-ip: "10.2.0.10"
 advertise-address: "10.2.0.10"
-
 cni: cilium
 disable-kube-proxy: true
-
 cluster-cidr: "10.42.0.0/16"
 service-cidr: "10.43.0.0/16"
 
@@ -253,272 +276,307 @@ kubelet-arg:
   - "serialize-image-pulls=false"
 ```
 
-**Certificate Rotation Command (run after editing `config.yaml` on each hub):**
-
+After updating `config.yaml` on each hub, rotate certificates:
 ```bash
 sudo systemctl stop rke2-server
 sudo rke2 certificate rotate
 sudo systemctl start rke2-server
 ```
 
-### 4.2 Resolving `etcd` Peer URL Mismatch
+---
 
-**Symptom:**
-```text
-Failed to test data store connection: this server is not a member of the etcd cluster.
-Found [primaryhub-1784d016=https://192.168.122.225:2380], expect: primaryhub-1784d016=https://10.1.0.10:2380
-```
+## 6. OCM Dual-Hub Klusterlet Registration Over WireGuard
 
-**Resolution:**
-Update `etcd` peer URL in the live data store without resetting etcd or losing state:
+`spoke1` sends heartbeats to both hubs simultaneously over WireGuard overlay network.
+
+### Step 6.1: Join `primaryhub`
+
+1. **On `primaryhub`**:
+   ```bash
+   KUBECONFIG=/home/primaryhub/.kube/config-hubs clusteradm get token --context primaryhub
+   ```
+2. **On `spoke1`**:
+   ```bash
+   clusteradm join \
+     --hub-token <PRIMARY_HUB_TOKEN> \
+     --hub-apiserver https://10.100.0.1:6443 \
+     --cluster-name spoke1 \
+     --wait
+   ```
+3. **On `primaryhub`**:
+   ```bash
+   KUBECONFIG=/home/primaryhub/.kube/config-hubs kubectl --context primaryhub certificate approve <CSR_NAME>
+   KUBECONFIG=/home/primaryhub/.kube/config-hubs clusteradm accept --clusters spoke1 --context primaryhub --skip-approve-check
+   ```
+
+### Step 6.2: Join `secondaryhub`
+
+1. **On `primaryhub`**:
+   ```bash
+   KUBECONFIG=/home/primaryhub/.kube/config-hubs clusteradm get token --context secondaryhub
+   ```
+2. **On `spoke1`**:
+   ```bash
+   kubectl create namespace open-cluster-management-agent-secondaryhub --dry-run=client -o yaml | kubectl apply -f -
+
+   openssl s_client -connect 10.100.0.2:6443 -showcerts </dev/null 2>/dev/null | \
+     sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > /tmp/secondary_ca.crt
+   SECONDARY_CA=$(base64 -w0 /tmp/secondary_ca.crt)
+
+   kubectl create secret generic bootstrap-hub-kubeconfig \
+     -n open-cluster-management-agent-secondaryhub \
+     --from-literal=kubeconfig="apiVersion: v1
+   clusters:
+   - cluster:
+       certificate-authority-data: $SECONDARY_CA
+       server: https://10.100.0.2:6443
+     name: secondaryhub
+   contexts:
+   - context:
+       cluster: secondaryhub
+       user: bootstrap
+     name: bootstrap
+   current-context: bootstrap
+   kind: Config
+   users:
+   - name: bootstrap
+     user:
+       token: <SECONDARY_HUB_TOKEN>" \
+     --dry-run=client -o yaml | kubectl apply -f -
+
+   kubectl apply -f - <<'EOF'
+   apiVersion: operator.open-cluster-management.io/v1
+   kind: Klusterlet
+   metadata:
+     name: klusterlet-secondaryhub
+   spec:
+     namespace: open-cluster-management-agent-secondaryhub
+     clusterName: spoke1
+     registrationImagePullSpec: quay.io/open-cluster-management/registration:v1.3.1
+     workImagePullSpec: quay.io/open-cluster-management/work:v1.3.1
+     deployOption:
+       mode: Default
+   EOF
+   ```
+3. **On `primaryhub`**:
+   ```bash
+   KUBECONFIG=/home/primaryhub/.kube/config-hubs kubectl --context secondaryhub certificate approve <CSR_NAME>
+   KUBECONFIG=/home/primaryhub/.kube/config-hubs clusteradm accept --clusters spoke1 --context secondaryhub --skip-approve-check
+   ```
+
+---
+
+## 7. Quorum Witness & Failover Controller Setup
+
+### Step 7.1: Quorum Witness Server (on `spoke1`)
 
 ```bash
-# Locate etcdctl snapshot binary:
-ETCDCTL=$(sudo find /var/lib/rancher/rke2 -name "etcdctl" | head -n 1)
-
-# List current member details:
-sudo $ETCDCTL \
-  --endpoints=https://127.0.0.1:2379 \
-  --cacert=/var/lib/rancher/rke2/server/tls/etcd/server-ca.crt \
-  --cert=/var/lib/rancher/rke2/server/tls/etcd/client.crt \
-  --key=/var/lib/rancher/rke2/server/tls/etcd/client.key \
-  member list
-
-# Update peer URL for member ID (e.g., a32461b004ab6884):
-sudo $ETCDCTL \
-  --endpoints=https://127.0.0.1:2379 \
-  --cacert=/var/lib/rancher/rke2/server/tls/etcd/server-ca.crt \
-  --cert=/var/lib/rancher/rke2/server/tls/etcd/client.crt \
-  --key=/var/lib/rancher/rke2/server/tls/etcd/client.key \
-  member update a32461b004ab6884 --peer-urls=https://10.1.0.10:2380
+# Run on spoke1:
+cat > /tmp/witness.sh <<'EOF'
+#!/bin/sh
+while true; do
+  if kubectl get nodes --request-timeout=3s >/dev/null 2>&1; then
+    printf "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nreachable" | nc -l -p 9999 -q 1
+  else
+    printf "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nunreachable" | nc -l -p 9999 -q 1
+  fi
+done
+EOF
+nohup sh /tmp/witness.sh > /tmp/witness.log 2>&1 &
 ```
 
-### 4.3 Cilium eBPF Table Refresh Post IP Migration
+### Step 7.2: Deploy Failover Watchdog (on `secondaryhub`)
 
-**Symptom:**
-```text
-Sending HTTP 502 response: dial tcp 10.42.0.x:10250: connect: network is unreachable
-```
-
-**Resolution:**
-Restart the Cilium DaemonSet to flush stale eBPF routing tables:
+Run on **`primaryhub`**:
 
 ```bash
-kubectl rollout restart ds/cilium -n kube-system
+# 1. Mount kubeconfig secret on secondaryhub:
+KUBECONFIG=/home/primaryhub/.kube/config-hubs kubectl --context secondaryhub \
+  create secret generic hub-kubeconfig \
+  -n kube-system \
+  --from-file=config=/home/primaryhub/.kube/config-hubs \
+  --dry-run=client -o yaml | \
+  KUBECONFIG=/home/primaryhub/.kube/config-hubs kubectl --context secondaryhub apply -f -
+
+# 2. Deploy watchdog Deployment:
+KUBECONFIG=/home/primaryhub/.kube/config-hubs kubectl --context secondaryhub apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: failover-script
+  namespace: kube-system
+data:
+  run.sh: |
+    #!/bin/sh
+    WITNESS_URL="http://10.100.0.3:9999"
+    FAIL_COUNT=0
+    THRESHOLD=3
+    PROMOTED=false
+    KUBECONF="/root/.kube/config"
+
+    echo "[failover] Starting watchdog. Witness: $WITNESS_URL"
+
+    while true; do
+      sleep 5
+
+      if kubectl --kubeconfig=$KUBECONF --context primaryhub \
+           get nodes --request-timeout=3s >/dev/null 2>&1; then
+        if [ "$PROMOTED" = "true" ]; then
+          echo "[failover] primaryhub recovered — executing automatic failback reset"
+          kubectl --kubeconfig=$KUBECONF --context secondaryhub \
+            annotate managedcluster spoke1 failover.hub/active- --overwrite >/dev/null 2>&1 || true
+        elif [ "$FAIL_COUNT" -gt 0 ]; then
+          echo "[failover] primaryhub recovered — resetting counter"
+        fi
+        FAIL_COUNT=0
+        PROMOTED=false
+        continue
+      fi
+
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      echo "[failover] primaryhub UNREACHABLE ($FAIL_COUNT/$THRESHOLD)"
+      [ "$FAIL_COUNT" -lt "$THRESHOLD" ] && continue
+      [ "$PROMOTED" = "true" ] && continue
+
+      WITNESS=$(curl -sk --max-time 5 "$WITNESS_URL" 2>/dev/null || echo "unreachable")
+      echo "[failover] spoke1 witness says: $WITNESS"
+
+      if ! echo "$WITNESS" | grep -q "unreachable"; then
+        echo "[failover] SPLIT-BRAIN SUSPECTED — spoke1 can reach primaryhub. Aborting."
+        FAIL_COUNT=0
+        continue
+      fi
+
+      echo "[failover] QUORUM CONFIRMED (2/2) — starting failover sequence"
+
+      kubectl --kubeconfig=/root/.kube/config --context secondaryhub \
+        annotate managedcluster spoke1 failover.hub/active="true" --overwrite 2>/dev/null && \
+        echo "[failover] OCM spoke1 marked as active on secondaryhub" || true
+
+      echo "[failover] === FAILOVER COMPLETE at $(date -u) ==="
+      PROMOTED=true
+    done
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: failover-controller
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: failover-controller-role
+rules:
+- apiGroups: ["apps"]
+  resources: ["daemonsets"]
+  verbs: ["get", "patch", "update"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["list", "delete"]
+- apiGroups: ["cluster.open-cluster-management.io"]
+  resources: ["managedclusters"]
+  verbs: ["get", "patch", "update", "annotate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: failover-controller-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: failover-controller-role
+subjects:
+- kind: ServiceAccount
+  name: failover-controller
+  namespace: kube-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: failover-controller
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: failover-controller
+  template:
+    metadata:
+      labels:
+        app: failover-controller
+    spec:
+      serviceAccountName: failover-controller
+      containers:
+      - name: controller
+        image: bitnami/kubectl:latest
+        command: ["/bin/sh", "/scripts/run.sh"]
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+        - name: kubeconfig
+          mountPath: /root/.kube
+      volumes:
+      - name: script
+        configMap:
+          name: failover-script
+          defaultMode: 0755
+      - name: kubeconfig
+        secret:
+          secretName: hub-kubeconfig
+EOF
 ```
 
 ---
 
-## 4.4 Inter-Hub Kubeconfig & SCP Communication
+## 8. Live Automated Failover & Failback Test Sequence
 
-Because physical IPs (`10.x.0.10`) are isolated on separate libvirt bridges, all `scp`, `ssh`, and `kubectl` cross-VM operations **must target WireGuard Overlay IPs (`10.100.0.x`)**.
+### Test Step 1: Open Live Watchdog Logs (Terminal 1)
+```bash
+KUBECONFIG=/home/primaryhub/.kube/config-hubs kubectl --context secondaryhub \
+  logs -n kube-system deploy/failover-controller -f
+```
 
-### Copying `rke2.yaml` from `secondaryhub` to `primaryhub`
-
-Since `/etc/rancher/rke2/rke2.yaml` is owned by `root:root` with `0600` permissions on `secondaryhub`:
-
-**Option A (Direct SSH command with sudo):**
+### Test Step 2: Trigger Primary Outage (Terminal 2)
 ```bash
 # Run on primaryhub:
-ssh secondaryhub@10.100.0.2 "sudo cat /etc/rancher/rke2/rke2.yaml" > ~/.kube/config-secondaryhub
+sudo iptables -I INPUT -p tcp --dport 6443 -j REJECT
+sudo iptables -I OUTPUT -p tcp --sport 6443 -j REJECT
 ```
 
-**Option B (Temp file copy):**
-```bash
-# Step 1: On secondaryhub
-sudo cp /etc/rancher/rke2/rke2.yaml /tmp/rke2.yaml
-sudo chmod 644 /tmp/rke2.yaml
+### Test Step 3: Observe Automatic Failover (Terminal 1)
+```text
+[failover] primaryhub UNREACHABLE (1/3)
+[failover] primaryhub UNREACHABLE (2/3)
+[failover] primaryhub UNREACHABLE (3/3)
+[failover] spoke1 witness says: unreachable
+[failover] QUORUM CONFIRMED (2/2) — starting failover sequence
+[failover] OCM spoke1 marked as active on secondaryhub
+[failover] === FAILOVER COMPLETE at ... ===
+```
 
-# Step 2: On primaryhub over WireGuard
-scp secondaryhub@10.100.0.2:/tmp/rke2.yaml ~/.kube/config-secondaryhub
+### Test Step 4: Restore Primary Hub (Terminal 2)
+```bash
+# Run on primaryhub:
+sudo iptables -D INPUT -p tcp --dport 6443 -j REJECT
+sudo iptables -D OUTPUT -p tcp --sport 6443 -j REJECT
+```
+
+### Test Step 5: Observe Automatic Failback (Terminal 1)
+```text
+[failover] primaryhub recovered — executing automatic failback reset
 ```
 
 ---
 
-## 5. Dual-Hub OCM Registration Over WireGuard
+## 9. Verification Matrix & Health Checklist
 
-With separate CIDRs, ARP-based kube-vip is removed. Redundancy is handled natively via **OCM Dual Klusterlets**.
-
-```
-spoke1
-├── open-cluster-management-agent/             → primaryhub   (10.100.0.1:6443)
-└── open-cluster-management-agent-secondaryhub/ → secondaryhub (10.100.0.2:6443)
-```
-
-### Step 5.1: Join `primaryhub` (from `spoke1`)
-
-```bash
-# Get token on primaryhub:
-KUBECONFIG=~/.kube/config-hubs clusteradm get token --context primaryhub
-
-# Join from spoke1 over WireGuard:
-clusteradm join \
-  --hub-token <PRIMARY_HUB_TOKEN> \
-  --hub-apiserver https://10.100.0.1:6443 \
-  --cluster-name spoke1 \
-  --wait
-
-# Approve & Accept on primaryhub:
-KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub certificate approve <CSR_NAME>
-KUBECONFIG=~/.kube/config-hubs clusteradm accept --clusters spoke1 --context primaryhub --skip-approve-check
-```
-
-### Step 5.2: Join `secondaryhub` (from `spoke1`)
-
-```bash
-# Pull CA from secondaryhub over WireGuard:
-openssl s_client -connect 10.100.0.2:6443 -showcerts </dev/null 2>/dev/null | \
-  sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > /tmp/secondary_ca.crt
-SECONDARY_CA=$(base64 -w0 /tmp/secondary_ca.crt)
-
-kubectl create namespace open-cluster-management-agent-secondaryhub --dry-run=client -o yaml | kubectl apply -f -
-
-kubectl create secret generic bootstrap-hub-kubeconfig \
-  -n open-cluster-management-agent-secondaryhub \
-  --from-literal=kubeconfig="apiVersion: v1
-clusters:
-- cluster:
-    certificate-authority-data: $SECONDARY_CA
-    server: https://10.100.0.2:6443
-  name: secondaryhub
-contexts:
-- context:
-    cluster: secondaryhub
-    user: bootstrap
-  name: bootstrap
-current-context: bootstrap
-kind: Config
-users:
-- name: bootstrap
-  user:
-    token: <SECONDARY_HUB_TOKEN>" \
-  --dry-run=client -o yaml | kubectl apply -f -
-
-kubectl apply -f - <<'EOF'
-apiVersion: operator.open-cluster-management.io/v1
-kind: Klusterlet
-metadata:
-  name: klusterlet-secondaryhub
-spec:
-  namespace: open-cluster-management-agent-secondaryhub
-  clusterName: spoke1
-  registrationImagePullSpec: quay.io/open-cluster-management/registration:v1.3.1
-  workImagePullSpec: quay.io/open-cluster-management/work:v1.3.1
-  deployOption:
-    mode: Default
-EOF
-
-# Approve & Accept on secondaryhub:
-KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub certificate approve <CSR_NAME>
-KUBECONFIG=~/.kube/config-hubs clusteradm accept --clusters spoke1 --context secondaryhub --skip-approve-check
-```
-
----
-
-## 6. Failover Controller Watchdog Update
-
-The Failover Controller running on `secondaryhub` monitors `primaryhub` and the `spoke1` witness server over WireGuard overlay IPs.
-
-Update ConfigMap `/scripts/run.sh` to target WireGuard IPs:
-
-```bash
-WITNESS_URL="http://10.100.0.3:9999"
-PRIMARY_HUB_IP="10.100.0.1"
-```
-
----
-
-## 7. Verification Matrix
-
-| Verification Step | Command | Expected Result |
+| Verification Item | Execution Command | Success Criteria |
 | :--- | :--- | :--- |
-| **WireGuard Ping** | `ping -c 2 10.100.0.2` (from primaryhub) | `0% packet loss` |
-| **RKE2 API Server** | `kubectl get nodes` | `primaryhub Ready` |
-| **OCM Primary Hub** | `kubectl --context primaryhub get managedcluster spoke1` | `AVAILABLE: True` |
-| **OCM Secondary Hub** | `kubectl --context secondaryhub get managedcluster spoke1` | `AVAILABLE: True` |
+| **Host WireGuard Mesh** | `sudo wg show wg0` | All peers active with recent handshakes |
+| **Cilium In-Cluster Encryption** | `kubectl exec ds/cilium -n kube-system -- cilium-dbg status \| grep -i wireguard` | `Encryption: Wireguard` active on port 51871 |
+| **ClusterMesh Connection** | `cilium clustermesh status --context primaryhub --helm-release-name rke2-cilium` | `1/1 connected`, `KVStoreMesh 1/1 connected` |
+| **OCM Primary ManagedCluster** | `kubectl --context primaryhub get managedcluster spoke1` | `JOINED: True`, `AVAILABLE: True` |
+| **OCM Secondary ManagedCluster** | `kubectl --context secondaryhub get managedcluster spoke1` | `JOINED: True`, `AVAILABLE: True` |
 | **Quorum Witness** | `curl http://10.100.0.3:9999` | `reachable` |
-
----
-
-## 8. Troubleshooting & Operational Field Lessons Learned
-
-### 8.1 TLS SAN Verification Failure on WireGuard Overlay IPs (`10.100.0.x`)
-
-- **Symptom:**
-  ```text
-  Unable to connect to the server: tls: failed to verify certificate:
-  x509: certificate is valid for 10.1.0.10, 127.0.0.1... not 10.100.0.1
-  ```
-- **Root Cause:**
-  When connecting to RKE2 API servers over WireGuard Overlay IPs (`10.100.0.1` / `10.100.0.2`), Go TLS client rejects the connection if those IPs are not explicitly listed under `tls-san` in `/etc/rancher/rke2/config.yaml`.
-- **Resolution:**
-  1. Update `/etc/rancher/rke2/config.yaml` on each hub to include its WireGuard overlay IP:
-     - `primaryhub`: add `"10.100.0.1"`
-     - `secondaryhub`: add `"10.100.0.2"`
-  2. Rotate RKE2 certificates and restart:
-     ```bash
-     sudo systemctl stop rke2-server
-     sudo rke2 certificate rotate
-     sudo systemctl start rke2-server
-     ```
-
----
-
-### 8.2 Duplicate `tls-san:` Keys in `config.yaml`
-
-- **Symptom:**
-  RKE2 server fails to start with `level=fatal msg="Error: preparing..."`.
-- **Root Cause:**
-  YAML parsers take only the **last** occurrence of duplicate keys. If `tls-san:` is appended multiple times, RKE2 ignores earlier SAN entries.
-- **Resolution:**
-  Consolidate all SANs into a single YAML list:
-  ```yaml
-  tls-san:
-    - "10.1.0.10"
-    - "10.100.0.1"
-    - "127.0.0.1"
-    - "localhost"
-    - "primaryhub"
-  ```
-
----
-
-### 8.3 Inter-VM SSH/SCP `Connection Refused` Across Subnets
-
-- **Symptom:**
-  ```text
-  primaryhub@primaryhub:~$ scp secondaryhub@10.2.0.10:/etc/rancher/rke2/rke2.yaml ~/.kube/config-secondaryhub
-  ssh: connect to host 10.2.0.10 port 22: Connection refused
-  ```
-- **Root Cause:**
-  Physical IPs (`10.x.0.10`) reside on separate libvirt bridges. Direct TCP traffic between physical IPs is blocked.
-- **Resolution:**
-  Target the WireGuard Overlay IP (`10.100.0.2`):
-  ```bash
-  ssh secondaryhub@10.100.0.2 "sudo cat /etc/rancher/rke2/rke2.yaml" > ~/.kube/config-secondaryhub
-  ```
-
----
-
-### 8.4 `etcd` Peer URL Mismatch Post IP Migration
-
-- **Symptom:**
-  RKE2 startup loop logging `this server is not a member of the etcd cluster. Found [...=https://192.168.122.225:2380], expect: [...=https://10.1.0.10:2380]`.
-- **Root Cause:**
-  `etcd`'s on-disk raft metadata preserves old peer URLs across server restarts.
-- **Resolution:**
-  Update peer URL using `etcdctl member update`:
-  ```bash
-  ETCDCTL=$(sudo find /var/lib/rancher/rke2 -name "etcdctl" | head -n 1)
-  sudo $ETCDCTL --endpoints=https://127.0.0.1:2379 \
-    --cacert=/var/lib/rancher/rke2/server/tls/etcd/server-ca.crt \
-    --cert=/var/lib/rancher/rke2/server/tls/etcd/client.crt \
-    --key=/var/lib/rancher/rke2/server/tls/etcd/client.key \
-    member list
-
-  sudo $ETCDCTL --endpoints=https://127.0.0.1:2379 \
-    --cacert=/var/lib/rancher/rke2/server/tls/etcd/server-ca.crt \
-    --cert=/var/lib/rancher/rke2/server/tls/etcd/client.crt \
-    --key=/var/lib/rancher/rke2/server/tls/etcd/client.key \
-    member update <MEMBER_ID> --peer-urls=https://10.1.0.10:2380
-  ```
+| **Failover Controller Watchdog** | `kubectl --context secondaryhub logs -n kube-system deploy/failover-controller` | `[failover] Starting watchdog...` |
