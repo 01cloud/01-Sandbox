@@ -247,3 +247,438 @@ KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub get managedcluster
 > [updated-multi-cluster-architecture-and-ha-strategy.md](./updated-multi-cluster-architecture-and-ha-strategy.md).
 > All 19 operational issues encountered during implementation have been recorded with root causes
 > and resolutions for future reference.
+
+---
+
+## Configuration Reference — Exact Code Applied
+
+This section contains the exact configuration applied to each node to make automated failover work.
+
+---
+
+### Component 1: kube-vip — Deployed on BOTH Hubs
+
+kube-vip runs as a DaemonSet on **both** `primaryhub` and `secondaryhub`. They compete via a
+Kubernetes Lease lock (`plndr-cp-lock`). The winner binds the VIP to its NIC. The loser stays
+in standby. When the leader fails, the standby wins the lease and sends a Gratuitous ARP to
+reroute all traffic instantly.
+
+#### RBAC (applied to both hubs)
+
+```bash
+for CTX in primaryhub secondaryhub; do
+  KUBECONFIG=~/.kube/config-hubs kubectl --context $CTX apply -f - <<'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-vip
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-vip-role
+rules:
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "create", "update", "patch"]
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-vip-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-vip-role
+subjects:
+- kind: ServiceAccount
+  name: kube-vip
+  namespace: kube-system
+EOF
+done
+```
+
+#### DaemonSet — primaryhub
+
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-vip
+  namespace: kube-system
+  labels:
+    app: kube-vip
+spec:
+  selector:
+    matchLabels:
+      app: kube-vip
+  template:
+    metadata:
+      labels:
+        app: kube-vip
+    spec:
+      serviceAccountName: kube-vip
+      hostNetwork: true
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      containers:
+      - name: kube-vip
+        image: ghcr.io/kube-vip/kube-vip:v0.8.2
+        imagePullPolicy: IfNotPresent
+        args:
+        - manager
+        - --controlplane
+        - --arp
+        - --interface
+        - enp1s0
+        - --address
+        - "192.168.122.230"
+        - --leaderElection
+        - --leaseDuration
+        - "5"
+        - --leaseRenewDuration
+        - "3"
+        - --leaseRetry
+        - "1"
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN", "NET_RAW", "SYS_TIME"]
+EOF
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub rollout restart ds/kube-vip -n kube-system
+```
+
+#### DaemonSet — secondaryhub
+
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub apply -f - <<'EOF'
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kube-vip
+  namespace: kube-system
+  labels:
+    app: kube-vip
+spec:
+  selector:
+    matchLabels:
+      app: kube-vip
+  template:
+    metadata:
+      labels:
+        app: kube-vip
+    spec:
+      serviceAccountName: kube-vip
+      hostNetwork: true
+      tolerations:
+      - effect: NoSchedule
+        operator: Exists
+      containers:
+      - name: kube-vip
+        image: ghcr.io/kube-vip/kube-vip:v0.8.2
+        imagePullPolicy: IfNotPresent
+        args:
+        - manager
+        - --controlplane
+        - --arp
+        - --interface
+        - enp1s0
+        - --address
+        - "192.168.122.230"
+        - --leaderElection
+        - --leaseDuration
+        - "5"
+        - --leaseRenewDuration
+        - "3"
+        - --leaseRetry
+        - "1"
+        securityContext:
+          capabilities:
+            add: ["NET_ADMIN", "NET_RAW", "SYS_TIME"]
+EOF
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub rollout restart ds/kube-vip -n kube-system
+```
+
+#### Verify kube-vip state
+
+```bash
+# primaryhub should OWN the VIP:
+ssh 192.168.122.225 "ip addr show enp1s0 | grep 192.168.122.230"
+# Expected: inet 192.168.122.230/32 scope global enp1s0
+
+# secondaryhub should be STANDBY (no VIP):
+ssh 192.168.122.143 "ip addr show enp1s0 | grep 192.168.122.230"
+# Expected: (empty)
+
+# Check which node holds the lease:
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub \
+  get lease plndr-cp-lock -n kube-system -o yaml | grep holderIdentity
+```
+
+---
+
+### Component 2: Quorum Witness — Deployed on spoke1
+
+A lightweight HTTP server on `spoke1` that the failover controller queries independently to
+confirm the outage. Prevents false failovers (split-brain protection).
+
+```bash
+# Run on spoke1:
+cat > /tmp/witness.sh <<'WITNESSEOF'
+#!/bin/sh
+while true; do
+  if kubectl get nodes --request-timeout=3s >/dev/null 2>&1; then
+    printf "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nreachable" | nc -l -p 9999 -q 1
+  else
+    printf "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nunreachable" | nc -l -p 9999 -q 1
+  fi
+done
+WITNESSEOF
+nohup sh /tmp/witness.sh > /tmp/witness.log 2>&1 &
+echo "Witness running on port 9999"
+
+# Verify from primaryhub:
+curl http://192.168.122.52:9999
+# Expected: reachable
+```
+
+---
+
+### Component 3: Failover Controller — Deployed on secondaryhub
+
+Watchdog monitoring `primaryhub` every 5 seconds with 2-of-2 quorum before triggering failover.
+Includes automatic failback detection.
+
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub apply -f - <<'EOF'
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: failover-script
+  namespace: kube-system
+data:
+  run.sh: |
+    #!/bin/sh
+    WITNESS_URL="http://192.168.122.52:9999"
+    FAIL_COUNT=0
+    THRESHOLD=3
+    PROMOTED=false
+    KUBECONF="/root/.kube/config"
+    echo "[failover] Starting watchdog. Witness: $WITNESS_URL"
+    while true; do
+      sleep 5
+      if kubectl --kubeconfig=$KUBECONF --context primaryhub \
+           get nodes --request-timeout=3s >/dev/null 2>&1; then
+        if [ "$PROMOTED" = "true" ]; then
+          echo "[failover] primaryhub recovered — executing automatic failback reset"
+          kubectl --kubeconfig=$KUBECONF --context secondaryhub \
+            annotate managedcluster spoke1 failover.hub/active- --overwrite >/dev/null 2>&1 || true
+        elif [ "$FAIL_COUNT" -gt 0 ]; then
+          echo "[failover] primaryhub recovered — resetting counter"
+        fi
+        FAIL_COUNT=0
+        PROMOTED=false
+        continue
+      fi
+      FAIL_COUNT=$((FAIL_COUNT + 1))
+      echo "[failover] primaryhub UNREACHABLE ($FAIL_COUNT/$THRESHOLD)"
+      [ "$FAIL_COUNT" -lt "$THRESHOLD" ] && continue
+      [ "$PROMOTED" = "true" ] && continue
+      WITNESS=$(curl -sk --max-time 5 "$WITNESS_URL" 2>/dev/null || echo "unreachable")
+      echo "[failover] spoke1 witness says: $WITNESS"
+      if ! echo "$WITNESS" | grep -q "unreachable"; then
+        echo "[failover] SPLIT-BRAIN SUSPECTED — spoke1 can reach primaryhub. Aborting."
+        FAIL_COUNT=0
+        continue
+      fi
+      echo "[failover] QUORUM CONFIRMED (2/2) — starting failover sequence"
+      kubectl --kubeconfig=/root/.kube/config --context primaryhub \
+        delete pod -n kube-system -l app=kube-vip 2>/dev/null && \
+        echo "[failover] primaryhub kube-vip fenced" || \
+        echo "[failover] fence via API failed (node down) — expected"
+      kubectl --kubeconfig=/root/.kube/config --context secondaryhub \
+        cnpg promote postgresql-secondary -n opensandbox-system 2>/dev/null && \
+        echo "[failover] PostgreSQL promoted to Primary" || \
+        echo "[failover] PostgreSQL skipped (not deployed yet)"
+      kubectl --kubeconfig=/root/.kube/config --context secondaryhub \
+        annotate managedcluster spoke1 failover.hub/active="true" --overwrite 2>/dev/null && \
+        echo "[failover] OCM spoke1 marked as active on secondaryhub" || true
+      echo "[failover] === FAILOVER COMPLETE at $(date -u) ==="
+      PROMOTED=true
+    done
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: failover-controller
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: failover-controller-role
+rules:
+- apiGroups: ["apps"]
+  resources: ["daemonsets"]
+  verbs: ["get", "patch", "update"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["list", "delete"]
+- apiGroups: ["cluster.open-cluster-management.io"]
+  resources: ["managedclusters"]
+  verbs: ["get", "patch", "update", "annotate"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: failover-controller-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: failover-controller-role
+subjects:
+- kind: ServiceAccount
+  name: failover-controller
+  namespace: kube-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: failover-controller
+  namespace: kube-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: failover-controller
+  template:
+    metadata:
+      labels:
+        app: failover-controller
+    spec:
+      serviceAccountName: failover-controller
+      containers:
+      - name: controller
+        image: bitnami/kubectl:latest
+        command: ["/bin/sh", "/scripts/run.sh"]
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+        - name: kubeconfig
+          mountPath: /root/.kube
+      volumes:
+      - name: script
+        configMap:
+          name: failover-script
+          defaultMode: 0755
+      - name: kubeconfig
+        secret:
+          secretName: hub-kubeconfig
+EOF
+```
+
+#### Verify failover controller
+
+```bash
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub \
+  get pods -n kube-system -l app=failover-controller
+
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub \
+  logs -n kube-system deploy/failover-controller --tail=5
+# Expected (while primary is UP):
+# [failover] Starting watchdog. Witness: http://192.168.122.52:9999
+```
+
+---
+
+### Component 4: OCM Dual Klusterlet — Deployed on spoke1
+
+Two independent Klusterlet instances so both hubs always receive heartbeats simultaneously.
+
+#### Klusterlet 1 — primaryhub (via clusteradm join)
+
+```bash
+# Run on spoke1:
+clusteradm join \
+  --hub-token <PRIMARY_HUB_TOKEN> \
+  --hub-apiserver https://192.168.122.225:6443 \
+  --cluster-name spoke1 \
+  --force-internal-endpoint-lookup
+
+# Approve on primaryhub:
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub get csr | grep Pending
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub certificate approve <CSR_NAME>
+KUBECONFIG=~/.kube/config-hubs clusteradm accept --clusters spoke1 \
+  --context primaryhub --skip-approve-check
+```
+
+#### Klusterlet 2 — secondaryhub (manual Klusterlet CR)
+
+```bash
+# Run on spoke1:
+openssl s_client -connect 192.168.122.143:6443 -showcerts </dev/null 2>/dev/null | \
+  sed -ne '/-BEGIN CERTIFICATE-/,/-END CERTIFICATE-/p' > /tmp/secondary_ca.crt
+SECONDARY_CA=$(base64 -w0 /tmp/secondary_ca.crt)
+
+kubectl create namespace open-cluster-management-agent-secondaryhub
+
+kubectl create secret generic bootstrap-hub-kubeconfig \
+  -n open-cluster-management-agent-secondaryhub \
+  --from-literal=kubeconfig="apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: $SECONDARY_CA
+    server: https://192.168.122.143:6443
+  name: secondaryhub
+contexts:
+- context:
+    cluster: secondaryhub
+    user: bootstrap
+  name: bootstrap
+current-context: bootstrap
+kind: Config
+users:
+- name: bootstrap
+  user:
+    token: <SECONDARY_HUB_TOKEN>" \
+  --dry-run=client -o yaml | kubectl apply -f -
+
+kubectl apply -f - <<'EOF'
+apiVersion: operator.open-cluster-management.io/v1
+kind: Klusterlet
+metadata:
+  name: klusterlet-secondaryhub
+spec:
+  namespace: open-cluster-management-agent-secondaryhub
+  clusterName: spoke1
+  registrationImagePullSpec: quay.io/open-cluster-management/registration:v1.3.1
+  workImagePullSpec: quay.io/open-cluster-management/work:v1.3.1
+  deployOption:
+    mode: Default
+EOF
+
+# Approve on secondaryhub:
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub get csr | grep Pending
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub certificate approve <CSR_NAME>
+KUBECONFIG=~/.kube/config-hubs clusteradm accept --clusters spoke1 \
+  --context secondaryhub --skip-approve-check
+```
+
+#### Verify dual Klusterlets
+
+```bash
+kubectl get pods -n open-cluster-management-agent
+kubectl get pods -n open-cluster-management-agent-secondaryhub
+
+KUBECONFIG=~/.kube/config-hubs kubectl --context primaryhub get managedcluster spoke1
+KUBECONFIG=~/.kube/config-hubs kubectl --context secondaryhub get managedcluster spoke1
+# Expected: JOINED: True, AVAILABLE: True on BOTH
+```
