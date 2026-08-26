@@ -146,6 +146,20 @@ sudo sed -i "s|PRIVKEY_PLACEHOLDER|$(sudo cat /etc/wireguard/privatekey)|" /etc/
 sudo systemctl enable --now wg-quick@wg0
 ```
 
+### Step 3.5: Architectural Note — Host-Level WireGuard vs. Cilium CNI WireGuard
+
+> **Decision:** **Do NOT enable Cilium CNI WireGuard (`cilium config set enable-wireguard true` or `encrypt-node: "true"`).**
+
+#### Reason:
+- **Host-Level WireGuard (`wg0`)** is already running at the Linux kernel OS layer. It encrypts **100% of network packets** leaving each VM (including API Server, SSH, Kubelet, Pod-to-Pod overlay, OCM, and Failover Controller traffic) over `10.100.0.x`.
+- Enabling Cilium WireGuard in addition to Host WireGuard creates **double-encryption** (encrypting data twice), introducing unnecessary CPU overhead and redundant `cilium_wg0` virtual interfaces without adding security.
+
+| Scope | Host WireGuard (`wg0`) — **APPLIED** | Cilium CNI WireGuard (`enable-wireguard`) — **NOT NEEDED** |
+| :--- | :--- | :--- |
+| **Encrypted Coverage** | All Host + Pod + API + Control plane traffic | Pod-to-Pod overlay traffic only |
+| **IP Range** | WireGuard Mesh `10.100.0.0/24` | Pod Subnet `10.42.0.0/16` |
+| **Status** | Systemd Service (`wg-quick@wg0`) | Omitted (prevents double encryption) |
+
 ---
 
 ## 4. RKE2 Configuration Updates & Troubleshooting
