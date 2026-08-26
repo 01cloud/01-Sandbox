@@ -375,7 +375,7 @@ sudo systemctl start rke2-server
 cat > /tmp/witness.sh <<'EOF'
 #!/bin/sh
 while true; do
-  if kubectl get nodes --request-timeout=3s >/dev/null 2>&1; then
+  if curl -sk --max-time 3 https://10.100.0.1:6443/version >/dev/null 2>&1; then
     printf "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nreachable" | nc -l -p 9999 -q 1
   else
     printf "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\nunreachable" | nc -l -p 9999 -q 1
