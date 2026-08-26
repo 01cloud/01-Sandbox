@@ -146,19 +146,41 @@ sudo sed -i "s|PRIVKEY_PLACEHOLDER|$(sudo cat /etc/wireguard/privatekey)|" /etc/
 sudo systemctl enable --now wg-quick@wg0
 ```
 
-### Step 3.5: Architectural Note — Host-Level WireGuard vs. Cilium CNI WireGuard
+### Step 3.5: Cilium In-Cluster WireGuard Encryption Setup
 
-> **Decision:** **Do NOT enable Cilium CNI WireGuard (`cilium config set enable-wireguard true` or `encrypt-node: "true"`).**
+In addition to Host OS-level WireGuard (`wg0`), Cilium's native eBPF-managed WireGuard encryption is enabled inside the Kubernetes clusters for container Pod-to-Pod and Node-to-Node security.
 
-#### Reason:
-- **Host-Level WireGuard (`wg0`)** is already running at the Linux kernel OS layer. It encrypts **100% of network packets** leaving each VM (including API Server, SSH, Kubelet, Pod-to-Pod overlay, OCM, and Failover Controller traffic) over `10.100.0.x`.
-- Enabling Cilium WireGuard in addition to Host WireGuard creates **double-encryption** (encrypting data twice), introducing unnecessary CPU overhead and redundant `cilium_wg0` virtual interfaces without adding security.
+#### Configuration Commands:
 
-| Scope | Host WireGuard (`wg0`) — **APPLIED** | Cilium CNI WireGuard (`enable-wireguard`) — **NOT NEEDED** |
-| :--- | :--- | :--- |
-| **Encrypted Coverage** | All Host + Pod + API + Control plane traffic | Pod-to-Pod overlay traffic only |
-| **IP Range** | WireGuard Mesh `10.100.0.0/24` | Pod Subnet `10.42.0.0/16` |
-| **Status** | Systemd Service (`wg-quick@wg0`) | Omitted (prevents double encryption) |
+```bash
+# Enable WireGuard & Node Encryption on primaryhub:
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context primaryhub -n kube-system patch configmap cilium-config \
+  --type merge -p '{"data":{"enable-wireguard":"true","encrypt-node":"true"}}'
+
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context primaryhub -n kube-system rollout restart daemonset/cilium
+
+# Enable WireGuard & Node Encryption on secondaryhub:
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context secondaryhub -n kube-system patch configmap cilium-config \
+  --type merge -p '{"data":{"enable-wireguard":"true","encrypt-node":"true"}}'
+
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context secondaryhub -n kube-system rollout restart daemonset/cilium
+```
+
+#### Verification:
+
+```bash
+KUBECONFIG=~/.kube/config-hubs \
+  kubectl --context primaryhub -n kube-system exec ds/cilium -- cilium-dbg status | grep -i wireguard
+```
+
+Expected output:
+```text
+Encryption: Wireguard [NodeEncryption: OptedOut, cilium_wg0 (Pubkey: ..., Port: 51871, Peers: 0)]
+```
 
 ---
 
