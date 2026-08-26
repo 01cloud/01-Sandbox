@@ -401,3 +401,88 @@ PRIMARY_HUB_IP="10.100.0.1"
 | **OCM Primary Hub** | `kubectl --context primaryhub get managedcluster spoke1` | `AVAILABLE: True` |
 | **OCM Secondary Hub** | `kubectl --context secondaryhub get managedcluster spoke1` | `AVAILABLE: True` |
 | **Quorum Witness** | `curl http://10.100.0.3:9999` | `reachable` |
+
+---
+
+## 8. Troubleshooting & Operational Field Lessons Learned
+
+### 8.1 TLS SAN Verification Failure on WireGuard Overlay IPs (`10.100.0.x`)
+
+- **Symptom:**
+  ```text
+  Unable to connect to the server: tls: failed to verify certificate:
+  x509: certificate is valid for 10.1.0.10, 127.0.0.1... not 10.100.0.1
+  ```
+- **Root Cause:**
+  When connecting to RKE2 API servers over WireGuard Overlay IPs (`10.100.0.1` / `10.100.0.2`), Go TLS client rejects the connection if those IPs are not explicitly listed under `tls-san` in `/etc/rancher/rke2/config.yaml`.
+- **Resolution:**
+  1. Update `/etc/rancher/rke2/config.yaml` on each hub to include its WireGuard overlay IP:
+     - `primaryhub`: add `"10.100.0.1"`
+     - `secondaryhub`: add `"10.100.0.2"`
+  2. Rotate RKE2 certificates and restart:
+     ```bash
+     sudo systemctl stop rke2-server
+     sudo rke2 certificate rotate
+     sudo systemctl start rke2-server
+     ```
+
+---
+
+### 8.2 Duplicate `tls-san:` Keys in `config.yaml`
+
+- **Symptom:**
+  RKE2 server fails to start with `level=fatal msg="Error: preparing..."`.
+- **Root Cause:**
+  YAML parsers take only the **last** occurrence of duplicate keys. If `tls-san:` is appended multiple times, RKE2 ignores earlier SAN entries.
+- **Resolution:**
+  Consolidate all SANs into a single YAML list:
+  ```yaml
+  tls-san:
+    - "10.1.0.10"
+    - "10.100.0.1"
+    - "127.0.0.1"
+    - "localhost"
+    - "primaryhub"
+  ```
+
+---
+
+### 8.3 Inter-VM SSH/SCP `Connection Refused` Across Subnets
+
+- **Symptom:**
+  ```text
+  primaryhub@primaryhub:~$ scp secondaryhub@10.2.0.10:/etc/rancher/rke2/rke2.yaml ~/.kube/config-secondaryhub
+  ssh: connect to host 10.2.0.10 port 22: Connection refused
+  ```
+- **Root Cause:**
+  Physical IPs (`10.x.0.10`) reside on separate libvirt bridges. Direct TCP traffic between physical IPs is blocked.
+- **Resolution:**
+  Target the WireGuard Overlay IP (`10.100.0.2`):
+  ```bash
+  ssh secondaryhub@10.100.0.2 "sudo cat /etc/rancher/rke2/rke2.yaml" > ~/.kube/config-secondaryhub
+  ```
+
+---
+
+### 8.4 `etcd` Peer URL Mismatch Post IP Migration
+
+- **Symptom:**
+  RKE2 startup loop logging `this server is not a member of the etcd cluster. Found [...=https://192.168.122.225:2380], expect: [...=https://10.1.0.10:2380]`.
+- **Root Cause:**
+  `etcd`'s on-disk raft metadata preserves old peer URLs across server restarts.
+- **Resolution:**
+  Update peer URL using `etcdctl member update`:
+  ```bash
+  ETCDCTL=$(sudo find /var/lib/rancher/rke2 -name "etcdctl" | head -n 1)
+  sudo $ETCDCTL --endpoints=https://127.0.0.1:2379 \
+    --cacert=/var/lib/rancher/rke2/server/tls/etcd/server-ca.crt \
+    --cert=/var/lib/rancher/rke2/server/tls/etcd/client.crt \
+    --key=/var/lib/rancher/rke2/server/tls/etcd/client.key \
+    member list
+
+  sudo $ETCDCTL --endpoints=https://127.0.0.1:2379 \
+    --cacert=/var/lib/rancher/rke2/server/tls/etcd/server-ca.crt \
+    --cert=/var/lib/rancher/rke2/server/tls/etcd/client.crt \
+    --key=/var/lib/rancher/rke2/server/tls/etcd/client.key \
+    member update <MEMBER_ID> --peer-urls=https://10.1.0.10:2380
+  ```
