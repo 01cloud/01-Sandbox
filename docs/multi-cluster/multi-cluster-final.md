@@ -234,6 +234,32 @@ kubectl rollout restart ds/cilium -n kube-system
 
 ---
 
+## 4.4 Inter-Hub Kubeconfig & SCP Communication
+
+Because physical IPs (`10.x.0.10`) are isolated on separate libvirt bridges, all `scp`, `ssh`, and `kubectl` cross-VM operations **must target WireGuard Overlay IPs (`10.100.0.x`)**.
+
+### Copying `rke2.yaml` from `secondaryhub` to `primaryhub`
+
+Since `/etc/rancher/rke2/rke2.yaml` is owned by `root:root` with `0600` permissions on `secondaryhub`:
+
+**Option A (Direct SSH command with sudo):**
+```bash
+# Run on primaryhub:
+ssh secondaryhub@10.100.0.2 "sudo cat /etc/rancher/rke2/rke2.yaml" > ~/.kube/config-secondaryhub
+```
+
+**Option B (Temp file copy):**
+```bash
+# Step 1: On secondaryhub
+sudo cp /etc/rancher/rke2/rke2.yaml /tmp/rke2.yaml
+sudo chmod 644 /tmp/rke2.yaml
+
+# Step 2: On primaryhub over WireGuard
+scp secondaryhub@10.100.0.2:/tmp/rke2.yaml ~/.kube/config-secondaryhub
+```
+
+---
+
 ## 5. Dual-Hub OCM Registration Over WireGuard
 
 With separate CIDRs, ARP-based kube-vip is removed. Redundancy is handled natively via **OCM Dual Klusterlets**.

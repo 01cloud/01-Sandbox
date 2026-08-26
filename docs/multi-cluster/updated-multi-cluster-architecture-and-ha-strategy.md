@@ -3611,3 +3611,25 @@ This section documents every issue encountered during the implementation and tes
   kubectl delete pod -n open-cluster-management-agent-secondaryhub --all
   ```
   Everything is self-healing — **no configuration is lost across reboots**. Bootstrap tokens are not needed again (client certificates in `hub-kubeconfig-secret` are valid for 5 years).
+
+---
+
+### Issue 20: Inter-VM SSH/SCP `Connection Refused` Across Separate CIDR Subnets
+
+- **Symptom:**
+  ```text
+  primaryhub@primaryhub:~$ scp secondaryhub@10.2.0.10:/etc/rancher/rke2/rke2.yaml ~/.kube/config-secondaryhub
+  ssh: connect to host 10.2.0.10 port 22: Connection refused
+  ```
+- **Root Cause:**
+  Each VM resides on a distinct, isolated libvirt bridge (`10.1.0.0/24`, `10.2.0.0/24`, `10.3.0.0/24`). Raw cross-bridge TCP traffic to physical IPs is dropped/blocked by design.
+- **Resolution:**
+  Target the **WireGuard Overlay IP (`10.100.0.x`)** instead of the physical IP:
+  ```bash
+  # Option A: SSH with sudo inline
+  ssh secondaryhub@10.100.0.2 "sudo cat /etc/rancher/rke2/rke2.yaml" > ~/.kube/config-secondaryhub
+
+  # Option B: SCP via temp file on secondaryhub
+  # On secondaryhub: sudo cp /etc/rancher/rke2/rke2.yaml /tmp/rke2.yaml && sudo chmod 644 /tmp/rke2.yaml
+  # On primaryhub:   scp secondaryhub@10.100.0.2:/tmp/rke2.yaml ~/.kube/config-secondaryhub
+  ```
