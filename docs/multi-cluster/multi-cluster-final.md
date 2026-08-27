@@ -599,8 +599,6 @@ sudo iptables -D OUTPUT -p tcp --sport 6443 -j REJECT
 
 ---
 
-## 9. Verification Matrix & Health Checklist
-
 | Verification Item | Execution Command | Success Criteria |
 | :--- | :--- | :--- |
 | **Host WireGuard Mesh** | `sudo wg show wg0` | All peers active with recent handshakes |
@@ -610,3 +608,44 @@ sudo iptables -D OUTPUT -p tcp --sport 6443 -j REJECT
 | **OCM Secondary ManagedCluster** | `kubectl --context secondaryhub get managedcluster spoke1` | `JOINED: True`, `AVAILABLE: True` |
 | **Quorum Witness** | `curl http://10.100.0.3:9999` | `reachable` |
 | **Failover Controller Watchdog** | `kubectl --context secondaryhub logs -n kube-system deploy/failover-controller` | `[failover] Starting watchdog...` |
+
+---
+
+## 10. Production Persistence & Reboot Best Practices
+
+To guarantee that all WireGuard tunnels, network routing, and Kubernetes services **automatically survive host or VM reboots** without requiring manual commands:
+
+### 10.1 Host Machine Persistence (Run Once on Hypervisor Host)
+
+```bash
+# 1. Permanent IP forwarding:
+echo "net.ipv4.ip_forward = 1" | sudo tee /etc/sysctl.d/99-ipforward.conf
+sudo sysctl -p /etc/sysctl.d/99-ipforward.conf
+
+# 2. Permanent iptables bridge forwarding (UDP 51820):
+sudo apt update && sudo apt install -y iptables-persistent netfilter-persistent
+sudo netfilter-persistent save
+sudo systemctl enable netfilter-persistent
+```
+
+### 10.2 VM Persistence (Run Once on `primaryhub`, `secondaryhub`, `spoke1`)
+
+```bash
+# 1. Enable WireGuard tunnel on boot:
+sudo systemctl enable wg-quick@wg0
+
+# 2. Enable RKE2 Control Plane / Agent on boot:
+sudo systemctl enable rke2-server
+```
+
+---
+
+## 11. Local Lab vs. Cloud Production Architectural Differences
+
+| Deployment Aspect | Local Machine Lab (Libvirt/KVM) | Cloud Production (AWS / Azure / GCP / Bare-Metal) |
+| :--- | :--- | :--- |
+| **Hypervisor Host Rules** | Required (`iptables` rules on local bridge interfaces). | **Zero host configuration.** You never touch the cloud hypervisor. |
+| **Subnet Routing** | Isolated local bridges (`virbr-phub`, `virbr-shub`). | Handled natively by **VPC Peering** or **Transit Gateway**. |
+| **Firewall / Security** | Host iptables rules. | **Cloud Security Groups** (1-click rule: Inbound `UDP 51820`). |
+| **WireGuard Endpoints** | Internal physical bridge IPs (`10.1.0.10`). | Cloud Elastic / Public IPs (`Endpoint = 54.x.x.x:51820`). |
+| **Provisioning** | Manual VM creation. | Automated via **Terraform** + **Ansible**. |
