@@ -27,7 +27,7 @@ const SecurityPipeline = () => {
             Automated <span className="text-gradient">Security Toolchain</span>
           </h2>
           <p className="text-muted-foreground mt-5 text-lg">
-            Every static audit runs inside hardened <strong>gVisor user-space kernel pods</strong> or <strong>Kata MicroVMs</strong>, isolating your host while analyzing repository dependencies.
+            Every static audit runs inside hardened <strong>gVisor user-space kernel pods</strong> or <strong>MicroVMs</strong>, isolating your host while analyzing repository dependencies.
           </p>
           <div className="mt-6 flex flex-wrap justify-center items-center gap-3">
             <span className="px-3 py-1 rounded-full text-xs font-mono font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20 dark:text-violet-400">
@@ -35,7 +35,7 @@ const SecurityPipeline = () => {
             </span>
             <span className="text-muted-foreground text-xs">•</span>
             <span className="px-3 py-1 rounded-full text-xs font-mono font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 dark:text-emerald-400">
-              Kata Container MicroVM Hypervisor
+              MicroVM Hypervisor
             </span>
           </div>
         </motion.div>

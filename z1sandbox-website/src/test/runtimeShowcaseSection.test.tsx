@@ -15,20 +15,20 @@ describe("RuntimeShowcaseSection Component", () => {
     render(<RuntimeShowcaseSection />);
 
     expect(screen.getByRole("button", { name: /gVisor Sandbox/i })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: /Kata Containers/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /MicroVM/i })).toBeInTheDocument();
 
     // Default gVisor specifications
     expect(screen.getByText("Kernel Syscall Interception (Sentry)")).toBeInTheDocument();
     expect(screen.getByText(/Go-based Sentry Kernel/i)).toBeInTheDocument();
   });
 
-  it("switches description and technical specs when toggling to Kata Containers", async () => {
+  it("switches description and technical specs when toggling to MicroVM", async () => {
     render(<RuntimeShowcaseSection />);
 
-    const kataButton = screen.getByRole("button", { name: /Kata Containers/i });
-    fireEvent.click(kataButton);
+    const microVmButton = screen.getByRole("button", { name: /MicroVM/i });
+    fireEvent.click(microVmButton);
 
-    // Kata Containers specifications
+    // MicroVM specifications
     expect(await screen.findByText("Hardware VT-x / AMD-V MicroVM Hypervisor")).toBeInTheDocument();
     expect(await screen.findByText(/Firecracker VMM \/ QEMU-lite \+ KVM/i)).toBeInTheDocument();
   });

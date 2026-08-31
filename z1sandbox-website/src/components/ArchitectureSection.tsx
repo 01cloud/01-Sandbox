@@ -24,8 +24,8 @@ const steps = [
   },
   {
     label: "Isolated Runtime Pod",
-    sub: "gVisor & Kata MicroVM",
-    desc: "Executes untrusted code within gVisor-hardened kernel pods or Kata Container hardware microVMs."
+    sub: "gVisor & MicroVM",
+    desc: "Executes untrusted code within gVisor-hardened kernel pods or hardware MicroVMs."
   },
   {
     label: "Result Delivery",
@@ -52,7 +52,7 @@ const ArchitectureSection = () => {
           </h2>
           <p className="text-muted-foreground mt-5 text-lg">
             A high-performance pipeline that manages secure traffic from Auth0-protected entries
-            to gVisor-hardened kernel pods and Kata MicroVM sandboxes with synchronous result delivery.
+            to gVisor-hardened kernel pods and MicroVM sandboxes with synchronous result delivery.
           </p>
         </motion.div>
 

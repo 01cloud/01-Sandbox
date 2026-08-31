@@ -6,7 +6,7 @@ const pillars = [
     icon: ShieldCheck,
     title: "Kernel & MicroVM Isolation",
     description:
-      "Powered by gVisor user-space kernel sandboxing and Kata Container hardware microVMs, 01 Sandbox traps untrusted code vulnerabilities within dedicated security boundaries, protecting host infrastructure.",
+      "Powered by gVisor user-space kernel sandboxing and hardware MicroVMs, 01 Sandbox traps untrusted code vulnerabilities within dedicated security boundaries, protecting host infrastructure.",
   },
   {
     icon: Rocket,

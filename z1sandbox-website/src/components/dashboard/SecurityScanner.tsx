@@ -1050,7 +1050,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                     )}
                   >
                     <Activity className="w-3 h-3" />
-                    Kata-FC
+                    MicroVM
                   </button>
                 </div>
               </div>

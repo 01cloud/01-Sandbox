@@ -46,7 +46,7 @@ const runtimes: RuntimeSpec[] = [
   },
   {
     id: "kata-containers",
-    name: "Kata Containers",
+    name: "MicroVM",
     badge: "Hardware-Assisted MicroVM",
     tagline: "Hardware-Isolated MicroVM Sandboxing Powered by Firecracker / QEMU",
     icon: Cpu,
@@ -56,7 +56,7 @@ const runtimes: RuntimeSpec[] = [
     virtualizationTech: "Firecracker VMM / QEMU-lite + KVM",
     memoryOverhead: "Lightweight MicroVM (~128MB)",
     description:
-      "Kata Containers delivers lightweight virtual machines that feel and perform like containers while providing real workload isolation. Scanned code runs inside a dedicated guest Linux kernel protected by hardware virtualization instructions.",
+      "MicroVM sandboxing delivers lightweight virtual machines that feel and perform like containers while providing real workload isolation. Scanned code runs inside a dedicated guest Linux kernel protected by hardware virtualization instructions.",
     keyFeatures: [
       "Hardware-level CPU virtualization (KVM) separating host from untrusted workloads",
       "Dedicated guest kernel per scanning execution job to guarantee total tenant isolation",
@@ -91,7 +91,7 @@ export const RuntimeShowcaseSection = () => {
             Hardened Sandboxes For <span className="text-gradient">Secured Code Scanning</span>
           </h2>
           <p className="text-muted-foreground mt-4 text-base md:text-lg leading-relaxed font-medium">
-            01 Sandbox provisions gVisor kernel-isolated pods and Kata Container microVMs on demand to execute untrusted repository analysis without exposing host infrastructure.
+            01 Sandbox provisions gVisor kernel-isolated pods and hardware MicroVMs on demand to execute untrusted repository analysis without exposing host infrastructure.
           </p>
         </motion.div>
 
