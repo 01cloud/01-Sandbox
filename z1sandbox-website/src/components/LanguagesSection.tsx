@@ -1,21 +1,21 @@
 import { motion } from "framer-motion";
 
 const languages = [
-  { name: "Python", icon: "🐍" },
-  { name: "Node.js", icon: "🟢" },
-  { name: "Go", icon: "🔵" },
-  { name: "Rust", icon: "🦀" },
-  { name: "C++", icon: "📁" },
-  { name: "Java", icon: "☕" },
-  { name: "Ruby", icon: "💎" },
-  { name: "PHP", icon: "🐘" },
-  { name: "Swift", icon: "🐦" },
-  { name: "TypeScript", icon: "🟦" },
-  { name: "Bash", icon: "🐚" },
-  { name: "YAML", icon: "📜" },
-  { name: "SQL", icon: "💾" },
-  { name: "Dockerfile", icon: "🐳" },
-  { name: "Kubernetes", icon: "☸️" },
+  { name: "Python", icon: "/logos/python.svg" },
+  { name: "Node.js", icon: "/logos/nodejs.svg" },
+  { name: "Go", icon: "/logos/go-icon.svg" },
+  { name: "Rust", icon: "/logos/rust.svg" },
+  { name: "C++", icon: "/logos/cplusplus.svg" },
+  { name: "Java", icon: "/logos/java.svg" },
+  { name: "Ruby", icon: "/logos/ruby.svg" },
+  { name: "PHP", icon: "/logos/php.svg" },
+  { name: "Swift", icon: "/logos/swift.svg" },
+  { name: "TypeScript", icon: "/logos/typescript.svg" },
+  { name: "Bash", icon: "/logos/bash.svg" },
+  { name: "YAML", icon: "/logos/yaml.svg" },
+  { name: "SQL", icon: "/logos/azuresql.svg" },
+  { name: "Dockerfile", icon: "/logos/docker.svg" },
+  { name: "Kubernetes", icon: "/logos/kubernetes.svg" },
 ];
 
 const LanguagesSection = () => {
@@ -41,7 +41,11 @@ const LanguagesSection = () => {
                 transition={{ delay: i * 0.03 }}
                 className="flex items-center gap-3 px-4 py-3 rounded-xl bg-card/40 backdrop-blur-sm border border-border/50 hover:border-accent/40 hover:bg-card/60 shadow-sm hover:shadow-accent/5 transition-all group cursor-default"
               >
-                <span className="text-xl group-hover:scale-110 transition-transform duration-300">{lang.icon}</span>
+                <img
+                  src={lang.icon}
+                  alt={`${lang.name} logo`}
+                  className="w-5 h-5 object-contain group-hover:scale-110 transition-transform duration-300 flex-shrink-0"
+                />
                 <span className="text-xs font-bold tracking-tight text-foreground/70 group-hover:text-foreground transition-colors">{lang.name}</span>
               </motion.div>
             ))}

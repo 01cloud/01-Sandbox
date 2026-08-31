@@ -59,7 +59,7 @@ const CODE_TEMPLATES = [
   {
     name: "Python",
     lang: "py",
-    icon: "🐍",
+    icon: "/logos/python.svg",
     code: `# Python SQL Injection & Unsafe Eval Example
 import sqlite3
 
@@ -79,7 +79,7 @@ def execute_config(user_code):
   {
     name: "JavaScript",
     lang: "js",
-    icon: "🟨",
+    icon: "/logos/javascript.svg",
     code: `// JavaScript XSS & Prototype Pollution Example
 const express = require('express');
 const app = express();
@@ -103,7 +103,7 @@ app.listen(3000);
   {
     name: "TypeScript",
     lang: "ts",
-    icon: "🔷",
+    icon: "/logos/typescript.svg",
     code: `// TypeScript unsafe any & eval example
 const express = require('express');
 
@@ -123,7 +123,7 @@ export { processInput, DB_PASSWORD, JWT_SECRET };
   {
     name: "Go",
     lang: "go",
-    icon: "🐹",
+    icon: "/logos/go-icon.svg",
     code: `package main
 
 import (
@@ -144,7 +144,7 @@ func main() {
   {
     name: "Rust",
     lang: "rs",
-    icon: "🦀",
+    icon: "/logos/rust.svg",
     code: `// Rust unsafe memory & command injection example
 use std::process::Command;
 
@@ -171,7 +171,7 @@ fn main() {
   {
     name: "Shell",
     lang: "sh",
-    icon: "🐚",
+    icon: "/logos/bash.svg",
     code: `#!/bin/bash
 # Shell Script Command Injection Vulnerability
 
@@ -185,7 +185,7 @@ eval "echo Logs processed for host: $hostname"
   {
     name: "Kubernetes",
     lang: "k8s",
-    icon: "☸️",
+    icon: "/logos/kubernetes.svg",
     code: `# Insecure Kubernetes Pod Deployment configuration
 apiVersion: v1
 kind: Pod
@@ -206,7 +206,7 @@ spec:
   {
     name: "Terraform",
     lang: "terraform",
-    icon: "🏗️",
+    icon: "/logos/terraform.svg",
     code: `# Terraform IaC Security Issues Example
 resource "aws_s3_bucket" "data" {
   bucket = "company-data-bucket"
@@ -969,7 +969,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                         detectLanguage(code) === tmpl.lang && code === tmpl.code ? "border-violet-500/30 bg-violet-500/5 text-violet-500" : ""
                       )}
                     >
-                      <span className="text-xs">{tmpl.icon}</span>
+                      <img src={tmpl.icon} alt="" className="w-3.5 h-3.5 object-contain flex-shrink-0" />
                       {tmpl.name}
                     </button>
                   ))}
@@ -1250,7 +1250,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                           : ""
                       )}
                     >
-                      <span className="text-[10px]">{tmpl.icon}</span>
+                      <img src={tmpl.icon} alt="" className="w-3.5 h-3.5 object-contain flex-shrink-0" />
                       {tmpl.name}
                     </button>
                   ))}
