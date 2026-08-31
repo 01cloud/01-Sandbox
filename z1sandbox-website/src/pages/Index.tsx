@@ -3,6 +3,7 @@ import TrustSection from "@/components/TrustSection";
 import PillarsSection from "@/components/PillarsSection";
 import FeaturesSection from "@/components/FeaturesSection";
 import SecurityPipeline from "@/components/SecurityPipeline";
+import RuntimeShowcaseSection from "@/components/RuntimeShowcaseSection";
 // import ArchitectureSection from "@/components/ArchitectureSection";
 import WhySection from "@/components/WhySection";
 import LanguagesSection from "@/components/LanguagesSection";
@@ -13,6 +14,7 @@ const Index = () => {
       <HeroSection />
       <TrustSection />
       <div id="pillars"><PillarsSection /></div>
+      <div id="runtimes"><RuntimeShowcaseSection /></div>
       <LanguagesSection />
       <div id="features"><FeaturesSection /></div>
       <div id="security"><SecurityPipeline /></div>

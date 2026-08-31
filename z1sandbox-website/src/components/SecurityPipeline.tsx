@@ -27,8 +27,17 @@ const SecurityPipeline = () => {
             Automated <span className="text-gradient">Security Toolchain</span>
           </h2>
           <p className="text-muted-foreground mt-5 text-lg">
-            Every sandbox comes pre-equipped with a strict toolchain that audits code in real time.
+            Every static audit runs inside hardened <strong>gVisor user-space kernel pods</strong> or <strong>Kata MicroVMs</strong>, isolating your host while analyzing repository dependencies.
           </p>
+          <div className="mt-6 flex flex-wrap justify-center items-center gap-3">
+            <span className="px-3 py-1 rounded-full text-xs font-mono font-semibold bg-violet-500/10 text-violet-600 border border-violet-500/20 dark:text-violet-400">
+              gVisor Sentry Sandboxing
+            </span>
+            <span className="text-muted-foreground text-xs">•</span>
+            <span className="px-3 py-1 rounded-full text-xs font-mono font-semibold bg-emerald-500/10 text-emerald-600 border border-emerald-500/20 dark:text-emerald-400">
+              Kata Container MicroVM Hypervisor
+            </span>
+          </div>
         </motion.div>
 
         <div className="max-w-5xl mx-auto rounded-3xl border border-border bg-card overflow-hidden shadow-2xl">

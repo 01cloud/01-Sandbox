@@ -23,9 +23,9 @@ const steps = [
     desc: "Orchestrates storage on PVCs and manages the lifecycle of execution pods."
   },
   {
-    label: "Scanner Pod",
-    sub: "gVisor Performance",
-    desc: "Executes untrusted code within gVisor-hardened, kernel-isolated containers."
+    label: "Isolated Runtime Pod",
+    sub: "gVisor & Kata MicroVM",
+    desc: "Executes untrusted code within gVisor-hardened kernel pods or Kata Container hardware microVMs."
   },
   {
     label: "Result Delivery",
@@ -52,7 +52,7 @@ const ArchitectureSection = () => {
           </h2>
           <p className="text-muted-foreground mt-5 text-lg">
             A high-performance pipeline that manages secure traffic from Auth0-protected entries
-            to gVisor-hardened execution pods with synchronous result delivery.
+            to gVisor-hardened kernel pods and Kata MicroVM sandboxes with synchronous result delivery.
           </p>
         </motion.div>
 
