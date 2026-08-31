@@ -4,9 +4,9 @@ import { ShieldCheck, Rocket, Database } from "lucide-react";
 const pillars = [
   {
     icon: ShieldCheck,
-    title: "Kernel-Level Isolation",
+    title: "Kernel & MicroVM Isolation",
     description:
-      "Powered by a secure, isolated runtime,  Sandbox provides a strong layer of defense. Vulnerabilities are trapped within the sandbox kernel, protecting host infrastructure from malicious actors.",
+      "Powered by gVisor user-space kernel sandboxing and Kata Container hardware microVMs, 01 Sandbox traps untrusted code vulnerabilities within dedicated security boundaries, protecting host infrastructure.",
   },
   {
     icon: Rocket,

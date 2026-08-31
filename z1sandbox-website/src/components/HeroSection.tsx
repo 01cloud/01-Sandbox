@@ -27,15 +27,13 @@ const HeroSection = () => {
             01 Sandbox runs every line in a hardened pod, auto-audits for
             vulnerabilities, secrets, and policy violations — without touching your host kernel.
           </p>
-
-
         </motion.div>
 
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.7, delay: 0.3 }}
-          className="mt-24 sm:mt-32 grid grid-cols-1 sm:grid-cols-3 gap-8 sm:gap-6 max-w-3xl mx-auto border-t border-border/50 pt-12"
+          className="mt-16 sm:mt-24 grid grid-cols-1 sm:grid-cols-3 gap-8 sm:gap-6 max-w-3xl mx-auto border-t border-border/50 pt-12"
         >
           {[
             { label: "Job pickup", value: "<100ms" },
