@@ -22,44 +22,7 @@ if [ -n "$SCAN_REPORT" ] && [ "$(dirname "$SCAN_REPORT")" != "/reports" ]; then
     ln -sf "$(dirname "$SCAN_REPORT")" /reports
 fi
 
-# ── Security Scanning Tools — Startup Verification (Commented Out) ────────────
-# echo "============================================="
-# echo " Security Scanning Tools — Startup Check"
-# echo "---------------------------------------------"
-#
-# _check_tool() {
-# 	local name=$1
-# 	local version_cmd=$2
-# 	local version_output
-# 	if version_output=$(eval "${version_cmd}" 2>&1); then
-# 		echo " [OK]      ${name}: $(echo "${version_output}" | head -n1)"
-# 	else
-# 		echo " [MISSING] ${name}: not found on PATH"
-# 	fi
-# }
-#
-# _check_tool "semgrep"       "semgrep --version"
-# _check_tool "gitleaks"      "gitleaks version"
-# _check_tool "trivy"         "trivy --version"
-# _check_tool "bandit"        "bandit --version"
-# _check_tool "pylint"        "pylint --version"
-# _check_tool "gosec"         "gosec --version"
-# _check_tool "golangci-lint" "golangci-lint --version"
-# _check_tool "pmd"           "pmd --version"
-# _check_tool "rubocop"       "rubocop --version"
-# _check_tool "brakeman"      "brakeman --version"
-# _check_tool "eslint"        "eslint --version"
-# _check_tool "cargo-audit"   "cargo audit --version"
-# _check_tool "cppcheck"      "cppcheck --version"
-# _check_tool "clang-tidy"    "clang-tidy --version"
-# _check_tool "yamllint"      "yamllint --version"
-# _check_tool "kube-linter"   "kube-linter version"
-# _check_tool "kubeconform"   "kubeconform -v"
-# _check_tool "kube-score"    "kube-score version"
-#
-# echo "---------------------------------------------"
-# echo " PATH: ${PATH}"
-# echo "============================================="
+
 
 # ── Automated Security Scanning ───────────────────────────────────────────────
 run_security_scans() {

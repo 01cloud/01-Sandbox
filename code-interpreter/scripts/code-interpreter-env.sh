@@ -1,25 +1,4 @@
-#!/bin/bash
-# Copyright 2025 Alibaba Group Holding Ltd.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
-# This script is used to switch versions of different languages in the OpenSandbox environment
-# Usage: source /opt/opensandbox/code-interpreter-env.sh <language> <version>
-# Examples:
-#   source /opt/opensandbox/code-interpreter-env.sh python 3.13
-#   source /opt/opensandbox/code-interpreter-env.sh java 21
-#   source /opt/opensandbox/code-interpreter-env.sh node 22
-#   source /opt/opensandbox/code-interpreter-env.sh go 1.25
 
 function usage() {
 	echo "Usage: source code-interpreter-env.sh <language> <version>"

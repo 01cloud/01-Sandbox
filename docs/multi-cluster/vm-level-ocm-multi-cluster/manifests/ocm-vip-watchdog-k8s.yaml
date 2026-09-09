@@ -1,0 +1,101 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: open-cluster-management-vip-watchdog
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ocm-vip-watchdog-script
+  namespace: open-cluster-management-vip-watchdog
+data:
+  watchdog.sh: |
+    #!/bin/sh
+    PRIMARY_HUB="10.99.0.1"
+    SECONDARY_HUB="10.99.0.2"
+    VIP="10.99.0.100"
+    ACTIVE_TARGET=""
+
+    FAIL_COUNT=0
+    FAIL_THRESHOLD=3
+
+    ip addr add ${VIP}/32 dev wg0 2>/dev/null || true
+
+    check_primary() {
+      curl -k -m 3 -s https://${PRIMARY_HUB}:6443/livez >/dev/null
+    }
+
+    check_secondary() {
+      curl -k -m 3 -s https://${SECONDARY_HUB}:6443/livez >/dev/null
+    }
+
+    while true; do
+      if check_primary; then
+        FAIL_COUNT=0
+        TARGET="${PRIMARY_HUB}"
+      else
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        echo "[$(date -Iseconds)] [ocm-vip-watchdog] Primary check failed (${FAIL_COUNT}/${FAIL_THRESHOLD})"
+        if [ $FAIL_COUNT -ge $FAIL_THRESHOLD ]; then
+          if check_secondary; then
+            TARGET="${SECONDARY_HUB}"
+          else
+            TARGET="${PRIMARY_HUB}"
+          fi
+        else
+          TARGET="${ACTIVE_TARGET:-$PRIMARY_HUB}"
+        fi
+      fi
+
+      if [ -n "$TARGET" ] && [ "$TARGET" != "$ACTIVE_TARGET" ]; then
+        echo "[$(date -Iseconds)] [ocm-vip-watchdog] Failover event: Switching VIP target to ${TARGET}"
+
+        iptables -t nat -D PREROUTING -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${PRIMARY_HUB}:6443 2>/dev/null || true
+        iptables -t nat -D PREROUTING -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${SECONDARY_HUB}:6443 2>/dev/null || true
+        iptables -t nat -D OUTPUT -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${PRIMARY_HUB}:6443 2>/dev/null || true
+        iptables -t nat -D OUTPUT -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${SECONDARY_HUB}:6443 2>/dev/null || true
+
+        iptables -t nat -I PREROUTING 1 -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${TARGET}:6443
+        iptables -t nat -I OUTPUT 1 -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${TARGET}:6443
+
+        ACTIVE_TARGET="${TARGET}"
+      fi
+      sleep 2
+    done
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ocm-vip-watchdog
+  namespace: open-cluster-management-vip-watchdog
+  labels:
+    app: ocm-vip-watchdog
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ocm-vip-watchdog
+  template:
+    metadata:
+      labels:
+        app: ocm-vip-watchdog
+    spec:
+      hostNetwork: true
+      containers:
+      - name: vip-watchdog
+        image: alpine:latest
+        command: ["/bin/sh", "-c"]
+        args: ["apk add --no-cache curl iptables iproute2 >/dev/null && /scripts/watchdog.sh"]
+        securityContext:
+          capabilities:
+            add:
+            - NET_ADMIN
+            - NET_RAW
+        volumeMounts:
+        - name: script-vol
+          mountPath: /scripts
+      volumes:
+      - name: script-vol
+        configMap:
+          name: ocm-vip-watchdog-script
+          defaultMode: 0755
