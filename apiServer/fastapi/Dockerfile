@@ -12,9 +12,10 @@ WORKDIR /app
 
 # Install dependencies into a separate layer for caching
 COPY requirements.txt .
-RUN apt-get update && apt-get install -y libpq-dev gcc curl git golang \
+RUN apt-get update && apt-get install -y --no-install-recommends libpq-dev gcc curl git golang-go \
  && pip install --no-cache-dir --upgrade pip \
- && pip install --no-cache-dir -r requirements.txt
+ && pip install --no-cache-dir -r requirements.txt \
+ && rm -rf /var/lib/apt/lists/*
 
 # tokei — secondary detector & LoC counter (static binary, fast)
 RUN set -eux; \
