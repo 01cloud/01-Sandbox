@@ -25,7 +25,7 @@ RUN set -eux; \
       aarch64) ARCH="aarch64-unknown-linux-gnu" ;; \
       *) ARCH="x86_64-unknown-linux-gnu" ;; \
     esac; \
-    curl -fsSL \
+    curl --retry 5 --retry-connrefused -fsSL \
       "https://github.com/XAMPPRocky/tokei/releases/download/v${TOKEI_VERSION}/tokei-${ARCH}.tar.gz" \
       | tar -xz -C /usr/local/bin tokei; \
     chmod 755 /usr/local/bin/tokei
