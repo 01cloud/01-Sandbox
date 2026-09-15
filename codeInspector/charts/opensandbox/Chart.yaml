@@ -27,3 +27,4 @@ sources:
 - https://github.com/alibaba/OpenSandbox/tree/main/kubernetes
 type: application
 version: 0.1.0
+icon: https://raw.githubusercontent.com/cncf/artwork/main/projects/kubernetes/icon/color/kubernetes-icon-color.png
