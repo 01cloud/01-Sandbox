@@ -10,6 +10,25 @@ global:
     - "10."
     - "127.0.0.1"
     - "::1"
+  ocm:
+    enabled: true
+    role: "hub" # "hub" or "spoke"
+    primaryHub: "primaryhub"
+    primaryHubIp: "10.9.9.0.10"
+    secondaryHub: "secondaryhub"
+    secondaryHubIp: "10.9.9.0.20"
+    clusterSet: "sandbox-spokes"
+    placementName: "sandbox-spoke-placement"
+    spokes:
+      - name: "spoke-us-east-1"
+        region: "us-east-1"
+        wireguardIp: "10.9.9.0.30"
+      - name: "spoke-eu-central-1"
+        region: "eu-central-1"
+        wireguardIp: "10.9.9.0.40"
+      - name: "spoke-us-west-1"
+        region: "us-west-1"
+        wireguardIp: "10.9.9.0.50"
 ################################################################
 # Agent Gateway  values
 ################################################################
@@ -26,6 +45,8 @@ agentgateway:
   gateway:
     gatewayClassName: agentgateway
     addresses:
+      - value: 10.9.9.0.10  # Primary Hub
+      - value: 10.9.9.0.20  # Secondary Hub
       - value: 10.0.10.9
     listeners:
       - protocol: HTTP
@@ -77,6 +98,8 @@ apiServer:
     ALLOW_MOCK_KEYS: "false"
     PORT: "8000"
     BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"
+    WORKLOAD_PROVIDER: "ocm"
+    PLACEMENT_NAME: "sandbox-spoke-placement"
     RATE_LIMIT_REQUESTS: "20"
     RATE_LIMIT_WINDOW_SECS: "60"
     GATEWAY_SECRET_NAME: "apikey"
@@ -182,7 +205,7 @@ metallb:
   namespace: metallb-system
   ipAddressPool:
     addresses:
-      # - 172.18.0.200-172.18.0.250
+      - 10.9.9.0.10-10.9.9.0.20
       - 10.0.10.9-10.0.10.9
   l2Advertisement:
     enabled: true

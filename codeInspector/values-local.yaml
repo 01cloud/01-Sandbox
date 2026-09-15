@@ -12,6 +12,25 @@ global:
     - "10."
     - "127.0.0.1"
     - "::1"
+  ocm:
+    enabled: true
+    role: "hub" # "hub" or "spoke"
+    primaryHub: "primaryhub"
+    primaryHubIp: "10.9.9.0.10"
+    secondaryHub: "secondaryhub"
+    secondaryHubIp: "10.9.9.0.20"
+    clusterSet: "sandbox-spokes"
+    placementName: "sandbox-spoke-placement"
+    spokes:
+      - name: "spoke-us-east-1"
+        region: "us-east-1"
+        wireguardIp: "10.9.9.0.30"
+      - name: "spoke-eu-central-1"
+        region: "eu-central-1"
+        wireguardIp: "10.9.9.0.40"
+      - name: "spoke-us-west-1"
+        region: "us-west-1"
+        wireguardIp: "10.9.9.0.50"
 ################################################################
 # Agent Gateway  values
 ################################################################

@@ -1,0 +1,18 @@
+{{- if and .Values.global .Values.global.ocm .Values.global.ocm.enabled (eq (default "hub" .Values.global.ocm.role) "hub") }}
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSet
+metadata:
+  name: {{ default "sandbox-spokes" .Values.global.ocm.clusterSet }}
+  labels:
+    {{- include "codeInspector.labels" . | nindent 4 }}
+---
+apiVersion: cluster.open-cluster-management.io/v1beta2
+kind: ManagedClusterSetBinding
+metadata:
+  name: {{ default "sandbox-spokes" .Values.global.ocm.clusterSet }}
+  namespace: {{ default "opensandbox-system" .Values.opensandbox.namespace }}
+  labels:
+    {{- include "codeInspector.labels" . | nindent 4 }}
+spec:
+  clusterSet: {{ default "sandbox-spokes" .Values.global.ocm.clusterSet }}
+{{- end }}
