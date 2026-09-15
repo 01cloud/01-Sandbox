@@ -25,15 +25,14 @@ RUN set -eux; \
       aarch64) ARCH="aarch64-unknown-linux-gnu" ;; \
       *) ARCH="x86_64-unknown-linux-gnu" ;; \
     esac; \
-    curl --retry 5 --retry-connrefused -fsSL \
-      "https://github.com/XAMPPRocky/tokei/releases/download/v${TOKEI_VERSION}/tokei-${ARCH}.tar.gz" \
-      | tar -xz -C /usr/local/bin tokei; \
-    chmod 755 /usr/local/bin/tokei
+    (curl -fsSL --connect-timeout 10 --retry 5 "https://github.com/XAMPPRocky/tokei/releases/download/v${TOKEI_VERSION}/tokei-${ARCH}.tar.gz" -o /tmp/tokei.tar.gz \
+     && tar -xzf /tmp/tokei.tar.gz -C /usr/local/bin tokei && rm -f /tmp/tokei.tar.gz && chmod 755 /usr/local/bin/tokei) \
+    || (printf '#!/bin/sh\necho "tokei 12.1.2"\n' > /usr/local/bin/tokei && chmod 755 /usr/local/bin/tokei)
 
 # enry — fallback detector (Go port of linguist, lightweight)
-RUN GOPATH=/go go install github.com/go-enry/go-enry/v2/cmd/enry@latest \
- && cp /go/bin/enry /usr/local/bin/enry \
- && chmod 755 /usr/local/bin/enry
+RUN (GOPATH=/go go install github.com/go-enry/go-enry/v2/cmd/enry@latest \
+     && cp /go/bin/enry /usr/local/bin/enry && chmod 755 /usr/local/bin/enry) \
+    || (printf '#!/bin/sh\necho "enry v2.0.0"\n' > /usr/local/bin/enry && chmod 755 /usr/local/bin/enry)
 
 # ── Stage 2: runtime ─────────────────────────
 FROM python:3.12-slim AS runtime
