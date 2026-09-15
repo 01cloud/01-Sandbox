@@ -1,6 +1,0 @@
-{{- if .Values.multiCluster.enabled }}
-apiVersion: cluster.open-cluster-management.io/v1beta2
-kind: ManagedClusterSet
-metadata:
-  name: {{ .Values.multiCluster.clusterSet | default "sandbox-spokes" }}
-{{- end }}
