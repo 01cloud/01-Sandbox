@@ -58,10 +58,13 @@ informer_resync_seconds = 300
 informer_watch_timeout_seconds = 60
 
 # Workload provider type: available providers are registered in the provider factory
-# If not specified, uses the first registered provider (typically "batchsandbox")
-workload_provider = "batchsandbox"
+# Options: "batchsandbox", "agent-sandbox", "ocm" (Open Cluster Management multi-cluster)
+workload_provider = "ocm"
 
-# Path to the BatchSandbox template file
+# OCM Placement engine resource name (used when workload_provider is "ocm")
+placement_name = "sandbox-spoke-placement"
+
+# Path to the BatchSandbox template file (used when workload_provider is "batchsandbox")
 # Replace with your path
 batchsandbox_template_file = "~/batchsandbox-template.yaml"
 

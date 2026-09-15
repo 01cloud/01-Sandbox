@@ -201,6 +201,15 @@ metallb:
 opensandbox:
   enabled: true
   namespace: opensandbox-system
+  multiCluster:
+    enabled: true
+    clusterSet: "sandbox-spokes"
+    placementName: "sandbox-spoke-placement"
+    targetSpokes:
+      - name: "spoke-us-east-1"
+        region: "us-east-1"
+      - name: "spoke-eu-central-1"
+        region: "eu-central-1"
   controller:
     replicaCount: 1
     image:
@@ -216,6 +225,8 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
+    workloadProvider: "ocm"
+    placementName: "sandbox-spoke-placement"
     sandboxImage: "01community/01sandbox-codeinterpreter:v0.7.10"
     scannerImagePython: "01community/01sandbox-scanner-python:1.0.0"
     scannerImageGo: "01community/01sandbox-scanner-go:1.0.0"

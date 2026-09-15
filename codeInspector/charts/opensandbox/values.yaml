@@ -24,6 +24,8 @@ storage:
 
 server:
   replicaCount: 1
+  workloadProvider: "ocm"
+  placementName: "sandbox-spoke-placement"
   image:
     repository: opensandbox/server
     tag: v1.0.0
@@ -37,4 +39,15 @@ server:
   sandboxImage: "01community/01sandbox-codeinterpreter:1.0.0"
   sandboxCreateTimeoutSeconds: 600
   autoTerminationSeconds: 0
-  runtimeClassName: "kata-fc"
+  runtimeClassName: "gvisor"
+
+# Multi-Cluster (OCM) Configuration
+multiCluster:
+  enabled: true
+  clusterSet: "sandbox-spokes"
+  placementName: "sandbox-spoke-placement"
+  targetSpokes:
+    - name: "spoke-us-east-1"
+      region: "us-east-1"
+    - name: "spoke-eu-central-1"
+      region: "eu-central-1"

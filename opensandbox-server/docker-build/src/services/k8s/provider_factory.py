@@ -23,6 +23,7 @@ from src.config import AppConfig
 from src.services.k8s.agent_sandbox_provider import AgentSandboxProvider
 from src.services.k8s.batchsandbox_provider import BatchSandboxProvider
 from src.services.k8s.client import K8sClient
+from src.services.k8s.ocm_provider import OcmWorkloadProvider
 from src.services.k8s.workload_provider import WorkloadProvider
 
 logger = logging.getLogger(__name__)
@@ -30,13 +31,13 @@ logger = logging.getLogger(__name__)
 # Provider type constants
 PROVIDER_TYPE_BATCHSANDBOX = "batchsandbox"
 PROVIDER_TYPE_AGENT_SANDBOX = "agent-sandbox"
+PROVIDER_TYPE_OCM = "ocm"
 
 # Registry of available workload providers
 _PROVIDER_REGISTRY: Dict[str, Type[WorkloadProvider]] = {
     PROVIDER_TYPE_BATCHSANDBOX: BatchSandboxProvider,
     PROVIDER_TYPE_AGENT_SANDBOX: AgentSandboxProvider,
-    # Future providers can be registered here:
-    # "pod": PodProvider
+    PROVIDER_TYPE_OCM: OcmWorkloadProvider,
 }
 
 
@@ -49,7 +50,7 @@ def create_workload_provider(
     Create a WorkloadProvider instance based on the provider type.
 
     Args:
-        provider_type: Type of provider (e.g., 'batchsandbox', 'pod', 'job').
+        provider_type: Type of provider (e.g., 'batchsandbox', 'pod', 'job', 'ocm').
                       If None, uses the first registered provider.
         k8s_client: Kubernetes client instance
         app_config: Application config; kubernetes/agent_sandbox/ingress sub-configs
@@ -83,8 +84,12 @@ def create_workload_provider(
     provider_class = _PROVIDER_REGISTRY[provider_type_lower]
     logger.info(f"Creating workload provider: {provider_class.__name__}")
 
-    # BatchSandboxProvider and AgentSandboxProvider read all sub-configs from app_config.
-    if provider_type_lower in (PROVIDER_TYPE_BATCHSANDBOX, PROVIDER_TYPE_AGENT_SANDBOX):
+    # BatchSandboxProvider, AgentSandboxProvider, and OcmWorkloadProvider read sub-configs from app_config.
+    if provider_type_lower in (
+        PROVIDER_TYPE_BATCHSANDBOX,
+        PROVIDER_TYPE_AGENT_SANDBOX,
+        PROVIDER_TYPE_OCM,
+    ):
         return provider_class(k8s_client, app_config=app_config)
 
     # Providers that do not accept app_config

@@ -102,5 +102,30 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - work.open-cluster-management.io
+  resources:
+  - manifestworks
+  - manifestworks/status
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - cluster.open-cluster-management.io
+  resources:
+  - managedclustersets
+  - managedclustersetbindings
+  - placements
+  - placementdecisions
+  - managedclusters
+  verbs:
+  - get
+  - list
+  - watch
 
 {{- end }}

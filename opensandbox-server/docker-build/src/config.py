@@ -282,6 +282,10 @@ class KubernetesRuntimeConfig(BaseModel):
         default=None,
         description="Workload provider type. If not specified, uses the first registered provider.",
     )
+    placement_name: Optional[str] = Field(
+        default="sandbox-spoke-placement",
+        description="OCM Placement resource name for spoke cluster scheduling. Used when workload_provider is 'ocm'.",
+    )
     batchsandbox_template_file: Optional[str] = Field(
         default=None,
         description="Path to BatchSandbox CR YAML template file. Used when workload_provider is 'batchsandbox'.",

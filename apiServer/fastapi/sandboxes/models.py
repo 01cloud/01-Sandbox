@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from enum import Enum
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -60,11 +60,15 @@ class CreateSandboxRequest(BaseModel):
     """Request payload to provision a new isolated sandbox."""
 
     image: ImageSpec
-    entrypoint: list[str]
+    entrypoint: Optional[list[str]] = None
     timeout: int = Field(60, ge=1, le=3600)
     env: dict[str, str] = {}
     resourceLimits: ResourceLimits = Field(default_factory=ResourceLimits)
     metadata: dict[str, str] = {}
+    extensions: Optional[dict[str, Any]] = Field(
+        default=None,
+        description="Optional extension parameters, e.g. {'target_cluster': 'spoke-us-east-1', 'secure_runtime': 'gvisor'}",
+    )
 
 
 class SandboxResponse(BaseModel):
