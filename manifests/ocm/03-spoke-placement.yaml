@@ -2,7 +2,7 @@ apiVersion: cluster.open-cluster-management.io/v1beta1
 kind: Placement
 metadata:
   name: sandbox-spoke-placement
-  namespace: opensandbox
+  namespace: opensandbox-system
 spec:
   clusterSets:
     - sandbox-spokes

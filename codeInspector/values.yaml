@@ -14,21 +14,21 @@ global:
     enabled: true
     role: "hub" # "hub" or "spoke"
     primaryHub: "primaryhub"
-    primaryHubIp: "10.9.9.0.10"
+    primaryHubIp: "10.9.9.10"
     secondaryHub: "secondaryhub"
-    secondaryHubIp: "10.9.9.0.20"
+    secondaryHubIp: "10.9.9.20"
     clusterSet: "sandbox-spokes"
     placementName: "sandbox-spoke-placement"
     spokes:
       - name: "spoke-us-east-1"
         region: "us-east-1"
-        wireguardIp: "10.9.9.0.30"
+        wireguardIp: "10.9.9.30"
       - name: "spoke-eu-central-1"
         region: "eu-central-1"
-        wireguardIp: "10.9.9.0.40"
+        wireguardIp: "10.9.9.40"
       - name: "spoke-us-west-1"
         region: "us-west-1"
-        wireguardIp: "10.9.9.0.50"
+        wireguardIp: "10.9.9.50"
 ################################################################
 # Agent Gateway  values
 ################################################################
@@ -45,8 +45,8 @@ agentgateway:
   gateway:
     gatewayClassName: agentgateway
     addresses:
-      - value: 10.9.9.0.10  # Primary Hub
-      - value: 10.9.9.0.20  # Secondary Hub
+      - value: 10.9.9.10  # Primary Hub
+      - value: 10.9.9.20  # Secondary Hub
       - value: 10.0.10.9
     listeners:
       - protocol: HTTP
@@ -83,7 +83,7 @@ agentgateway-controller:
     extraEnv:
       KGW_ENABLE_GATEWAY_API_EXPERIMENTAL_FEATURES: "true"
     image:
-      pullPolicy: Always
+      pullPolicy: IfNotPresent
 ################################################################
 # API Server component values
 ################################################################
@@ -130,7 +130,7 @@ apiServer:
     JWT_PUBLIC_JWKS: ""
     SENDGRID_API_KEY: ""
   sealedSecrets:
-    enabled: true
+    enabled: false
     encryptedData:
       E2B_API_KEY: ""
       JWT_PRIVATE_KEY: ""
@@ -144,7 +144,7 @@ apiServer:
     image:
       repository: 01community/01sandbox-api
       tag: "v0.7.9"
-      pullPolicy: Always
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: "100m"
@@ -183,7 +183,7 @@ apiServer:
     password: "password123"
     database: "apikeys"
     storage: "5Gi"
-    storageClassName: "longhorn"
+    storageClassName: "standard"
   redis:
     enabled: true
     host: "redis-service"
@@ -205,7 +205,7 @@ metallb:
   namespace: metallb-system
   ipAddressPool:
     addresses:
-      - 10.9.9.0.10-10.9.9.0.20
+      - 10.9.9.10-10.9.9.20
       - 10.0.10.9-10.0.10.9
   l2Advertisement:
     enabled: true
@@ -238,7 +238,7 @@ opensandbox:
     image:
       repository: 01community/01sandbox-opensandbox-controller
       tag: "v0.7.3"
-      pullPolicy: Always
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: 100m
@@ -267,7 +267,7 @@ opensandbox:
     image:
       repository: 01community/01sandbox-opensandbox-server
       tag: "v0.7.10"
-      pullPolicy: Always
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: 100m
@@ -281,7 +281,7 @@ opensandbox:
       size: "10Gi"
       accessMode: "ReadWriteMany"
       mountPath: "/data"
-      storageClassName: "longhorn"
+      storageClassName: "standard"
 ################################################################
 # OpenSandbox Resource Pool component values
 ################################################################
