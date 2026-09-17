@@ -1,6 +1,6 @@
 # 01-Sandbox Multi-Cluster Architecture (OCM Integration)
 
-This document provides a comprehensive, step-by-step record of all code changes, manifest updates, and Helm chart modifications implemented to convert 01-Sandbox from a single-cluster architecture to an **Open Cluster Management (OCM)** multi-cluster hub-spoke topology.
+This document provides a comprehensive, step-by-step record of all code changes, manifest updates, and Helm chart modifications implemented to convert 01-Sandbox from a single-cluster architecture to an **Open Cluster Management (OCM)** multi-cluster hub-spoke topology. (https://github.com/openshift/multiclusterengine/blob/main/docs/user-guide/README.md)
 
 ---
 
