@@ -4,6 +4,31 @@ This document provides the complete, end-to-end technical implementation guide, 
 
 ---
 
+## Table of Contents
+1. [Executive Summary & Problem Definition](#1-executive-summary--problem-definition)
+2. [Infrastructure & Network Topology](#2-infrastructure--network-topology)
+3. [Service Replication Matrix & Write Behavior](#3-service-replication-matrix--write-behavior)
+4. [Quick Reference Deployment Checklist (TL;DR)](#4-quick-reference-deployment-checklist-tldr)
+5. [Step-by-Step Technical Implementation Guide](#5-step-by-step-technical-implementation-guide)
+   - [Phase 1: Primary Hub Exposure & Database Configuration](#phase-1-primary-hub-exposure--database-configuration)
+   - [Phase 2: Helm Chart & Codebase Modifications](#phase-2-helm-chart--codebase-modifications)
+   - [Phase 3: Secondary Hub Environment Provisioning](#phase-3-secondary-hub-environment-provisioning)
+   - [Phase 4: Deploying Secondary Helm Release](#phase-4-deploying-secondary-helm-release)
+6. [Verification & Testing Runbook](#6-verification--testing-runbook)
+   - [Test 1: PostgreSQL Physical Streaming Status](#test-1-postgresql-physical-streaming-status)
+   - [Test 2: Real-Time Write Replication Test](#test-2-real-time-write-replication-test--50ms)
+   - [Test 3: Write-Conflict Protection Test](#test-3-write-conflict-protection-test)
+   - [Test 4: Redis Replication Verification](#test-4-redis-replication-verification)
+   - [Test 5: Standby Microservices Health Checks](#test-5-standby-microservices-health-checks)
+7. [Failover, Long-Term Outage & Failback Lifecycle](#7-failover-long-term-outage--failback-lifecycle)
+   - [Phase 1: Normal Operations](#7-failover-long-term-outage--failback-lifecycle)
+   - [Phase 2: Primary Down & Secondary Promotion](#71-phase-2-if-primary-hub-is-down--promotion-to-read-write-master)
+   - [Phase 3: Primary Recovery & Reverse Sync Rejoin](#72-phase-3-when-primary-hub-recovers--rejoin-as-standby--reverse-sync)
+   - [Phase 4: Graceful Switchover Back to Original Roles](#73-phase-4-optional-graceful-switchover-back-to-original-roles)
+8. [Operational Gotchas & Troubleshooting Guide](#8-operational-gotchas--troubleshooting-guide)
+
+---
+
 ## 1. Executive Summary & Problem Definition
 
 In a multi-cluster Open Cluster Management (OCM) control plane architecture, running two hubs (`primaryhub` and `secondaryhub`) requires a unified state layer.
@@ -68,7 +93,130 @@ Both control plane hubs are connected via a dedicated low-latency WireGuard mesh
 
 ---
 
-## 3. Step-by-Step Implementation Instructions
+## 3. Service Replication Matrix & Write Behavior
+
+### 3.1 Component Breakdown
+
+| Service / Component | Role on Primary | Role on Secondary | Replication Mechanism & Data Handled |
+| :--- | :--- | :--- | :--- |
+| **PostgreSQL** | **Active Master (Read-Write)** | **Hot Standby (Read-Only)** | **Physical WAL Streaming Replication**: Continuous real-time sync of all databases (`apikeys`, `postgres`), all tables (`api_keys`, `system_settings`, `user_subscriptions`), user credentials, sequences, and indexes. |
+| **Redis** | **Master (Read-Write)** | **Replica (`replicaof`) (Read-Only)** | **Master-Replica Memory Mirroring**: Synchronously streams cached API tokens, active JWT signing keys, session states, and rate limit counters. |
+| **`sandbox-api`** | **Active (Read-Write)** | **Warm Standby (Read-Only)** | **Stateless API microservice**: Connects to the local PostgreSQL and Redis. On `secondaryhub`, it automatically detects standby mode (`SELECT pg_is_in_recovery()`), serves read queries, and is ready for instantaneous write promotion. |
+| **`opensandbox-server`** | **Active** | **Warm Standby** | **Stateless Controller service**: Running at `replicaCount: 1` on `secondaryhub`, connected to local storage and OCM placement. |
+| **`opensandbox-controller`**| **Active** | **Active Standby** | Watches Custom Resources (`BatchSandbox`, `Pool`) in both clusters. |
+| **RabbitMQ** | **Independent Broker** | **Independent Broker** | RabbitMQ handles transient in-flight async job queues. In failover, traffic shifts to `secondaryhub`'s broker cleanly. |
+| **Spoke Clusters (OCM)** | **Primary Hub** | **Secondary Hub** | **Dual Registration (Klusterlet)**: `spoke1` and `spoke2` are registered to both hubs, so placement decisions and agent workloads can be managed from either hub. |
+
+### 3.2 What Happens If Someone Tries to Write to `secondaryhub` During Normal Operations?
+
+**Direct writes on `secondaryhub` are strictly rejected by the database and cache engines:**
+
+1. **PostgreSQL Write Attempt on Secondary**:
+   ```sql
+   INSERT INTO system_settings(key, value) VALUES('test', '1');
+   ```
+   **Result**:
+   ```
+   ERROR: cannot execute INSERT in a read-only transaction
+   ```
+   *(The same rejection occurs for `UPDATE`, `DELETE`, `CREATE TABLE`, `ALTER TABLE`, or `DROP TABLE`)*.
+
+2. **Redis Write Attempt on Secondary**:
+   ```bash
+   redis-cli set test_key 1
+   ```
+   **Result**:
+   ```
+   READONLY You can't write against a read only replica.
+   ```
+
+#### Why is this strictly enforced?
+This is the core rule of **Split-Brain Prevention**:
+- In high availability, allowing both hubs to accept writes simultaneously without a multi-master distributed consensus engine leads to irreversible data corruption (mismatched auto-increment IDs, colliding API tokens, conflicting sandbox states).
+- By locking `secondaryhub` in **read-only standby mode**, `primaryhub` remains the undisputed Single Source of Truth.
+- Every commit on `primaryhub` is streamed to `secondaryhub` in sub-milliseconds with zero lag.
+
+---
+
+## 4. Quick Reference Deployment Checklist (TL;DR)
+
+### "Will Just Applying the Helm Chart on Both Hubs Deploy Everything as Expected?"
+
+**Yes!** The Helm chart and container images are fully equipped with automatic replication bootstrapping and standby protection:
+- On **`primaryhub`**, applying `values.yaml` deploys the standard Read-Write Master stack.
+- On **`secondaryhub`**, applying `values.yaml` + `values-secondary.yaml` automatically:
+  1. Bootstraps the standby PostgreSQL using `pg_basebackup` via the built-in `init-standby` container.
+  2. Configures `primary_conninfo` and continuously streams WAL transactions from `10.99.0.1`.
+  3. Starts Redis in `--replicaof 10.99.0.1 6379` replica mode.
+  4. Starts `sandbox-api` with the standby recovery guard, preventing migration crash loops.
+  5. Deploys pre-warmed `opensandbox-server` and `controller` at `replicaCount: 1`.
+
+---
+
+### The 2 Prerequisites on Primary Hub (Before Deploying Secondary)
+
+Before `secondaryhub` can pull replication data, ensure these 2 prerequisites are active on `primaryhub`:
+
+1. **WireGuard Connection Active**:
+   ```bash
+   ping -c 3 10.99.0.1   # From secondaryhub, must succeed (~0.5ms)
+   ```
+
+2. **Primary Replication Ports Exposed (`5432` & `6379`)**:
+   Ensure the host-level `socat` forwarders are active on `primaryhub` (`ubuntu@192.168.100.20`):
+   ```bash
+   sudo systemctl status socat-pg.service
+   sudo systemctl status socat-redis.service
+   ```
+   *(These bridge `10.99.0.1:5432` -> `172.18.0.2:30432` and `10.99.0.1:6379` -> `172.18.0.2:30379`)*.
+
+---
+
+### The Exact 2 Deployment Commands
+
+#### 1. On `primaryhub` (`ubuntu@192.168.100.20`):
+```bash
+cd ~/01-Sandbox
+
+helm upgrade --install codeinspector ./codeInspector \
+  -n opensandbox-system \
+  --create-namespace \
+  --values ./codeInspector/values.yaml
+```
+
+#### 2. On `secondaryhub` (`ubuntu@192.168.101.20`):
+```bash
+cd ~/01-Sandbox
+
+helm upgrade --install codeinspector ./codeInspector \
+  -n opensandbox-system \
+  --create-namespace \
+  --values ./codeInspector/values.yaml \
+  --values ./codeInspector/values-secondary.yaml
+```
+
+---
+
+### 1-Command Verification
+
+Run this on both hubs to verify all 8 pods achieve `1/1 Running`:
+```bash
+kubectl get pods -n opensandbox-system
+```
+
+Expected on both clusters:
+- `codeinspector-agentgateway-controller`: `1/1 Running`
+- `codeinspector-sealed-secrets`: `1/1 Running`
+- `opensandbox-controller`: `1/1 Running`
+- `opensandbox-server`: `1/1 Running`
+- `postgresql`: `1/1 Running` (Master on Primary, Hot Standby on Secondary)
+- `rabbitmq`: `1/1 Running`
+- `redis`: `1/1 Running` (Master on Primary, Read-only Replica on Secondary)
+- `sandbox-api`: `1/1 Running` (Read-Write on Primary, Read-Only Standby on Secondary)
+
+---
+
+## 5. Step-by-Step Technical Implementation Guide
 
 ### Phase 1: Primary Hub Exposure & Database Configuration
 
@@ -304,7 +452,9 @@ Because standby PostgreSQL rejects DDL transactions with `cannot execute CREATE 
             is_standby = False
 
         if is_standby:
-            print("[startup] Connected to Standby/Replica PostgreSQL. Skipping schema migrations.")
+            print(
+                "[startup] Connected to Standby/Replica PostgreSQL. Skipping schema migrations."
+            )
         else:
             # Create system_settings table for cluster-wide settings (e.g. shared JWT keys)
             cursor.execute("""
@@ -367,7 +517,9 @@ Because standby PostgreSQL rejects DDL transactions with `cannot execute CREATE 
                 # Sync keys to Redis
                 ...
             else:
-                print("[startup] Connected to Redis replica. Skipping registry write sync (handled by master).")
+                print(
+                    "[startup] Connected to Redis replica. Skipping registry write sync (handled by master)."
+                )
 ```
 
 ---
@@ -451,7 +603,7 @@ sandbox-api-5c454bb69-sr5dt                              1/1     Running   0    
 
 ---
 
-## 4. Verification & Testing Runbook
+## 6. Verification & Testing Runbook
 
 Execute these commands to verify continuous synchronization and failover protection.
 
@@ -513,7 +665,7 @@ kubectl exec -n opensandbox-system deployment/postgresql -- \
 ```
 Expected output:
 ```
-ERROR:  cannot execute INSERT in a read-only transaction
+ERROR: cannot execute INSERT in a read-only transaction
 ```
 
 Attempt to write to `secondaryhub` Redis:
@@ -593,22 +745,156 @@ Expected response:
 
 ---
 
-## 5. Promotion & Failover Runbook (Disaster Recovery)
+## 7. Failover, Long-Term Outage & Failback Lifecycle
 
-If `primaryhub` suffers total failure, promote `secondaryhub` to Read-Write Master in < 10 seconds:
+This section details exactly what happens if `primaryhub` goes down for an extended period, how users continue creating API keys on `secondaryhub`, and how those keys replicate back to `primaryhub` once it recovers.
 
-```bash
-# 1. Promote PostgreSQL Standby to Read-Write Master
-kubectl exec -n opensandbox-system deployment/postgresql -- pg_ctl promote
-
-# 2. Promote Redis Standby to Master
-kubectl exec -n opensandbox-system deployment/redis -- redis-cli replicaof no one
-
-# 3. Verify PostgreSQL is now Read-Write
-kubectl exec -n opensandbox-system deployment/postgresql -- \
-  psql -U postgres -d apikeys -c "SELECT pg_is_in_recovery();"
-# -> Output: f (false = Master)
-
-# 4. Shift Client Traffic / VIP to secondaryhub (10.99.0.2 / 192.168.101.20)
 ```
-After promotion, `secondaryhub` seamlessly handles all read and write traffic with zero data loss.
++---------------------------------------------------------------------------------------+
+| PHASE 1: NORMAL STATE                                                                 |
+| PrimaryHub (Master RW)  ================ WAL Sync ================> SecondaryHub (RO) |
++---------------------------------------------------------------------------------------+
+                                           |
+                                  [ Primary Crashes ❌ ]
+                                           |
+                                           v
++---------------------------------------------------------------------------------------+
+| PHASE 2: FAILOVER TRIGGERED                                                           |
+| PrimaryHub (DOWN ❌)                                                                  |
+| SecondaryHub (PROMOTED TO MASTER RW ✅)                                               |
+| Users create API Keys, Sandboxes, Scan Jobs ---> Stored directly in SecondaryHub DB   |
++---------------------------------------------------------------------------------------+
+                                           |
+                              [ Primary Boots Back Up 🔄 ]
+                                           |
+                                           v
++---------------------------------------------------------------------------------------+
+| PHASE 3: FAILBACK & ROLE REVERSAL                                                     |
+| PrimaryHub (REJOINS AS STANDBY RO) <==== Reverse Sync ===== SecondaryHub (Master RW)  |
+| *All newly generated API keys are automatically copied back to PrimaryHub*            |
++---------------------------------------------------------------------------------------+
+                                           |
+                             (Optional Planned Switchover)
+                                           v
++---------------------------------------------------------------------------------------+
+| PHASE 4: RESTORE ORIGINAL ROLES (OPTIONAL)                                            |
+| PrimaryHub (Promoted back to Master RW) === Sync ===> SecondaryHub (Demoted to RO)    |
++---------------------------------------------------------------------------------------+
+```
+
+### 7.1 Phase 2: If Primary Hub is Down $\rightarrow$ Promotion to Read-Write Master
+
+If `primaryhub` suffers hardware failure, network isolation, or extended maintenance:
+1. **Trigger Promotion on Secondary Hub**:
+   ```bash
+   # On secondaryhub (ubuntu@192.168.101.20):
+   # 1. Promote PostgreSQL to Read-Write Master (< 2 seconds)
+   kubectl exec -n opensandbox-system deployment/postgresql -- pg_ctl promote
+
+   # 2. Promote Redis to Master
+   kubectl exec -n opensandbox-system deployment/redis -- redis-cli replicaof no one
+
+   # 3. Verify PostgreSQL is in Master mode (returns false)
+   kubectl exec -n opensandbox-system deployment/postgresql -- \
+     psql -U postgres -d apikeys -c "SELECT pg_is_in_recovery();"
+   # Output: f (false)
+   ```
+
+2. **Shift Client Traffic / VIP to Secondary Hub**:
+   The Virtual IP (`10.99.0.100` / `192.168.100.200`) floats to `secondaryhub`.
+
+3. **Users Create API Keys & Workloads on Secondary Hub**:
+   - `sandbox-api` detects `pg_is_in_recovery() == False`.
+   - Any user request to generate an API key (`POST /api-keys/`), create a sandbox, or launch a scan job is accepted and written directly to `secondaryhub`'s PostgreSQL and Redis.
+   - All state is safely committed on `secondaryhub`.
+
+---
+
+### 7.2 Phase 3: When Primary Hub Recovers $\rightarrow$ Rejoin as Standby & Reverse Sync
+
+When the old `primaryhub` is repaired and boots back online, **it must not start as master** (doing so would cause split-brain data conflict). Instead, it rejoins as a **Standby Replica** replicating from `secondaryhub`:
+
+1. **Re-bootstrap Primary Hub PostgreSQL from Secondary Hub**:
+   On `primaryhub` (`ubuntu@192.168.100.20`), configure PostgreSQL to pull from `secondaryhub` (`10.99.0.2`):
+   ```bash
+   # Re-sync primary volume with all new transactions created on secondaryhub:
+   kubectl exec -it -n opensandbox-system deployment/postgresql -c postgres -- sh -c '
+     pg_basebackup -h 10.99.0.2 -p 5432 -U postgres -D /tmp/new_data -Fp -Xs -R &&
+     rm -rf /var/lib/postgresql/data/* &&
+     cp -r /tmp/new_data/* /var/lib/postgresql/data/ &&
+     rm -rf /tmp/new_data
+   '
+   kubectl rollout restart deployment/postgresql -n opensandbox-system
+   ```
+
+2. **Configure Primary Redis as Replica of Secondary**:
+   ```bash
+   kubectl exec -n opensandbox-system deployment/redis -- redis-cli replicaof 10.99.0.2 6379
+   ```
+
+3. **Verify Reverse Replication**:
+   Check replication status on `secondaryhub` (now Master):
+   ```bash
+   kubectl exec -n opensandbox-system deployment/postgresql -- \
+     psql -U postgres -d postgres -x -c "SELECT client_addr, state, sync_state FROM pg_stat_replication;"
+   ```
+   **Output:**
+   ```
+   -[ RECORD 1 ]-----------
+   client_addr | 10.99.0.1
+   state       | streaming
+   sync_state  | async
+   ```
+
+4. **Verify New API Keys Replicated to Primary Hub**:
+   Query `primaryhub` PostgreSQL:
+   ```bash
+   kubectl exec -n opensandbox-system deployment/postgresql -- \
+     psql -U postgres -d apikeys -c "SELECT id, name, created_at FROM api_keys;"
+   ```
+   **Result: All API keys generated while `primaryhub` was offline are now present in `primaryhub`'s database.**
+
+---
+
+### 7.3 Phase 4: Optional Graceful Switchover Back to Original Roles
+
+If you prefer `primaryhub` to resume its role as the active Master:
+1. Briefly pause writes on `secondaryhub`.
+2. Promote `primaryhub` to Master:
+   ```bash
+   kubectl exec -n opensandbox-system deployment/postgresql -- pg_ctl promote
+   kubectl exec -n opensandbox-system deployment/redis -- redis-cli replicaof no one
+   ```
+3. Demote `secondaryhub` back to Standby:
+   ```bash
+   kubectl exec -it -n opensandbox-system deployment/postgresql -c postgres -- sh -c '
+     touch /var/lib/postgresql/data/standby.signal
+   '
+   kubectl rollout restart deployment/postgresql -n opensandbox-system
+   kubectl exec -n opensandbox-system deployment/redis -- redis-cli replicaof 10.99.0.1 6379
+   ```
+4. Float Virtual IP back to `primaryhub`. Both hubs return to the initial Warm Standby topology with zero data loss.
+
+---
+
+## 8. Operational Gotchas & Troubleshooting Guide
+
+### 8.1 Primary Database Crash or Restart
+- **Behavior**: If `primaryhub`'s PostgreSQL restarts (e.g. pod rescheduling or VM reboot), `secondaryhub` will temporarily log `could not connect to server... retrying`.
+- **Resolution**: Automatic! As soon as `primaryhub` comes back up, `secondaryhub` resumes streaming immediately without administrative intervention.
+
+### 8.2 Temporary WireGuard Link Flapping
+- **Behavior**: If the network tunnel drops for a few minutes, PostgreSQL on `primaryhub` retains up to `wal_keep_size = 1GB` of WAL logs on disk.
+- **Resolution**: Automatic! When the WireGuard tunnel reconnects, `secondaryhub` replays the buffered WAL segments and catches up to 0 lag within seconds. Redis similarly replays its replication backlog.
+
+### 8.3 Kind Container Runtime Image Caching (`IfNotPresent`)
+- **Gotcha**: When modifying container source code (like `app_state.py`) while keeping the same image tag (e.g. `v0.7.9`), Kind's underlying containerd daemon may retain the cached image layers even after `kind load`.
+- **Fix**: Before running `kind load`, remove the existing image from containerd:
+  ```bash
+  docker exec secondaryhub-control-plane crictl rmi docker.io/01community/01sandbox-api:v0.7.9
+  kind load docker-image 01community/01sandbox-api:v0.7.9 --name secondaryhub
+  ```
+
+### 8.4 Database Selection: `apikeys` vs `postgres`
+- **Gotcha**: PostgreSQL has multiple databases inside the cluster. The application tables (`api_keys`, `system_settings`, `user_subscriptions`) reside in the database named **`apikeys`**, while system replication queries (`pg_stat_replication`, `pg_is_in_recovery()`) can be run against **`postgres`**.
+- **Rule**: Always specify `-d apikeys` when verifying application tables.
