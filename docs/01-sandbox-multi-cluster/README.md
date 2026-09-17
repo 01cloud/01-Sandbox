@@ -25,6 +25,7 @@ Based on the specification in [`docs/spec-driven-development/prod-sandbox.md`](f
 4. [Phase 4: Standalone OCM Infrastructure Manifests (`manifests/ocm/`)](#phase-4-standalone-ocm-infrastructure-manifests-manifestsocm)
 5. [Phase 5: Umbrella Helm Chart (`codeInspector`)](#phase-5-umbrella-helm-chart-codeinspector)
 6. [Phase 6: Deployment & Runtime Verification](#phase-6-deployment--runtime-verification)
+7. [Phase 7: Custom Tagging (`v0.7.10-ocm`) & Containerd Persistence Fix](#phase-7-custom-tagging-v0710-ocm--containerd-persistence-fix)
 
 ---
 
@@ -442,4 +443,77 @@ INFO: Creating sandbox service with type: kubernetes
 INFO: Creating workload provider: OcmWorkloadProvider
 INFO: Initialized workload provider: OcmWorkloadProvider
 INFO: Uvicorn running on http://0.0.0.0:8080
+```
+
+---
+
+## Phase 7: Custom Tagging (`v0.7.10-ocm`) & Containerd Persistence Fix
+
+### 7.1 Issue Summary & Diagnostic Log
+When the host VM or Kind cluster nodes restart, containerd inside the Kind control plane node re-checks image registries. If local images use official release tags (such as `01community/01sandbox-opensandbox-server:v0.7.10`), containerd pulls the official upstream layer from Docker Hub.
+
+Because the upstream public image lacks the custom `OcmWorkloadProvider` module, `opensandbox-server` threw the following initialization exception upon restart:
+```text
+ERROR: Failed to create workload provider: Unsupported workload provider type 'ocm'. Available providers: batchsandbox, agent-sandbox
+ValueError: Unsupported workload provider type 'ocm'. Available providers: batchsandbox, agent-sandbox
+```
+
+### 7.2 Root Cause & Architectural Fix
+- **Root Cause**: Upstream public tag collision on Docker Hub causing containerd image layer overwrites during cluster node restarts.
+- **Fix**: Rebuilt the local OCM image with a unique custom tag `01community/01sandbox-opensandbox-server:v0.7.10-ocm`. Because `v0.7.10-ocm` does not exist upstream on Docker Hub, containerd will never pull upstream layers or overwrite the image upon node restarts.
+
+### 7.3 `[MODIFY]` [`codeInspector/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values.yaml)
+- **Path**: `codeInspector/values.yaml`
+- **Reason**: Updated `opensandbox.server.image.tag` from `v0.7.10` to `v0.7.10-ocm`.
+
+```yaml
+opensandbox:
+  server:
+    workloadProvider: "ocm"
+    placementName: "sandbox-spoke-placement"
+    image:
+      repository: 01community/01sandbox-opensandbox-server
+      tag: "v0.7.10-ocm"
+      pullPolicy: IfNotPresent
+```
+
+### 7.4 `[MODIFY]` [`codeInspector/values-local.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-local.yaml)
+- **Path**: `codeInspector/values-local.yaml`
+- **Reason**: Aligned repository and tag to `01community/01sandbox-opensandbox-server:v0.7.10-ocm`.
+
+```yaml
+opensandbox:
+  server:
+    image:
+      repository: 01community/01sandbox-opensandbox-server
+      tag: "v0.7.10-ocm"
+      pullPolicy: IfNotPresent
+```
+
+### 7.5 Execution & Verification Commands
+```bash
+# 1. Build distinct custom OCM image
+docker build -t 01community/01sandbox-opensandbox-server:v0.7.10-ocm ./opensandbox-server/docker-build
+
+# 2. Load into Kind primaryhub
+kind load docker-image 01community/01sandbox-opensandbox-server:v0.7.10-ocm --name primaryhub
+
+# 3. Deploy updated Helm release
+helm upgrade --install codeinspector ./codeInspector -n opensandbox-system --set global.ocm.role=hub
+
+# 4. Verify pod status
+kubectl get pods -n opensandbox-system
+```
+
+### 7.6 Final Verified Pod State
+```text
+NAME                                                     READY   STATUS    RESTARTS   AGE
+codeinspector-agentgateway-controller-79c6f549df-n477k   1/1     Running   0          39h
+codeinspector-sealed-secrets-57dc877cb9-lrr8f            1/1     Running   0          40h
+opensandbox-controller-86c99b4948-fn4f5                  1/1     Running   0          39h
+opensandbox-server-55564d6f44-8wp9p                      1/1     Running   0          43s
+postgresql-7bd7f466dd-n6glq                              1/1     Running   0          40h
+rabbitmq-5685746466-78l9x                                1/1     Running   0          40h
+redis-7f8475f964-kt7lt                                   1/1     Running   0          40h
+sandbox-api-584f569c4d-xp6jm                             1/1     Running   0          39h
 ```
