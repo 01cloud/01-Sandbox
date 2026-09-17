@@ -26,6 +26,7 @@ Based on the specification in [`docs/spec-driven-development/prod-sandbox.md`](f
 5. [Phase 5: Umbrella Helm Chart (`codeInspector`)](#phase-5-umbrella-helm-chart-codeinspector)
 6. [Phase 6: Deployment & Runtime Verification](#phase-6-deployment--runtime-verification)
 7. [Phase 7: Custom Tagging (`v0.7.10-ocm`) & Containerd Persistence Fix](#phase-7-custom-tagging-v0710-ocm--containerd-persistence-fix)
+8. [Phase 8: API Server (`sandbox-api`) Runtime Log Analysis](#phase-8-api-server-sandbox-api-runtime-log-analysis)
 
 ---
 
@@ -517,3 +518,52 @@ rabbitmq-5685746466-78l9x                                1/1     Running   0    
 redis-7f8475f964-kt7lt                                   1/1     Running   0          40h
 sandbox-api-584f569c4d-xp6jm                             1/1     Running   0          39h
 ```
+
+---
+
+## Phase 8: API Server (`sandbox-api`) Runtime Log Analysis
+
+### 8.1 Execution Log Output
+The runtime logs from `sandbox-api-584f569c4d-lmpwq` confirm complete initialization and operational health across all dependent services:
+
+```text
+[startup] Connected to Redis at redis-service
+[startup] Successfully connected to PostgreSQL for database initialization.
+[startup] Loaded cluster-wide JWT Private Key from system_settings table.
+INFO:     Started server process [1]
+INFO:     Waiting for application startup.
+[Janitor] Running cleanup for keys expired before 2026-09-17T06:12:06.600886+00:00...
+[RabbitMQ] Connected on attempt 1: rabbitmq-service:5672/
+[Cancellation] Starting Redis Pub/Sub cancellation/deletion listener...
+INFO:     Application startup complete.
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+[RabbitMQ] DLQ setup complete: scan.failed bound to scan_jobs.dlx
+[RabbitMQ] Bound delay queue scan.retry.5s to scan_jobs.retry with key scan.quick.5s
+[RabbitMQ] Bound delay queue scan.retry.5s to scan_jobs.retry with key scan.repo.5s
+[RabbitMQ] Bound delay queue scan.retry.5s to scan_jobs.retry with key notification.email.5s
+[RabbitMQ] Bound delay queue scan.retry.30s to scan_jobs.retry with key scan.quick.30s
+[RabbitMQ] Bound delay queue scan.retry.30s to scan_jobs.retry with key scan.repo.30s
+[RabbitMQ] Bound delay queue scan.retry.30s to scan_jobs.retry with key notification.email.30s
+[RabbitMQ] Bound delay queue scan.retry.2m to scan_jobs.retry with key scan.quick.2m
+[RabbitMQ] Bound delay queue scan.retry.2m to scan_jobs.retry with key scan.repo.2m
+[RabbitMQ] Bound delay queue scan.retry.2m to scan_jobs.retry with key notification.email.2m
+[RabbitMQ] Consumer ready: queue=scan.quick prefetch=1
+[RabbitMQ] Consumer ready: queue=scan.repo prefetch=1
+[RabbitMQ] Consumer ready: queue=notification.email prefetch=5
+[RabbitMQ] Consumer ready: queue=scan.delete prefetch=5
+[RabbitMQ] All 4 consumers active.
+[DEBUG HEADERS] GET /health Headers: {'host': '10.244.0.31:8000', 'user-agent': 'kube-probe/1.32', 'accept': '*/*', 'connection': 'close'}
+{"timestamp": "2026-09-17T06:12:09Z", "level": "INFO", "name": "httpx", "message": "HTTP Request: GET http://opensandbox-server.opensandbox-system.svc.cluster.local/health \"HTTP/1.1 200 OK\"", "taskName": "starlette.middleware.base.BaseHTTPMiddleware.__call__.<locals>.call_next.<locals>.coro", "correlation_id": "0883c46e-6783-4765-900c-60eee6e803c6"}
+INFO:     10.244.0.1:50084 - "GET /health HTTP/1.1" 200 OK
+```
+
+### 8.2 Log Breakdown & Subsystem Verification
+
+| Subsystem | Verified Log Indicator | Component Status |
+| :--- | :--- | :--- |
+| **Database (PostgreSQL)** | `[startup] Successfully connected to PostgreSQL...` | Connected & Schema Initialized |
+| **In-Memory Cache (Redis)** | `[startup] Connected to Redis at redis-service` | Connected & Pub/Sub Listener Active |
+| **Message Broker (RabbitMQ)** | `[RabbitMQ] All 4 consumers active.` | Queue Workers Active (`scan.quick`, `scan.repo`, `notification.email`, `scan.delete`) |
+| **Security & Authentication** | `Loaded cluster-wide JWT Private Key...` | RSA JWT Private Key Active |
+| **Backend Interoperability** | `GET http://opensandbox-server... "HTTP/1.1 200 OK"` | `apiServer` verified health of `opensandbox-server` |
+| **Kubernetes Health Probes** | `INFO: 10.244.0.1:50084 - "GET /health HTTP/1.1" 200 OK` | Liveness/Readiness probes returning HTTP 200 |
