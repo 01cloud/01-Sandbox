@@ -17,6 +17,27 @@ spec:
         app: postgresql
     spec:
       terminationGracePeriodSeconds: 60
+      {{- if and .Values.postgresql.replication .Values.postgresql.replication.enabled (eq .Values.postgresql.replication.role "standby") }}
+      initContainers:
+      - name: init-standby
+        image: postgres:15-alpine
+        command:
+        - sh
+        - -c
+        - |
+          set -e
+          if [ ! -f /var/lib/postgresql/data/standby.signal ] && [ ! -f /var/lib/postgresql/data/PG_VERSION ]; then
+            echo "Bootstrapping standby from primary {{ .Values.postgresql.replication.primaryHost }}:{{ .Values.postgresql.replication.primaryPort }}..."
+            PGPASSWORD="{{ .Values.postgresql.password }}" pg_basebackup -h {{ .Values.postgresql.replication.primaryHost }} -p {{ .Values.postgresql.replication.primaryPort }} -U postgres -D /var/lib/postgresql/data -Fp -Xs -R
+            echo "Standby bootstrapped successfully."
+          else
+            echo "Standby data directory already exists."
+          fi
+        volumeMounts:
+        - name: postgres-storage
+          mountPath: /var/lib/postgresql/data
+          subPath: v3-data
+      {{- end }}
       containers:
       - name: postgres
         image: postgres:15-alpine

@@ -31,6 +31,17 @@ apiServer:
     enabled: false
   postgresql:
     storageClassName: "standard"
+    replication:
+      enabled: true
+      role: "standby"
+      primaryHost: "10.99.0.1"
+      primaryPort: 5432
+  redis:
+    replication:
+      enabled: true
+      role: "standby"
+      primaryHost: "10.99.0.1"
+      primaryPort: 6379
 
 opensandbox:
   enabled: true

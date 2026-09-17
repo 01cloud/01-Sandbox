@@ -126,68 +126,82 @@ class AppState:
 
         cursor = conn.cursor()
 
-        # Create system_settings table for cluster-wide settings (e.g. shared JWT keys)
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS system_settings (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS api_keys (
-                id TEXT PRIMARY KEY,
-                name TEXT,
-                backend TEXT,
-                user_id TEXT,
-                user_email TEXT,
-                created_at TEXT,
-                expires_at TEXT,
-                last_used_at TEXT,
-                is_revoked INTEGER DEFAULT 0,
-                prefix TEXT,
-                expiry_notification_sent INTEGER DEFAULT 0
-            )
-        """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS user_subscriptions (
-                id TEXT PRIMARY KEY,
-                user_id TEXT NOT NULL,
-                backend_id TEXT NOT NULL,
-                status TEXT DEFAULT 'active',
-                created_at TEXT,
-                CONSTRAINT unique_user_backend UNIQUE (user_id, backend_id)
-            )
-        """
-        )
-
-        conn.commit()
-
-        # Schema Guard: Ensure user_email exists (Migration)
+        # Check if database is in standby (read-only replica) recovery mode
         try:
-            cursor.execute("ALTER TABLE api_keys ADD COLUMN user_email TEXT")
-            conn.commit()
-            print("[startup] Database migration: Added user_email column to api_keys")
+            cursor.execute("SELECT pg_is_in_recovery();")
+            is_standby = cursor.fetchone()[0]
         except Exception:
-            conn.rollback()
-            pass
+            is_standby = False
 
-        # Schema Guard: Ensure expiry_notification_sent exists (Migration)
-        try:
-            cursor.execute(
-                "ALTER TABLE api_keys ADD COLUMN expiry_notification_sent INTEGER DEFAULT 0"
-            )
-            conn.commit()
+        if is_standby:
             print(
-                "[startup] Database migration: Added expiry_notification_sent column to api_keys"
+                "[startup] Connected to Standby/Replica PostgreSQL. Skipping schema migrations."
             )
-        except Exception:
-            conn.rollback()
-            pass
+        else:
+            # Create system_settings table for cluster-wide settings (e.g. shared JWT keys)
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS system_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                )
+            """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS api_keys (
+                    id TEXT PRIMARY KEY,
+                    name TEXT,
+                    backend TEXT,
+                    user_id TEXT,
+                    user_email TEXT,
+                    created_at TEXT,
+                    expires_at TEXT,
+                    last_used_at TEXT,
+                    is_revoked INTEGER DEFAULT 0,
+                    prefix TEXT,
+                    expiry_notification_sent INTEGER DEFAULT 0
+                )
+            """
+            )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS rate_limits (
+                    key TEXT PRIMARY KEY,
+                    count INTEGER,
+                    reset_time REAL
+                )
+            """
+            )
+
+            # Performance Indexes
+            try:
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_api_keys_prefix ON api_keys(prefix)"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_api_keys_user_id ON api_keys(user_id)"
+                )
+                cursor.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_api_keys_active ON api_keys(is_revoked, expires_at)"
+                )
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                pass
+
+            # Schema Guard: Ensure expiry_notification_sent exists (Migration)
+            try:
+                cursor.execute(
+                    "ALTER TABLE api_keys ADD COLUMN expiry_notification_sent INTEGER DEFAULT 0"
+                )
+                conn.commit()
+                print(
+                    "[startup] Database migration: Added expiry_notification_sent column to api_keys"
+                )
+            except Exception:
+                conn.rollback()
+                pass
 
         # Load or generate stable JWT signing key to avoid signature verification mismatch in multi-pod deployments
         import config
@@ -209,7 +223,7 @@ class AppState:
                     print(
                         "[startup] Loaded cluster-wide JWT Private Key from system_settings table."
                     )
-                else:
+                elif not is_standby:
                     print("[startup] Generating stable cluster-wide JWT Private Key...")
                     from cryptography.hazmat.backends import default_backend
                     from cryptography.hazmat.primitives import serialization
@@ -254,29 +268,41 @@ class AppState:
                             print(
                                 f"[startup] Database write failed, using local ephemeral key: {db_err}"
                             )
+                else:
+                    print("[startup] Standby database awaiting replicated JWT key.")
             except Exception as e:
                 print(f"[startup] Stable JWT setup error: {e}")
 
         # Sync Active Registry to Redis for line-rate validation
         if self.use_redis:
-            now_iso = datetime.datetime.now(datetime.UTC).isoformat()
-            cursor.execute(
-                "SELECT id FROM api_keys WHERE is_revoked = 0 AND expires_at > %s",
-                (now_iso,),
-            )
-            active_jtis = cursor.fetchall()
-            if active_jtis:
-                # Add all active JTIs to a Redis set called 'active_api_keys'
-                pipe = self.redis_client.pipeline()
-                pipe.delete("active_api_keys")  # Refresh
-                for (jti,) in active_jtis:
-                    pipe.sadd("active_api_keys", jti)
-                pipe.execute()
+            try:
+                info = self.redis_client.info("replication")
+                is_redis_slave = info.get("role") == "slave"
+            except Exception:
+                is_redis_slave = False
+
+            if not is_redis_slave:
+                now_iso = datetime.datetime.now(datetime.UTC).isoformat()
+                cursor.execute(
+                    "SELECT id FROM api_keys WHERE is_revoked = 0 AND expires_at > %s",
+                    (now_iso,),
+                )
+                active_jtis = cursor.fetchall()
+                if active_jtis:
+                    # Add all active JTIs to a Redis set called 'active_api_keys'
+                    pipe = self.redis_client.pipeline()
+                    pipe.delete("active_api_keys")  # Refresh
+                    for (jti,) in active_jtis:
+                        pipe.sadd("active_api_keys", jti)
+                    pipe.execute()
+                    print(
+                        f"[startup] Synced {len(active_jtis)} active keys to Redis registry."
+                    )
+            else:
                 print(
-                    f"[startup] Synced {len(active_jtis)} active keys to Redis registry."
+                    "[startup] Connected to Redis replica. Skipping registry write sync (handled by master)."
                 )
 
-        conn.commit()
         conn.close()
 
 
