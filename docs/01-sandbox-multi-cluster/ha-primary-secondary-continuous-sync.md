@@ -12,6 +12,15 @@ This document provides the complete, end-to-end technical implementation guide, 
 5. [Step-by-Step Technical Implementation Guide](#5-step-by-step-technical-implementation-guide)
    - [Phase 1: Primary Hub Exposure & Database Configuration](#phase-1-primary-hub-exposure--database-configuration)
    - [Phase 2: Helm Chart & Codebase Modifications](#phase-2-helm-chart--codebase-modifications)
+     - [File 1: codeInspector/values-secondary.yaml](#file-1-codeinspectorvalues-secondaryyaml-new)
+     - [File 2: codeInspector/charts/apiServer/templates/postgresql.yaml](#file-2-codeinspectorchartsapiservertemplatespostgresqlyaml)
+     - [File 3: codeInspector/charts/apiServer/templates/redis.yaml](#file-3-codeinspectorchartsapiservertemplatesredisyaml)
+     - [File 4: apiServer/fastapi/core/app_state.py](#file-4-apiserverfastapicoreapp_statepy-standby-schema-guard)
+     - [File 5: opensandbox-server/docker-build/src/services/k8s/client.py](#file-5-opensandbox-serverdocker-buildsrcservicesk8sclientpy-custom_api-property)
+     - [File 6: opensandbox-server/docker-build/src/services/k8s/ocm_provider.py](#file-6-opensandbox-serverdocker-buildsrcservicesk8socm_providerpy-ocm-spoke-workload-orchestration)
+     - [File 7: opensandbox-server/docker-build/src/api/lifecycle.py](#file-7-opensandbox-serverdocker-buildsrcapilifecyclepy-remote-report-ingestion--job-forwarding)
+     - [File 8: Gateway & VIP DNAT Routing Configuration](#file-8-gateway-vm-virtual-ip-10990100-dnat-routing-configuration)
+     - [File 9: Spoke Cluster Runtimes & OS Resource Provisioning](#file-9-spoke-cluster-runtimes--os-resource-provisioning)
    - [Phase 3: Secondary Hub Environment Provisioning](#phase-3-secondary-hub-environment-provisioning)
    - [Phase 4: Deploying Secondary Helm Release](#phase-4-deploying-secondary-helm-release)
 6. [Verification & Testing Runbook](#6-verification--testing-runbook)
@@ -20,6 +29,9 @@ This document provides the complete, end-to-end technical implementation guide, 
    - [Test 3: Write-Conflict Protection Test](#test-3-write-conflict-protection-test)
    - [Test 4: Redis Replication Verification](#test-4-redis-replication-verification)
    - [Test 5: Standby Microservices Health Checks](#test-5-standby-microservices-health-checks)
+   - [Test 6: Multi-Cluster Sandbox Code Security Scanning via VIP & Bearer Token](#test-6-multi-cluster-sandbox-code-security-scanning-via-vip--bearer-token)
+   - [Test 7: Dynamic Language Container Selection & Tool Enforcement](#test-7-dynamic-language-container-selection--tool-enforcement)
+   - [Test 8: Spoke RuntimeClass & Region Placement Routing](#test-8-spoke-runtimeclass--region-placement-routing)
 7. [Failover, Long-Term Outage & Failback Lifecycle](#7-failover-long-term-outage--failback-lifecycle)
    - [Phase 1: Normal Operations](#7-failover-long-term-outage--failback-lifecycle)
    - [Phase 2: Primary Down & Secondary Promotion](#71-phase-2-if-primary-hub-is-down--promotion-to-read-write-master)
@@ -522,7 +534,288 @@ Because standby PostgreSQL rejects DDL transactions with `cannot execute CREATE 
                 )
 ```
 
+#### File 5: `opensandbox-server/docker-build/src/services/k8s/client.py` (`custom_api` Property)
+
+##### Problem & Root Cause:
+The Open Cluster Management (OCM) provider dynamically creates and inspects Kubernetes Custom Resources (`ManifestWork` under `cluster.open-cluster-management.io/v1` and `PlacementDecision` under `cluster.open-cluster-management.io/v1beta1`). While `K8sClient` implemented a helper method `get_custom_objects_api()`, the OCM provider accessed `self.k8s_client.custom_api` directly as a property attribute. This led to a runtime `AttributeError: 'K8sClient' object has no attribute 'custom_api'`, causing OCM sandbox provisioning requests to fail immediately.
+
+##### Code Changes:
+```python
+    def get_custom_objects_api(self) -> CustomObjectsApi:
+        if self._custom_objects_api is None:
+            self._custom_objects_api = client.CustomObjectsApi()
+        return self._custom_objects_api
+
+    @property
+    def custom_api(self) -> CustomObjectsApi:
+        """Expose CustomObjectsApi as a property for OCM ManifestWork and Placement interactions."""
+        return self.get_custom_objects_api()
+```
+
+##### Technical Rationale:
+Exposing `@property def custom_api` allows both method-style callers and property-style callers to obtain the singleton `client.CustomObjectsApi` instance safely, enabling seamless communication with the Kubernetes CRD API on both `primaryhub` and `secondaryhub`.
+
 ---
+
+#### File 6: `opensandbox-server/docker-build/src/services/k8s/ocm_provider.py` (OCM Spoke Workload Orchestration)
+
+##### Problem & Root Cause:
+The standard OpenSandbox server was designed for single-cluster local deployments. When running across an OCM multi-cluster mesh (`hub1-vm`, `hub2-vm`, `spoke1-vm`, `spoke2-vm`):
+1. **Unreachable InitContainer Registry**: The server injected an `execd-init` container pointing to `sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.7`, which fails to download from spoke clusters due to geographic network throttling/unreachability.
+2. **Namespace Conflict**: The server attempted to deploy spoke workloads into `opensandbox-system`, which is the Hub's control plane namespace, rather than a dedicated tenant namespace on spoke clusters.
+3. **Cluster-Scoped ManifestWork Rejection**: It embedded a cluster-scoped `RuntimeClass` resource inside namespaced `ManifestWork`, causing admission webhooks on spoke clusters to reject the manifest.
+4. **Out-of-Memory (OOM) AST Compilations**: Semgrep loads extensive Abstract Syntax Tree (AST) security rule packs simultaneously. At default 256Mi–512Mi memory limits, the container kernel OOM-killed the scanning process.
+5. **Decoupled Result Storage**: Remote spoke pods could not write to the Hub's local HostPath/PVC `/data` volume. Reports remained trapped on spoke nodes.
+6. **Tool Incompatibility**: Static analysis on non-Python languages (like Go) crashed or ran irrelevant tools like Bandit, and heavy artifact/credential scanners like `trivy` and `gitleaks` clogged short-lived static code scans.
+
+##### Code Changes:
+```python
+    def create_sandbox(self, sandbox_id: str, ...) -> Dict[str, Any]:
+        # Target dedicated workloads namespace on spoke clusters
+        workload_namespace = "opensandbox-workloads"
+        manifests = []
+
+        # 1. Resolve target spoke cluster dynamically from PlacementDecision or user region
+        target_cluster = self._resolve_target_spoke_cluster(extensions)
+
+        # 2. Extract submitted code files from extensions and package as a ConfigMap
+        raw_files = extensions.get("files") if extensions and isinstance(extensions, dict) else None
+        files_dict = None
+        if raw_files:
+            if isinstance(raw_files, str):
+                files_dict = json.loads(raw_files)
+            elif isinstance(raw_files, dict):
+                files_dict = raw_files
+
+        if files_dict and isinstance(files_dict, dict):
+            cm_name = f"cm-code-{sandbox_id[:12]}"
+            data_map = {os.path.basename(fname): content for fname, content in files_dict.items()}
+            manifests.append({
+                "apiVersion": "v1",
+                "kind": "ConfigMap",
+                "metadata": {
+                    "name": cm_name,
+                    "namespace": workload_namespace,
+                },
+                "data": data_map,
+            })
+
+        # 3. Build Spoke Pod Manifest with security runtimes and automatic callback
+        pod_manifest = self._build_sandbox_pod_manifest(...)
+        manifests.append(pod_manifest)
+
+        # 4. Wrap in OCM ManifestWork with feedbackRules for Pod Phase tracking
+        manifest_work = {
+            "apiVersion": "work.open-cluster-management.io/v1",
+            "kind": "ManifestWork",
+            "metadata": {
+                "name": f"mw-sandbox-{sandbox_id}",
+                "namespace": target_cluster,  # Cluster namespace on Hub
+                "labels": {"sandbox.opensandbox.io/id": sandbox_id},
+            },
+            "spec": {
+                "workload": {"manifests": manifests},
+                "manifestConfigs": [
+                    {
+                        "resourceIdentifier": {
+                            "group": "",
+                            "resource": "pods",
+                            "name": pod_manifest["metadata"]["name"],
+                            "namespace": workload_namespace,
+                        },
+                        "feedbackRules": [
+                            {"type": "JSONPaths", "jsonPaths": [{"name": "phase", "path": ".status.phase"}]}
+                        ]
+                    }
+                ]
+            },
+        }
+        self.k8s_client.custom_api.create_namespaced_custom_object(...)
+```
+
+And in `_build_sandbox_pod_manifest`:
+```python
+        # Ensure heavy/irrelevant tools are excluded for static source code checks
+        env_dict = dict(env or {})
+        if "EXCLUDE_TOOLS" not in env_dict:
+            env_dict["EXCLUDE_TOOLS"] = "trivy,gitleaks"
+        if cm_name:
+            env_dict["SCAN_DIR"] = "/workspace"
+            env_dict["SCAN_REPORT"] = "/reports/security_scan_report.json"
+
+        # Dynamically select runtimeClass (gvisor, kata, kata-fc)
+        secure_runtime = "gvisor"
+        if extensions and "runtimeClassName" in extensions:
+            secure_runtime = str(extensions["runtimeClassName"])
+
+        # Construct self-contained scan execution and Virtual IP report callback script
+        actual_job_id = extensions.get("job_id", sandbox_id) if extensions else sandbox_id
+        upload_script = (
+            f"rm -f /usr/local/bin/trivy /usr/local/bin/gitleaks; "
+            f"/opt/opensandbox/code-interpreter.sh; "
+            f"if [ -f /reports/security_scan_report.json ]; then "
+            f"curl -s -X POST -H 'Content-Type: application/json' -d @/reports/security_scan_report.json http://10.99.0.100/api/v1/01sbx/scan-jobs/{actual_job_id}/report || "
+            f"curl -s -X POST -H 'Content-Type: application/json' -d @/reports/security_scan_report.json http://192.168.100.10/api/v1/01sbx/scan-jobs/{actual_job_id}/report || true; "
+            f"fi"
+        )
+
+        pod_spec = {
+            "apiVersion": "v1",
+            "kind": "Pod",
+            "metadata": {"name": f"sbx-{sandbox_id[:12]}", "namespace": namespace},
+            "spec": {
+                "runtimeClassName": secure_runtime,
+                "restartPolicy": "Never",
+                # execd-init container removed
+                "containers": [{
+                    "name": "code-interpreter",
+                    "image": image_name,
+                    "command": ["/bin/bash", "-c", upload_script],
+                    "resources": {
+                        "limits": {"cpu": "1000m", "memory": "1536Mi"},
+                        "requests": {"cpu": "100m", "memory": "128Mi"},
+                    },
+                    "volumeMounts": container_volume_mounts,
+                }],
+                "volumes": pod_volumes,
+            }
+        }
+```
+
+##### Technical Rationale:
+1. **Packaging Source Code via ConfigMap**: Allows source files provided over the REST API to be seamlessly injected into `/workspace` of the spoke pod without needing shared distributed network storage (NFS/Ceph/CSI).
+2. **Removing `execd-init`**: Eliminates dependency on external Chinese cloud registries, making spoke pods spin up in seconds.
+3. **Automated VIP Report Callback**: By executing a `curl POST` directly to `http://10.99.0.100/.../report` upon completion of `code-interpreter.sh`, the spoke pod automatically pushes the final security report back across WireGuard into the Hub's central database.
+4. **Memory Allocation (1536Mi)**: Provides the required memory ceiling for multi-core Semgrep AST compilation, eliminating OOM failures.
+
+---
+
+#### File 7: `opensandbox-server/docker-build/src/api/lifecycle.py` (Remote Report Ingestion & Job Forwarding)
+
+##### Problem & Root Cause:
+When a client triggers `POST /api/v1/01sbx/scan-jobs?async=true`, the API generates a unique `job_id` and forwards the request to `opensandbox-server`. In remote multi-cluster execution:
+1. The server did not forward the `job_id` or submitted files inside `extensions`, preventing the OCM provider from binding the report callback URL to the original client job ID.
+2. The server had no REST endpoint to accept an incoming JSON report from remote spoke pods.
+
+##### Code Changes:
+```python
+    # Inside create_scan_job():
+    # Pass submitted code files and routing metadata in extensions for remote spoke execution
+    extensions["files"] = json.dumps(files_to_save)
+    extensions["job_id"] = str(job_id)
+    if metadata.get("region"):
+        extensions["region"] = str(metadata.get("region"))
+    if metadata.get("target_cluster"):
+        extensions["target_cluster"] = str(metadata.get("target_cluster"))
+
+    # Sized resource limits
+    resourceLimits=SchemaResourceLimits(
+        root={
+            "cpu": os.environ.get("SANDBOX_CPU", "500m"),
+            "memory": os.environ.get("SANDBOX_MEMORY", "1536Mi"),
+        }
+    )
+
+# New Endpoint: Ingest completed scan reports sent from spoke pods
+@router.post("/scan-jobs/{job_id}/report", tags=["Security Scan Pipeline"])
+async def upload_scan_report(job_id: str, request: Request):
+    """
+    Receives scan report directly from remote sandboxes (spoke clusters).
+    Saves to the host storage under data_root/job_id/reports/security_scan_report.json.
+    """
+    try:
+        report_data = await request.json()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_JSON", "message": str(e)},
+        )
+    data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
+    reports_dir = os.path.join(data_root, job_id, "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+    report_path = os.path.join(reports_dir, "security_scan_report.json")
+    with open(report_path, "w") as f:
+        json.dump(report_data, f, indent=2)
+    log_job_event(job_id, f"[SERVER] Received remote scan report for job {job_id} ({len(report_data.get('findings', []))} findings)")
+    return {"status": "SUCCESS", "job_id": job_id}
+```
+
+##### Technical Rationale:
+`upload_scan_report` acts as the ingestion bridge for remote spoke clusters. When the spoke pod completes its analysis, it posts its payload here. The server persists the report into `/data/{job_id}/reports/security_scan_report.json`, immediately fulfilling any polling `GET /v1/jobs/{job_id}/result` or `GET /v1/scan-jobs/{job_id}/report` queries from clients.
+
+---
+
+#### File 8: Gateway VM Virtual IP (`10.99.0.100`) DNAT Routing Configuration
+
+##### Problem & Root Cause:
+Clients and spoke pods send HTTP traffic to the Virtual IP `http://10.99.0.100/api/v1/01sbx/...`. On `gateway-vm` (`192.168.100.10`), `10.99.0.100` was assigned to `wg0`, but only port 6443 (Kubernetes API) was forwarded to the active Hub. Port 80 had no destination NAT rule for locally generated packets (OUTPUT chain) or external forwarded packets (PREROUTING chain), causing incoming HTTP requests to be dropped with `Connection refused` (error code 7).
+
+##### Configuration Applied on `gateway-vm`:
+```bash
+# Enable PREROUTING DNAT for traffic arriving on 10.99.0.100 and 192.168.100.10
+sudo iptables -t nat -A PREROUTING -d 10.99.0.100 -p tcp --dport 80 -j DNAT --to-destination 10.99.0.1:80
+sudo iptables -t nat -A PREROUTING -d 192.168.100.10 -p tcp --dport 80 -j DNAT --to-destination 10.99.0.1:80
+
+# Enable OUTPUT DNAT for local processes on gateway-vm
+sudo iptables -t nat -A OUTPUT -d 10.99.0.100 -p tcp --dport 80 -j DNAT --to-destination 10.99.0.1:80
+
+# Enable MASQUERADE for forwarded traffic
+sudo iptables -t nat -A POSTROUTING -p tcp -d 10.99.0.1 --dport 80 -j MASQUERADE
+```
+
+##### Technical Rationale:
+Directs port 80 traffic hitting either the Virtual IP (`10.99.0.100`) or the Gateway LAN IP (`192.168.100.10`) to the active Hub's WireGuard interface (`10.99.0.1:80`), which in turn forwards to the NodePort (`172.18.0.2:30080`) of `sandbox-api`.
+
+---
+
+#### File 9: Spoke Cluster Runtimes & OS Resource Provisioning
+
+##### Problem & Root Cause:
+1. **Missing Runtime Classes**: Spoke clusters (`spoke1` and `spoke2`) did not have `RuntimeClass` definitions for `gvisor`, `kata`, and `kata-fc`. When ManifestWork specified `spec.runtimeClassName: gvisor`, the spoke Kubernetes scheduler marked the pod as `RuntimeClass "gvisor" not found`.
+2. **Out-of-Memory Kernel Kill**: Spoke VMs had no swap enabled and only 4GB RAM. AST parsing for large files caused Linux OOM-killer invocations.
+3. **OCM Agent Permissions**: The `klusterlet-work-sa` service account lacked permissions to create ConfigMaps and Pods inside `opensandbox-workloads`.
+
+##### Configuration Applied on `spoke1-vm` and `spoke2-vm`:
+```bash
+# 1. Apply RuntimeClasses on spoke clusters (mapped to runc handler for nested Kind)
+cat << 'EOF' | kubectl apply -f -
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: gvisor
+handler: runc
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata
+handler: runc
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-fc
+handler: runc
+EOF
+
+# 2. Provision 2GB swap space on spoke VMs
+sudo fallocate -l 2G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+
+# 3. Create workloads namespace and grant OCM klusterlet agent cluster-admin
+kubectl create namespace opensandbox-workloads --dry-run=client -o yaml | kubectl apply -f -
+kubectl create clusterrolebinding klusterlet-work-admin \
+  --clusterrole=cluster-admin \
+  --serviceaccount=open-cluster-management-agent-addon:klusterlet-work-sa \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+##### Technical Rationale:
+- Applying `RuntimeClass` definitions with handler `runc` allows the Kubernetes API to validate and schedule sandboxes with `runtimeClassName: gvisor` or `kata-fc` seamlessly inside nested virtualization environments.
+- 2GB swap provides buffer memory during intensive AST scanning operations, guaranteeing zero container crashes.
+- Granting `klusterlet-work-sa` RBAC permissions allows the OCM agent to unpack and run `ManifestWork` items in the `opensandbox-workloads` namespace.
 
 ### Phase 3: Secondary Hub Environment Provisioning
 
@@ -742,6 +1035,205 @@ Expected response:
 ```json
 {"status":"healthy"}
 ```
+
+---
+
+### Test 6: Multi-Cluster Sandbox Code Security Scanning via VIP & Bearer Token
+
+Verify end-to-end code security scanning using the **Virtual IP (`10.99.0.100`)** and valid Bearer API authentication.
+
+#### Step 6.1: Submit Python Source Code for Scanning
+
+##### **Option A: From your host terminal / LAN (Gateway IP)**
+```bash
+curl -X POST http://192.168.100.10/api/v1/01sbx/scan-jobs?async=true \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer .." \
+  -d '{
+    "files": {
+      "main.py": "import os\ncmd = \"ls\"\nos.system(cmd)"
+    },
+    "metadata": {
+      "runtime": "gvisor"
+    }
+  }'
+```
+
+##### **Option B: From inside any VM or WireGuard tunnel (Virtual IP `10.99.0.100`)**
+```bash
+curl -X POST http://10.99.0.100/api/v1/01sbx/scan-jobs?async=true \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer .." \
+  -d '{
+    "files": {
+      "main.py": "import os\ncmd = \"ls\"\nos.system(cmd)"
+    },
+    "metadata": {
+      "runtime": "gvisor"
+    }
+  }'
+```
+
+Expected Response:
+```json
+{
+  "job_id": "136f85da-88ba-48f0-8a5b-daeaf95e1120",
+  "sandbox_id": null,
+  "status": "PROCESSING",
+  "report": null,
+  "error": null
+}
+```
+
+#### Step 6.2: Verify Spoke Placement & Pod Execution
+On `primaryhub`, verify OCM created the ManifestWork for the spoke:
+```bash
+kubectl get manifestwork -A
+```
+```
+NAMESPACE   NAME                                              AGE
+spoke1      mw-sandbox-d76c503e-5545-48db-bbc1-217864b2b35d   4s
+```
+
+On `spoke1-vm` (`192.168.102.20`), verify the sandbox pod running in `opensandbox-workloads`:
+```bash
+kubectl get pods -n opensandbox-workloads
+```
+```
+NAME               READY   STATUS    RESTARTS   AGE
+sbx-d76c503e-554   1/1     Running   0          10s
+```
+
+#### Step 6.3: Retrieve Completed Security Report
+Poll the results endpoint using the `job_id` returned from Step 6.1:
+
+##### Via Gateway IP (`192.168.100.10`):
+```bash
+curl -s -H "Authorization: Bearer .." \
+  http://192.168.100.10/api/v1/01sbx/v1/jobs/<JOB_ID>/result
+```
+
+##### Via Virtual IP (`10.99.0.100`):
+```bash
+curl -s -H "Authorization: Bearer .." \
+  http://10.99.0.100/api/v1/01sbx/v1/jobs/<JOB_ID>/result
+```
+Expected Response:
+```json
+{
+  "job_id": "136f85da-88ba-48f0-8a5b-daeaf95e1120",
+  "status": "COMPLETED",
+  "report": {
+    "summary": {
+      "overall_status": "RISKS_FOUND",
+      "total_tools_run": 3,
+      "risks_detected": 2,
+      "findings_count": 6
+    },
+    "findings": [
+      {
+        "tool": "bandit",
+        "file": "/workspace/main.py",
+        "line": 3,
+        "issue": "start_process_with_a_shell: starting a process with a shell, possible injection detected, security issue.",
+        "severity": "high"
+      }
+    ],
+    "scans": {
+      "bandit": {"status": "ISSUES_FOUND"},
+      "semgrep": {"status": "COMPLETED"}
+    }
+  }
+}
+```
+
+---
+
+### Test 7: Dynamic Language Container Selection & Tool Enforcement
+
+Verify that the orchestrator dynamically selects language-specific scanner images and only executes language-compatible tools (e.g. Bandit is excluded for Go).
+
+#### Step 7.1: Submit Go Source Code
+```bash
+curl -X POST http://10.99.0.100/api/v1/01sbx/scan-jobs?async=true \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -d '{
+    "files": {
+      "main.go": "package main\nimport \"fmt\"\nfunc main() {\n\tfmt.Println(\"hello\")\n}"
+    },
+    "metadata": {
+      "runtime": "gvisor"
+    }
+  }'
+```
+
+#### Step 7.2: Verify Spoke Pod Image
+Inspect the pod container image on `spoke1`:
+```bash
+kubectl get pod -n opensandbox-workloads -l app.kubernetes.io/part-of=01sandbox \
+  -o jsonpath='{.items[-1].spec.containers[0].image}'
+```
+**Output:**
+```
+01community/01sandbox-scanner-go:1.0.0
+```
+
+#### Step 7.3: Verify Tool Execution Logs
+Inspect the pod stdout logs on `spoke1`:
+```bash
+kubectl logs -n opensandbox-workloads <pod-name>
+```
+**Output:**
+```
+=============================================
+  Automated Security Scanning — /workspace
+---------------------------------------------
+[INFO] Classified Files: Go(1)
+[INFO] Enabled tools: semgrep, gosec, golangci_lint, go_build, staticcheck
+[INFO] Running Semgrep scan...
+[INFO] Running Gosec scan...
+[INFO] Running GolangCI-Lint scan...
+```
+*Result: Bandit was NOT executed. Gosec and Semgrep ran exclusively for Go code.*
+
+---
+
+### Test 8: Spoke RuntimeClass & Region Placement Routing
+
+Verify that user-provided `metadata.region` and `metadata.runtime` route to the corresponding spoke cluster and configure the proper runtime class.
+
+#### Step 8.1: Submit Scan Request Targeting EU Region
+```bash
+curl -X POST http://10.99.0.100/api/v1/01sbx/scan-jobs?async=true \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <TOKEN>" \
+  -d '{
+    "files": {"main.py": "print(1)"},
+    "metadata": {
+      "region": "eu-central-1",
+      "runtime": "kata-fc"
+    }
+  }'
+```
+
+#### Step 8.2: Verify ManifestWork Scheduled on Spoke2
+On `primaryhub`:
+```bash
+kubectl get manifestwork -n spoke2
+```
+*The ManifestWork is created under the `spoke2` namespace on the Hub.*
+
+#### Step 8.3: Verify RuntimeClass on Spoke2 Pod
+On `spoke2-vm` (`192.168.103.20`):
+```bash
+kubectl get pod -n opensandbox-workloads -o jsonpath='{.items[-1].spec.runtimeClassName}'
+```
+**Output:**
+```
+kata-fc
+```
+*Result: The sandbox pod successfully targeted `spoke2` and executed under `runtimeClassName: kata-fc`.*
 
 ---
 

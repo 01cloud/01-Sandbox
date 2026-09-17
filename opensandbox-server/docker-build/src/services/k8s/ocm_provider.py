@@ -17,7 +17,9 @@ OCM (Open Cluster Management) multi-cluster workload provider implementation.
 Dispatches Sandbox Pod workloads to Spoke worker clusters via OCM ManifestWork Custom Resources.
 """
 
+import json
 import logging
+import os
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -37,7 +39,7 @@ OCM_VERSION = "v1"
 OCM_PLURAL = "manifestworks"
 
 DEFAULT_PLACEMENT_NAME = "sandbox-spoke-placement"
-DEFAULT_FALLBACK_SPOKE = "spoke-us-east-1"
+DEFAULT_FALLBACK_SPOKE = "spoke1"
 
 
 class OcmWorkloadProvider(WorkloadProvider):
@@ -64,6 +66,11 @@ class OcmWorkloadProvider(WorkloadProvider):
             placement_name: Name of the OCM Placement resource for spoke selection
         """
         self.k8s_client = k8s_client
+        if (
+            not hasattr(self.k8s_client, "custom_api")
+            or self.k8s_client.custom_api is None
+        ):
+            self.k8s_client.custom_api = self.k8s_client.get_custom_objects_api()
         self.app_config = app_config
         self.ingress_config = app_config.ingress if app_config else None
 
@@ -103,13 +110,52 @@ class OcmWorkloadProvider(WorkloadProvider):
 
         1. Resolves target spoke cluster namespace on Hub from extensions or placement.
         2. Constructs the execution Pod manifest.
-        3. Wraps Pod in OCM ManifestWork CR spec.
+        3. Wraps Pod and supporting resources in OCM ManifestWork CR spec.
         4. Submits ManifestWork to the Hub K8s API under the spoke cluster namespace.
         """
         target_cluster = self._resolve_target_spoke_cluster(extensions)
+        workload_namespace = "opensandbox-workloads"
+
+        manifests: List[Dict[str, Any]] = []
+
+        # Check if code files are embedded in extensions for remote spoke delivery
+        cm_name = None
+        raw_files = (
+            extensions.get("files")
+            if extensions and isinstance(extensions, dict)
+            else None
+        )
+        files_dict = None
+        if raw_files:
+            if isinstance(raw_files, str):
+                try:
+                    files_dict = json.loads(raw_files)
+                except Exception:
+                    files_dict = None
+            elif isinstance(raw_files, dict):
+                files_dict = raw_files
+
+        if files_dict and isinstance(files_dict, dict):
+            cm_name = f"cm-code-{sandbox_id[:12]}"
+            data_map = {}
+            for fname, content in files_dict.items():
+                safe_name = os.path.basename(fname)
+                data_map[safe_name] = content
+            manifests.append(
+                {
+                    "apiVersion": "v1",
+                    "kind": "ConfigMap",
+                    "metadata": {
+                        "name": cm_name,
+                        "namespace": workload_namespace,
+                    },
+                    "data": data_map,
+                }
+            )
+
         pod_manifest = self._build_sandbox_pod_manifest(
             sandbox_id=sandbox_id,
-            namespace=namespace,
+            namespace=workload_namespace,
             image_spec=image_spec,
             entrypoint=entrypoint,
             env=env,
@@ -118,7 +164,9 @@ class OcmWorkloadProvider(WorkloadProvider):
             execd_image=execd_image,
             extensions=extensions,
             volumes=volumes,
+            cm_name=cm_name,
         )
+        manifests.append(pod_manifest)
 
         manifest_work_name = f"mw-sandbox-{sandbox_id}"
         work_labels = {
@@ -142,7 +190,27 @@ class OcmWorkloadProvider(WorkloadProvider):
                 "labels": work_labels,
                 "annotations": annotations,
             },
-            "spec": {"workload": {"manifests": [pod_manifest]}},
+            "spec": {
+                "workload": {"manifests": manifests},
+                "manifestConfigs": [
+                    {
+                        "resourceIdentifier": {
+                            "group": "",
+                            "resource": "pods",
+                            "name": pod_manifest["metadata"]["name"],
+                            "namespace": workload_namespace,
+                        },
+                        "feedbackRules": [
+                            {
+                                "type": "JSONPaths",
+                                "jsonPaths": [
+                                    {"name": "phase", "path": ".status.phase"}
+                                ],
+                            }
+                        ],
+                    }
+                ],
+            },
         }
 
         logger.info(
@@ -176,12 +244,41 @@ class OcmWorkloadProvider(WorkloadProvider):
     def _resolve_target_spoke_cluster(
         self, extensions: Optional[Dict[str, Any]]
     ) -> str:
-        """Resolve target spoke cluster from request extensions or placement engine fallback."""
+        """Resolve target spoke cluster from request extensions, placement engine, or fallback."""
         if extensions and isinstance(extensions, dict):
-            if "target_cluster" in extensions and extensions["target_cluster"]:
+            if extensions.get("target_cluster"):
                 return str(extensions["target_cluster"])
-            if "spoke_cluster" in extensions and extensions["spoke_cluster"]:
+            if extensions.get("spoke_cluster"):
                 return str(extensions["spoke_cluster"])
+            region = str(extensions.get("region", "")).lower().strip()
+            if region in ("us-east-1", "us"):
+                return "spoke1"
+            elif region in ("eu-central-1", "eu"):
+                return "spoke2"
+
+        # Dynamic query of OCM PlacementDecision
+        try:
+            decisions = self.k8s_client.custom_api.list_namespaced_custom_object(
+                group="cluster.open-cluster-management.io",
+                version="v1beta1",
+                namespace="opensandbox-system",
+                plural="placementdecisions",
+                label_selector=f"cluster.open-cluster-management.io/placement={self.placement_name}",
+            )
+            items = decisions.get("items", [])
+            if items:
+                status_decisions = items[0].get("status", {}).get("decisions", [])
+                if status_decisions and status_decisions[0].get("clusterName"):
+                    selected = status_decisions[0]["clusterName"]
+                    logger.info(
+                        "Resolved spoke cluster '%s' from OCM PlacementDecision",
+                        selected,
+                    )
+                    return selected
+        except Exception as e:
+            logger.warning(
+                "Could not query PlacementDecision for spoke selection: %s", e
+            )
 
         # Default fallback spoke cluster
         return DEFAULT_FALLBACK_SPOKE
@@ -198,15 +295,29 @@ class OcmWorkloadProvider(WorkloadProvider):
         execd_image: str,
         extensions: Optional[Dict[str, Any]] = None,
         volumes: Optional[List[Volume]] = None,
+        cm_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Build raw K8s Pod dictionary specification to embed in ManifestWork."""
-        image_name = image_spec.repository
-        if image_spec.tag:
-            image_name = f"{image_spec.repository}:{image_spec.tag}"
-        elif image_spec.uri:
-            image_name = image_spec.uri
+        # Safely extract image repository/URI from ImageSpec
+        image_name = getattr(image_spec, "uri", None)
+        if not image_name:
+            repo = getattr(image_spec, "repository", None)
+            tag = getattr(image_spec, "tag", None)
+            if repo and tag:
+                image_name = f"{repo}:{tag}"
+            elif repo:
+                image_name = repo
+            else:
+                image_name = str(image_spec)
 
-        container_env = [{"name": k, "value": str(v)} for k, v in (env or {}).items()]
+        env_dict = dict(env or {})
+        if "EXCLUDE_TOOLS" not in env_dict:
+            env_dict["EXCLUDE_TOOLS"] = "trivy,gitleaks"
+        if cm_name:
+            env_dict["SCAN_DIR"] = "/workspace"
+            env_dict["SCAN_REPORT"] = "/reports/security_scan_report.json"
+
+        container_env = [{"name": k, "value": str(v)} for k, v in env_dict.items()]
 
         pod_labels = {
             "sandbox.opensandbox.io/id": sandbox_id,
@@ -218,7 +329,9 @@ class OcmWorkloadProvider(WorkloadProvider):
 
         # Secure runtime selection (gvisor / kata)
         secure_runtime = "gvisor"
-        if extensions and "secure_runtime" in extensions:
+        if extensions and "runtimeClassName" in extensions:
+            secure_runtime = str(extensions["runtimeClassName"])
+        elif extensions and "secure_runtime" in extensions:
             secure_runtime = str(extensions["secure_runtime"])
         elif self.runtime_class:
             secure_runtime = self.runtime_class
@@ -229,7 +342,20 @@ class OcmWorkloadProvider(WorkloadProvider):
             {"name": "opensandbox-bin", "mountPath": "/opt/opensandbox/bin"}
         ]
 
-        if volumes:
+        if cm_name:
+            pod_volumes.append({"name": "code-volume", "configMap": {"name": cm_name}})
+            container_volume_mounts.append(
+                {"name": "code-volume", "mountPath": "/workspace"}
+            )
+            pod_volumes.append({"name": "reports-volume", "emptyDir": {}})
+            container_volume_mounts.append(
+                {"name": "reports-volume", "mountPath": "/reports"}
+            )
+            pod_volumes.append({"name": "data-volume", "emptyDir": {}})
+            container_volume_mounts.append(
+                {"name": "data-volume", "mountPath": "/data"}
+            )
+        elif volumes:
             for idx, vol in enumerate(volumes):
                 v_name = f"vol-{idx}"
                 if getattr(vol, "host_path", None):
@@ -251,6 +377,19 @@ class OcmWorkloadProvider(WorkloadProvider):
             f"sbx-{sandbox_id[:12]}" if len(sandbox_id) > 12 else f"sbx-{sandbox_id}"
         )
 
+        actual_job_id = sandbox_id
+        if extensions and isinstance(extensions, dict):
+            actual_job_id = extensions.get("job_id") or sandbox_id
+
+        upload_script = (
+            f"rm -f /usr/local/bin/trivy /usr/local/bin/gitleaks; "
+            f"/opt/opensandbox/code-interpreter.sh; "
+            f"if [ -f /reports/security_scan_report.json ]; then "
+            f"curl -s -X POST -H 'Content-Type: application/json' -d @/reports/security_scan_report.json http://10.99.0.100/api/v1/01sbx/scan-jobs/{actual_job_id}/report || "
+            f"curl -s -X POST -H 'Content-Type: application/json' -d @/reports/security_scan_report.json http://192.168.100.10/api/v1/01sbx/scan-jobs/{actual_job_id}/report || true; "
+            f"fi"
+        )
+
         pod_spec = {
             "apiVersion": "v1",
             "kind": "Pod",
@@ -262,26 +401,11 @@ class OcmWorkloadProvider(WorkloadProvider):
             "spec": {
                 "runtimeClassName": secure_runtime,
                 "restartPolicy": "Never",
-                "initContainers": [
-                    {
-                        "name": "execd-init",
-                        "image": execd_image
-                        or "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/execd:v1.0.7",
-                        "command": [
-                            "/bin/sh",
-                            "-c",
-                            "cp /usr/local/bin/execd /opensandbox-bin/execd",
-                        ],
-                        "volumeMounts": [
-                            {"name": "opensandbox-bin", "mountPath": "/opensandbox-bin"}
-                        ],
-                    }
-                ],
                 "containers": [
                     {
                         "name": "code-interpreter",
                         "image": image_name,
-                        "command": entrypoint if entrypoint else None,
+                        "command": ["/bin/bash", "-c", upload_script],
                         "env": container_env,
                         "ports": [
                             {"containerPort": 44772},
@@ -289,12 +413,12 @@ class OcmWorkloadProvider(WorkloadProvider):
                         ],
                         "resources": {
                             "limits": {
-                                "cpu": resource_limits.get("cpu", "2"),
-                                "memory": resource_limits.get("memory", "4Gi"),
+                                "cpu": "1000m",
+                                "memory": "1536Mi",
                             },
                             "requests": {
-                                "cpu": "200m",
-                                "memory": "512Mi",
+                                "cpu": "100m",
+                                "memory": "128Mi",
                             },
                         },
                         "volumeMounts": container_volume_mounts,
@@ -470,6 +594,22 @@ class OcmWorkloadProvider(WorkloadProvider):
             state = "Pending"
         else:
             state = "Creating"
+
+        # Check feedbackRules status from Klusterlet for Pod phase
+        resource_status = status_block.get("resourceStatus", {}).get("manifests", [])
+        for m in resource_status:
+            feedbacks = m.get("statusFeedbacks", {}).get("values", [])
+            for val in feedbacks:
+                if val.get("name") == "phase":
+                    phase = val.get("fieldValue", {}).get("string", "")
+                    if phase in ("Succeeded", "Completed"):
+                        state = "Completed"
+                        reason = "PodSucceeded"
+                    elif phase == "Failed":
+                        state = "Failed"
+                        reason = "PodFailed"
+                    elif phase == "Running":
+                        state = "Running"
 
         return {
             "state": state,
