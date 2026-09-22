@@ -8,11 +8,16 @@ set -euo pipefail
 
 echo "🚀 Installing automated post-reboot recovery service (ocm-mesh-boot.service)..."
 
+HUB1_IP="${HUB1_IP:-192.168.100.20}"
+HUB2_IP="${HUB2_IP:-192.168.101.20}"
+SPOKE1_IP="${SPOKE1_IP:-192.168.102.20}"
+SPOKE2_IP="${SPOKE2_IP:-192.168.103.20}"
+
 declare -A VM_IPS=(
-  ["hub1-vm"]="192.168.100.20"
-  ["hub2-vm"]="192.168.101.20"
-  ["spoke1-vm"]="192.168.102.20"
-  ["spoke2-vm"]="192.168.103.20"
+  ["hub1-vm"]="$HUB1_IP"
+  ["hub2-vm"]="$HUB2_IP"
+  ["spoke1-vm"]="$SPOKE1_IP"
+  ["spoke2-vm"]="$SPOKE2_IP"
 )
 
 for vm in "hub1-vm" "hub2-vm" "spoke1-vm" "spoke2-vm"; do
@@ -30,6 +35,10 @@ for vm in "hub1-vm" "hub2-vm" "spoke1-vm" "spoke2-vm"; do
   esac
 
   ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "ubuntu@$IP" "sudo bash -s" << EOF
+systemctl stop primaryhub-redis-forward.service primaryhub-pg-forward.service socat-redis.service socat-pg.service 2>/dev/null || true
+systemctl disable primaryhub-redis-forward.service primaryhub-pg-forward.service socat-redis.service socat-pg.service 2>/dev/null || true
+rm -f /etc/systemd/system/primaryhub-redis-forward.service /etc/systemd/system/primaryhub-pg-forward.service 2>/dev/null || true
+
 cat > /usr/local/bin/ocm-mesh-boot.sh << 'SCRIPT'
 #!/bin/bash
 set -eo pipefail
@@ -58,6 +67,14 @@ iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 8091 -j DNAT --to-destina
 
 iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 32379 -j DNAT --to-destination \${DOCKER_IP}:32379 2>/dev/null || \
 iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 32379 -j DNAT --to-destination \${DOCKER_IP}:32379
+
+# Valkey continuous sync (WireGuard 10.99.0.1:6379 -> KinD NodePort 30379)
+iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination \${DOCKER_IP}:30379 2>/dev/null || \
+iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination \${DOCKER_IP}:30379
+
+# PostgreSQL continuous replication (WireGuard 10.99.0.1:5432 -> KinD NodePort 30432)
+iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432 2>/dev/null || \
+iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432
 
 iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || \
 iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE
