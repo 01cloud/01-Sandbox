@@ -43,6 +43,7 @@ if ! ip link show wg0 >/dev/null 2>&1; then
 fi
 
 echo "[ocm-mesh-boot] Resetting containerd inside KinD $CONTAINER..."
+docker update --restart=always $CONTAINER 2>/dev/null || true
 docker exec $CONTAINER systemctl restart containerd 2>/dev/null || docker restart $CONTAINER || true
 sleep 5
 
@@ -156,7 +157,7 @@ docker run -d \
   --cap-add NET_ADMIN \
   alpine:latest \
   /bin/sh -c '
-    apk add --no-cache curl iptables iproute2 bash >/dev/null 2>&1
+    apk add --no-cache curl iptables iproute2 bash conntrack-tools >/dev/null 2>&1
     PRIMARY_HUB="10.99.0.1"
     SECONDARY_HUB="10.99.0.2"
     VIP="10.99.0.100"
@@ -166,6 +167,7 @@ docker run -d \
 
     ip addr add ${VIP}/32 dev wg0 2>/dev/null || true
     sysctl -w net.ipv4.ip_forward=1 >/dev/null
+    iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE
 
     while true; do
       if curl -k -m 2 -s https://${PRIMARY_HUB}:6443/livez >/dev/null; then
@@ -195,6 +197,9 @@ docker run -d \
         iptables -t nat -I PREROUTING 1 -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${TARGET}:6443
         iptables -t nat -I OUTPUT 1 -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${TARGET}:6443
         ACTIVE_TARGET="${TARGET}"
+
+        conntrack -D -d ${VIP} 2>/dev/null || true
+        conntrack -D -p tcp --dport 6443 2>/dev/null || true
       fi
       sleep 2
     done

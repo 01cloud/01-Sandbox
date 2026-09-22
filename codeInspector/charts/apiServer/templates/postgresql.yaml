@@ -1,4 +1,4 @@
-{{- if .Values.postgresql.enabled }}
+{{- if and .Values.postgresql.enabled (not (and .Values.cnpg .Values.cnpg.enabled)) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:

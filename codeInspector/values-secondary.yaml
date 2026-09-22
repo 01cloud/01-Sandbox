@@ -30,18 +30,37 @@ apiServer:
   sealedSecrets:
     enabled: false
   postgresql:
+    enabled: false
+  cnpg:
+    enabled: true
+    instances: 1
+    storage: "5Gi"
     storageClassName: "standard"
+    database: "apikeys"
+    user: "postgres"
+    password: "password123"
     replication:
       enabled: true
       role: "standby"
       primaryHost: "10.99.0.1"
       primaryPort: 5432
   redis:
+    enabled: false
+  valkey:
+    enabled: true
+    host: "redis-service"
+    port: 6379
+    password: ""
+    image:
+      repository: valkey/valkey
+      tag: "7.2-alpine"
+      pullPolicy: IfNotPresent
     replication:
       enabled: true
       role: "standby"
       primaryHost: "10.99.0.1"
       primaryPort: 6379
+
 
 opensandbox:
   enabled: true
@@ -65,3 +84,8 @@ opensandbox:
       repository: 01community/01sandbox-opensandbox-controller
       tag: "v0.7.3"
       pullPolicy: IfNotPresent
+
+cloudnative-pg:
+  enabled: true
+  crds:
+    create: false

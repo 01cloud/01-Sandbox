@@ -176,7 +176,7 @@ apiServer:
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
   postgresql:
-    enabled: true
+    enabled: false
     host: "postgresql-service"
     port: 5432
     user: "postgres"
@@ -184,11 +184,34 @@ apiServer:
     database: "apikeys"
     storage: "5Gi"
     storageClassName: "standard"
+  cnpg:
+    enabled: true
+    instances: 1
+    storage: "5Gi"
+    storageClassName: "standard"
+    database: "apikeys"
+    user: "postgres"
+    password: "password123"
+    replication:
+      enabled: true
+      role: "primary"
   redis:
+    enabled: false
+    host: "redis-service"
+    port: 6379
+    password: ""
+  valkey:
     enabled: true
     host: "redis-service"
     port: 6379
     password: ""
+    image:
+      repository: valkey/valkey
+      tag: "7.2-alpine"
+      pullPolicy: IfNotPresent
+    replication:
+      enabled: true
+      role: "primary"
   rabbitmq:
     enabled: true
     host: "rabbitmq-service"
@@ -377,3 +400,11 @@ grafana:
 ###############################################################
 sealed-secrets:
   enabled: true
+
+###############################################################
+# CloudNativePG Operator subchart values
+###############################################################
+cloudnative-pg:
+  enabled: true
+  crds:
+    create: false

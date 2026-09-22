@@ -91,6 +91,35 @@ redis:
   port: 6379
   password: ""
 
+cnpg:
+  enabled: false
+  instances: 1
+  storage: "5Gi"
+  storageClassName: "standard"
+  database: "apikeys"
+  user: "postgres"
+  password: "password123"
+  replication:
+    enabled: true
+    role: "primary"
+    primaryHost: "10.99.0.1"
+    primaryPort: 5432
+
+valkey:
+  enabled: false
+  host: "redis-service"
+  port: 6379
+  password: ""
+  image:
+    repository: valkey/valkey
+    tag: "7.2-alpine"
+    pullPolicy: IfNotPresent
+  replication:
+    enabled: true
+    role: "primary"
+    primaryHost: "10.99.0.1"
+    primaryPort: 6379
+
 rabbitmq:
   enabled: false
   host: "rabbitmq-service"
