@@ -76,6 +76,10 @@ iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destina
 iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432 2>/dev/null || \
 iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432
 
+# AgentGateway & MetalLB API Ingress (Port 80 -> MetalLB LoadBalancer 172.18.255.200:80)
+iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80 2>/dev/null || \
+iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80
+
 iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || \
 iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE
 

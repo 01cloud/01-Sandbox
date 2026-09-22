@@ -861,59 +861,102 @@ else
 fi
 
 # ==============================================================================
-# PHASE 7: AUTOMATED VIP WATCHDOG ON GATEWAY VM
+# PHASE 7: AUTOMATED DUAL-PORT (6443 & 80) VIP WATCHDOG ON GATEWAY VM
 # ==============================================================================
-log_step "PHASE 7: Deploying 3-Second VIP Watchdog on Gateway VM ($GATEWAY_IP)"
+log_step "PHASE 7: Deploying 3-Second VIP Watchdog (Ports 6443 & 80) on Gateway VM ($GATEWAY_IP)"
 
-log_info "Checking if VIP Watchdog is already running on gateway-vm ($GATEWAY_IP)..."
-if run_ssh_sudo "$GATEWAY_IP" "docker ps --filter name=ocm-vip-watchdog --filter status=running -q | grep -q ."; then
-  log_info "VIP Watchdog container is already running on gateway-vm, preserving."
-else
-  log_info "Starting VIP Watchdog container on gateway-vm..."
-  run_ssh_sudo "$GATEWAY_IP" "
-docker rm -f ocm-vip-watchdog 2>/dev/null || true
-docker run -d \
-  --name ocm-vip-watchdog \
-  --restart always \
-  --network host \
-  --privileged \
-  ghcr.io/marian-m/network-multitool:latest bash -c '
-    PRIMARY=\"${WG_HUB1_IP}\"
-    SECONDARY=\"${WG_HUB2_IP}\"
-    VIP=\"${WG_VIP}\"
-    CURRENT_TARGET=\"\"
+log_info "Installing persistent systemd VIP Watchdog on gateway-vm ($GATEWAY_IP)..."
+run_ssh_sudo "$GATEWAY_IP" "
+cat > /usr/local/bin/ocm-vip-watchdog.sh << 'SCRIPT'
+#!/bin/bash
+set -eo pipefail
+
+PRIMARY_HUB=\"${WG_HUB1_IP}\"
+SECONDARY_HUB=\"${WG_HUB2_IP}\"
+VIP=\"${WG_VIP}\"
+GW_PHYSICAL=\"${GATEWAY_IP}\"
+ACTIVE_TARGET=\"\"
+FAIL_COUNT=0
+FAIL_THRESHOLD=3
+
+ip addr add \${VIP}/32 dev wg0 2>/dev/null || true
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
+iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE
+
+while true; do
+  if curl -k -m 2 -s https://\${PRIMARY_HUB}:6443/livez >/dev/null 2>&1; then
     FAIL_COUNT=0
-    FAIL_THRESHOLD=3
-
-    echo \"[VIP Watchdog] Starting monitoring loop for VIP \${VIP}...\"
-
-    while true; do
-      if curl -k -m 2 -s https://\${PRIMARY}:6443/livez >/dev/null 2>&1; then
-        FAIL_COUNT=0
-        if [ \"\$CURRENT_TARGET\" != \"\$PRIMARY\" ]; then
-          echo \"[VIP Watchdog] Primary is HEALTHY. Routing \${VIP}:6443 -> \${PRIMARY}:6443...\"
-          iptables -t nat -F PREROUTING 2>/dev/null || true
-          iptables -t nat -A PREROUTING -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${PRIMARY}:6443
-          conntrack -F 2>/dev/null || true
-          CURRENT_TARGET=\"\$PRIMARY\"
-        fi
+    TARGET=\"\${PRIMARY_HUB}\"
+  else
+    FAIL_COUNT=\$((FAIL_COUNT + 1))
+    echo \"[\$(date -Iseconds)] [ocm-vip-watchdog] Primary check failed (\${FAIL_COUNT}/\${FAIL_THRESHOLD})\"
+    if [ \"\$FAIL_COUNT\" -ge \"\$FAIL_THRESHOLD\" ]; then
+      if curl -k -m 2 -s https://\${SECONDARY_HUB}:6443/livez >/dev/null 2>&1; then
+        TARGET=\"\${SECONDARY_HUB}\"
       else
-        FAIL_COUNT=\$((FAIL_COUNT + 1))
-        echo \"[VIP Watchdog] Primary check failed (\${FAIL_COUNT}/\${FAIL_THRESHOLD})\"
-        if [ \"\$FAIL_COUNT\" -ge \"\$FAIL_THRESHOLD\" ] && [ \"\$CURRENT_TARGET\" != \"\$SECONDARY\" ]; then
-          echo \"[VIP Watchdog] Primary DOWN! Flipping VIP \${VIP}:6443 -> \${SECONDARY}:6443...\"
-          iptables -t nat -F PREROUTING 2>/dev/null || true
-          iptables -t nat -A PREROUTING -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${SECONDARY}:6443
-          conntrack -F 2>/dev/null || true
-          CURRENT_TARGET=\"\$SECONDARY\"
-        fi
+        TARGET=\"\${PRIMARY_HUB}\"
       fi
-      sleep 1
-    done
-  '
+    else
+      TARGET=\"\${ACTIVE_TARGET:-\${PRIMARY_HUB}}\"
+    fi
+  fi
+
+  if [ -n \"\$TARGET\" ] && [ \"\$TARGET\" != \"\$ACTIVE_TARGET\" ]; then
+    echo \"[\$(date -Iseconds)] [ocm-vip-watchdog] Switching VIP target to \${TARGET}\"
+
+    iptables -t nat -D PREROUTING -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${PRIMARY_HUB}:6443 2>/dev/null || true
+    iptables -t nat -D PREROUTING -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${SECONDARY_HUB}:6443 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${PRIMARY_HUB}:6443 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${SECONDARY_HUB}:6443 2>/dev/null || true
+
+    iptables -t nat -D PREROUTING -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${PRIMARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D PREROUTING -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${SECONDARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${PRIMARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${SECONDARY_HUB}:80 2>/dev/null || true
+
+    iptables -t nat -D PREROUTING -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${PRIMARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D PREROUTING -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${SECONDARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${PRIMARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${SECONDARY_HUB}:80 2>/dev/null || true
+
+    iptables -t nat -I PREROUTING 1 -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${TARGET}:6443
+    iptables -t nat -I OUTPUT 1 -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${TARGET}:6443
+
+    iptables -t nat -I PREROUTING 1 -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${TARGET}:80
+    iptables -t nat -I OUTPUT 1 -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${TARGET}:80
+
+    iptables -t nat -I PREROUTING 1 -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${TARGET}:80
+    iptables -t nat -I OUTPUT 1 -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${TARGET}:80
+
+    ACTIVE_TARGET=\"\${TARGET}\"
+    conntrack -D -d \${VIP} 2>/dev/null || true
+    conntrack -D -d \${GW_PHYSICAL} 2>/dev/null || true
+  fi
+  sleep 2
+done
+SCRIPT
+
+chmod +x /usr/local/bin/ocm-vip-watchdog.sh
+
+cat > /etc/systemd/system/ocm-vip-watchdog.service << 'SERVICE'
+[Unit]
+Description=OCM High-Availability VIP Watchdog (Ports 6443 and 80)
+After=network-online.target wg-quick@wg0.service
+
+[Service]
+ExecStart=/usr/local/bin/ocm-vip-watchdog.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+SERVICE
+
+systemctl daemon-reload
+systemctl enable --now ocm-vip-watchdog.service
+systemctl restart ocm-vip-watchdog.service
 "
-fi
-log_success "VIP Watchdog active on gateway-vm ($GATEWAY_IP)."
+log_success "VIP Watchdog active on gateway-vm ($GATEWAY_IP) managing ports 6443 and 80."
 
 # ==============================================================================
 # PHASE 8: REGISTER SPOKES TO OCM HUB VIA VIRTUAL IP
@@ -965,6 +1008,7 @@ else
     iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 32379 -j DNAT --to-destination \${DOCKER_IP}:32379 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 32379 -j DNAT --to-destination \${DOCKER_IP}:32379
     iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination \${DOCKER_IP}:30379 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination \${DOCKER_IP}:30379
     iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432
+    iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80
   "
 fi
 

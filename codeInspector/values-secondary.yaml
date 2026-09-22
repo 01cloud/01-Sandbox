@@ -11,9 +11,19 @@ global:
 
 agentgateway:
   enabled: true
+  httproute:
+    hostnames:
+      - api-sandbox.01security.com
+      - 10.0.10.9
+      - 10.99.0.100
+      - 10.99.0.1
+      - 10.99.0.2
+      - 192.168.100.10
+      - 192.168.100.20
+      - 192.168.101.20
   gateway:
     addresses:
-      - value: 10.9.9.20  # Secondary Hub IP
+      - value: 172.18.255.200
 
 apiServer:
   enabled: true

@@ -567,3 +567,10 @@ INFO:     10.244.0.1:50084 - "GET /health HTTP/1.1" 200 OK
 | **Security & Authentication** | `Loaded cluster-wide JWT Private Key...` | RSA JWT Private Key Active |
 | **Backend Interoperability** | `GET http://opensandbox-server... "HTTP/1.1 200 OK"` | `apiServer` verified health of `opensandbox-server` |
 | **Kubernetes Health Probes** | `INFO: 10.244.0.1:50084 - "GET /health HTTP/1.1" 200 OK` | Liveness/Readiness probes returning HTTP 200 |
+
+---
+
+## Related Documentation
+
+- [`ha-primary-secondary-continuous-sync.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/01-sandbox-multi-cluster/ha-primary-secondary-continuous-sync.md): Definitive guide on CloudNativePG WAL streaming, Valkey continuous memory sync, and Linux Kernel NAT.
+- [`agentgateway-metallb-sync.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/01-sandbox-multi-cluster/agentgateway-metallb-sync.md): Complete reference on AgentGateway (Envoy), MetalLB (L2), and dual-port Virtual IP (10.99.0.100) high-availability routing.
