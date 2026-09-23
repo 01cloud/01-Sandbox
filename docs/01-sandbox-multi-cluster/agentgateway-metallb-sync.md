@@ -443,13 +443,25 @@ done
 
 ### 6.4 Boot Auto-Recovery (`ocm-mesh-boot.service`)
 
-Installed across `hub1-vm` and `hub2-vm` at `/usr/local/bin/ocm-mesh-boot.sh`:
+Installed across `hub1-vm` and `hub2-vm` at `/usr/local/bin/ocm-mesh-boot.sh` and enabled via systemd unit `/etc/systemd/system/ocm-mesh-boot.service`:
 
 ```bash
-# AgentGateway & MetalLB API Ingress (Port 80 -> MetalLB LoadBalancer 172.18.255.200:80)
+# AgentGateway & MetalLB HTTP Ingress (Port 80 -> MetalLB LoadBalancer 172.18.255.200:80)
 iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80 2>/dev/null || \
 iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80
+
+# AgentGateway & MetalLB HTTPS Ingress (Port 443 -> MetalLB LoadBalancer 172.18.255.200:443)
+iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 443 -j DNAT --to-destination 172.18.255.200:443 2>/dev/null || \
+iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 443 -j DNAT --to-destination 172.18.255.200:443
+
+# Persist to /etc/iptables.rules
+iptables-save > /etc/iptables.rules
 ```
+
+When any VM boots or restarts:
+1. `ocm-vip-watchdog.service` on `gateway-vm` boots up, ensures `10.99.0.100/32` is attached to `wg0`, sets up forwarding, and monitors `livez`.
+2. `ocm-mesh-boot.service` on `hub1-vm` and `hub2-vm` boots up, ensures WireGuard `wg0` is up, containerd is active, and reinstates the kernel DNAT rules for ports 80, 443, 6443, 8091, 32379, 6379, and 5432.
+3. Both browser API interfaces (`http://192.168.100.10/docs` and `http://192.168.100.10/api/v1/01sbx/docs`) survive reboot automatically with zero manual intervention.
 
 ---
 

@@ -1009,6 +1009,7 @@ else
     iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination \${DOCKER_IP}:30379 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination \${DOCKER_IP}:30379
     iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432
     iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80
+    iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 443 -j DNAT --to-destination 172.18.255.200:443 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 443 -j DNAT --to-destination 172.18.255.200:443
   "
 fi
 
