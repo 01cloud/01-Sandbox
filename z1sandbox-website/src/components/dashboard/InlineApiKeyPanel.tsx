@@ -14,8 +14,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import DOMPurify from "dompurify";
+import { getApiBaseUrl } from "@/lib/apiConfig";
 
-const API_BASE_URL = import.meta.env.DEV ? "" : ((window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "");
+const API_BASE_URL = getApiBaseUrl();
 
 const TTL_UNITS = [
   { value: "minutes", label: "Minutes", multiplier: 1 / 60 },

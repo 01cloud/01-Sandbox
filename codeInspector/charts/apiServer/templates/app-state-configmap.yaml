@@ -1,0 +1,8 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sandbox-api-app-state
+  namespace: {{ .Values.namespace }}
+data:
+  app_state.py: |
+{{- .Files.Get "files/app_state.py" | nindent 4 }}

@@ -105,6 +105,8 @@ spec:
             - name: MAX_REPO_SCAN_WORKERS
               value: {{ .Values.rabbitmq.maxRepoScanWorkers | quote }}
             {{- end }}
+            - name: ALLOW_MOCK_KEYS
+              value: {{ index .Values "configMap" "ALLOW_MOCK_KEYS" | default "false" | quote }}
 
 
           livenessProbe:
@@ -149,10 +151,16 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: app-state-patch
+              mountPath: /app/core/app_state.py
+              subPath: app_state.py
 
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: app-state-patch
+          configMap:
+            name: sandbox-api-app-state
 
       restartPolicy: Always
 

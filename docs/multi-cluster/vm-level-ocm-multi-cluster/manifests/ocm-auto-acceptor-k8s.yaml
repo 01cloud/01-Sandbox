@@ -53,7 +53,8 @@ data:
   auto-acceptor.sh: |
     #!/bin/sh
     echo "[$(date -Iseconds)] Starting OCM Priority Auto-Acceptor Loop in Kubernetes..."
-    PRIMARY_HUB="10.99.0.1"
+    # WireGuard Overlay IP of PrimaryHub (cluster: primaryhub)
+    PRIMARY_HUB_WG_IP="${PRIMARY_HUB_WG_IP:-${PRIMARY_HUB:-__PRIMARY_HUB_WG_IP__}}"
 
     while true; do
       NODE_NAME=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
@@ -63,7 +64,7 @@ data:
         IS_SECONDARY=false
       fi
 
-      if curl -k -m 2 -s https://${PRIMARY_HUB}:6443/livez >/dev/null 2>&1; then
+      if curl -k -m 2 -s https://${PRIMARY_HUB_WG_IP}:6443/livez >/dev/null 2>&1; then
         PRIMARY_ALIVE=true
       else
         PRIMARY_ALIVE=false
@@ -160,6 +161,9 @@ spec:
       - name: auto-acceptor
         image: bitnami/kubectl:latest
         imagePullPolicy: IfNotPresent
+        env:
+        - name: PRIMARY_HUB
+          value: "__PRIMARY_HUB_IP__"
         command: ["/bin/sh", "/scripts/auto-acceptor.sh"]
         volumeMounts:
         - name: script-vol

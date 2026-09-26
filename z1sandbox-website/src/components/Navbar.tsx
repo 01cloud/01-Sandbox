@@ -14,7 +14,6 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const links = [
-  { href: "/#runtimes", label: "Isolated Runtimes" },
   { href: "/#features", label: "Features" },
   { href: "/#security", label: "Security" },
   // { href: "/#architecture", label: "Architecture" },

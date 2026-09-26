@@ -381,12 +381,15 @@ class OcmWorkloadProvider(WorkloadProvider):
         if extensions and isinstance(extensions, dict):
             actual_job_id = extensions.get("job_id") or sandbox_id
 
+        callback_url = (
+            os.environ.get("REPORT_CALLBACK_URL") or "http://10.99.0.100/api/v1/01sbx"
+        ).rstrip("/")
+
         upload_script = (
             f"rm -f /usr/local/bin/trivy /usr/local/bin/gitleaks; "
             f"/opt/opensandbox/code-interpreter.sh; "
             f"if [ -f /reports/security_scan_report.json ]; then "
-            f"curl -s -X POST -H 'Content-Type: application/json' -d @/reports/security_scan_report.json http://10.99.0.100/api/v1/01sbx/scan-jobs/{actual_job_id}/report || "
-            f"curl -s -X POST -H 'Content-Type: application/json' -d @/reports/security_scan_report.json http://192.168.100.10/api/v1/01sbx/scan-jobs/{actual_job_id}/report || true; "
+            f"curl -s -X POST -H 'Content-Type: application/json' -d @/reports/security_scan_report.json {callback_url}/scan-jobs/{actual_job_id}/report || true; "
             f"fi"
         )
 

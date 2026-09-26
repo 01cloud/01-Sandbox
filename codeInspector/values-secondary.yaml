@@ -12,15 +12,7 @@ global:
 agentgateway:
   enabled: true
   httproute:
-    hostnames:
-      - api-sandbox.01security.com
-      - 10.0.10.9
-      - 10.99.0.100
-      - 10.99.0.1
-      - 10.99.0.2
-      - 192.168.100.10
-      - 192.168.100.20
-      - 192.168.101.20
+    hostnames: []
   gateway:
     addresses:
       - value: 172.18.255.200
@@ -52,7 +44,7 @@ apiServer:
     replication:
       enabled: true
       role: "standby"
-      primaryHost: "10.99.0.1"
+      primaryHost: ""
       primaryPort: 5432
   redis:
     enabled: false
@@ -68,8 +60,15 @@ apiServer:
     replication:
       enabled: true
       role: "standby"
-      primaryHost: "10.99.0.1"
+      primaryHost: ""
       primaryPort: 6379
+  failoverController:
+    enabled: true
+    primaryHost: ""
+    image:
+      repository: bitnami/kubectl
+      tag: latest
+      pullPolicy: IfNotPresent
 
 
 opensandbox:
@@ -99,3 +98,11 @@ cloudnative-pg:
   enabled: true
   crds:
     create: false
+
+###############################################################
+# Kubernetes-Native Node Network Agent (DaemonSet)
+###############################################################
+nodeNetworkAgent:
+  enabled: true
+  namespace: kube-system
+  image: "alpine:3.19"

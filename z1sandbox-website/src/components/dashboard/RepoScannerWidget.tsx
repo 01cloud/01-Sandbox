@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 
 import { useJobStore } from "@/hooks/useJobStore";
+import { resolveBackendUrl } from "@/lib/apiConfig";
 import { JobsPanel } from "./JobsPanel";
 import { UnifiedPipelineView } from "./UnifiedPipelineView";
 import { InlineApiKeyPanel } from "./InlineApiKeyPanel";
@@ -40,7 +41,8 @@ const LANG_COLORS = [
 
 const GITHUB_PATTERN = /^https:\/\/github\.com\/[A-Za-z0-9_.\-]+\/[A-Za-z0-9_.\-]+\/?$/;
 
-export default function RepoScannerWidget({ apiBaseUrl, keys, authToken, inline = false, onSwitchTab, backendId = "Z1_SANDBOX" }: RepoScannerWidgetProps) {
+export default function RepoScannerWidget({ apiBaseUrl: rawApiBaseUrl, keys, authToken, inline = false, onSwitchTab, backendId = "Z1_SANDBOX" }: RepoScannerWidgetProps) {
+  const apiBaseUrl = resolveBackendUrl(rawApiBaseUrl);
   const [isOpen, setIsOpen] = useState(false);
   const [repoUrl, setRepoUrl] = useState("");
   const [urlError, setUrlError] = useState("");

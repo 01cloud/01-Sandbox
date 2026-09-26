@@ -36,15 +36,7 @@ agentgateway:
   enabled: true
   namespace: agentgateway-system
   httproute:
-    hostnames:
-      - api-sandbox.01security.com
-      - 10.0.10.9
-      - 10.99.0.100
-      - 10.99.0.1
-      - 10.99.0.2
-      - 192.168.100.10
-      - 192.168.100.20
-      - 192.168.101.20
+    hostnames: []
     backendService:
       name: sandbox-api-service
       port: 80
@@ -94,6 +86,8 @@ agentgateway-controller:
 apiServer:
   enabled: true
   namespace: opensandbox-system
+  failoverController:
+    enabled: false
   configMap:
     PYTHONUNBUFFERED: "1"
     APP_ENV: "production"
@@ -112,10 +106,10 @@ apiServer:
     JWT_EXPIRATION_MINUTES: "60"
     JWT_ISSUER: "01 Sandbox"
     JWT_ALGORITHM: "RS256"
-    AUTH0_DOMAIN: "dev-1u502t8piuwyzb28.us.auth0.com"
-    AUTH0_AUDIENCE: "https://api-sandbox"
+    AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com"
+    AUTH0_AUDIENCE: "https://code-inspector-api"
     OPENSANDBOX_ROUTE_PREFIX: "{{ .Values.global.apiRoutePrefix }}"
-    DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}","documentationUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}/docs"}]'
+    DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"{{ .Values.global.apiRoutePrefix }}","documentationUrl":"{{ .Values.global.apiRoutePrefix }}/docs"}]'
     SCANNER_IMAGE_PYTHON: "01community/01sandbox-scanner-python:1.0.0"
     SCANNER_IMAGE_GO: "01community/01sandbox-scanner-go:1.0.0"
     SCANNER_IMAGE_JAVA: "01community/01sandbox-scanner-java:1.0.0"
@@ -411,3 +405,11 @@ cloudnative-pg:
   enabled: true
   crds:
     create: false
+
+###############################################################
+# Kubernetes-Native Node Network Agent (DaemonSet)
+###############################################################
+nodeNetworkAgent:
+  enabled: true
+  namespace: kube-system
+  image: "alpine:3.19"

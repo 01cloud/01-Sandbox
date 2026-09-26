@@ -1,9 +1,10 @@
+import os
 import time
 
 import requests
 
-API_KEY = ""
-API_URL = "https://api-sandbox.01security.com"
+API_KEY = os.environ.get("API_KEY", "")
+API_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 headers = {"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"}
 payload = {"language": "python", "code": "print('hello')"}

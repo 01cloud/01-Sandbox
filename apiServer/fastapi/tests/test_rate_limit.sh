@@ -1,8 +1,8 @@
 #!/bin/bash
 
 # Configuration
-API_KEY=""
-API_URL="https://api-sandbox.01security.com"
+API_KEY="${API_KEY:-}"
+API_URL="${API_URL:-http://localhost:8000}"
 
 echo "Testing rate limit with API Key..."
 for i in {1..50}

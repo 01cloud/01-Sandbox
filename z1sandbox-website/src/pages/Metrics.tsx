@@ -1,20 +1,14 @@
 import { useState, useEffect } from "react";
 import { Activity, Clock, RefreshCw, ExternalLink, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { getGrafanaUrl } from "@/lib/apiConfig";
 
 export default function Metrics() {
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
   const [isRefreshing, setIsRefreshing] = useState(false);
 
-  // Dynamically resolve base API URL with fallbacks
-  const API_BASE_URL = import.meta.env.DEV ? "" : ((window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "");
-  let cleanBase = import.meta.env.DEV ? "" : "https://api-sandbox.01security.com";
-  if (API_BASE_URL) {
-    cleanBase = API_BASE_URL.replace(/\/api\/z1sandbox\/?$/, "").replace(/\/v1\/?$/, "");
-  }
-
   // The Grafana subpath is /grafana, and the dashboard UID is codeinspector-main
-  const grafanaDashboardUrl = `${cleanBase}/grafana/d/codeinspector-main/codeinspector-system-dashboard?orgId=1&kiosk`;
+  const grafanaDashboardUrl = getGrafanaUrl();
 
   const handleRefresh = () => {
     setIsRefreshing(true);

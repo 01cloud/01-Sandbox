@@ -4,10 +4,12 @@ metadata:
   name: agentgateway-api-route
   namespace: {{ .Values.namespace }}
 spec:
+{{- if .Values.httproute.hostnames }}
   hostnames:
   {{- range .Values.httproute.hostnames }}
-  - {{ . }}
+  - {{ . | quote }}
   {{- end }}
+{{- end }}
   parentRefs:
   - group: gateway.networking.k8s.io
     kind: Gateway

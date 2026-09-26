@@ -1,11 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { GenericJob, jobStore } from "@/lib/jobStore";
+import { resolveBackendUrl } from "@/lib/apiConfig";
 
 export function useJobStore(
   jobType: "repo-scan" | "quick-scan",
-  apiBase: string,
+  rawApiBase: string,
   apiKey: string
 ) {
+  const apiBase = resolveBackendUrl(rawApiBase);
+
   const [jobs, setJobs] = useState<GenericJob[]>(() => jobStore.getAll(jobType));
 
   // Cache of full scan results in volatile RAM (never persisted to localStorage)

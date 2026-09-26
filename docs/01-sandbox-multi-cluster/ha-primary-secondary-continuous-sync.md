@@ -967,7 +967,7 @@ To establish continuous WAL streaming between `postgresql-secondary-1` on `secon
 1. **Userspace Latency & Context Switching**: `socat` required every database packet to transition from kernel space to user space, traverse the socat process buffer, and transition back to kernel space. This added ~0.8ms – 1.2ms latency to database transaction commits. Kernel NAT processes packets at Layer 3/4 inside the Linux kernel at wire speed (< 0.2ms).
 2. **Daemon Crash Vulnerability**: Userspace `socat` processes can be killed by the Linux Out-Of-Memory (OOM) killer or hang on unclosed sockets. The Linux kernel Netfilter engine cannot crash independently of the OS.
 3. **Clean Host OS Hygiene**: Eliminating `/etc/systemd/system/primaryhub-pg-forward.service` ensures the host VM's systemd directory remains 100% clean and unpolluted.
-4. **Boot Auto-Recovery**: The kernel NAT rule is managed directly by `/usr/local/bin/ocm-mesh-boot.sh` alongside ports `6443`, `8091`, `32379`, and `6379`.
+4. **Boot Auto-Recovery (Phase 4 Modernization)**: In Phase 4, ad-hoc host boot scripts were eliminated. Kernel NAT rules are persisted via standard `netfilter-persistent`, while KinD clusters declaratively map NodePort `30432` to host port `5432` via `extraPortMappings`.
 
 ### 2.8 Standby Schema Guard in sandbox-api
 
@@ -1176,7 +1176,7 @@ The following table explains how this memory synchronization mechanism has evolv
 | Dimension | 1. Legacy Approach (Deprecated) | 2. Current Implementation (Active Sandbox) | 3. Pure Production K8s (Bare-Metal / Cloud) |
 | :--- | :--- | :--- | :--- |
 | **Mechanism** | Userspace `socat` forwarder | **Linux Kernel Netfilter NAT (`PREROUTING DNAT`)** | **Kubernetes-Native CNI / NodePort / MCS** |
-| **Host Configuration** | `/etc/systemd/system/primaryhub-redis-forward.service` | Managed via `/usr/local/bin/ocm-mesh-boot.sh` | **Zero host-level files or scripts** |
+| **Host Configuration** | `/etc/systemd/system/primaryhub-redis-forward.service` | Managed via declarative KinD `extraPortMappings` & `netfilter-persistent` (Phase 4) | **Zero host-level files or scripts** |
 | **Execution Layer** | Userspace context switching (Kernel $\leftrightarrow$ `socat` $\leftrightarrow$ Kernel) | **Pure Linux Kernel Layer 3/4 packet rewrite** | Native `kube-proxy` or Cilium eBPF |
 | **Reliability** | Vulnerable to daemon crashes, pid file locks | **Crash-proof** (Netfilter engine in Linux kernel) | Native Kubernetes reconciliation |
 | **Systemd Footprint** | Polluted `/etc/systemd/system` | **100% Clean** (`Unit could not be found`) | 100% Clean |
@@ -1414,13 +1414,13 @@ Originally, these ports were forwarded on `hub1-vm` using userspace `socat` proc
    - Submariner's IPsec cable driver (Libreswan) throws an error (`whack exit status 20`) because an IPsec endpoint cannot peer with its own identical IP (`172.18.0.2 <-> 172.18.0.2`).
    - Linux Kernel NAT solves this elegantly by routing packets across the host VMs' unique WireGuard overlay IPs (`10.99.0.1` vs `10.99.0.2`) directly into KinD NodePorts.
 
-5. **100% Automated Multi-VM Portability**:
+5. **100% Automated Multi-VM Portability (Phase 4)**:
    - Setting up `socat` systemd services manually on new sets of VMs is tedious, error-prone, and requires multi-step manual intervention.
-   - By integrating the Kernel NAT rules into [`install-auto-recovery.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/multi-cluster/vm-level-ocm-multi-cluster/install-auto-recovery.sh) and `/usr/local/bin/ocm-mesh-boot.sh`, standing up or recovering a new cluster sandbox on any set of VMs is **100% automated via a single script execution**.
+   - In Phase 4, ad-hoc boot scripts were retired in favor of native WireGuard `PostUp`/`PreDown` policy routing, `netfilter-persistent`, and KinD `extraPortMappings` inside [`multi-cluster-sync.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/multi-cluster-sync.sh).
 
 #### 2. Master Unified Ingress Routing Matrix on `hub1-vm`
 
-All cross-cluster traffic arriving on WireGuard overlay IP `10.99.0.1` [primaryhub VM WireGuard IP] is managed by `/usr/local/bin/ocm-mesh-boot.sh` using five unified Linux Kernel NAT rules:
+All cross-cluster traffic arriving on WireGuard overlay IP `10.99.0.1` [primaryhub VM WireGuard IP] is managed natively via Linux Kernel NAT & KinD extraPortMappings:
 
 | Traffic Type | Ingress WireGuard Port | Forwarded Destination | Protocol | Purpose |
 | :--- | :--- | :--- | :--- | :--- |
@@ -1697,8 +1697,9 @@ sudo iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-de
 sudo iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination 172.18.0.2:30379
 
 # 3. Persistence across reboots:
-# These rules are permanently automated inside /usr/local/bin/ocm-mesh-boot.sh
-# and managed by the ocm-mesh-boot.service systemd unit.
+# In Phase 4, these rules are persisted natively via netfilter-persistent:
+# sudo netfilter-persistent save  (saves to /etc/iptables/rules.v4)
+# WireGuard return-path routing is managed by PostUp/PreDown in /etc/wireguard/wg0.conf.
 ```
 
 > **Why `! -i br-+`**: Excludes traffic already inside the Docker bridge network from being DNAT'd again. Only external traffic (from WireGuard) is redirected.
@@ -1713,7 +1714,46 @@ nc -zv 10.99.0.1 6379   # Valkey replication port [primaryhub VM WireGuard Ingre
 
 ---
 
-### Phase 1: Install Primary Hub
+### Quick Start: Modernized End-to-End Bootstrap (How to Start)
+
+> [!TIP]
+> **Automated Multi-Cluster Deployment**: Instead of manual step-by-step VM configuration, the entire topology (WireGuard mesh, KinD clusters with declarative port mappings, OCM, Envoy active-passive gateway, and HA databases) can be bootstrapped automatically in 6 steps:
+>
+> 1. **Configure `cluster.env`**:
+>    ```bash
+>    cat << 'EOF' > cluster.env
+>    GATEWAY_IP="192.168.100.10"
+>    HUB1_IP="192.168.100.20"
+>    HUB2_IP="192.168.101.20"
+>    SPOKE1_IP="192.168.102.20"
+>    SPOKE2_IP="192.168.103.20"
+>    SSH_USER="ubuntu"
+>    SSH_KEY="/home/berrybytes/.ssh/kamal-kvm"
+>    EOF
+>    ```
+> 2. **Run Master Infrastructure Bootstrap**:
+>    ```bash
+>    ./multi-cluster-sync.sh --env-file ./cluster.env
+>    ```
+> 3. **Deploy Envoy Active Gateway on `gateway-vm`**:
+>    ```bash
+>    ssh -i ~/.ssh/kamal-kvm ubuntu@192.168.100.10 "mkdir -p ~/gateway"
+>    scp -i ~/.ssh/kamal-kvm codeInspector/gateway/* ubuntu@192.168.100.10:~/gateway/
+>    ssh -i ~/.ssh/kamal-kvm ubuntu@192.168.100.10 "bash ~/gateway/deploy-gateway.sh"
+>    ```
+> 4. **Deploy PrimaryHub Stack (`hub1-vm`)**:
+>    ```bash
+>    ssh -i ~/.ssh/kamal-kvm ubuntu@192.168.100.20 "helm upgrade --install codeinspector ~/01-Sandbox/codeInspector/charts/apiServer -f ~/01-Sandbox/codeInspector/values.yaml -n opensandbox-system --create-namespace"
+>    ```
+> 5. **Deploy SecondaryHub Stack + Controller (`hub2-vm`)**:
+>    ```bash
+>    ssh -i ~/.ssh/kamal-kvm ubuntu@192.168.101.20 "helm upgrade --install codeinspector ~/01-Sandbox/codeInspector/charts/apiServer -f ~/01-Sandbox/codeInspector/values-secondary.yaml -n opensandbox-system --create-namespace"
+>    ```
+> 6. **Detailed Documentation**: For step-by-step live verification and split-brain failover testing, see [`multi-cluster-automated-failover-split-brain-safe-failback.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/01-sandbox-multi-cluster/multi-cluster-automated-failover-split-brain-safe-failback.md).
+
+---
+
+### Phase 1: Install Primary Hub (Manual Step-by-Step Reference)
 
 Execute **all steps in order** on `primaryhub` (`ubuntu@192.168.100.20`).
 

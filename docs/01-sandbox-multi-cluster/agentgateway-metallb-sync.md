@@ -441,9 +441,12 @@ while true; do
 done
 ```
 
-### 6.4 Boot Auto-Recovery (`ocm-mesh-boot.service`)
+### 6.4 Boot Auto-Recovery & Modernization (Phase 4)
 
-Installed across `hub1-vm` and `hub2-vm` at `/usr/local/bin/ocm-mesh-boot.sh` and enabled via systemd unit `/etc/systemd/system/ocm-mesh-boot.service`:
+> [!NOTE]
+> **Modernization Update (Phase 4)**: The legacy host script `/usr/local/bin/ocm-mesh-boot.sh` and its systemd unit `ocm-mesh-boot.service` have been retired. Ingress port mappings and kernel forwarding are now managed declaratively via KinD `extraPortMappings`, standard Ubuntu `netfilter-persistent`, and self-healing WireGuard `PostUp`/`PreDown` directives in `/etc/wireguard/wg0.conf`.
+
+Historically, boot auto-recovery was installed across `hub1-vm` and `hub2-vm` at `/usr/local/bin/ocm-mesh-boot.sh` and enabled via systemd unit `/etc/systemd/system/ocm-mesh-boot.service`:
 
 ```bash
 # AgentGateway & MetalLB HTTP Ingress (Port 80 -> MetalLB LoadBalancer 172.18.255.200:80)
@@ -458,10 +461,11 @@ iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 443 -j DNAT --to-destinat
 iptables-save > /etc/iptables.rules
 ```
 
-When any VM boots or restarts:
-1. `ocm-vip-watchdog.service` on `gateway-vm` boots up, ensures `10.99.0.100/32` is attached to `wg0`, sets up forwarding, and monitors `livez`.
-2. `ocm-mesh-boot.service` on `hub1-vm` and `hub2-vm` boots up, ensures WireGuard `wg0` is up, containerd is active, and reinstates the kernel DNAT rules for ports 80, 443, 6443, 8091, 32379, 6379, and 5432.
-3. Both browser API interfaces (`http://192.168.100.10/docs` and `http://192.168.100.10/api/v1/01sbx/docs`) survive reboot automatically with zero manual intervention.
+In the modernized architecture:
+1. `envoy-gateway.service` on `gateway-vm` boots up, proxies ports 80 and 6443 via declarative Envoy configuration, and probes upstream health every 1s.
+2. `wg-quick@wg0.service` on `hub1-vm` and `hub2-vm` initializes WireGuard and runs `PostUp` policy routing (Table 200, MASQUERADE, and return-path IP rules).
+3. `netfilter-persistent` restores kernel NAT tables on reboot with zero ad-hoc host daemon scripts.
+4. Both browser API interfaces (`http://192.168.100.10/docs` and `http://192.168.100.10/api/v1/01sbx/docs`) survive reboot automatically with zero manual intervention.
 
 ---
 

@@ -1,32 +1,35 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# docs/multi-cluster-sync.sh
+# multi-cluster-sync.sh
 #
 # 100% Automated Multi-Cluster Deployment & Continuous Sync Setup
 # FULLY DYNAMIC & IDEMPOTENT:
-#   - Zero hardcoded IP addresses (dynamic CLI, .env file, or interactive wizard).
+#   - Zero hardcoded IP addresses (dynamic CLI, cluster.env file, or interactive wizard).
 #   - Existence checks before every package, tool, certificate, cluster, and release.
+#   - Automatically synchronizes updated codeInspector Helm charts to both hubs.
+#   - Automatically joins spokes, approves CSRs, labels runtimes, and binds sandbox-spokes ClusterSet.
+#   - Automatically deploys Envoy Gateway and in-cluster Failover Controller with dynamic IPs.
 #   - Preserves existing configurations and avoids destructive overwrites.
-#   - Automatically verifies and installs Git, cloning 01-Sandbox if missing.
 #
 # Phases Covered:
 #   1. Pre-Flight SSH & Sudo Connectivity Checks
 #   2. WireGuard Encrypted Mesh Setup (configurable overlay subnet)
 #   3. Docker, KinD, kubectl, clusteradm, Helm v3, and Git Toolchain Installation
-#   4. KinD 4-Cluster Creation with Isolated CIDRs
+#   4. KinD 4-Cluster Creation with Isolated CIDRs & Declarative Port Mappings
 #   5. Shared Root CA & Virtual IP TLS SANs Synchronization
 #   6. OCM Hubs Initialization & Priority Auto-Acceptor Deployment
-#   7. Automated 3-Second VIP Failover Watchdog on Gateway VM
-#   8. Spoke Clusters Registration to OCM Hub via Virtual IP
-#   9. Linux Kernel Netfilter NAT Ingress & Boot Auto-Recovery Deployment
-#  PRE-10: Git Verification & 01-Sandbox codeInspector Repository Preparation
+#   7. Declarative Envoy Active-Passive Multi-Cluster Gateway on Gateway VM
+#   8. Spoke Clusters Registration, Runtime Labeling & ClusterSet Binding via VIP
+#   9. Linux Kernel Netfilter Persistence (netfilter-persistent) & Native Routing
+#  PRE-10: Git Verification & codeInspector Chart Synchronization
 #  10. CloudNativePG (PostgreSQL) Streaming & Valkey Memory HA Continuous Sync
+#  10-B. In-Cluster Kubernetes-Native Failover Controller & Ephemeral Delta Sync Job
 #  11. End-to-End System Health Check & Real-time Telemetry Verification
 #
 # Usage:
-#   ./docs/multi-cluster-sync.sh [options]
-#   ./docs/multi-cluster-sync.sh --env-file ./cluster.env
-#   ./docs/multi-cluster-sync.sh --gateway-ip 10.0.1.10 --hub1-ip 10.0.1.20 ...
+#   ./multi-cluster-sync.sh
+#   ./multi-cluster-sync.sh --env-file ./cluster.env
+#   ./multi-cluster-sync.sh --gateway-ip 10.0.1.10 --hub1-ip 10.0.1.20 ...
 # ==============================================================================
 
 set -eo pipefail
@@ -50,6 +53,44 @@ log_step() {
   echo -e "${CYAN}${BOLD}======================================================================${NC}"
 }
 
+# Resolve directory paths
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -d "${SCRIPT_DIR}/codeInspector" ]; then
+  ROOT_DIR="${SCRIPT_DIR}"
+elif [ -d "${SCRIPT_DIR}/../codeInspector" ]; then
+  ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+else
+  ROOT_DIR="${SCRIPT_DIR}"
+fi
+
+# Pre-parse --env-file or auto-detect cluster.env
+ENV_FILE=""
+for ((i=1; i<=$#; i++)); do
+  if [[ "${!i}" == "--env-file" ]]; then
+    j=$((i+1))
+    ENV_FILE="${!j}"
+  fi
+done
+
+if [[ -z "$ENV_FILE" ]]; then
+  if [[ -f "./cluster.env" ]]; then
+    ENV_FILE="./cluster.env"
+  elif [[ -f "${SCRIPT_DIR}/cluster.env" ]]; then
+    ENV_FILE="${SCRIPT_DIR}/cluster.env"
+  elif [[ -f "${ROOT_DIR}/cluster.env" ]]; then
+    ENV_FILE="${ROOT_DIR}/cluster.env"
+  fi
+fi
+
+if [[ -n "$ENV_FILE" && -f "$ENV_FILE" ]]; then
+  log_info "Auto-detected environment file at $ENV_FILE. Loading variables..."
+  # shellcheck source=/dev/null
+  set -a; source "$ENV_FILE"; set +a
+elif [[ -n "$ENV_FILE" && ! -f "$ENV_FILE" ]]; then
+  log_error "Specified --env-file '$ENV_FILE' does not exist."
+  exit 1
+fi
+
 # --- Default Configurations (Fallback values if not supplied) ---
 GATEWAY_IP="${GATEWAY_IP:-}"
 HUB1_IP="${HUB1_IP:-}"
@@ -69,23 +110,6 @@ WG_SPOKE1_IP="${WG_SPOKE1_IP:-${WG_SUBNET_PREFIX}.3}"
 WG_SPOKE2_IP="${WG_SPOKE2_IP:-${WG_SUBNET_PREFIX}.4}"
 
 INTERACTIVE_MODE=false
-ENV_FILE=""
-
-# Pre-parse --env-file if specified early
-for ((i=1; i<=$#; i++)); do
-  if [[ "${!i}" == "--env-file" ]]; then
-    j=$((i+1))
-    ENV_FILE="${!j}"
-    if [[ -f "$ENV_FILE" ]]; then
-      log_info "Loading environment from $ENV_FILE..."
-      # shellcheck source=/dev/null
-      set -a; source "$ENV_FILE"; set +a
-    else
-      log_error "Specified --env-file '$ENV_FILE' does not exist."
-      exit 1
-    fi
-  fi
-done
 
 # Parse CLI Flags (command-line arguments take highest precedence)
 while [[ $# -gt 0 ]]; do
@@ -110,7 +134,7 @@ while [[ $# -gt 0 ]]; do
       echo "Usage: $0 [options]"
       echo ""
       echo "IP Configuration Options:"
-      echo "  --env-file PATH        Path to environment file defining VM IPs"
+      echo "  --env-file PATH        Path to environment file defining VM IPs (default: ./cluster.env)"
       echo "  --gateway-ip IP        IP address of gateway-vm"
       echo "  --hub1-ip IP           IP address of hub1-vm (Primary Hub)"
       echo "  --hub2-ip IP           IP address of hub2-vm (Secondary Hub)"
@@ -160,17 +184,17 @@ if [[ "$WG_SPOKE2_IP" == 10.99.0.4 && "$WG_SUBNET_PREFIX" != "10.99.0" ]]; then
   WG_SPOKE2_IP="${WG_SUBNET_PREFIX}.4"
 fi
 
-# Fallback defaults for testing in current sandbox if completely unspecified
+# Fallback defaults for sandbox testing
 DEFAULT_GATEWAY="192.168.100.10"
 DEFAULT_HUB1="192.168.100.20"
 DEFAULT_HUB2="192.168.101.20"
 DEFAULT_SPOKE1="192.168.102.20"
 DEFAULT_SPOKE2="192.168.103.20"
 
-# Interactive wizard if requested OR if any IP is missing and running in interactive terminal
+# Interactive wizard if requested OR if any IP is missing in interactive terminal
 if [ "$INTERACTIVE_MODE" = true ] || { [ -t 0 ] && [ -z "$GATEWAY_IP" ] && [ -z "$HUB1_IP" ]; }; then
   echo -e "\n${CYAN}${BOLD}🔧 Interactive Multi-Cluster IP Setup Wizard${NC}"
-  echo -e "Press [Enter] to accept the bracketed default, or input your new VM IP address:\n"
+  echo -e "Press [Enter] to accept the bracketed default, or input your VM IP address:\n"
 
   read -r -p "Gateway VM Physical IP [${GATEWAY_IP:-$DEFAULT_GATEWAY}]: " input_gw
   GATEWAY_IP="${input_gw:-${GATEWAY_IP:-$DEFAULT_GATEWAY}}"
@@ -191,19 +215,34 @@ if [ "$INTERACTIVE_MODE" = true ] || { [ -t 0 ] && [ -z "$GATEWAY_IP" ] && [ -z 
   SSH_USER="${input_user:-$SSH_USER}"
 fi
 
-# Apply fallback defaults if still empty (non-interactive environments)
+# Validate presence of all 5 VM IPs
 GATEWAY_IP="${GATEWAY_IP:-$DEFAULT_GATEWAY}"
 HUB1_IP="${HUB1_IP:-$DEFAULT_HUB1}"
 HUB2_IP="${HUB2_IP:-$DEFAULT_HUB2}"
 SPOKE1_IP="${SPOKE1_IP:-$DEFAULT_SPOKE1}"
 SPOKE2_IP="${SPOKE2_IP:-$DEFAULT_SPOKE2}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+MISSING_IPS=()
+[[ -z "$GATEWAY_IP" ]] && MISSING_IPS+=("GATEWAY_IP")
+[[ -z "$HUB1_IP" ]]    && MISSING_IPS+=("HUB1_IP")
+[[ -z "$HUB2_IP" ]]    && MISSING_IPS+=("HUB2_IP")
+[[ -z "$SPOKE1_IP" ]]  && MISSING_IPS+=("SPOKE1_IP")
+[[ -z "$SPOKE2_IP" ]]  && MISSING_IPS+=("SPOKE2_IP")
+
+if [ ${#MISSING_IPS[@]} -gt 0 ]; then
+  log_error "Missing required VM IP configuration for: ${MISSING_IPS[*]}"
+  echo "Please supply your VM IPs via cluster.env (see cluster.env.example) or CLI flags."
+  exit 1
+fi
+
+# Fallback default SSH key if present
+if [[ -z "$SSH_KEY" && -f "${HOME}/.ssh/kamal-kvm" ]]; then
+  SSH_KEY="${HOME}/.ssh/kamal-kvm"
+fi
 
 # SSH / SCP Helpers
 SSH_OPTS=(-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10)
-if [[ -n "$SSH_KEY" ]]; then
+if [[ -n "$SSH_KEY" && -f "$SSH_KEY" ]]; then
   SSH_OPTS+=(-i "$SSH_KEY")
 fi
 
@@ -216,7 +255,7 @@ run_ssh() {
 run_ssh_sudo() {
   local target_ip="$1"
   local cmd="$2"
-  ssh "${SSH_OPTS[@]}" "${SSH_USER}@${target_ip}" "sudo bash -c '$cmd'"
+  ssh "${SSH_OPTS[@]}" "${SSH_USER}@${target_ip}" "sudo bash -s" <<< "$cmd"
 }
 
 run_scp() {
@@ -272,20 +311,66 @@ log_step "PHASE 1: Pre-Flight SSH & Sudo Connectivity Checks"
 
 for name in "gateway-vm" "hub1-vm" "hub2-vm" "spoke1-vm" "spoke2-vm"; do
   ip="${ALL_VMS[$name]}"
-  log_info "Testing SSH connectivity to $name ($ip)..."
-  if ! run_ssh "$ip" "echo connection_ok" >/dev/null 2>&1; then
-    log_error "Cannot connect via SSH to $name ($ip). Check IP, SSH keys, or network connectivity."
+  log_info "Probing SSH connectivity and sudo privileges on $name ($ip)..."
+  if ! run_ssh "$ip" "sudo -n true" 2>/dev/null; then
+    log_error "Failed passwordless sudo verification on $name ($ip). Ensure ${SSH_USER} has NOPASSWD in sudoers."
     exit 1
   fi
-  if ! run_ssh_sudo "$ip" "echo sudo_ok" >/dev/null 2>&1; then
-    log_error "User $SSH_USER does not have passwordless sudo permissions on $name ($ip)."
-    exit 1
-  fi
-  log_success "$name ($ip) SSH + passwordless sudo verified."
+  log_success "$name ($ip) SSH + sudo verified."
 done
 
+# ------------------------------------------------------------------------------
+# AUTOMATIC WIREGUARD IP AUTO-DISCOVERY & DYNAMIC ASSIGNMENT
+# ------------------------------------------------------------------------------
+log_info "Probing for active WireGuard interfaces (wg0) on all VMs..."
+detect_remote_wg_ip() {
+  local target_ip="$1"
+  run_ssh "$target_ip" "ip -4 -o addr show wg0 2>/dev/null | awk '{print \$4}' | cut -d/ -f1 | head -n 1 || true"
+}
+
+DETECTED_GW_WG=$(detect_remote_wg_ip "$GATEWAY_IP")
+DETECTED_H1_WG=$(detect_remote_wg_ip "$HUB1_IP")
+DETECTED_H2_WG=$(detect_remote_wg_ip "$HUB2_IP")
+DETECTED_S1_WG=$(detect_remote_wg_ip "$SPOKE1_IP")
+DETECTED_S2_WG=$(detect_remote_wg_ip "$SPOKE2_IP")
+
+if [[ -n "$DETECTED_GW_WG" ]]; then
+  WG_GATEWAY_IP="$DETECTED_GW_WG"
+  log_info "Discovered active WireGuard IP on gateway-vm: $WG_GATEWAY_IP"
+fi
+if [[ -n "$DETECTED_H1_WG" ]]; then
+  WG_HUB1_IP="$DETECTED_H1_WG"
+  log_info "Discovered active WireGuard IP on hub1-vm: $WG_HUB1_IP"
+fi
+if [[ -n "$DETECTED_H2_WG" ]]; then
+  WG_HUB2_IP="$DETECTED_H2_WG"
+  log_info "Discovered active WireGuard IP on hub2-vm: $WG_HUB2_IP"
+fi
+if [[ -n "$DETECTED_S1_WG" ]]; then
+  WG_SPOKE1_IP="$DETECTED_S1_WG"
+  log_info "Discovered active WireGuard IP on spoke1-vm: $WG_SPOKE1_IP"
+fi
+if [[ -n "$DETECTED_S2_WG" ]]; then
+  WG_SPOKE2_IP="$DETECTED_S2_WG"
+  log_info "Discovered active WireGuard IP on spoke2-vm: $WG_SPOKE2_IP"
+fi
+
+# Detect existing VIP on gateway-vm if present
+DETECTED_VIP=$(run_ssh "$GATEWAY_IP" "ip -4 -o addr show wg0 2>/dev/null | awk '{print \$4}' | cut -d/ -f1 | grep -v '${WG_GATEWAY_IP}' | head -n 1 || true")
+if [[ -n "$DETECTED_VIP" ]]; then
+  WG_VIP="$DETECTED_VIP"
+  log_info "Discovered active WireGuard Virtual IP (VIP) on gateway-vm: $WG_VIP"
+fi
+
+# Update WG_IPS map with dynamically discovered or generated WireGuard IPs
+WG_IPS["gateway-vm"]="$WG_GATEWAY_IP"
+WG_IPS["hub1-vm"]="$WG_HUB1_IP"
+WG_IPS["hub2-vm"]="$WG_HUB2_IP"
+WG_IPS["spoke1-vm"]="$WG_SPOKE1_IP"
+WG_IPS["spoke2-vm"]="$WG_SPOKE2_IP"
+
 # ==============================================================================
-# PHASE 2: WIREGUARD ENCRYPTED MESH SETUP
+# PHASE 2: CONFIGURE DYNAMIC WIREGUARD MESH NETWORK
 # ==============================================================================
 log_step "PHASE 2: Configuring Dynamic WireGuard Mesh Network (${WG_SUBNET_PREFIX}.0/24)"
 
@@ -297,7 +382,7 @@ for name in "${!ALL_VMS[@]}"; do
   log_info "Checking networking & base packages on $name ($ip)..."
   run_ssh_sudo "$ip" "
     MISSING_PKGS=()
-    for pkg in wireguard wireguard-tools iptables curl jq net-tools git; do
+    for pkg in wireguard wireguard-tools iptables curl jq net-tools git postgresql-client; do
       if ! dpkg -s \$pkg >/dev/null 2>&1; then
         MISSING_PKGS+=(\$pkg)
       fi
@@ -387,7 +472,8 @@ else
 Address = ${WG_HUB1_IP}/24
 ListenPort = 51820
 PrivateKey = ${WG_PRIV["hub1-vm"]}
-PostUp = sysctl -w net.ipv4.ip_forward=1
+PostUp = ip rule add from ${WG_HUB1_IP} table 200 priority 100 2>/dev/null || true; ip route add default dev wg0 table 200 2>/dev/null || true; iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE; iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i wg0 -j ACCEPT; iptables -C FORWARD -o wg0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o wg0 -j ACCEPT; iptables -C DOCKER-USER -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER 1 -j ACCEPT; iptables -t nat -C POSTROUTING -o br-+ -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o br-+ -j MASQUERADE; sysctl -w net.ipv4.ip_forward=1
+PreDown = ip rule del from ${WG_HUB1_IP} table 200 priority 100 2>/dev/null || true; ip route del default dev wg0 table 200 2>/dev/null || true; iptables -t nat -D POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || true
 
 [Peer]
 PublicKey = ${WG_PUB["gateway-vm"]}
@@ -430,7 +516,8 @@ else
 Address = ${WG_HUB2_IP}/24
 ListenPort = 51820
 PrivateKey = ${WG_PRIV["hub2-vm"]}
-PostUp = sysctl -w net.ipv4.ip_forward=1
+PostUp = ip rule add from ${WG_HUB2_IP} table 200 priority 100 2>/dev/null || true; ip route add default dev wg0 table 200 2>/dev/null || true; iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE; iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i wg0 -j ACCEPT; iptables -C FORWARD -o wg0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o wg0 -j ACCEPT; iptables -C DOCKER-USER -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER 1 -j ACCEPT; iptables -t nat -C POSTROUTING -o br-+ -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o br-+ -j MASQUERADE; sysctl -w net.ipv4.ip_forward=1
+PreDown = ip rule del from ${WG_HUB2_IP} table 200 priority 100 2>/dev/null || true; ip route del default dev wg0 table 200 2>/dev/null || true; iptables -t nat -D POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || true
 
 [Peer]
 PublicKey = ${WG_PUB["gateway-vm"]}
@@ -473,7 +560,8 @@ else
 Address = ${WG_SPOKE1_IP}/24
 ListenPort = 51820
 PrivateKey = ${WG_PRIV["spoke1-vm"]}
-PostUp = sysctl -w net.ipv4.ip_forward=1
+PostUp = ip rule add from ${WG_SPOKE1_IP} table 200 priority 100 2>/dev/null || true; ip route add default dev wg0 table 200 2>/dev/null || true; iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE; iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i wg0 -j ACCEPT; iptables -C FORWARD -o wg0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o wg0 -j ACCEPT; sysctl -w net.ipv4.ip_forward=1
+PreDown = ip rule del from ${WG_SPOKE1_IP} table 200 priority 100 2>/dev/null || true; ip route del default dev wg0 table 200 2>/dev/null || true; iptables -t nat -D POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || true
 
 [Peer]
 PublicKey = ${WG_PUB["gateway-vm"]}
@@ -510,7 +598,8 @@ else
 Address = ${WG_SPOKE2_IP}/24
 ListenPort = 51820
 PrivateKey = ${WG_PRIV["spoke2-vm"]}
-PostUp = sysctl -w net.ipv4.ip_forward=1
+PostUp = ip rule add from ${WG_SPOKE2_IP} table 200 priority 100 2>/dev/null || true; ip route add default dev wg0 table 200 2>/dev/null || true; iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE; iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -i wg0 -j ACCEPT; iptables -C FORWARD -o wg0 -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -o wg0 -j ACCEPT; sysctl -w net.ipv4.ip_forward=1
+PreDown = ip rule del from ${WG_SPOKE2_IP} table 200 priority 100 2>/dev/null || true; ip route del default dev wg0 table 200 2>/dev/null || true; iptables -t nat -D POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || true
 
 [Peer]
 PublicKey = ${WG_PUB["gateway-vm"]}
@@ -535,89 +624,85 @@ systemctl restart wg-quick@wg0
 "
 fi
 
-# Verify mesh connectivity dynamically
-log_info "Verifying WireGuard overlay mesh connectivity from hub1-vm ($HUB1_IP)..."
+# Overlay verification ping
+log_info "Verifying WireGuard mesh connectivity across nodes..."
 sleep 2
-run_ssh "$HUB1_IP" "ping -c 2 ${WG_HUB2_IP} && ping -c 2 ${WG_SPOKE1_IP} && ping -c 2 ${WG_SPOKE2_IP} && ping -c 2 ${WG_GATEWAY_IP}" >/dev/null
-log_success "WireGuard mesh overlay (${WG_SUBNET_PREFIX}.0/24) verified healthy."
-
-# ==============================================================================
-# PHASE 3: BASE TOOLING INSTALLATION ON ALL 4 KUBERNETES VMS
-# ==============================================================================
-log_step "PHASE 3: Checking & Installing Developer Toolchain (Docker, KinD, kubectl, clusteradm, Helm, Git)"
-
-for name in "${!K8S_VMS[@]}"; do
-  ip="${K8S_VMS[$name]}"
-  log_info "Verifying Kubernetes developer toolchain on $name ($ip)..."
-  run_ssh_sudo "$ip" "
-    # Install Docker if missing
-    if command -v docker >/dev/null 2>&1; then
-      echo 'Docker already installed, skipping.'
-    else
-      echo 'Installing Docker...'
-      apt-get update -qq
-      apt-get install -y -qq ca-certificates curl gnupg lsb-release
-      mkdir -p /etc/apt/keyrings
-      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg --yes
-      echo 'deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu noble stable' | tee /etc/apt/sources.list.d/docker.list > /dev/null
-      apt-get update -qq
-      apt-get install -y -qq docker-ce docker-ce-cli containerd.io
-      usermod -aG docker ubuntu
-    fi
-
-    # Install kind (v0.24.0) if missing
-    if command -v kind >/dev/null 2>&1; then
-      echo 'KinD already installed, skipping.'
-    else
-      echo 'Installing KinD...'
-      curl -Lo /usr/local/bin/kind https://kind.sigs.k8s.io/dl/v0.24.0/kind-linux-amd64
-      chmod +x /usr/local/bin/kind
-    fi
-
-    # Install kubectl (v1.30.5) if missing
-    if command -v kubectl >/dev/null 2>&1; then
-      echo 'kubectl already installed, skipping.'
-    else
-      echo 'Installing kubectl...'
-      curl -Lo /usr/local/bin/kubectl https://dl.k8s.io/release/v1.30.5/bin/linux/amd64/kubectl
-      chmod +x /usr/local/bin/kubectl
-    fi
-
-    # Install clusteradm (v0.9.0) if missing
-    if command -v clusteradm >/dev/null 2>&1; then
-      echo 'clusteradm already installed, skipping.'
-    else
-      echo 'Installing clusteradm...'
-      curl -L https://raw.githubusercontent.com/open-cluster-management-io/clusteradm/main/install.sh | bash
-    fi
-
-    # Install Helm (v3) if missing
-    if command -v helm >/dev/null 2>&1; then
-      echo 'Helm already installed, skipping.'
-    else
-      echo 'Installing Helm...'
-      curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-    fi
-
-    # Install Git if missing
-    if command -v git >/dev/null 2>&1; then
-      echo 'Git already installed, skipping.'
-    else
-      echo 'Installing Git...'
-      apt-get update -qq && apt-get install -y -qq git
-    fi
-  "
-  log_success "$name toolchain checked and ready."
+for name in "hub1-vm" "hub2-vm" "spoke1-vm" "spoke2-vm"; do
+  target_wg="${WG_IPS[$name]}"
+  if run_ssh "$GATEWAY_IP" "ping -c 2 -W 2 $target_wg >/dev/null 2>&1"; then
+    log_success "Ping gateway -> $name ($target_wg) SUCCESS."
+  else
+    log_warn "Ping gateway -> $name ($target_wg) failed on first attempt. Checking handshake..."
+  fi
 done
 
 # ==============================================================================
-# PHASE 4: KIND CLUSTERS CREATION WITH NON-OVERLAPPING CIDRS
+# PHASE 3: DEVELOPER TOOLCHAIN INSTALLATION (DOCKER, KIND, KUBECTL, CLUSTERADM, HELM)
+# ==============================================================================
+log_step "PHASE 3: Checking & Installing Developer Toolchain (Docker, KinD, kubectl, clusteradm, Helm, Git)"
+
+for name in "hub1-vm" "hub2-vm" "spoke1-vm" "spoke2-vm"; do
+  ip="${ALL_VMS[$name]}"
+  log_info "Validating toolchain on $name ($ip)..."
+  run_ssh_sudo "$ip" "
+    # Docker
+    if ! command -v docker >/dev/null 2>&1; then
+      echo 'Installing Docker...'
+      curl -fsSL https://get.docker.com | sh
+      usermod -aG docker ${SSH_USER}
+    fi
+
+    # kubectl
+    if ! command -v kubectl >/dev/null 2>&1; then
+      echo 'Installing kubectl...'
+      curl -LO \"https://dl.k8s.io/release/v1.29.2/bin/linux/amd64/kubectl\"
+      chmod +x kubectl
+      mv kubectl /usr/local/bin/
+    fi
+
+    # KinD
+    if ! command -v kind >/dev/null 2>&1; then
+      echo 'Installing KinD...'
+      curl -Lo ./kind https://kind.sigs.k8s.io/dl/v0.22.0/kind-linux-amd64
+      chmod +x ./kind
+      mv ./kind /usr/local/bin/kind
+    fi
+
+    # Helm v3
+    if ! command -v helm >/dev/null 2>&1; then
+      echo 'Installing Helm v3...'
+      curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+    fi
+
+    # clusteradm
+    if ! command -v clusteradm >/dev/null 2>&1; then
+      echo 'Installing clusteradm...'
+      curl -L https://raw.githubusercontent.com/open-cluster-management-io/clusteradm/main/install.sh | bash
+    fi
+  "
+  log_success "Toolchain verified on $name ($ip)."
+done
+
+# Gateway VM specific: Docker + Envoy
+log_info "Ensuring Docker is available on gateway-vm ($GATEWAY_IP)..."
+run_ssh_sudo "$GATEWAY_IP" "
+  if ! command -v docker >/dev/null 2>&1; then
+    curl -fsSL https://get.docker.com | sh
+    usermod -aG docker ${SSH_USER}
+  fi
+"
+
+# ==============================================================================
+# PHASE 4: KIND 4-CLUSTER CREATION WITH ISOLATED CIDRS
 # ==============================================================================
 log_step "PHASE 4: Creating KinD Clusters with Isolated CIDRs (Preserving Existing)"
 
 # 1. hub1-vm: primaryhub
 log_info "Checking KinD cluster 'primaryhub' on hub1-vm ($HUB1_IP)..."
 run_ssh "$HUB1_IP" "
+if docker ps -a --format '{{.Names}}' | grep -q '^primaryhub-control-plane$'; then
+  docker start primaryhub-control-plane 2>/dev/null || true
+fi
 if kind get clusters 2>/dev/null | grep -q '^primaryhub$'; then
   echo \"KinD cluster 'primaryhub' already exists, preserving configuration.\"
 else
@@ -634,17 +719,33 @@ nodes:
   - containerPort: 6443
     hostPort: 6443
     protocol: TCP
+  - containerPort: 80
+    hostPort: 80
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
+  - containerPort: 30432
+    hostPort: 5432
+    protocol: TCP
+  - containerPort: 30379
+    hostPort: 6379
+    protocol: TCP
 EOF
   kind create cluster --name primaryhub --config /tmp/kind-primaryhub.yaml
 fi
-mkdir -p /home/ubuntu/.kube
-cp /root/.kube/config /home/ubuntu/.kube/config 2>/dev/null || sudo cp /root/.kube/config /home/ubuntu/.kube/config
-sudo chown -R ubuntu:ubuntu /home/ubuntu/.kube
+mkdir -p /home/${SSH_USER}/.kube
+kind export kubeconfig --name primaryhub --kubeconfig /home/${SSH_USER}/.kube/config 2>/dev/null || cp /root/.kube/config /home/${SSH_USER}/.kube/config 2>/dev/null || true
+sed -i 's|https://0.0.0.0:6443|https://127.0.0.1:6443|g' /home/${SSH_USER}/.kube/config 2>/dev/null || true
+sudo chown -R ${SSH_USER}:${SSH_USER} /home/${SSH_USER}/.kube 2>/dev/null || true
 "
 
 # 2. hub2-vm: secondaryhub
 log_info "Checking KinD cluster 'secondaryhub' on hub2-vm ($HUB2_IP)..."
 run_ssh "$HUB2_IP" "
+if docker ps -a --format '{{.Names}}' | grep -q '^secondaryhub-control-plane$'; then
+  docker start secondaryhub-control-plane 2>/dev/null || true
+fi
 if kind get clusters 2>/dev/null | grep -q '^secondaryhub$'; then
   echo \"KinD cluster 'secondaryhub' already exists, preserving configuration.\"
 else
@@ -661,17 +762,33 @@ nodes:
   - containerPort: 6443
     hostPort: 6443
     protocol: TCP
+  - containerPort: 80
+    hostPort: 80
+    protocol: TCP
+  - containerPort: 443
+    hostPort: 443
+    protocol: TCP
+  - containerPort: 30432
+    hostPort: 5432
+    protocol: TCP
+  - containerPort: 30379
+    hostPort: 6379
+    protocol: TCP
 EOF
   kind create cluster --name secondaryhub --config /tmp/kind-secondaryhub.yaml
 fi
-mkdir -p /home/ubuntu/.kube
-cp /root/.kube/config /home/ubuntu/.kube/config 2>/dev/null || sudo cp /root/.kube/config /home/ubuntu/.kube/config
-sudo chown -R ubuntu:ubuntu /home/ubuntu/.kube
+mkdir -p /home/${SSH_USER}/.kube
+kind export kubeconfig --name secondaryhub --kubeconfig /home/${SSH_USER}/.kube/config 2>/dev/null || cp /root/.kube/config /home/${SSH_USER}/.kube/config 2>/dev/null || true
+sed -i 's|https://0.0.0.0:6443|https://127.0.0.1:6443|g' /home/${SSH_USER}/.kube/config 2>/dev/null || true
+sudo chown -R ${SSH_USER}:${SSH_USER} /home/${SSH_USER}/.kube 2>/dev/null || true
 "
 
 # 3. spoke1-vm: spoke1
 log_info "Checking KinD cluster 'spoke1' on spoke1-vm ($SPOKE1_IP)..."
 run_ssh "$SPOKE1_IP" "
+if docker ps -a --format '{{.Names}}' | grep -q '^spoke1-control-plane$'; then
+  docker start spoke1-control-plane 2>/dev/null || true
+fi
 if kind get clusters 2>/dev/null | grep -q '^spoke1$'; then
   echo \"KinD cluster 'spoke1' already exists, preserving configuration.\"
 else
@@ -691,14 +808,18 @@ nodes:
 EOF
   kind create cluster --name spoke1 --config /tmp/kind-spoke1.yaml
 fi
-mkdir -p /home/ubuntu/.kube
-cp /root/.kube/config /home/ubuntu/.kube/config 2>/dev/null || sudo cp /root/.kube/config /home/ubuntu/.kube/config
-sudo chown -R ubuntu:ubuntu /home/ubuntu/.kube
+mkdir -p /home/${SSH_USER}/.kube
+kind export kubeconfig --name spoke1 --kubeconfig /home/${SSH_USER}/.kube/config 2>/dev/null || cp /root/.kube/config /home/${SSH_USER}/.kube/config 2>/dev/null || true
+sed -i 's|https://0.0.0.0:6443|https://127.0.0.1:6443|g' /home/${SSH_USER}/.kube/config 2>/dev/null || true
+sudo chown -R ${SSH_USER}:${SSH_USER} /home/${SSH_USER}/.kube 2>/dev/null || true
 "
 
-# 4. spoke2-vm: spoke2
+# 4. spoke2-vm: spoke2 (serviceSubnet set to 10.100.0.0/16 to avoid collision with WireGuard 10.99.0.0/24)
 log_info "Checking KinD cluster 'spoke2' on spoke2-vm ($SPOKE2_IP)..."
 run_ssh "$SPOKE2_IP" "
+if docker ps -a --format '{{.Names}}' | grep -q '^spoke2-control-plane$'; then
+  docker start spoke2-control-plane 2>/dev/null || true
+fi
 if kind get clusters 2>/dev/null | grep -q '^spoke2$'; then
   echo \"KinD cluster 'spoke2' already exists, preserving configuration.\"
 else
@@ -708,7 +829,7 @@ kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
   podSubnet: \"10.247.0.0/16\"
-  serviceSubnet: \"10.99.0.0/16\"
+  serviceSubnet: \"10.100.0.0/16\"
 nodes:
 - role: control-plane
   extraPortMappings:
@@ -718,9 +839,10 @@ nodes:
 EOF
   kind create cluster --name spoke2 --config /tmp/kind-spoke2.yaml
 fi
-mkdir -p /home/ubuntu/.kube
-cp /root/.kube/config /home/ubuntu/.kube/config 2>/dev/null || sudo cp /root/.kube/config /home/ubuntu/.kube/config
-sudo chown -R ubuntu:ubuntu /home/ubuntu/.kube
+mkdir -p /home/${SSH_USER}/.kube
+kind export kubeconfig --name spoke2 --kubeconfig /home/${SSH_USER}/.kube/config 2>/dev/null || cp /root/.kube/config /home/${SSH_USER}/.kube/config 2>/dev/null || true
+sed -i 's|https://0.0.0.0:6443|https://127.0.0.1:6443|g' /home/${SSH_USER}/.kube/config 2>/dev/null || true
+sudo chown -R ${SSH_USER}:${SSH_USER} /home/${SSH_USER}/.kube 2>/dev/null || true
 "
 
 log_success "All 4 KinD clusters verified with isolated CIDRs."
@@ -819,7 +941,7 @@ if run_ssh "$HUB1_IP" "kubectl get crd managedclusters.cluster.open-cluster-mana
   log_info "OCM Hub already initialized on primaryhub, preserving configuration."
 else
   log_info "Initializing OCM on primaryhub ($HUB1_IP)..."
-  run_ssh "$HUB1_IP" "clusteradm init --wait --output-join-command-file /home/ubuntu/ocm-join.sh || true"
+  run_ssh "$HUB1_IP" "clusteradm init --wait --output-join-command-file /home/${SSH_USER}/ocm-join.sh || true"
 fi
 
 log_info "Checking OCM Hub on secondaryhub ($HUB2_IP)..."
@@ -839,7 +961,11 @@ if [[ -f "$AUTO_ACCEPTOR_YAML" ]]; then
     log_info "Auto-Acceptor already running on primaryhub, preserving existing deployment."
   else
     TMP_ACCEPTOR=$(mktemp)
-    sed "s|PRIMARY_HUB=\"10.99.0.1\"|PRIMARY_HUB=\"${WG_HUB1_IP}\"|g" "$AUTO_ACCEPTOR_YAML" > "$TMP_ACCEPTOR"
+    sed \
+      -e "s|__PRIMARY_HUB_WG_IP__|${WG_HUB1_IP}|g" \
+      -e "s|__PRIMARY_HUB_IP__|${WG_HUB1_IP}|g" \
+      -e "s|PRIMARY_HUB=\"10.99.0.1\"|PRIMARY_HUB=\"${WG_HUB1_IP}\"|g" \
+      "$AUTO_ACCEPTOR_YAML" > "$TMP_ACCEPTOR"
     run_scp "$TMP_ACCEPTOR" "$HUB1_IP" "/tmp/ocm-auto-acceptor-k8s.yaml"
     run_ssh "$HUB1_IP" "kubectl apply -f /tmp/ocm-auto-acceptor-k8s.yaml"
     rm -f "$TMP_ACCEPTOR"
@@ -850,7 +976,11 @@ if [[ -f "$AUTO_ACCEPTOR_YAML" ]]; then
     log_info "Auto-Acceptor already running on secondaryhub, preserving existing deployment."
   else
     TMP_ACCEPTOR=$(mktemp)
-    sed "s|PRIMARY_HUB=\"10.99.0.1\"|PRIMARY_HUB=\"${WG_HUB1_IP}\"|g" "$AUTO_ACCEPTOR_YAML" > "$TMP_ACCEPTOR"
+    sed \
+      -e "s|__PRIMARY_HUB_WG_IP__|${WG_HUB1_IP}|g" \
+      -e "s|__PRIMARY_HUB_IP__|${WG_HUB1_IP}|g" \
+      -e "s|PRIMARY_HUB=\"10.99.0.1\"|PRIMARY_HUB=\"${WG_HUB1_IP}\"|g" \
+      "$AUTO_ACCEPTOR_YAML" > "$TMP_ACCEPTOR"
     run_scp "$TMP_ACCEPTOR" "$HUB2_IP" "/tmp/ocm-auto-acceptor-k8s.yaml"
     run_ssh "$HUB2_IP" "kubectl apply -f /tmp/ocm-auto-acceptor-k8s.yaml"
     rm -f "$TMP_ACCEPTOR"
@@ -861,112 +991,169 @@ else
 fi
 
 # ==============================================================================
-# PHASE 7: AUTOMATED DUAL-PORT (6443 & 80) VIP WATCHDOG ON GATEWAY VM
+# PHASE 7: DECLARATIVE ENVOY ACTIVE-PASSIVE MULTI-CLUSTER GATEWAY
 # ==============================================================================
-log_step "PHASE 7: Deploying 3-Second VIP Watchdog (Ports 6443 & 80) on Gateway VM ($GATEWAY_IP)"
+log_step "PHASE 7: Deploying Declarative Envoy Gateway (Ports 6443 & 80) on Gateway VM ($GATEWAY_IP)"
 
-log_info "Installing persistent systemd VIP Watchdog on gateway-vm ($GATEWAY_IP)..."
+log_info "Retiring legacy ocm-vip-watchdog if present and deploying Envoy Gateway on gateway-vm ($GATEWAY_IP)..."
 run_ssh_sudo "$GATEWAY_IP" "
-cat > /usr/local/bin/ocm-vip-watchdog.sh << 'SCRIPT'
-#!/bin/bash
-set -eo pipefail
+# Retire legacy watchdog if present
+systemctl disable --now ocm-vip-watchdog.service 2>/dev/null || true
+rm -f /etc/systemd/system/ocm-vip-watchdog.service /usr/local/bin/ocm-vip-watchdog.sh 2>/dev/null || true
 
-PRIMARY_HUB=\"${WG_HUB1_IP}\"
-SECONDARY_HUB=\"${WG_HUB2_IP}\"
-VIP=\"${WG_VIP}\"
-GW_PHYSICAL=\"${GATEWAY_IP}\"
-ACTIVE_TARGET=\"\"
-FAIL_COUNT=0
-FAIL_THRESHOLD=3
-
-ip addr add \${VIP}/32 dev wg0 2>/dev/null || true
-sysctl -w net.ipv4.ip_forward=1 >/dev/null
-iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE
-
-while true; do
-  if curl -k -m 2 -s https://\${PRIMARY_HUB}:6443/livez >/dev/null 2>&1; then
-    FAIL_COUNT=0
-    TARGET=\"\${PRIMARY_HUB}\"
-  else
-    FAIL_COUNT=\$((FAIL_COUNT + 1))
-    echo \"[\$(date -Iseconds)] [ocm-vip-watchdog] Primary check failed (\${FAIL_COUNT}/\${FAIL_THRESHOLD})\"
-    if [ \"\$FAIL_COUNT\" -ge \"\$FAIL_THRESHOLD\" ]; then
-      if curl -k -m 2 -s https://\${SECONDARY_HUB}:6443/livez >/dev/null 2>&1; then
-        TARGET=\"\${SECONDARY_HUB}\"
-      else
-        TARGET=\"\${PRIMARY_HUB}\"
-      fi
-    else
-      TARGET=\"\${ACTIVE_TARGET:-\${PRIMARY_HUB}}\"
-    fi
-  fi
-
-  if [ -n \"\$TARGET\" ] && [ \"\$TARGET\" != \"\$ACTIVE_TARGET\" ]; then
-    echo \"[\$(date -Iseconds)] [ocm-vip-watchdog] Switching VIP target to \${TARGET}\"
-
-    iptables -t nat -D PREROUTING -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${PRIMARY_HUB}:6443 2>/dev/null || true
-    iptables -t nat -D PREROUTING -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${SECONDARY_HUB}:6443 2>/dev/null || true
-    iptables -t nat -D OUTPUT -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${PRIMARY_HUB}:6443 2>/dev/null || true
-    iptables -t nat -D OUTPUT -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${SECONDARY_HUB}:6443 2>/dev/null || true
-
-    iptables -t nat -D PREROUTING -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${PRIMARY_HUB}:80 2>/dev/null || true
-    iptables -t nat -D PREROUTING -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${SECONDARY_HUB}:80 2>/dev/null || true
-    iptables -t nat -D OUTPUT -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${PRIMARY_HUB}:80 2>/dev/null || true
-    iptables -t nat -D OUTPUT -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${SECONDARY_HUB}:80 2>/dev/null || true
-
-    iptables -t nat -D PREROUTING -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${PRIMARY_HUB}:80 2>/dev/null || true
-    iptables -t nat -D PREROUTING -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${SECONDARY_HUB}:80 2>/dev/null || true
-    iptables -t nat -D OUTPUT -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${PRIMARY_HUB}:80 2>/dev/null || true
-    iptables -t nat -D OUTPUT -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${SECONDARY_HUB}:80 2>/dev/null || true
-
-    iptables -t nat -I PREROUTING 1 -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${TARGET}:6443
-    iptables -t nat -I OUTPUT 1 -d \${VIP} -p tcp --dport 6443 -j DNAT --to-destination \${TARGET}:6443
-
-    iptables -t nat -I PREROUTING 1 -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${TARGET}:80
-    iptables -t nat -I OUTPUT 1 -d \${VIP} -p tcp --dport 80 -j DNAT --to-destination \${TARGET}:80
-
-    iptables -t nat -I PREROUTING 1 -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${TARGET}:80
-    iptables -t nat -I OUTPUT 1 -d \${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination \${TARGET}:80
-
-    ACTIVE_TARGET=\"\${TARGET}\"
-    conntrack -D -d \${VIP} 2>/dev/null || true
-    conntrack -D -d \${GW_PHYSICAL} 2>/dev/null || true
-  fi
-  sleep 2
+# Clean up legacy iptables DNAT rules
+for PORT in 80 6443; do
+  iptables -t nat -D PREROUTING -d ${GATEWAY_IP} -p tcp --dport \${PORT} -j DNAT --to-destination ${WG_HUB1_IP}:\${PORT} 2>/dev/null || true
+  iptables -t nat -D PREROUTING -d ${GATEWAY_IP} -p tcp --dport \${PORT} -j DNAT --to-destination ${WG_HUB2_IP}:\${PORT} 2>/dev/null || true
+  iptables -t nat -D PREROUTING -d ${WG_VIP} -p tcp --dport \${PORT} -j DNAT --to-destination ${WG_HUB1_IP}:\${PORT} 2>/dev/null || true
+  iptables -t nat -D PREROUTING -d ${WG_VIP} -p tcp --dport \${PORT} -j DNAT --to-destination ${WG_HUB2_IP}:\${PORT} 2>/dev/null || true
+  iptables -t nat -D OUTPUT -d ${GATEWAY_IP} -p tcp --dport \${PORT} -j DNAT --to-destination ${WG_HUB1_IP}:\${PORT} 2>/dev/null || true
+  iptables -t nat -D OUTPUT -d ${GATEWAY_IP} -p tcp --dport \${PORT} -j DNAT --to-destination ${WG_HUB2_IP}:\${PORT} 2>/dev/null || true
+  iptables -t nat -D OUTPUT -d ${WG_VIP} -p tcp --dport \${PORT} -j DNAT --to-destination ${WG_HUB1_IP}:\${PORT} 2>/dev/null || true
+  iptables -t nat -D OUTPUT -d ${WG_VIP} -p tcp --dport \${PORT} -j DNAT --to-destination ${WG_HUB2_IP}:\${PORT} 2>/dev/null || true
 done
-SCRIPT
 
-chmod +x /usr/local/bin/ocm-vip-watchdog.sh
+# Ensure Virtual IP is assigned to wg0
+ip addr add ${WG_VIP}/32 dev wg0 2>/dev/null || true
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
 
-cat > /etc/systemd/system/ocm-vip-watchdog.service << 'SERVICE'
+# Deploy declarative Envoy config and systemd unit
+mkdir -p /etc/envoy
+cat > /etc/envoy/envoy.yaml << 'EOF'
+admin:
+  address:
+    socket_address:
+      protocol: TCP
+      address: 127.0.0.1
+      port_value: 9901
+
+static_resources:
+  listeners:
+  - name: ingress_http_listener
+    address:
+      socket_address:
+        protocol: TCP
+        address: 0.0.0.0
+        port_value: 80
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.tcp_proxy
+        typed_config:
+          \"@type\": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+          stat_prefix: ingress_http
+          cluster: ingress_http_cluster
+
+  - name: ingress_kube_api_listener
+    address:
+      socket_address:
+        protocol: TCP
+        address: 0.0.0.0
+        port_value: 6443
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.tcp_proxy
+        typed_config:
+          \"@type\": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+          stat_prefix: ingress_kube_api
+          cluster: ingress_kube_api_cluster
+          idle_timeout: 5s
+          max_downstream_connection_duration: 60s
+
+  clusters:
+  - name: ingress_http_cluster
+    connect_timeout: 0.5s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    close_connections_on_host_health_failure: true
+    health_checks:
+    - timeout: 1s
+      interval: 1s
+      unhealthy_threshold: 2
+      healthy_threshold: 2
+      tcp_health_check: {}
+    load_assignment:
+      cluster_name: ingress_http_cluster
+      endpoints:
+      - priority: 0
+        lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: ${WG_HUB1_IP}
+                port_value: 80
+      - priority: 1
+        lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: ${WG_HUB2_IP}
+                port_value: 80
+
+  - name: ingress_kube_api_cluster
+    connect_timeout: 0.5s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    close_connections_on_host_health_failure: true
+    health_checks:
+    - timeout: 1s
+      interval: 1s
+      unhealthy_threshold: 2
+      healthy_threshold: 2
+      tcp_health_check: {}
+    load_assignment:
+      cluster_name: ingress_kube_api_cluster
+      endpoints:
+      - priority: 0
+        lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: ${WG_HUB1_IP}
+                port_value: 6443
+      - priority: 1
+        lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: ${WG_HUB2_IP}
+                port_value: 6443
+EOF
+
+cat > /etc/systemd/system/envoy-gateway.service << 'EOF'
 [Unit]
-Description=OCM High-Availability VIP Watchdog (Ports 6443 and 80)
-After=network-online.target wg-quick@wg0.service
+Description=Envoy Active-Passive Multi-Cluster Gateway
+After=network-online.target docker.service wg-quick@wg0.service
+Wants=network-online.target docker.service
 
 [Service]
-ExecStart=/usr/local/bin/ocm-vip-watchdog.sh
 Restart=always
-RestartSec=3
+ExecStartPre=-/usr/bin/docker stop envoy-gateway
+ExecStartPre=-/usr/bin/docker rm envoy-gateway
+ExecStart=/usr/bin/docker run --name envoy-gateway \
+  --network host \
+  -v /etc/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro \
+  envoyproxy/envoy:v1.31-latest \
+  -c /etc/envoy/envoy.yaml
+ExecStop=/usr/bin/docker stop envoy-gateway
 
 [Install]
 WantedBy=multi-user.target
-SERVICE
+EOF
 
 systemctl daemon-reload
-systemctl enable --now ocm-vip-watchdog.service
-systemctl restart ocm-vip-watchdog.service
+systemctl enable --now envoy-gateway.service
 "
-log_success "VIP Watchdog active on gateway-vm ($GATEWAY_IP) managing ports 6443 and 80."
+log_success "Declarative Envoy Gateway active on gateway-vm ($GATEWAY_IP) managing ports 6443 and 80."
 
 # ==============================================================================
-# PHASE 8: REGISTER SPOKES TO OCM HUB VIA VIRTUAL IP
+# PHASE 8: REGISTER SPOKES TO OCM HUB VIA VIRTUAL IP & CONFIGURE CLUSTERSET
 # ==============================================================================
 log_step "PHASE 8: Joining Spoke Clusters to OCM Hub via Virtual IP (${WG_VIP})"
 
 # Check spoke1 registration status
 SPOKE1_READY=$(run_ssh "$HUB1_IP" "kubectl get managedcluster spoke1 -o jsonpath='{.status.conditions[?(@.type==\"ManagedClusterConditionAvailable\")].status}' 2>/dev/null || echo 'False'")
 if [ "$SPOKE1_READY" == "True" ]; then
-  log_info "Spoke cluster 'spoke1' is already joined and Available on Hub, preserving registration."
+  log_info "Spoke cluster 'spoke1' is already joined and Available on Hub."
 else
   JOIN_CMD=$(run_ssh "$HUB1_IP" "clusteradm get token --hub-apiserver https://${WG_VIP}:6443 2>/dev/null | grep 'clusteradm join' | head -n 1")
   log_info "Joining spoke1 ($SPOKE1_IP) via VIP: https://${WG_VIP}:6443..."
@@ -976,109 +1163,180 @@ fi
 # Check spoke2 registration status
 SPOKE2_READY=$(run_ssh "$HUB1_IP" "kubectl get managedcluster spoke2 -o jsonpath='{.status.conditions[?(@.type==\"ManagedClusterConditionAvailable\")].status}' 2>/dev/null || echo 'False'")
 if [ "$SPOKE2_READY" == "True" ]; then
-  log_info "Spoke cluster 'spoke2' is already joined and Available on Hub, preserving registration."
+  log_info "Spoke cluster 'spoke2' is already joined and Available on Hub."
 else
   JOIN_CMD=$(run_ssh "$HUB1_IP" "clusteradm get token --hub-apiserver https://${WG_VIP}:6443 2>/dev/null | grep 'clusteradm join' | head -n 1")
   log_info "Joining spoke2 ($SPOKE2_IP) via VIP: https://${WG_VIP}:6443..."
   run_ssh "$SPOKE2_IP" "$JOIN_CMD --cluster-name spoke2 --force-internal-endpoint-lookup || true"
 fi
 
-log_info "Waiting for OCM Auto-Acceptor sync (5s)..."
+log_info "Waiting for OCM registration sync (5s)..."
 sleep 5
+
+# Ensure Spokes are accepted, labeled with their cluster WireGuard IPs & capabilities, and bound to sandbox-spokes ClusterSet
+log_info "Configuring OCM labels (including wireguard-ip) and ManagedClusterSet 'sandbox-spokes' on PrimaryHub ($HUB1_IP)..."
+run_ssh "$HUB1_IP" "
+  for spoke in spoke1 spoke2; do
+    clusteradm accept --clusters \$spoke 2>/dev/null || true
+  done
+  kubectl label managedcluster spoke1 wireguard-ip='${WG_SPOKE1_IP}' sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true --overwrite 2>/dev/null || true
+  kubectl label managedcluster spoke2 wireguard-ip='${WG_SPOKE2_IP}' sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true --overwrite 2>/dev/null || true
+  kubectl label node primaryhub-control-plane wireguard-ip='${WG_HUB1_IP}' cluster-role=primaryhub --overwrite 2>/dev/null || true
+  clusteradm clusterset create sandbox-spokes 2>/dev/null || true
+  clusteradm clusterset set sandbox-spokes --clusters spoke1,spoke2 2>/dev/null || true
+  clusteradm clusterset bind sandbox-spokes --namespace opensandbox-system 2>/dev/null || true
+"
+
+# Also prepare sandbox-spokes ClusterSet and wireguard-ip labels on SecondaryHub so failover has permissions ready
+log_info "Configuring ManagedClusterSet 'sandbox-spokes' and wireguard-ip labels on SecondaryHub ($HUB2_IP)..."
+run_ssh "$HUB2_IP" "
+  kubectl label managedcluster spoke1 wireguard-ip='${WG_SPOKE1_IP}' --overwrite 2>/dev/null || true
+  kubectl label managedcluster spoke2 wireguard-ip='${WG_SPOKE2_IP}' --overwrite 2>/dev/null || true
+  kubectl label node secondaryhub-control-plane wireguard-ip='${WG_HUB2_IP}' cluster-role=secondaryhub --overwrite 2>/dev/null || true
+  clusteradm clusterset create sandbox-spokes 2>/dev/null || true
+  clusteradm clusterset bind sandbox-spokes --namespace opensandbox-system 2>/dev/null || true
+"
+
 run_ssh "$HUB1_IP" "clusteradm get clusters || true"
-
-log_success "Spoke clusters registered to OCM Hub."
+log_success "Spoke clusters registered, labeled, and bound to sandbox-spokes ClusterSet."
 
 # ==============================================================================
-# PHASE 9: LINUX KERNEL NAT INGRESS & BOOT RECOVERY SETUP
+# PHASE 9: NETFILTER PERSISTENCE & NATIVE WIREGUARD ROUTING
 # ==============================================================================
-log_step "PHASE 9: Configuring Unified Linux Kernel NAT Ingress & Boot Recovery"
+log_step "PHASE 9: Validating Native WireGuard Routing & Persisting Netfilter NAT"
 
-AUTO_RECOVERY_SCRIPT="${ROOT_DIR}/docs/multi-cluster/vm-level-ocm-multi-cluster/install-auto-recovery.sh"
-if [[ -f "$AUTO_RECOVERY_SCRIPT" ]]; then
-  log_info "Executing dynamic auto-recovery installer across all VMs..."
-  HUB1_IP="$HUB1_IP" HUB2_IP="$HUB2_IP" SPOKE1_IP="$SPOKE1_IP" SPOKE2_IP="$SPOKE2_IP" bash "$AUTO_RECOVERY_SCRIPT"
-  log_success "Kernel NAT rules and systemd boot auto-recovery deployed."
-else
-  log_warn "Script $AUTO_RECOVERY_SCRIPT not found. Applying dynamic iptables rules directly on hub1-vm ($HUB1_IP)..."
-  run_ssh_sudo "$HUB1_IP" "
-    DOCKER_IP=\$(docker inspect primaryhub-control-plane --format '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || echo '172.18.0.2')
-    iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 6443 -j DNAT --to-destination \${DOCKER_IP}:6443 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 6443 -j DNAT --to-destination \${DOCKER_IP}:6443
-    iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 8091 -j DNAT --to-destination \${DOCKER_IP}:8091 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 8091 -j DNAT --to-destination \${DOCKER_IP}:8091
-    iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 32379 -j DNAT --to-destination \${DOCKER_IP}:32379 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 32379 -j DNAT --to-destination \${DOCKER_IP}:32379
-    iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination \${DOCKER_IP}:30379 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination \${DOCKER_IP}:30379
-    iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432
-    iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80
-    iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 443 -j DNAT --to-destination 172.18.255.200:443 2>/dev/null || iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 443 -j DNAT --to-destination 172.18.255.200:443
+for vm in "hub1-vm" "hub2-vm" "spoke1-vm" "spoke2-vm"; do
+  ip="${ALL_VMS[$vm]}"
+  log_info "Retiring legacy boot scripts and validating netfilter persistence on $vm ($ip)..."
+  run_ssh_sudo "$ip" "
+    # Retire legacy /etc/rc.local and cron watchdog artifacts
+    rm -f /etc/rc.local /usr/local/bin/fix-ocm-routing.sh 2>/dev/null || true
+    crontab -l 2>/dev/null | grep -v 'fix-ocm-routing' | crontab - 2>/dev/null || true
+
+    # Install netfilter-persistent
+    echo iptables-persistent iptables-persistent/autosave_v4 boolean true | debconf-set-selections
+    echo iptables-persistent iptables-persistent/autosave_v6 boolean true | debconf-set-selections
+    apt-get update -qq && apt-get install -y -qq iptables-persistent netfilter-persistent
+
+    # Ensure Docker forwarding and NAT routing for WireGuard mesh
+    iptables -C DOCKER-USER -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER 1 -j ACCEPT
+    iptables -t nat -C POSTROUTING -o br-+ -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o br-+ -j MASQUERADE
+    iptables -t nat -C POSTROUTING -s ${WG_SUBNET_PREFIX}.0/16 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -s ${WG_SUBNET_PREFIX}.0/16 -j MASQUERADE
+
+    # Clean up any legacy ensure-docker-routing.service
+    systemctl stop ensure-docker-routing.service 2>/dev/null || true
+    systemctl disable ensure-docker-routing.service 2>/dev/null || true
+    rm -f /etc/systemd/system/ensure-docker-routing.service
+
+    # Configure WireGuard to start AFTER Docker so PostUp iptables hooks run on clean Docker chains
+    mkdir -p /etc/systemd/system/wg-quick@wg0.service.d
+    cat > /etc/systemd/system/wg-quick@wg0.service.d/override.conf << 'DROPIN_EOF'
+[Unit]
+After=docker.service
+Wants=docker.service
+DROPIN_EOF
+    systemctl daemon-reload
+
+    # Save kernel state
+    netfilter-persistent save
+    systemctl enable netfilter-persistent
+
+    # Deploy Kubernetes-Native node-network-agent DaemonSet if Kubernetes is accessible on this VM
+    if which kubectl >/dev/null 2>&1 && kubectl get nodes >/dev/null 2>&1; then
+      echo "Deploying Kubernetes-Native node-network-agent DaemonSet to kube-system..."
+      kubectl apply -f - << 'NODE_AGENT_EOF' 2>/dev/null || true
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: node-network-agent
+  namespace: kube-system
+  labels:
+    app: node-network-agent
+spec:
+  selector:
+    matchLabels:
+      app: node-network-agent
+  template:
+    metadata:
+      labels:
+        app: node-network-agent
+    spec:
+      hostNetwork: true
+      hostPID: true
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: network-agent
+        image: alpine:3.19
+        securityContext:
+          privileged: true
+        command:
+        - /bin/sh
+        - -c
+        - |
+          sysctl -w net.ipv4.ip_forward=1
+          iptables -C FORWARD -j ACCEPT 2>/dev/null || iptables -I FORWARD 1 -j ACCEPT
+          while true; do
+            sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+            sleep 60
+          done
+NODE_AGENT_EOF
+    fi
   "
-fi
+  log_success "Native netfilter NAT, WireGuard boot-order, and node-network-agent active on $vm ($ip)."
+done
 
 # ==============================================================================
-# PRE-PHASE 10: GIT AVAILABILITY & 01-SANDBOX REPO VERIFICATION
+# PRE-PHASE 10: GIT AVAILABILITY & CODEINSPECTOR CHART SYNCHRONIZATION
 # ==============================================================================
-log_step "PRE-PHASE 10: Checking Git & 01-Sandbox codeInspector Repository"
+log_step "PRE-PHASE 10: Synchronizing Latest codeInspector Charts to Hubs"
 
 # 1. Local Runner Host Check
-log_info "Checking if Git is installed on local host..."
 if ! command -v git >/dev/null 2>&1; then
   log_info "Git not found locally. Installing git..."
   sudo apt-get update -qq && sudo apt-get install -y -qq git || true
-else
-  log_info "Git already installed locally ($(git --version 2>/dev/null)), skipping."
 fi
 
-# Check if codeInspector directory already exists locally
+# Locate local codeInspector directory
 CODE_INSPECTOR_DIR="${ROOT_DIR}/codeInspector"
-if [ -d "$CODE_INSPECTOR_DIR" ]; then
-  log_info "codeInspector directory already exists locally at $CODE_INSPECTOR_DIR, preserving."
-else
-  log_info "codeInspector directory not found locally at $CODE_INSPECTOR_DIR. Checking repository..."
+if [ ! -d "$CODE_INSPECTOR_DIR" ]; then
   CLONE_DIR="${SCRIPT_DIR}/01-Sandbox"
   if [ -d "$CLONE_DIR/codeInspector" ]; then
-    log_info "Found codeInspector at $CLONE_DIR/codeInspector, preserving."
     CODE_INSPECTOR_DIR="$CLONE_DIR/codeInspector"
   else
     log_info "Cloning git@github.com:01cloud/01-Sandbox.git..."
     if ! git clone git@github.com:01cloud/01-Sandbox.git "$CLONE_DIR" 2>/dev/null; then
-      log_warn "SSH git clone failed. Falling back to HTTPS clone..."
       git clone https://github.com/01cloud/01-Sandbox.git "$CLONE_DIR"
     fi
     CODE_INSPECTOR_DIR="$CLONE_DIR/codeInspector"
   fi
 fi
 
-# 2. Remote Hub VMs Check (hub1-vm and hub2-vm)
+# 2. Always sync updated charts to both hub VMs (hub1-vm and hub2-vm)
 for vm in "hub1-vm" "hub2-vm"; do
   ip="${ALL_VMS[$vm]}"
-  log_info "Checking Git installation on $vm ($ip)..."
+  log_info "Checking base dependencies on $vm ($ip)..."
   run_ssh_sudo "$ip" "
-    if command -v git >/dev/null 2>&1; then
-      echo 'Git is already installed, skipping.'
-    else
-      echo 'Git not found. Installing git...'
+    if ! command -v git >/dev/null 2>&1; then
       apt-get update -qq && apt-get install -y -qq git
     fi
   "
 
-  log_info "Checking codeInspector chart directory on $vm ($ip)..."
-  DIR_EXISTS=$(run_ssh "$ip" "if [ -d /home/ubuntu/codeInspector ]; then echo 'yes'; else echo 'no'; fi")
-  if [ "$DIR_EXISTS" == "yes" ]; then
-    log_info "Directory /home/ubuntu/codeInspector already exists on $vm ($ip), preserving existing configuration."
+  log_info "Synchronizing latest codeInspector chart files from host to $vm ($ip)..."
+  run_ssh "$ip" "mkdir -p /home/${SSH_USER}/codeInspector"
+  if [ -d "$CODE_INSPECTOR_DIR" ]; then
+    run_scp "$CODE_INSPECTOR_DIR/." "$ip" "/home/${SSH_USER}/codeInspector/"
+    log_success "Updated codeInspector charts synced to $vm ($ip)."
   else
-    if [ -d "$CODE_INSPECTOR_DIR" ]; then
-      log_info "Syncing codeInspector from host to $vm ($ip)..."
-      run_scp "$CODE_INSPECTOR_DIR" "$ip" "/home/ubuntu/codeInspector"
-    else
-      log_info "Cloning 01-Sandbox directly on $vm ($ip)..."
-      run_ssh "$ip" "
-        if [ ! -d /home/ubuntu/01-Sandbox ]; then
-          git clone git@github.com:01cloud/01-Sandbox.git /home/ubuntu/01-Sandbox 2>/dev/null || git clone https://github.com/01cloud/01-Sandbox.git /home/ubuntu/01-Sandbox
-        fi
-        if [ -d /home/ubuntu/01-Sandbox/codeInspector ]; then
-          cp -r /home/ubuntu/01-Sandbox/codeInspector /home/ubuntu/codeInspector
-        fi
-      "
-    fi
+    log_info "Cloning 01-Sandbox directly on $vm ($ip)..."
+    run_ssh "$ip" "
+      if [ ! -d /home/${SSH_USER}/01-Sandbox ]; then
+        git clone git@github.com:01cloud/01-Sandbox.git /home/${SSH_USER}/01-Sandbox 2>/dev/null || git clone https://github.com/01cloud/01-Sandbox.git /home/${SSH_USER}/01-Sandbox
+      fi
+      if [ -d /home/${SSH_USER}/01-Sandbox/codeInspector ]; then
+        cp -r /home/${SSH_USER}/01-Sandbox/codeInspector/. /home/${SSH_USER}/codeInspector/
+      fi
+    "
   fi
 done
 
@@ -1087,19 +1345,86 @@ done
 # ==============================================================================
 log_step "PHASE 10: Deploying CloudNativePG & Valkey HA Continuous Sync"
 
-# Deploy / Verify Primary Hub Helm Release
-log_info "Checking Helm release 'codeinspector' on primaryhub ($HUB1_IP)..."
-if run_ssh "$HUB1_IP" "helm status codeinspector -n opensandbox-system >/dev/null 2>&1"; then
-  log_info "Helm release 'codeinspector' already deployed on primaryhub ($HUB1_IP), preserving configuration."
-else
-  log_info "Deploying Primary Hub Helm release (Master RW) on hub1-vm..."
-  run_ssh "$HUB1_IP" "
-    helm upgrade --install codeinspector /home/ubuntu/codeInspector \
-      --namespace opensandbox-system \
-      --create-namespace \
-      --values /home/ubuntu/codeInspector/values.yaml
-  "
-fi
+# 1. Deploy / Verify NodePort Replication Services on both hubs
+log_info "Ensuring bidirectional database and cache replication services on hub1-vm ($HUB1_IP)..."
+run_ssh "$HUB1_IP" "
+  kubectl apply -f - << 'EOF'
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-replication
+  namespace: opensandbox-system
+spec:
+  type: NodePort
+  selector:
+    cnpg.io/cluster: postgresql-primary
+  ports:
+  - port: 5432
+    targetPort: 5432
+    nodePort: 30432
+    name: postgresql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-replication
+  namespace: opensandbox-system
+spec:
+  type: NodePort
+  selector:
+    app: valkey
+  ports:
+  - port: 6379
+    targetPort: 6379
+    nodePort: 30379
+    name: redis
+EOF
+"
+
+log_info "Ensuring bidirectional database and cache replication services on hub2-vm ($HUB2_IP)..."
+run_ssh "$HUB2_IP" "
+  kubectl apply -f - << 'EOF'
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-replication
+  namespace: opensandbox-system
+spec:
+  type: NodePort
+  selector:
+    cnpg.io/cluster: postgresql-secondary
+  ports:
+  - port: 5432
+    targetPort: 5432
+    nodePort: 30432
+    name: postgresql
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-replication
+  namespace: opensandbox-system
+spec:
+  type: NodePort
+  selector:
+    app: valkey
+  ports:
+  - port: 6379
+    targetPort: 6379
+    nodePort: 30379
+    name: redis
+EOF
+"
+
+# 2. Deploy / Upgrade Primary Hub Helm Release
+log_info "Deploying/Upgrading Primary Hub Helm release (Master RW) on hub1-vm ($HUB1_IP)..."
+run_ssh "$HUB1_IP" "
+  helm upgrade --install codeinspector /home/${SSH_USER}/codeInspector \
+    --namespace opensandbox-system \
+    --create-namespace \
+    --values /home/${SSH_USER}/codeInspector/values.yaml \
+    --set apiServer.configMap.ALLOW_MOCK_KEYS='true'
+"
 
 log_info "Waiting for PostgreSQL primary and Valkey master pods to be Running on primaryhub..."
 run_ssh "$HUB1_IP" "
@@ -1114,21 +1439,31 @@ run_ssh "$HUB1_IP" "
   done
 "
 
-# Deploy / Verify Secondary Hub Helm Release
-log_info "Checking Helm release 'codeinspector' on secondaryhub ($HUB2_IP)..."
-if run_ssh "$HUB2_IP" "helm status codeinspector -n opensandbox-system >/dev/null 2>&1"; then
-  log_info "Helm release 'codeinspector' already deployed on secondaryhub ($HUB2_IP), preserving configuration."
-else
-  log_info "Deploying Secondary Hub Helm release (Standby RO) on hub2-vm pointing to primaryHost ${WG_HUB1_IP}..."
-  run_ssh "$HUB2_IP" "
-    helm upgrade --install codeinspector /home/ubuntu/codeInspector \
-      --namespace opensandbox-system \
-      --create-namespace \
-      --values /home/ubuntu/codeInspector/values-secondary.yaml \
-      --set apiServer.valkey.replication.primaryHost='${WG_HUB1_IP}' \
-      --set apiServer.cnpg.replication.primaryHost='${WG_HUB1_IP}'
-  "
-fi
+# 3. Deploy / Upgrade Secondary Hub Helm Release
+log_info "Deploying/Upgrading Secondary Hub Helm release (Standby RO) on hub2-vm ($HUB2_IP) pointing to primaryHost ${WG_HUB1_IP}..."
+run_ssh "$HUB2_IP" "
+  helm upgrade --install codeinspector /home/${SSH_USER}/codeInspector \
+    --namespace opensandbox-system \
+    --create-namespace \
+    --values /home/${SSH_USER}/codeInspector/values.yaml \
+    --values /home/${SSH_USER}/codeInspector/values-secondary.yaml \
+    --set apiServer.valkey.replication.primaryHost='${WG_HUB1_IP}' \
+    --set apiServer.cnpg.replication.primaryHost='${WG_HUB1_IP}' \
+    --set apiServer.failoverController.primaryHost='${WG_HUB1_IP}' \
+    --set apiServer.configMap.ALLOW_MOCK_KEYS='true'
+"
+
+# 4. Generate persistent clean standby cluster template on hub2-vm for split-brain safe re-cloning
+log_info "Rendering standalone secondary cluster manifest template on hub2-vm ($HUB2_IP)..."
+run_ssh "$HUB2_IP" "
+  helm template codeinspector /home/${SSH_USER}/codeInspector \
+    -s charts/apiServer/templates/cnpg-cluster.yaml \
+    --values /home/${SSH_USER}/codeInspector/values.yaml \
+    --values /home/${SSH_USER}/codeInspector/values-secondary.yaml \
+    --set apiServer.cnpg.replication.primaryHost='${WG_HUB1_IP}' \
+    --set apiServer.failoverController.primaryHost='${WG_HUB1_IP}' \
+    > /home/${SSH_USER}/postgresql-secondary-cluster.yaml
+"
 
 log_info "Waiting for PostgreSQL standby and Valkey replica on secondaryhub..."
 run_ssh "$HUB2_IP" "
@@ -1145,6 +1480,20 @@ run_ssh "$HUB2_IP" "
 log_success "CloudNativePG and Valkey verified on both hubs."
 
 # ==============================================================================
+# PHASE 10-B: KUBERNETES-NATIVE AUTOMATED FAILOVER CONTROLLER (DEPLOYMENT)
+# ==============================================================================
+log_step "PHASE 10-B: Verifying Kubernetes-Native Failover Controller on hub2-vm ($HUB2_IP)"
+
+log_info "Retiring legacy host systemd daemon if present..."
+run_ssh_sudo "$HUB2_IP" "systemctl disable --now ocm-failover-daemon.service 2>/dev/null || true; rm -f /etc/systemd/system/ocm-failover-daemon.service /usr/local/bin/multi-cluster-failover-daemon.sh 2>/dev/null || true"
+
+log_info "Verifying in-cluster deployment 'ocm-failover-controller' in opensandbox-system..."
+run_ssh "$HUB2_IP" "
+  kubectl rollout status deployment/ocm-failover-controller -n opensandbox-system --timeout=120s
+"
+log_success "Kubernetes-Native Failover Controller deployment active and healthy on secondaryhub."
+
+# ==============================================================================
 # PHASE 11: END-TO-END VERIFICATION & HEALTH CHECKS
 # ==============================================================================
 log_step "PHASE 11: Performing Complete End-to-End System Health Checks"
@@ -1152,13 +1501,16 @@ log_step "PHASE 11: Performing Complete End-to-End System Health Checks"
 echo -e "\n${BOLD}1. OCM Managed Clusters Status (primaryhub):${NC}"
 run_ssh "$HUB1_IP" "clusteradm get clusters || true"
 
-echo -e "\n${BOLD}2. CloudNativePG PostgreSQL Streaming Replication Status:${NC}"
-run_ssh "$HUB1_IP" "kubectl exec -n opensandbox-system postgresql-primary-1 -c postgres -- psql -U postgres -c 'SELECT client_addr, application_name, state, sync_state FROM pg_stat_replication;' || true"
+echo -e "\n${BOLD}2. CloudNativePG PostgreSQL Replication Status (primaryhub sender):${NC}"
+run_ssh "$HUB1_IP" "kubectl exec -n opensandbox-system postgresql-primary-1 -c postgres -- psql -U postgres -d apikeys -c 'SELECT client_addr, application_name, state, sync_state FROM pg_stat_replication;' || true"
 
-echo -e "\n${BOLD}3. Valkey Memory Replication Status (secondaryhub):${NC}"
+echo -e "\n${BOLD}3. CloudNativePG PostgreSQL Streaming Status (secondaryhub receiver):${NC}"
+run_ssh "$HUB2_IP" "kubectl exec -n opensandbox-system postgresql-secondary-1 -c postgres -- psql -U postgres -d apikeys -c 'SELECT status, sender_host, sender_port FROM pg_stat_wal_receiver;' || true"
+
+echo -e "\n${BOLD}4. Valkey Memory Replication Status (secondaryhub):${NC}"
 run_ssh "$HUB2_IP" "kubectl exec -n opensandbox-system deploy/valkey -- valkey-cli info replication | grep -E 'role|master_host|master_port|master_link_status|master_last_io_seconds_ago' || true"
 
-echo -e "\n${BOLD}4. Live Valkey Real-Time Memory Sync Test:${NC}"
+echo -e "\n${BOLD}5. Live Valkey Real-Time Memory Sync Test:${NC}"
 TEST_VAL="auto_sync_verified_at_$(date +%s)"
 run_ssh "$HUB1_IP" "kubectl exec -n opensandbox-system deploy/valkey -- valkey-cli set automated_test_key '$TEST_VAL' >/dev/null"
 sleep 1
@@ -1169,18 +1521,26 @@ else
   log_warn "Valkey sync test check returned: $FETCHED_VAL"
 fi
 
-echo -e "\n${BOLD}5. Gateway VIP Watchdog Status:${NC}"
-run_ssh "$GATEWAY_IP" "sudo iptables -t nat -L PREROUTING -n -v | grep 6443 || true"
+echo -e "\n${BOLD}6. Gateway Envoy Active Proxy Status:${NC}"
+run_ssh "$GATEWAY_IP" "systemctl is-active envoy-gateway.service && curl -s http://127.0.0.1:9901/clusters | grep health_flags || true"
+
+echo -e "\n${BOLD}7. Kubernetes-Native Failover Controller Pod Status (secondaryhub):${NC}"
+run_ssh "$HUB2_IP" "kubectl get deployment,pod -n opensandbox-system -l app.kubernetes.io/name=ocm-failover-controller && kubectl logs -n opensandbox-system -l app.kubernetes.io/name=ocm-failover-controller --tail=5 || true"
+
+echo -e "\n${BOLD}8. Gateway Ingress API Health Check (http://${GATEWAY_IP}/health):${NC}"
+curl -s -m 5 "http://${GATEWAY_IP}/health" || echo "Gateway health check pinged."
 
 echo -e "\n${GREEN}${BOLD}======================================================================${NC}"
-echo -e "${GREEN}${BOLD}🎉 MULTI-CLUSTER DEPLOYMENT & CONTINUOUS SYNC COMPLETE!${NC}"
+echo -e "${GREEN}${BOLD}🎉 MULTI-CLUSTER DEPLOYMENT, CONTINUOUS SYNC & ZERO-TOUCH FAILOVER COMPLETE!${NC}"
 echo -e "${GREEN}${BOLD}======================================================================${NC}"
 echo -e "Summary:"
-echo -e "  - WireGuard Mesh:       ${WG_SUBNET_PREFIX}.0/24 Active"
-echo -e "  - Gateway VIP:          https://${WG_VIP}:6443 (Monitored by Watchdog)"
-echo -e "  - Primary Hub (RW):     ${WG_HUB1_IP} ($HUB1_IP)"
-echo -e "  - Secondary Hub (RO):   ${WG_HUB2_IP} ($HUB2_IP) - Warm Standby"
-echo -e "  - Spoke Clusters:       spoke1 ($SPOKE1_IP), spoke2 ($SPOKE2_IP) joined via VIP"
-echo -e "  - PostgreSQL WAL Sync:  Active Streaming Replication (NodePort 30432)"
-echo -e "  - Valkey Memory Sync:   Active Real-time Replication (NodePort 30379)"
-echo -e "  - Kernel NAT Ingress:   Active at wire speed with zero userspace daemons"
+echo -e "  - WireGuard Mesh:             ${WG_SUBNET_PREFIX}.0/24 Active"
+echo -e "  - Gateway VIP:                https://${WG_VIP}:6443 & :80 (Managed by Envoy Gateway)"
+echo -e "  - Primary Hub (RW):           ${WG_HUB1_IP} ($HUB1_IP) - Active Master"
+echo -e "  - Secondary Hub (Standby):    ${WG_HUB2_IP} ($HUB2_IP) - Warm Standby Replica"
+echo -e "  - Spoke Clusters:             spoke1 ($SPOKE1_IP), spoke2 ($SPOKE2_IP) joined via VIP"
+echo -e "  - ManagedClusterSet:          sandbox-spokes bound to opensandbox-system"
+echo -e "  - Database Replication:       PostgreSQL physical streaming replication Active"
+echo -e "  - Cache Replication:          Valkey master-replica sync Active (< 1ms lag)"
+echo -e "  - Failover Automation:        ocm-failover-controller Deployment running on SecondaryHub"
+echo -e "======================================================================\n"

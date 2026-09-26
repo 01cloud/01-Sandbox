@@ -49,8 +49,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+import { getApiBaseUrl } from "@/lib/apiConfig";
 
-const API_BASE_URL = import.meta.env.DEV ? "" : ((window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "");
+const API_BASE_URL = getApiBaseUrl();
 
 interface UserSettingsDialogProps {
   isOpen: boolean;

@@ -94,6 +94,13 @@ spec:
     parameters:
       max_connections: "200"
 
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: postgresql-primary-credentials
+
+  smartShutdownTimeout: 10
+  stopDelay: 30
+
   replica:
     enabled: true
     source: postgresql-primary

@@ -102,7 +102,7 @@ cnpg:
   replication:
     enabled: true
     role: "primary"
-    primaryHost: "10.99.0.1"
+    primaryHost: ""
     primaryPort: 5432
 
 valkey:
@@ -117,8 +117,16 @@ valkey:
   replication:
     enabled: true
     role: "primary"
-    primaryHost: "10.99.0.1"
+    primaryHost: ""
     primaryPort: 6379
+
+failoverController:
+  enabled: false
+  primaryHost: ""
+  image:
+    repository: bitnami/kubectl
+    tag: latest
+    pullPolicy: IfNotPresent
 
 rabbitmq:
   enabled: false
