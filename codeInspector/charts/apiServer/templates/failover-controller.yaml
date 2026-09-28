@@ -429,13 +429,13 @@ spec:
         imagePullPolicy: {{ .Values.failoverController.image.pullPolicy | default "IfNotPresent" }}
         env:
         - name: PRIMARY_HOST
-          value: {{ required "A valid failoverController.primaryHost must be provided" .Values.failoverController.primaryHost | quote }}
+          value: {{ .Values.failoverController.primaryHost | default (.Values.cnpg.replication.primaryHost | default "10.99.0.1") | quote }}
         - name: SECONDARY_IP
           value: {{ .Values.failoverController.secondaryHost | default "10.99.0.2" | quote }}
         - name: PRIMARY_PORT
-          value: {{ .Values.failoverController.primaryPort | default (.Values.cnpg.replication.primaryPort | default 5432) | quote }}
+          value: {{ .Values.failoverController.primaryPort | default (.Values.cnpg.replication.primaryPort | default 30432) | quote }}
         - name: PRIMARY_VALKEY_PORT
-          value: {{ .Values.valkey.replication.primaryPort | default 6379 | quote }}
+          value: {{ .Values.valkey.replication.primaryPort | default 30379 | quote }}
         command:
         - /bin/bash
         - /scripts/reconciler.sh

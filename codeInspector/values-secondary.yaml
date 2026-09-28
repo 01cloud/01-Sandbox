@@ -44,8 +44,8 @@ apiServer:
     replication:
       enabled: true
       role: "standby"
-      primaryHost: ""
-      primaryPort: 5432
+      primaryHost: "10.99.0.1"
+      primaryPort: 30432
   redis:
     enabled: false
   valkey:
@@ -60,11 +60,12 @@ apiServer:
     replication:
       enabled: true
       role: "standby"
-      primaryHost: ""
-      primaryPort: 6379
+      primaryHost: "10.99.0.1"
+      primaryPort: 30379
   failoverController:
     enabled: true
-    primaryHost: ""
+    primaryHost: "10.99.0.1"
+    primaryPort: 30432
     image:
       repository: bitnami/kubectl
       tag: latest

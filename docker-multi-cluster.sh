@@ -1486,6 +1486,10 @@ phase_12_secondaryhub_deploy() {
     --values "${CODE_INSPECTOR_DIR}/values-secondary.yaml" \
     --set apiServer.cnpg.replication.primaryHost="${WG_HUB1_IP}" \
     --set apiServer.cnpg.replication.primaryPort=30432 \
+    --set apiServer.valkey.replication.primaryHost="${WG_HUB1_IP}" \
+    --set apiServer.valkey.replication.primaryPort=30379 \
+    --set apiServer.failoverController.primaryHost="${WG_HUB1_IP}" \
+    --set apiServer.failoverController.primaryPort=30432 \
     > "${SEC_DIR}/postgresql-secondary-cluster.yaml"
   docker cp "${SEC_DIR}/postgresql-secondary-cluster.yaml" \
     secondaryhub-control-plane:/root/postgresql-secondary-cluster.yaml 2>/dev/null || true
