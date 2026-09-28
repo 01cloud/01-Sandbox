@@ -1303,27 +1303,23 @@ phase_09_create_namespaces() {
 phase_10_load_custom_image() {
   log_step "PHASE 10: Building & Loading Custom opensandbox-server Image"
 
-  local img="01community/01sandbox-opensandbox-server:v0.7.10-ocm"
-  if ! docker image inspect "$img" >/dev/null 2>&1; then
-    log_info "Ensuring 01-Sandbox repository is available for build..."
-    ensure_sandbox_repo
+  ensure_sandbox_repo
 
-    if [ ! -d "${OPENSANDBOX_BUILD_DIR}" ] || [ ! -f "${OPENSANDBOX_BUILD_DIR}/Dockerfile" ]; then
-      log_error "Dockerfile not found at detected build path: ${OPENSANDBOX_BUILD_DIR}"
-      log_error "Failed to locate opensandbox-server/docker-build context."
-      exit 1
-    fi
-
-    log_info "Building $img from detected path: ${OPENSANDBOX_BUILD_DIR}..."
-    docker build -t "$img" "${OPENSANDBOX_BUILD_DIR}"
-    log_success "Built $img successfully."
-  else
-    log_info "Image $img already exists in local Docker cache."
+  if [ ! -d "${OPENSANDBOX_BUILD_DIR}" ] || [ ! -f "${OPENSANDBOX_BUILD_DIR}/Dockerfile" ]; then
+    log_error "Dockerfile not found at detected build path: ${OPENSANDBOX_BUILD_DIR}"
+    log_error "Failed to locate opensandbox-server/docker-build context."
+    exit 1
   fi
+
+  local img="01community/01sandbox-opensandbox-server:v0.7.10-ocm"
+  log_info "Building $img from: ${OPENSANDBOX_BUILD_DIR}..."
+  docker build -t "$img" "${OPENSANDBOX_BUILD_DIR}"
+  log_success "Built $img successfully with OCM workload provider support."
 
   for hub in primaryhub secondaryhub; do
     log_info "Loading $img into $hub..."
-    kind load docker-image "$img" --name "$hub" 2>/dev/null || true
+    kind load docker-image "$img" --name "$hub"
+    kubectl --context "kind-${hub}" rollout restart deployment/opensandbox-server -n opensandbox-system 2>/dev/null || true
   done
 
   log_success "Custom image ready on both hubs."
@@ -1392,6 +1388,8 @@ phase_11_primaryhub_deploy() {
   kubectl --context kind-primaryhub rollout status deployment/valkey \
     -n opensandbox-system --timeout=120s || true
   kubectl --context kind-primaryhub rollout status deployment/sandbox-api \
+    -n opensandbox-system --timeout=120s || true
+  kubectl --context kind-primaryhub rollout status deployment/opensandbox-server \
     -n opensandbox-system --timeout=120s || true
 
   log_success "PrimaryHub full stack deployed."
@@ -1474,6 +1472,8 @@ phase_12_secondaryhub_deploy() {
   kubectl --context kind-secondaryhub rollout status deployment/valkey \
     -n opensandbox-system --timeout=120s || true
   kubectl --context kind-secondaryhub rollout status deployment/sandbox-api \
+    -n opensandbox-system --timeout=120s || true
+  kubectl --context kind-secondaryhub rollout status deployment/opensandbox-server \
     -n opensandbox-system --timeout=120s || true
   kubectl --context kind-secondaryhub rollout status deployment/ocm-failover-controller \
     -n opensandbox-system --timeout=120s || true
