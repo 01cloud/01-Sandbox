@@ -172,6 +172,35 @@ ensure_kernel_inotify_limits() {
   fi
 }
 
+# Ensure admission webhooks do not cause circular deadlocks or timeout errors
+# during bootstrap or node reboots when webhook pods are spinning up.
+_relax_webhook_failure_policy() {
+  local ctx="$1"
+  log_info "Ensuring admission webhooks on $ctx do not block deployment..."
+
+  for vwh in managedclustersetbindingvalidators.admission.cluster.open-cluster-management.io \
+             managedclustervalidators.admission.cluster.open-cluster-management.io \
+             manifestworkvalidators.admission.work.open-cluster-management.io; do
+    if kubectl --context "$ctx" get validatingwebhookconfiguration "$vwh" >/dev/null 2>&1; then
+      kubectl --context "$ctx" get validatingwebhookconfiguration "$vwh" -o json 2>/dev/null | \
+        jq '(.webhooks[].failurePolicy) = "Ignore"' 2>/dev/null | \
+        kubectl --context "$ctx" apply -f - >/dev/null 2>&1 || true
+    fi
+  done
+
+  if kubectl --context "$ctx" get mutatingwebhookconfiguration cnpg-mutating-webhook-configuration >/dev/null 2>&1; then
+    kubectl --context "$ctx" get mutatingwebhookconfiguration cnpg-mutating-webhook-configuration -o json 2>/dev/null | \
+      jq '(.webhooks[].failurePolicy) = "Ignore"' 2>/dev/null | \
+      kubectl --context "$ctx" apply -f - >/dev/null 2>&1 || true
+  fi
+
+  if kubectl --context "$ctx" get validatingwebhookconfiguration cnpg-validating-webhook-configuration >/dev/null 2>&1; then
+    kubectl --context "$ctx" get validatingwebhookconfiguration cnpg-validating-webhook-configuration -o json 2>/dev/null | \
+      jq '(.webhooks[].failurePolicy) = "Ignore"' 2>/dev/null | \
+      kubectl --context "$ctx" apply -f - >/dev/null 2>&1 || true
+  fi
+}
+
 # Create a KinD cluster and attach it to the transit network.
 # Args: <name> <pod-subnet> <svc-subnet> <transit-ip> [use-shared-ca=false]
 _create_kind_cluster() {
@@ -238,6 +267,10 @@ EOF
     log_info "Connecting $cname to transit net @ $transit_ip..."
     docker network connect --ip "$transit_ip" "$TRANSIT_NET_NAME" "$cname"
   fi
+
+  log_info "Ensuring control-plane and CoreDNS are ready on $name..."
+  kubectl --context "kind-${name}" wait --for=condition=Ready node "${name}-control-plane" --timeout=60s 2>/dev/null || true
+  kubectl --context "kind-${name}" -n kube-system wait --for=condition=Ready pods -l k8s-app=kube-dns --timeout=60s 2>/dev/null || true
 }
 
 # Configure WireGuard wg0 inside a KinD control-plane container.
@@ -1329,6 +1362,14 @@ phase_08_ocm_init() {
     log_info "Deploying ocm-auto-acceptor on primaryhub..."
     kubectl --context kind-primaryhub apply -f "$auto_acceptor" || true
   fi
+
+  for hub in primaryhub secondaryhub; do
+    log_info "Waiting for OCM registration webhook on $hub..."
+    kubectl --context "kind-${hub}" -n open-cluster-management-hub wait \
+      --for=condition=Available deployment/cluster-manager-registration-webhook \
+      --timeout=60s 2>/dev/null || true
+    _relax_webhook_failure_policy "kind-${hub}"
+  done
 }
 
 # ── Phase 9: Create application namespaces on both hubs ───────────────────────
@@ -1384,6 +1425,7 @@ phase_11_primaryhub_deploy() {
 
   # Ensure all necessary CRDs (Gateway API, AgentGateway, CNPG, etc.) are established
   _ensure_hub_crds "kind-primaryhub"
+  _relax_webhook_failure_policy "kind-primaryhub"
 
   log_info "Using codeInspector directory: ${CODE_INSPECTOR_DIR}"
   log_info "Deploying CNPG operator + PostgreSQL primary on primaryhub..."
@@ -1393,6 +1435,9 @@ phase_11_primaryhub_deploy() {
     --namespace opensandbox-system \
     --create-namespace \
     --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --set global.ocm.enabled=false \
+    --set cloudnative-pg.webhook.mutating.failurePolicy=Ignore \
+    --set cloudnative-pg.webhook.validating.failurePolicy=Ignore \
     --set agentgateway.enabled=false \
     --set "agentgateway-controller.enabled=false" \
     --set apiServer.enabled=true \
@@ -1415,6 +1460,7 @@ phase_11_primaryhub_deploy() {
 
   # Ensure AgentgatewayPolicy and all other required CRDs are installed and established
   _ensure_hub_crds "kind-primaryhub"
+  _relax_webhook_failure_policy "kind-primaryhub"
   if ! kubectl --context kind-primaryhub get crd agentgatewaypolicies.agentgateway.dev >/dev/null 2>&1; then
     log_warn "Explicitly applying agentgateway-crds.yaml on kind-primaryhub..."
     _sanitize_agentgateway_crds
@@ -1428,6 +1474,8 @@ phase_11_primaryhub_deploy() {
     --namespace opensandbox-system \
     --create-namespace \
     --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --set cloudnative-pg.webhook.mutating.failurePolicy=Ignore \
+    --set cloudnative-pg.webhook.validating.failurePolicy=Ignore \
     --set-string apiServer.configMap.ALLOW_MOCK_KEYS="true" \
     --timeout 10m
 
@@ -1454,6 +1502,7 @@ phase_12_secondaryhub_deploy() {
 
   # Ensure all necessary CRDs are established
   _ensure_hub_crds "kind-secondaryhub"
+  _relax_webhook_failure_policy "kind-secondaryhub"
 
   log_info "Using codeInspector directory: ${CODE_INSPECTOR_DIR}"
   log_info "Deploying CNPG standby on secondaryhub (WAL from ${WG_HUB1_IP}:30432)..."
@@ -1464,6 +1513,9 @@ phase_12_secondaryhub_deploy() {
     --create-namespace \
     --values "${CODE_INSPECTOR_DIR}/values.yaml" \
     --values "${CODE_INSPECTOR_DIR}/values-secondary.yaml" \
+    --set global.ocm.enabled=false \
+    --set cloudnative-pg.webhook.mutating.failurePolicy=Ignore \
+    --set cloudnative-pg.webhook.validating.failurePolicy=Ignore \
     --set agentgateway.enabled=false \
     --set "agentgateway-controller.enabled=false" \
     --set apiServer.enabled=true \
@@ -1492,6 +1544,7 @@ phase_12_secondaryhub_deploy() {
 
   # Ensure AgentgatewayPolicy and all other required CRDs are installed and established
   _ensure_hub_crds "kind-secondaryhub"
+  _relax_webhook_failure_policy "kind-secondaryhub"
   if ! kubectl --context kind-secondaryhub get crd agentgatewaypolicies.agentgateway.dev >/dev/null 2>&1; then
     log_warn "Explicitly applying agentgateway-crds.yaml on kind-secondaryhub..."
     _sanitize_agentgateway_crds
@@ -1506,6 +1559,8 @@ phase_12_secondaryhub_deploy() {
     --create-namespace \
     --values "${CODE_INSPECTOR_DIR}/values.yaml" \
     --values "${CODE_INSPECTOR_DIR}/values-secondary.yaml" \
+    --set cloudnative-pg.webhook.mutating.failurePolicy=Ignore \
+    --set cloudnative-pg.webhook.validating.failurePolicy=Ignore \
     --set apiServer.valkey.replication.primaryHost="${WG_HUB1_IP}" \
     --set apiServer.valkey.replication.primaryPort=30379 \
     --set apiServer.cnpg.replication.primaryHost="${WG_HUB1_IP}" \

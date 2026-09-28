@@ -405,6 +405,11 @@ cloudnative-pg:
   enabled: true
   crds:
     create: false
+  webhook:
+    mutating:
+      failurePolicy: Ignore
+    validating:
+      failurePolicy: Ignore
 
 ###############################################################
 # Kubernetes-Native Node Network Agent (DaemonSet)
