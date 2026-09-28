@@ -118,7 +118,7 @@ declare -A CRD_DETAILS=(
 # agentgateway-crds.yaml and opensandbox-crds.yaml have no public upstream → always local.
 declare -A CRD_URLS=(
   ["cloudnative-pg-crds.yaml"]="https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/main/releases/cnpg-latest.yaml"
-  ["gateway-api-crds.yaml"]="https://github.com/kubernetes-sigs/gateway-api/releases/latest/download/standard-install.yaml"
+  ["gateway-api-crds.yaml"]="https://github.com/kubernetes-sigs/gateway-api/releases/latest/download/experimental-install.yaml"
   ["metallb-crds.yaml"]="https://raw.githubusercontent.com/metallb/metallb/main/config/crd/bases/metallb.io_addresspools.yaml"
   ["sealed-secrets-crd.yaml"]="https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/controller.yaml"
 )
@@ -293,12 +293,90 @@ _wait_for_pod() {
   log_warn "$label did not become Ready within timeout – continuing anyway."
 }
 
+# Verify and enforce that all required CRDs are applied and established on a cluster context.
+_ensure_hub_crds() {
+  local ctx="$1"
+  ensure_sandbox_repo || true
+
+  local crd_dir="${CODE_INSPECTOR_DIR}/crds"
+
+  # Delete any blocking admission policy installed by Gateway API
+  kubectl --context "$ctx" delete validatingadmissionpolicy safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+  kubectl --context "$ctx" delete validatingadmissionpolicybinding safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+
+  # 1. Gateway API CRDs (TCPRoute, HTTPRoute, Gateway, ReferenceGrant)
+  if ! kubectl --context "$ctx" get crd tcproutes.gateway.networking.k8s.io >/dev/null 2>&1 || \
+     ! kubectl --context "$ctx" get crd httproutes.gateway.networking.k8s.io >/dev/null 2>&1 || \
+     ! kubectl --context "$ctx" get crd gateways.gateway.networking.k8s.io >/dev/null 2>&1; then
+    log_info "Ensuring Gateway API CRDs (including TCPRoute) are applied on $ctx..."
+    if [ -f "${crd_dir}/gateway-api-crds.yaml" ]; then
+      kubectl --context "$ctx" apply --server-side --force-conflicts -f "${crd_dir}/gateway-api-crds.yaml" >/dev/null 2>&1 || \
+      kubectl --context "$ctx" apply -f "${crd_dir}/gateway-api-crds.yaml" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # 2. AgentGateway CRDs (AgentgatewayPolicy, AgentgatewayBackend, AgentgatewayParameters)
+  if ! kubectl --context "$ctx" get crd agentgatewaypolicies.agentgateway.dev >/dev/null 2>&1 || \
+     ! kubectl --context "$ctx" get crd agentgatewaybackends.agentgateway.dev >/dev/null 2>&1; then
+    log_info "Ensuring AgentGateway CRDs (including AgentgatewayPolicy) are applied on $ctx..."
+    if [ -f "${crd_dir}/agentgateway-crds.yaml" ]; then
+      kubectl --context "$ctx" apply --server-side --force-conflicts --field-manager=crd-installer -f "${crd_dir}/agentgateway-crds.yaml" >/dev/null 2>&1 || \
+      kubectl --context "$ctx" apply --server-side --force-conflicts -f "${crd_dir}/agentgateway-crds.yaml" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # 3. OpenSandbox CRDs (BatchSandbox, Pool)
+  if ! kubectl --context "$ctx" get crd batchsandboxes.sandbox.opensandbox.io >/dev/null 2>&1 || \
+     ! kubectl --context "$ctx" get crd pools.sandbox.opensandbox.io >/dev/null 2>&1; then
+    log_info "Ensuring OpenSandbox CRDs are applied on $ctx..."
+    if [ -f "${crd_dir}/opensandbox-crds.yaml" ]; then
+      kubectl --context "$ctx" apply --server-side --force-conflicts -f "${crd_dir}/opensandbox-crds.yaml" >/dev/null 2>&1 || \
+      kubectl --context "$ctx" apply -f "${crd_dir}/opensandbox-crds.yaml" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # 4. MetalLB CRDs (IPAddressPool, L2Advertisement)
+  if ! kubectl --context "$ctx" get crd ipaddresspools.metallb.io >/dev/null 2>&1; then
+    log_info "Ensuring MetalLB CRDs are applied on $ctx..."
+    if [ -f "${crd_dir}/metallb-crds.yaml" ]; then
+      kubectl --context "$ctx" apply --server-side --force-conflicts -f "${crd_dir}/metallb-crds.yaml" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # 5. CloudNativePG CRDs
+  if ! kubectl --context "$ctx" get crd clusters.postgresql.cnpg.io >/dev/null 2>&1; then
+    log_info "Ensuring CloudNativePG CRDs are applied on $ctx..."
+    if [ -f "${crd_dir}/cloudnative-pg-crds.yaml" ]; then
+      kubectl --context "$ctx" apply --server-side --force-conflicts -f "${crd_dir}/cloudnative-pg-crds.yaml" >/dev/null 2>&1 || true
+    fi
+  fi
+
+  # Wait for critical CRDs to become Established
+  local wait_crds=(
+    "agentgatewaypolicies.agentgateway.dev"
+    "agentgatewaybackends.agentgateway.dev"
+    "tcproutes.gateway.networking.k8s.io"
+    "httproutes.gateway.networking.k8s.io"
+    "gateways.gateway.networking.k8s.io"
+    "clusters.postgresql.cnpg.io"
+    "batchsandboxes.sandbox.opensandbox.io"
+    "pools.sandbox.opensandbox.io"
+  )
+  for c in "${wait_crds[@]}"; do
+    if kubectl --context "$ctx" get crd "$c" >/dev/null 2>&1; then
+      kubectl --context "$ctx" wait --for condition=established --timeout=30s "crd/${c}" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 # Install CRDs on a cluster context: internet URL first, local file as fallback.
 # Displays detailed information about each CRD package and verified CRDs.
 # Args: <context>
 _install_crds() {
   local ctx="$1"
   log_info "Installing Custom Resource Definitions (CRDs) on $ctx..."
+
+  ensure_sandbox_repo || true
 
   local crd_dir="${CODE_INSPECTOR_DIR}/crds"
   local -a crd_manifests=()
@@ -313,10 +391,19 @@ _install_crds() {
     "opensandbox-crds.yaml"
   )
 
-  # Check if directory exists and collect available YAML files
+  # Check if directory exists and collect available YAML files in ordered sequence
   if [ -d "$crd_dir" ]; then
+    for f in "${default_bundles[@]}"; do
+      [ -f "${crd_dir}/$f" ] && crd_manifests+=("$f")
+    done
     for f in "$crd_dir"/*.yaml; do
-      [ -f "$f" ] && crd_manifests+=("$(basename "$f")")
+      if [ -f "$f" ]; then
+        local bname
+        bname=$(basename "$f")
+        if [[ ! " ${crd_manifests[*]} " =~ " ${bname} " ]]; then
+          crd_manifests+=("$bname")
+        fi
+      fi
     done
   fi
 
@@ -356,7 +443,8 @@ _install_crds() {
     if [ "$applied" = false ]; then
       if [ -f "$local_file" ]; then
         log_info "    Applying local manifest: ${local_file}"
-        if kubectl --context "$ctx" apply --server-side --force-conflicts -f "$local_file" >/dev/null 2>&1; then
+        if kubectl --context "$ctx" apply --server-side --force-conflicts --field-manager=crd-installer -f "$local_file" >/dev/null 2>&1 || \
+           kubectl --context "$ctx" apply --server-side --force-conflicts -f "$local_file" >/dev/null 2>&1; then
           log_success "    Applied ${title} from local manifest."
           applied=true
         else
@@ -374,6 +462,9 @@ _install_crds() {
   # This prevents Helm or local tools from being blocked by version admission checks.
   kubectl --context "$ctx" delete validatingadmissionpolicy safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
   kubectl --context "$ctx" delete validatingadmissionpolicybinding safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+
+  # Ensure critical CRDs are established
+  _ensure_hub_crds "$ctx"
 
   # ── Summary of all CRDs actually installed and established on the cluster ──
   echo -e "\n  ${GREEN}${BOLD}Established CRDs on cluster [${ctx}]:${NC}"
@@ -927,6 +1018,8 @@ phase_03_create_hub_clusters() {
 phase_04_install_crds_on_hubs() {
   log_step "PHASE 4: Installing CRDs on Hub Clusters"
 
+  ensure_sandbox_repo || log_warn "Repository clone pending; local CRDs may be deferred."
+
   for hub in primaryhub secondaryhub; do
     _install_crds "kind-${hub}"
   done
@@ -1224,10 +1317,10 @@ phase_11_primaryhub_deploy() {
     sed -i 's/tpl \$value \$/tpl (\$value | toString) \$/g' "$cmap_tmpl" 2>/dev/null || true
   fi
 
-  # Ensure no stale validating admission policy blocks the release
-  kubectl --context kind-primaryhub delete validatingadmissionpolicy safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
-  kubectl --context kind-primaryhub delete validatingadmissionpolicybinding safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+  # Ensure all necessary CRDs (Gateway API, AgentGateway, CNPG, etc.) are established
+  _ensure_hub_crds "kind-primaryhub"
 
+  log_info "Using codeInspector directory: ${CODE_INSPECTOR_DIR}"
   log_info "Deploying CNPG operator + PostgreSQL primary on primaryhub..."
   helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
     --skip-crds \
@@ -1238,6 +1331,8 @@ phase_11_primaryhub_deploy() {
     --set agentgateway.enabled=false \
     --set "agentgateway-controller.enabled=false" \
     --set apiServer.enabled=true \
+    --set apiServer.deployment.replicaCount=0 \
+    --set apiServer.rabbitmq.enabled=false \
     --set apiServer.failoverController.enabled=false \
     --set-string apiServer.configMap.ALLOW_MOCK_KEYS="true" \
     --set opensandbox.enabled=false \
@@ -1246,12 +1341,20 @@ phase_11_primaryhub_deploy() {
     --set prometheus.enabled=false \
     --set grafana.enabled=false \
     --set opensandboxResourcePool.enabled=false \
-    --atomic --timeout 5m
+    --timeout 5m
 
   log_info "Waiting for postgresql-primary-1 to be Ready before deploying full stack..."
   _wait_for_pod "kind-primaryhub" "opensandbox-system" "postgresql-primary-1" 60 "postgresql-primary-1"
 
   log_step "PHASE 11b: PrimaryHub – Full Stack (agentgateway, apiServer, opensandbox, metallb…)"
+
+  # Ensure AgentgatewayPolicy and all other required CRDs are installed and established
+  _ensure_hub_crds "kind-primaryhub"
+  if ! kubectl --context kind-primaryhub get crd agentgatewaypolicies.agentgateway.dev >/dev/null 2>&1; then
+    log_warn "Explicitly applying agentgateway-crds.yaml on kind-primaryhub..."
+    kubectl --context kind-primaryhub apply --server-side --force-conflicts --field-manager=crd-installer -f "${CODE_INSPECTOR_DIR}/crds/agentgateway-crds.yaml"
+    kubectl --context kind-primaryhub wait --for condition=established --timeout=60s crd/agentgatewaypolicies.agentgateway.dev
+  fi
 
   helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
     --skip-crds \
@@ -1281,10 +1384,10 @@ phase_12_secondaryhub_deploy() {
     sed -i 's/tpl \$value \$/tpl (\$value | toString) \$/g' "$cmap_tmpl" 2>/dev/null || true
   fi
 
-  # Ensure no stale validating admission policy blocks the release
-  kubectl --context kind-secondaryhub delete validatingadmissionpolicy safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
-  kubectl --context kind-secondaryhub delete validatingadmissionpolicybinding safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+  # Ensure all necessary CRDs are established
+  _ensure_hub_crds "kind-secondaryhub"
 
+  log_info "Using codeInspector directory: ${CODE_INSPECTOR_DIR}"
   log_info "Deploying CNPG standby on secondaryhub (WAL from ${WG_HUB1_IP}:30432)..."
   helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
     --skip-crds \
@@ -1296,6 +1399,8 @@ phase_12_secondaryhub_deploy() {
     --set agentgateway.enabled=false \
     --set "agentgateway-controller.enabled=false" \
     --set apiServer.enabled=true \
+    --set apiServer.deployment.replicaCount=0 \
+    --set apiServer.rabbitmq.enabled=false \
     --set apiServer.failoverController.enabled=false \
     --set-string apiServer.configMap.ALLOW_MOCK_KEYS="true" \
     --set apiServer.valkey.replication.primaryHost="${WG_HUB1_IP}" \
@@ -1310,12 +1415,20 @@ phase_12_secondaryhub_deploy() {
     --set prometheus.enabled=false \
     --set grafana.enabled=false \
     --set opensandboxResourcePool.enabled=false \
-    --atomic --timeout 5m
+    --timeout 5m
 
   log_info "Waiting for postgresql-secondary-1 to be Ready before deploying full stack..."
   _wait_for_pod "kind-secondaryhub" "opensandbox-system" "postgresql-secondary-1" 60 "postgresql-secondary-1"
 
   log_step "PHASE 12b: SecondaryHub – Full Stack + Failover Controller"
+
+  # Ensure AgentgatewayPolicy and all other required CRDs are installed and established
+  _ensure_hub_crds "kind-secondaryhub"
+  if ! kubectl --context kind-secondaryhub get crd agentgatewaypolicies.agentgateway.dev >/dev/null 2>&1; then
+    log_warn "Explicitly applying agentgateway-crds.yaml on kind-secondaryhub..."
+    kubectl --context kind-secondaryhub apply --server-side --force-conflicts --field-manager=crd-installer -f "${CODE_INSPECTOR_DIR}/crds/agentgateway-crds.yaml"
+    kubectl --context kind-secondaryhub wait --for condition=established --timeout=60s crd/agentgatewaypolicies.agentgateway.dev
+  fi
 
   helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
     --skip-crds \
@@ -1383,6 +1496,8 @@ phase_14_wireguard_on_all_clusters() {
 # ── Phase 15: Install CRDs on spoke clusters ──────────────────────────────────
 phase_15_install_crds_on_spokes() {
   log_step "PHASE 15: Installing CRDs on Spoke Clusters"
+
+  ensure_sandbox_repo || log_warn "Repository clone pending; local CRDs may be deferred."
 
   for spoke in spoke1 spoke2; do
     _install_crds "kind-${spoke}"
