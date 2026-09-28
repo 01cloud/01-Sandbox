@@ -2,48 +2,69 @@
 # ==============================================================================
 # docker-multi-cluster.sh
 #
-# Pure Docker Multi-Cluster Platform (Zero VMs Required)
-# Fully automated, self-contained, and idempotent setup of:
-#   - 4 KinD clusters with isolated subnets on a single Docker engine
-#   - 1 Envoy Active-Passive Gateway container
-#   - Encrypted WireGuard overlay mesh (10.99.0.0/24) running inside containers
-#   - Underlay transit isolation: direct inter-cluster TCP traffic blocked
-#   - CloudNativePG (PostgreSQL) physical WAL streaming (Primary -> Secondary)
-#   - Valkey memory cache replication
-#   - Open Cluster Management (OCM) with automated spoke registration via VIP
-#   - In-Cluster Failover Controller with Pre-Check Health Barrier & Delta Sync
+# One-Shot Automated Multi-Cluster Platform (KinD + Docker)
+#
+# Every provisioning step is a named function.
+# The main() function at the bottom calls them in the correct order.
+# You can comment out, reorder, or call any phase individually.
 #
 # Usage:
-#   ./docker-multi-cluster.sh           # Full one-shot automated setup
-#   ./docker-multi-cluster.sh --clean   # Tear down all clusters, containers & networks
-#   ./docker-multi-cluster.sh --verify  # Run complete end-to-end health verification
+#   ./docker-multi-cluster.sh           # Full one-shot setup
+#   ./docker-multi-cluster.sh --clean   # Tear down all clusters & networks
+#   ./docker-multi-cluster.sh --verify  # End-to-end health verification
 # ==============================================================================
 
 set -eo pipefail
 
-# --- Color formatting ---
+# ─── Color helpers ─────────────────────────────────────────────────────────────
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
 BOLD='\033[1m'
-NC='\033[0m' # No Color
+NC='\033[0m'
 
-log_info() { echo -e "${BLUE}${BOLD}[INFO]${NC} $1"; }
+log_info()    { echo -e "${BLUE}${BOLD}[INFO]${NC}    $1"; }
 log_success() { echo -e "${GREEN}${BOLD}[SUCCESS]${NC} $1"; }
-log_warn() { echo -e "${YELLOW}${BOLD}[WARN]${NC} $1"; }
-log_error() { echo -e "${RED}${BOLD}[ERROR]${NC} $1"; }
+log_warn()    { echo -e "${YELLOW}${BOLD}[WARN]${NC}    $1"; }
+log_error()   { echo -e "${RED}${BOLD}[ERROR]${NC}   $1"; }
 log_step() {
-  echo -e "\n${CYAN}${BOLD}======================================================================${NC}"
-  echo -e "${CYAN}${BOLD}▶ $1${NC}"
-  echo -e "${CYAN}${BOLD}======================================================================${NC}"
+  echo -e "\n${CYAN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
+  echo -e "${CYAN}${BOLD}▶  $1${NC}"
+  echo -e "${CYAN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
 }
 
-# Resolve directory paths
+# ─── Global paths & network config ─────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="${SCRIPT_DIR}"
+SANDBOX_REPO_DIR="${ROOT_DIR}"
 CODE_INSPECTOR_DIR="${ROOT_DIR}/codeInspector"
+OPENSANDBOX_BUILD_DIR="${ROOT_DIR}/opensandbox-server/docker-build"
+
+# Robust initial detection for repository directories if running inside cloned repo or next to it
+if [ -d "${ROOT_DIR}/01-Sandbox/codeInspector" ]; then
+  SANDBOX_REPO_DIR="${ROOT_DIR}/01-Sandbox"
+  CODE_INSPECTOR_DIR="${ROOT_DIR}/01-Sandbox/codeInspector"
+  OPENSANDBOX_BUILD_DIR="${ROOT_DIR}/01-Sandbox/opensandbox-server/docker-build"
+elif [ -d "${ROOT_DIR}/codeInspector" ]; then
+  SANDBOX_REPO_DIR="${ROOT_DIR}"
+  CODE_INSPECTOR_DIR="${ROOT_DIR}/codeInspector"
+  OPENSANDBOX_BUILD_DIR="${ROOT_DIR}/opensandbox-server/docker-build"
+elif [ -d "/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector" ]; then
+  SANDBOX_REPO_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox"
+  CODE_INSPECTOR_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector"
+  OPENSANDBOX_BUILD_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox/opensandbox-server/docker-build"
+elif [ -d "$(pwd)/01-Sandbox/codeInspector" ]; then
+  SANDBOX_REPO_DIR="$(pwd)/01-Sandbox"
+  CODE_INSPECTOR_DIR="$(pwd)/01-Sandbox/codeInspector"
+  OPENSANDBOX_BUILD_DIR="$(pwd)/01-Sandbox/opensandbox-server/docker-build"
+elif [ -d "$(pwd)/codeInspector" ]; then
+  SANDBOX_REPO_DIR="$(pwd)"
+  CODE_INSPECTOR_DIR="$(pwd)/codeInspector"
+  OPENSANDBOX_BUILD_DIR="$(pwd)/opensandbox-server/docker-build"
+fi
+
 STATE_DIR="${ROOT_DIR}/.sandbox-state"
 PKI_DIR="${STATE_DIR}/pki"
 WG_DIR="${STATE_DIR}/wg"
@@ -51,18 +72,17 @@ ENVOY_DIR="${STATE_DIR}/envoy"
 SEC_DIR="${STATE_DIR}/sec"
 mkdir -p "$PKI_DIR" "$WG_DIR" "$ENVOY_DIR" "$SEC_DIR"
 
-# --- Network Configuration ---
 TRANSIT_NET_NAME="01sandbox-transit"
 TRANSIT_SUBNET="172.30.0.0/24"
 
-# Underlay Transit IPs (Used solely for WireGuard UDP 51820 traffic)
+# Underlay (WireGuard UDP 51820 only)
 GW_TRANSIT_IP="172.30.0.10"
 HUB1_TRANSIT_IP="172.30.0.20"
 HUB2_TRANSIT_IP="172.30.0.21"
 SPOKE1_TRANSIT_IP="172.30.0.30"
 SPOKE2_TRANSIT_IP="172.30.0.31"
 
-# Overlay WireGuard Mesh IPs (All application/K8s traffic flows over this)
+# WireGuard overlay (all application / K8s traffic)
 WG_SUBNET_PREFIX="10.99.0"
 WG_GATEWAY_IP="10.99.0.254"
 WG_VIP="10.99.0.100"
@@ -71,192 +91,68 @@ WG_HUB2_IP="10.99.0.2"
 WG_SPOKE1_IP="10.99.0.3"
 WG_SPOKE2_IP="10.99.0.4"
 
-# --- Handle Flags ---
+# WireGuard keypairs – populated by phase_02_transit_network_and_wg_keys()
+declare -A WG_PRIV=()
+declare -A WG_PUB=()
+
+# CRD Package metadata & descriptions
+declare -A CRD_NAMES=(
+  ["cloudnative-pg-crds.yaml"]="CloudNativePG (Postgres HA & Replication)"
+  ["gateway-api-crds.yaml"]="Kubernetes Gateway API (Routing & Ingress)"
+  ["metallb-crds.yaml"]="MetalLB (Bare-metal LoadBalancer)"
+  ["sealed-secrets-crd.yaml"]="Bitnami SealedSecrets (GitOps Encryption)"
+  ["agentgateway-crds.yaml"]="AgentGateway (AI Agent Orchestration)"
+  ["opensandbox-crds.yaml"]="OpenSandbox (Workload Sandboxing & Pools)"
+)
+
+declare -A CRD_DETAILS=(
+  ["cloudnative-pg-crds.yaml"]="clusters, backups, scheduledbackups, poolers, publications, subscriptions, clusterimagecatalogs, databaseroles, databases, failoverquorums, imagecatalogs"
+  ["gateway-api-crds.yaml"]="gateways, gatewayclasses, httproutes, grpcroutes, tcproutes, tlsroutes, udproutes, referencegrants, backendtlspolicies"
+  ["metallb-crds.yaml"]="addresspools, ipaddresspools, l2advertisements, bgpadvertisements, bgppeers, bfdprofiles, communities"
+  ["sealed-secrets-crd.yaml"]="sealedsecrets.bitnami.com"
+  ["agentgateway-crds.yaml"]="agentgatewaybackends, agentgatewayparameters, agentgatewaypolicies"
+  ["opensandbox-crds.yaml"]="batchsandboxes, pools"
+)
+
+# Upstream URLs for CRDs available on the internet.
+# agentgateway-crds.yaml and opensandbox-crds.yaml have no public upstream → always local.
+declare -A CRD_URLS=(
+  ["cloudnative-pg-crds.yaml"]="https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/main/releases/cnpg-latest.yaml"
+  ["gateway-api-crds.yaml"]="https://github.com/kubernetes-sigs/gateway-api/releases/latest/download/standard-install.yaml"
+  ["metallb-crds.yaml"]="https://raw.githubusercontent.com/metallb/metallb/main/config/crd/bases/metallb.io_addresspools.yaml"
+  ["sealed-secrets-crd.yaml"]="https://github.com/bitnami-labs/sealed-secrets/releases/latest/download/controller.yaml"
+)
+
+# ─── Argument parsing ──────────────────────────────────────────────────────────
 ACTION="deploy"
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --clean|clean|--destroy|destroy)
-      ACTION="clean"
-      shift
-      ;;
-    --verify)
-      ACTION="verify"
-      shift
-      ;;
+    --clean|clean|--destroy|destroy) ACTION="clean";  shift ;;
+    --verify)                         ACTION="verify"; shift ;;
     -h|--help)
-      echo "Usage: $0 [options]"
-      echo ""
-      echo "Options:"
-      echo "  --clean     Tear down all KinD clusters, containers, and transit networks"
-      echo "  --verify    Run complete end-to-end health verification on existing deployment"
-      echo "  -h, --help  Show this help message"
-      exit 0
-      ;;
-    *)
-      log_error "Unknown argument: $1"
-      exit 1
-      ;;
+      echo "Usage: $0 [--clean | --verify]"
+      echo "  (no flags)  Full one-shot automated setup"
+      echo "  --clean     Tear down all clusters, containers, and networks"
+      echo "  --verify    Run end-to-end health checks on an existing deployment"
+      exit 0 ;;
+    *) log_error "Unknown argument: $1"; exit 1 ;;
   esac
 done
 
 # ==============================================================================
-# TEARDOWN / CLEANUP FUNCTION
+# ── UTILITY HELPERS ────────────────────────────────────────────────────────────
 # ==============================================================================
-cleanup_environment() {
-  log_step "Tearing down Pure Docker Multi-Cluster Platform..."
 
-  # 1. Stop and remove Envoy Gateway container
-  if docker ps -a --format '{{.Names}}' | grep -q '^envoy-gateway$'; then
-    log_info "Removing envoy-gateway container..."
-    docker rm -f envoy-gateway 2>/dev/null || true
-  fi
-
-  # 2. Delete KinD clusters
-  for cluster in primaryhub secondaryhub spoke1 spoke2; do
-    if kind get clusters 2>/dev/null | grep -q "^${cluster}$"; then
-      log_info "Deleting KinD cluster '$cluster'..."
-      kind delete cluster --name "$cluster" 2>/dev/null || true
-    fi
-    docker rm -f "${cluster}-control-plane" 2>/dev/null || true
-    kubectl config delete-context "kind-${cluster}" 2>/dev/null || true
-    kubectl config delete-cluster "kind-${cluster}" 2>/dev/null || true
-    kubectl config unset "users.kind-${cluster}" 2>/dev/null || true
-  done
-
-  # 3. Remove transit Docker network
-  if docker network ls --format '{{.Name}}' | grep -q "^${TRANSIT_NET_NAME}$"; then
-    log_info "Removing Docker network '$TRANSIT_NET_NAME'..."
-    for container in $(docker network inspect "$TRANSIT_NET_NAME" -f '{{range $k, $v := .Containers}}{{$k}} {{end}}' 2>/dev/null || true); do
-      docker network disconnect -f "$TRANSIT_NET_NAME" "$container" 2>/dev/null || true
-    done
-    docker network rm "$TRANSIT_NET_NAME" 2>/dev/null || true
-  fi
-
-  # 4. Remove any dangling KinD Docker network if empty
-  if [ -z "$(kind get clusters 2>/dev/null || true)" ]; then
-    docker network rm kind 2>/dev/null || true
-  fi
-
-  # 5. Remove local persistent and temporary state, configs, and prune dangling volumes
-  rm -rf "$STATE_DIR" /tmp/01sandbox-* /tmp/kind-*.yaml /tmp/spoke*-* 2>/dev/null || true
-  docker volume prune -f 2>/dev/null || true
-
-  log_success "Cleanup complete. Host is clean."
-}
-
-# ==============================================================================
-# VERIFICATION FUNCTION
-# ==============================================================================
-run_verification() {
-  log_step "Running End-to-End System Health Checks"
-
-  echo -e "\n${BOLD}1a. OCM Managed Clusters Status on PrimaryHub:${NC}"
-  clusteradm get clusters --context kind-primaryhub || true
-
-  echo -e "\n${BOLD}1b. OCM Managed Clusters Status on SecondaryHub (Standby Hub):${NC}"
-  clusteradm get clusters --context kind-secondaryhub || true
-
-  echo -e "\n${BOLD}2. CloudNativePG PostgreSQL Replication Sender (PrimaryHub):${NC}"
-  kubectl --context kind-primaryhub exec -n opensandbox-system postgresql-primary-1 -c postgres -- \
-    psql -U postgres -d apikeys -c "SELECT client_addr, application_name, state, sync_state FROM pg_stat_replication;" || true
-
-  echo -e "\n${BOLD}3. CloudNativePG PostgreSQL Streaming Receiver (SecondaryHub):${NC}"
-  kubectl --context kind-secondaryhub exec -n opensandbox-system postgresql-secondary-1 -c postgres -- \
-    psql -U postgres -d apikeys -c "SELECT status, sender_host, sender_port, latest_end_lsn FROM pg_stat_wal_receiver;" || true
-
-  echo -e "\n${BOLD}4. Valkey Memory Replication (SecondaryHub):${NC}"
-  kubectl --context kind-secondaryhub exec -n opensandbox-system deploy/valkey -- \
-    valkey-cli info replication | grep -E "role|master_host|master_port|master_link_status" || true
-
-  echo -e "\n${GREEN}${BOLD}======================================================================${NC}"
-  echo -e "${GREEN}${BOLD}✅ MULTI-CLUSTER HEALTH VERIFICATION COMPLETE!${NC}"
-  echo -e "${GREEN}${BOLD}======================================================================${NC}\n"
-}
-
-if [ "$ACTION" == "clean" ]; then
-  cleanup_environment
-  exit 0
-fi
-
-if [ "$ACTION" == "verify" ]; then
-  run_verification
-  exit 0
-fi
-
-# ==============================================================================
-# PHASE 1: PRE-FLIGHT TOOL & RUNTIME CHECKS
-# ==============================================================================
-log_step "PHASE 1: Checking Host Toolchain & Dependencies"
-
-MISSING_TOOLS=()
-for tool in docker kind kubectl helm clusteradm jq curl; do
-  if ! command -v "$tool" >/dev/null 2>&1; then
-    MISSING_TOOLS+=("$tool")
-  fi
-done
-
-if [ ${#MISSING_TOOLS[@]} -gt 0 ]; then
-  log_error "Missing required tools: ${MISSING_TOOLS[*]}"
-  log_info "Please ensure Docker, KinD, kubectl, Helm v3, clusteradm, and jq are installed."
-  exit 1
-fi
-
-log_success "Host toolchain verified: docker, kind, kubectl, helm, clusteradm, jq."
-
-# Ensure host kernel WireGuard module is available
-if ! modprobe wireguard >/dev/null 2>&1; then
-  log_warn "Kernel module 'wireguard' could not be loaded via modprobe. Attempting to proceed..."
-fi
-
-# ==============================================================================
-# PHASE 2: CREATE ISOLATED TRANSIT NETWORK & GENERATE WIREGUARD KEYS
-# ==============================================================================
-log_step "PHASE 2: Configuring Isolated Transit Network & WireGuard Cryptography"
-
-if ! docker network ls --format '{{.Name}}' | grep -q "^${TRANSIT_NET_NAME}$"; then
-  log_info "Creating isolated Docker transit network '$TRANSIT_NET_NAME' ($TRANSIT_SUBNET)..."
-  docker network create \
-    --driver bridge \
-    --subnet "$TRANSIT_SUBNET" \
-    --opt "com.docker.network.bridge.name"="br-01transit" \
-    "$TRANSIT_NET_NAME"
-else
-  log_info "Docker transit network '$TRANSIT_NET_NAME' already exists."
-fi
-
-# Generate WireGuard Keypairs for all 5 containers
-mkdir -p "$WG_DIR"
-declare -A WG_PRIV=()
-declare -A WG_PUB=()
-
-for entity in gateway primaryhub secondaryhub spoke1 spoke2; do
-  if [ ! -s "${WG_DIR}/${entity}.key" ] || [ ! -s "${WG_DIR}/${entity}.pub" ]; then
-    log_info "Generating WireGuard keypair for $entity..."
-    read -r priv pub < <(python3 -c "from cryptography.hazmat.primitives.asymmetric import x25519; import base64; k = x25519.X25519PrivateKey.generate(); print(f'{base64.b64encode(k.private_bytes_raw()).decode()} {base64.b64encode(k.public_key().public_bytes_raw()).decode()}')")
-    echo "$priv" > "${WG_DIR}/${entity}.key"
-    echo "$pub" > "${WG_DIR}/${entity}.pub"
-  fi
-  WG_PRIV[$entity]=$(cat "${WG_DIR}/${entity}.key" | tr -d '\r\n')
-  WG_PUB[$entity]=$(cat "${WG_DIR}/${entity}.pub" | tr -d '\r\n')
-done
-log_success "WireGuard cryptographic keypairs ready for all 5 entities."
-
-# ==============================================================================
-# PHASE 3: CREATE KIND CLUSTERS WITH NON-OVERLAPPING CIDRS
-# ==============================================================================
-log_step "PHASE 3: Creating KinD Clusters with Isolated CIDRs"
-
-create_kind_cluster() {
-  local name="$1"
-  local pod_subnet="$2"
-  local svc_subnet="$3"
-  local transit_ip="$4"
+# Create a KinD cluster and attach it to the transit network.
+# Args: <name> <pod-subnet> <svc-subnet> <transit-ip> [use-shared-ca=false]
+_create_kind_cluster() {
+  local name="$1" pod_subnet="$2" svc_subnet="$3" transit_ip="$4"
   local use_shared_ca="${5:-false}"
 
   if kind get clusters 2>/dev/null | grep -q "^${name}$"; then
-    log_info "KinD cluster '$name' already exists, preserving."
+    log_info "KinD cluster '$name' already exists – preserving."
   else
-    log_info "Creating KinD cluster '$name' (Pod: $pod_subnet, Svc: $svc_subnet)..."
+    log_info "Creating KinD cluster '$name' (Pod:$pod_subnet  Svc:$svc_subnet)..."
 
     local extra_mounts=""
     if [ "$use_shared_ca" == "true" ]; then
@@ -271,7 +167,7 @@ create_kind_cluster() {
     containerPath: /etc/kubernetes/pki/sa.pub"
     fi
 
-    cat << EOF > "/tmp/kind-${name}.yaml"
+    cat > "/tmp/kind-${name}.yaml" <<EOF
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 networking:
@@ -305,47 +201,21 @@ EOF
     kind create cluster --name "$name" --config "/tmp/kind-${name}.yaml"
   fi
 
-  # Connect KinD node container to isolated transit network with static IP
-  local container_name="${name}-control-plane"
-  if ! docker inspect "$container_name" --format '{{json .NetworkSettings.Networks}}' | grep -q "$TRANSIT_NET_NAME"; then
-    log_info "Connecting $container_name to transit network at $transit_ip..."
-    docker network connect --ip "$transit_ip" "$TRANSIT_NET_NAME" "$container_name"
+  local cname="${name}-control-plane"
+  if ! docker inspect "$cname" --format '{{json .NetworkSettings.Networks}}' \
+       2>/dev/null | grep -q "$TRANSIT_NET_NAME"; then
+    log_info "Connecting $cname to transit net @ $transit_ip..."
+    docker network connect --ip "$transit_ip" "$TRANSIT_NET_NAME" "$cname"
   fi
 }
 
-# 1. Create primaryhub
-create_kind_cluster "primaryhub" "10.244.0.0/16" "10.96.0.0/16" "$HUB1_TRANSIT_IP" "false"
-
-# 2. Extract shared Root CA and ServiceAccount keys from primaryhub
-mkdir -p "$PKI_DIR"
-docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt"
-docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key"
-docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
-docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
-
-# 3. Create secondaryhub mounting the shared Root CA and SA keys
-create_kind_cluster "secondaryhub" "10.245.0.0/16" "10.97.0.0/16" "$HUB2_TRANSIT_IP" "true"
-
-# 4. Create spoke clusters
-create_kind_cluster "spoke1" "10.246.0.0/16" "10.98.0.0/16" "$SPOKE1_TRANSIT_IP" "false"
-create_kind_cluster "spoke2" "10.247.0.0/16" "10.100.0.0/16" "$SPOKE2_TRANSIT_IP" "false"
-
-log_success "All 4 KinD clusters deployed and attached to transit network."
-
-# ==============================================================================
-# PHASE 4: ENFORCE WIREGUARD-ONLY ISOLATION & CONFIGURE OVERLAY MESH
-# ==============================================================================
-log_step "PHASE 4: Activating In-Container WireGuard Mesh (10.99.0.0/24)"
-
-setup_container_wireguard() {
-  local container="$1"
-  local entity="$2"
-  local wg_ip="$3"
-  local extra_ips="${4:-}"
+# Configure WireGuard wg0 inside a KinD control-plane container.
+# Args: <container> <entity-name> <wg-ip> [extra-ips]
+_setup_wireguard() {
+  local container="$1" entity="$2" wg_ip="$3" extra_ips="${4:-}"
 
   log_info "Configuring WireGuard wg0 inside $container ($wg_ip)..."
 
-  # Ensure wireguard tools are available inside KinD container
   docker exec "$container" bash -c "
     if ! command -v wg >/dev/null 2>&1; then
       apt-get update -qq && apt-get install -y -qq wireguard-tools iptables >/dev/null 2>&1 || true
@@ -353,55 +223,51 @@ setup_container_wireguard() {
     mkdir -p /etc/wireguard
   "
 
-  # Render wg0.conf
   local addr_str="${wg_ip}/24"
-  if [ -n "$extra_ips" ]; then
-    addr_str="${addr_str}, ${extra_ips}"
-  fi
+  [ -n "$extra_ips" ] && addr_str="${addr_str}, ${extra_ips}"
 
-  docker exec -i "$container" bash -c "cat > /etc/wireguard/wg0.conf" << EOF
+  docker exec -i "$container" bash -c "cat > /etc/wireguard/wg0.conf" <<EOF
 [Interface]
 Address = ${addr_str}
 ListenPort = 51820
 PrivateKey = ${WG_PRIV[$entity]}
 
-# Gateway Peer
 [Peer]
+# Gateway / VIP
 PublicKey = ${WG_PUB["gateway"]}
 AllowedIPs = ${WG_GATEWAY_IP}/32, ${WG_VIP}/32
 Endpoint = ${GW_TRANSIT_IP}:51820
 PersistentKeepalive = 25
 
-# PrimaryHub Peer
 [Peer]
+# PrimaryHub
 PublicKey = ${WG_PUB["primaryhub"]}
 AllowedIPs = ${WG_HUB1_IP}/32
 Endpoint = ${HUB1_TRANSIT_IP}:51820
 PersistentKeepalive = 25
 
-# SecondaryHub Peer
 [Peer]
+# SecondaryHub
 PublicKey = ${WG_PUB["secondaryhub"]}
 AllowedIPs = ${WG_HUB2_IP}/32
 Endpoint = ${HUB2_TRANSIT_IP}:51820
 PersistentKeepalive = 25
 
-# Spoke1 Peer
 [Peer]
+# Spoke1
 PublicKey = ${WG_PUB["spoke1"]}
 AllowedIPs = ${WG_SPOKE1_IP}/32
 Endpoint = ${SPOKE1_TRANSIT_IP}:51820
 PersistentKeepalive = 25
 
-# Spoke2 Peer
 [Peer]
+# Spoke2
 PublicKey = ${WG_PUB["spoke2"]}
 AllowedIPs = ${WG_SPOKE2_IP}/32
 Endpoint = ${SPOKE2_TRANSIT_IP}:51820
 PersistentKeepalive = 25
 EOF
 
-  # Bring up wg0 inside container and enable systemd service for persistence
   docker exec "$container" bash -c "
     wg-quick down wg0 2>/dev/null || true
     ip link del dev wg0 2>/dev/null || true
@@ -411,25 +277,684 @@ EOF
   "
 }
 
-setup_container_wireguard "primaryhub-control-plane"   "primaryhub"   "$WG_HUB1_IP"
-setup_container_wireguard "secondaryhub-control-plane" "secondaryhub" "$WG_HUB2_IP"
-setup_container_wireguard "spoke1-control-plane"       "spoke1"       "$WG_SPOKE1_IP"
-setup_container_wireguard "spoke2-control-plane"       "spoke2"       "$WG_SPOKE2_IP"
+# Poll until a pod matching <grep-pattern> is 1/1 Running.
+# Args: <context> <namespace> <pod-name-pattern> [max-iterations=60] [display-label]
+_wait_for_pod() {
+  local ctx="$1" ns="$2" pod_grep="$3" max="${4:-60}" label="${5:-$3}"
+  for i in $(seq 1 "$max"); do
+    if kubectl --context "$ctx" get pod -n "$ns" 2>/dev/null \
+         | grep -qE "${pod_grep}.*1/1.*Running"; then
+      log_success "$label is 1/1 Running!"
+      return 0
+    fi
+    log_info "Waiting for $label to become Ready ($i/$max)..."
+    sleep 5
+  done
+  log_warn "$label did not become Ready within timeout – continuing anyway."
+}
+
+# Install CRDs on a cluster context: internet URL first, local file as fallback.
+# Displays detailed information about each CRD package and verified CRDs.
+# Args: <context>
+_install_crds() {
+  local ctx="$1"
+  log_info "Installing Custom Resource Definitions (CRDs) on $ctx..."
+
+  local crd_dir="${CODE_INSPECTOR_DIR}/crds"
+  local -a crd_manifests=()
+
+  # Preferred order for CRD bundles
+  local default_bundles=(
+    "gateway-api-crds.yaml"
+    "cloudnative-pg-crds.yaml"
+    "metallb-crds.yaml"
+    "sealed-secrets-crd.yaml"
+    "agentgateway-crds.yaml"
+    "opensandbox-crds.yaml"
+  )
+
+  # Check if directory exists and collect available YAML files
+  if [ -d "$crd_dir" ]; then
+    for f in "$crd_dir"/*.yaml; do
+      [ -f "$f" ] && crd_manifests+=("$(basename "$f")")
+    done
+  fi
+
+  # If directory has no YAML files, fallback to default known bundles
+  if [ ${#crd_manifests[@]} -eq 0 ]; then
+    crd_manifests=("${default_bundles[@]}")
+  fi
+
+  # Apply each CRD bundle with full information
+  for fname in "${crd_manifests[@]}"; do
+    local title="${CRD_NAMES[$fname]:-$fname}"
+    local details="${CRD_DETAILS[$fname]:-}"
+    local url="${CRD_URLS[$fname]:-}"
+    local local_file="${crd_dir}/${fname}"
+    local applied=false
+
+    echo -e "\n  ${CYAN}▸ [CRD Package] ${BOLD}${title}${NC} (${fname})"
+    if [ -n "$details" ]; then
+      echo -e "    ${BOLD}CRDs included:${NC} ${details}"
+    fi
+
+    # 1. Try internet upstream URL if configured
+    if [ -n "$url" ]; then
+      log_info "    Fetching from upstream URL..."
+      if curl -fsSL --connect-timeout 5 --max-time 15 "$url" -o /tmp/_crd_dl.yaml 2>/dev/null; then
+        if kubectl --context "$ctx" apply --server-side --force-conflicts -f /tmp/_crd_dl.yaml >/dev/null 2>&1; then
+          log_success "    Applied ${title} from upstream repository."
+          applied=true
+        fi
+      fi
+      if [ "$applied" = false ]; then
+        log_warn "    Upstream download unavailable – falling back to local copy..."
+      fi
+    fi
+
+    # 2. Local copy fallback
+    if [ "$applied" = false ]; then
+      if [ -f "$local_file" ]; then
+        log_info "    Applying local manifest: ${local_file}"
+        if kubectl --context "$ctx" apply --server-side --force-conflicts -f "$local_file" >/dev/null 2>&1; then
+          log_success "    Applied ${title} from local manifest."
+          applied=true
+        else
+          log_warn "    Server-side apply warning; retrying standard apply..."
+          kubectl --context "$ctx" apply -f "$local_file" >/dev/null 2>&1 || true
+          applied=true
+        fi
+      else
+        log_error "    Manifest not found at ${local_file} and no upstream available!"
+      fi
+    fi
+  done
+
+  # Remove safe-upgrades validating admission policy if installed by upstream gateway-api.
+  # This prevents Helm or local tools from being blocked by version admission checks.
+  kubectl --context "$ctx" delete validatingadmissionpolicy safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+  kubectl --context "$ctx" delete validatingadmissionpolicybinding safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+
+  # ── Summary of all CRDs actually installed and established on the cluster ──
+  echo -e "\n  ${GREEN}${BOLD}Established CRDs on cluster [${ctx}]:${NC}"
+  local crd_table
+  crd_table=$(kubectl --context "$ctx" get crds --no-headers -o custom-columns='NAME:.metadata.name,GROUP:.spec.group' 2>/dev/null | sort || true)
+  if [ -n "$crd_table" ]; then
+    while IFS= read -r line; do
+      [ -z "$line" ] && continue
+      local cname cgroup
+      cname=$(echo "$line" | awk '{print $1}')
+      cgroup=$(echo "$line" | awk '{print $2}')
+      printf "    %-52s %s\n" "${cname}" "(${cgroup})"
+    done <<< "$crd_table"
+    local total_count
+    total_count=$(echo "$crd_table" | wc -l)
+    log_success "Total ${total_count} CRDs successfully established on ${ctx}.\n"
+  else
+    log_warn "No CRDs detected yet on ${ctx}."
+  fi
+}
 
 # ==============================================================================
-# PHASE 5: DEPLOY ENVOY ACTIVE-PASSIVE GATEWAY CONTAINER WITH VIP
+# ── TEARDOWN ───────────────────────────────────────────────────────────────────
 # ==============================================================================
-log_step "PHASE 5: Deploying Envoy Gateway Container with Virtual IP ($WG_VIP)"
+cleanup_environment() {
+  log_step "Tearing down Multi-Cluster Platform..."
 
-mkdir -p "$ENVOY_DIR"
-cat << EOF > "${ENVOY_DIR}/envoy.yaml"
+  ensure_docker_access
+  docker rm -f envoy-gateway 2>/dev/null || true
+
+  for cluster in primaryhub secondaryhub spoke1 spoke2; do
+    if kind get clusters 2>/dev/null | grep -q "^${cluster}$"; then
+      log_info "Deleting KinD cluster '$cluster'..."
+      kind delete cluster --name "$cluster" 2>/dev/null || true
+    fi
+    docker rm -f "${cluster}-control-plane" 2>/dev/null || true
+    kubectl config delete-context "kind-${cluster}"  2>/dev/null || true
+    kubectl config delete-cluster "kind-${cluster}"  2>/dev/null || true
+    kubectl config unset "users.kind-${cluster}"     2>/dev/null || true
+  done
+
+  if docker network ls --format '{{.Name}}' | grep -q "^${TRANSIT_NET_NAME}$"; then
+    for cid in $(docker network inspect "$TRANSIT_NET_NAME" \
+                   -f '{{range $k, $v := .Containers}}{{$k}} {{end}}' 2>/dev/null || true); do
+      docker network disconnect -f "$TRANSIT_NET_NAME" "$cid" 2>/dev/null || true
+    done
+    docker network rm "$TRANSIT_NET_NAME" 2>/dev/null || true
+  fi
+
+  [ -z "$(kind get clusters 2>/dev/null || true)" ] && \
+    docker network rm kind 2>/dev/null || true
+
+  rm -rf "$STATE_DIR" /tmp/01sandbox-* /tmp/kind-*.yaml /tmp/spoke*-* 2>/dev/null || true
+  docker volume prune -f 2>/dev/null || true
+
+  log_success "Cleanup complete."
+}
+
+# ==============================================================================
+# ── VERIFICATION ───────────────────────────────────────────────────────────────
+# ==============================================================================
+run_verification() {
+  log_step "End-to-End Health Verification"
+
+  echo -e "\n${BOLD}[1a] OCM Managed Clusters – PrimaryHub:${NC}"
+  kubectl --context kind-primaryhub get managedclusters 2>/dev/null || true
+
+  echo -e "\n${BOLD}[1b] OCM Managed Clusters – SecondaryHub (Standby):${NC}"
+  kubectl --context kind-secondaryhub get managedclusters 2>/dev/null || true
+
+  echo -e "\n${BOLD}[2] PostgreSQL Replication Sender (PrimaryHub):${NC}"
+  kubectl --context kind-primaryhub exec -n opensandbox-system postgresql-primary-1 \
+    -c postgres -- psql -U postgres -d apikeys \
+    -c "SELECT client_addr,application_name,state,sync_state FROM pg_stat_replication;" \
+    2>/dev/null || true
+
+  echo -e "\n${BOLD}[3] PostgreSQL WAL Receiver (SecondaryHub):${NC}"
+  kubectl --context kind-secondaryhub exec -n opensandbox-system postgresql-secondary-1 \
+    -c postgres -- psql -U postgres -d apikeys \
+    -c "SELECT status,sender_host,sender_port,latest_end_lsn FROM pg_stat_wal_receiver;" \
+    2>/dev/null || true
+
+  echo -e "\n${BOLD}[4] Valkey Replication (SecondaryHub):${NC}"
+  kubectl --context kind-secondaryhub exec -n opensandbox-system deploy/valkey -- \
+    valkey-cli info replication | grep -E "role|master_host|master_port|master_link_status" \
+    2>/dev/null || true
+
+  echo -e "\n${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
+  echo -e "${GREEN}${BOLD}  MULTI-CLUSTER HEALTH VERIFICATION COMPLETE${NC}"
+  echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}\n"
+}
+
+# ==============================================================================
+# ══ PHASE FUNCTIONS ════════════════════════════════════════════════════════════
+# ==============================================================================
+
+# ── Helper: Ensure Docker daemon is active and socket is accessible ────────────
+ensure_docker_access() {
+  command -v docker >/dev/null 2>&1 || return 0
+
+  if ! docker info >/dev/null 2>&1; then
+    local SUDO=""
+    if [ "$EUID" -ne 0 ]; then
+      command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+    fi
+
+    if [ -n "$SUDO" ] || [ "$EUID" -eq 0 ]; then
+      $SUDO systemctl enable --now docker 2>/dev/null || true
+      $SUDO systemctl start docker 2>/dev/null || true
+      $SUDO service docker start 2>/dev/null || true
+
+      # Wait up to 10s for /var/run/docker.sock to appear
+      local _w=0
+      while [ ! -S /var/run/docker.sock ] && [ $_w -lt 20 ]; do
+        sleep 0.5
+        _w=$((_w + 1))
+      done
+
+      # Add user to docker group permanently
+      $SUDO usermod -aG docker "$USER" 2>/dev/null || true
+
+      # Grant immediate read/write access to docker.sock for the current running session
+      if [ -S /var/run/docker.sock ]; then
+        $SUDO chmod 666 /var/run/docker.sock 2>/dev/null || true
+        command -v setfacl >/dev/null 2>&1 && $SUDO setfacl -m u:"$USER":rw /var/run/docker.sock 2>/dev/null || true
+      fi
+    fi
+  fi
+}
+
+# ── Helper: Apply detected repository path to dependent directories ───────────
+_apply_repo_paths() {
+  local base="$1"
+  SANDBOX_REPO_DIR="$base"
+  OPENSANDBOX_BUILD_DIR="${base}/opensandbox-server/docker-build"
+  CODE_INSPECTOR_DIR="${base}/codeInspector"
+
+  # Ensure the repository is checked out to branch feat/production
+  if [ -d "${base}/.git" ]; then
+    local current_branch
+    current_branch=$(git -C "$base" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+    if [ "$current_branch" != "feat/production" ]; then
+      log_info "Switching 01-Sandbox repository from '$current_branch' to branch 'feat/production'..."
+      git -C "$base" checkout feat/production 2>/dev/null || \
+      git -C "$base" checkout -b feat/production origin/feat/production 2>/dev/null || \
+      log_warn "Could not switch to feat/production; remaining on $current_branch."
+    fi
+  fi
+
+  # Ensure ConfigMap template handles boolean values as strings gracefully
+  local cmap_tmpl="${CODE_INSPECTOR_DIR}/charts/apiServer/templates/configmap.yaml"
+  if [ -f "$cmap_tmpl" ]; then
+    sed -i 's/tpl \$value \$/tpl (\$value | toString) \$/g' "$cmap_tmpl" 2>/dev/null || true
+  fi
+}
+
+# ── Helper: Ensure 01-Sandbox repository is cloned or located ──────────────────
+ensure_sandbox_repo() {
+  # 1. If already valid, return
+  if [ -d "${OPENSANDBOX_BUILD_DIR}" ] && [ -f "${OPENSANDBOX_BUILD_DIR}/Dockerfile" ]; then
+    _apply_repo_paths "$SANDBOX_REPO_DIR"
+    return 0
+  fi
+
+  # 2. Search common candidate locations
+  local candidates=(
+    "${ROOT_DIR}/01-Sandbox"
+    "${ROOT_DIR}"
+    "$(pwd)/01-Sandbox"
+    "$(pwd)"
+    "/home/berrybytes/Desktop/Kamal/01-Sandbox"
+  )
+
+  for cand in "${candidates[@]}"; do
+    if [ -d "${cand}/opensandbox-server/docker-build" ] && [ -f "${cand}/opensandbox-server/docker-build/Dockerfile" ]; then
+      log_info "Detected 01-Sandbox repository at: ${cand}"
+      _apply_repo_paths "$cand"
+      return 0
+    fi
+  done
+
+  # 3. Search under parent and user home
+  local found
+  found=$(find "${ROOT_DIR}" "${HOME}" -maxdepth 4 -type d -path "*/opensandbox-server/docker-build" 2>/dev/null | head -1 || true)
+  if [ -n "$found" ] && [ -f "${found}/Dockerfile" ]; then
+    local repo_base
+    repo_base="$(dirname "$(dirname "$found")")"
+    log_info "Discovered 01-Sandbox repository at: ${repo_base}"
+    _apply_repo_paths "$repo_base"
+    return 0
+  fi
+
+  # 4. Clone repository if not found locally
+  log_step "Cloning 01-Sandbox Repository"
+  local clone_target="${ROOT_DIR}/01-Sandbox"
+  [ -d "$clone_target" ] && clone_target="${STATE_DIR}/01-Sandbox"
+
+  local repo_url="${REPO_URL:-git@github.com:01cloud/01-Sandbox.git}"
+  local repo_branch="${REPO_BRANCH:-feat/production}"
+
+  log_info "Cloning 01-Sandbox via SSH (${repo_url}, branch: ${repo_branch}) into: ${clone_target}..."
+  mkdir -p "$(dirname "$clone_target")"
+  # Remove incomplete target directory if it exists without the project content
+  [ -d "$clone_target" ] && [ ! -d "${clone_target}/opensandbox-server" ] && rm -rf "$clone_target"
+
+  local clone_ok=false
+  # Clone via SSH (try feat/production branch first, fallback to default branch)
+  if GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" git clone --depth 1 -b "$repo_branch" "$repo_url" "$clone_target" 2>/dev/null || \
+     GIT_SSH_COMMAND="ssh -o StrictHostKeyChecking=accept-new" git clone --depth 1 "$repo_url" "$clone_target"; then
+    clone_ok=true
+  fi
+
+  if [ "$clone_ok" = true ] && [ -d "${clone_target}/opensandbox-server/docker-build" ]; then
+    log_success "01-Sandbox repository cloned successfully to: ${clone_target}"
+    _apply_repo_paths "$clone_target"
+    return 0
+  else
+    log_error "Unable to locate or clone 01-Sandbox repository via SSH into ${clone_target}."
+    log_error "Please ensure your SSH key is added to GitHub (ssh -T git@github.com) or clone manually:"
+    log_error "  git clone git@github.com:01cloud/01-Sandbox.git ${clone_target}"
+    return 1
+  fi
+}
+
+# ── Phase 1: Pre-flight toolchain check + auto-install ────────────────────────
+phase_01_preflight() {
+  log_step "PHASE 1: Checking Host Toolchain (Auto-Install if Missing)"
+
+  # ── Detect package manager ──────────────────────────────────────────────────
+  local PKG_MGR=""
+  if command -v apt-get >/dev/null 2>&1; then
+    PKG_MGR="apt"
+  elif command -v dnf >/dev/null 2>&1; then
+    PKG_MGR="dnf"
+  elif command -v yum >/dev/null 2>&1; then
+    PKG_MGR="yum"
+  else
+    log_warn "No supported package manager found (apt/dnf/yum). Will attempt binary installs only."
+  fi
+
+  # ── Ensure sudo is usable ───────────────────────────────────────────────────
+  local SUDO=""
+  if [ "$EUID" -ne 0 ]; then
+    if command -v sudo >/dev/null 2>&1; then
+      SUDO="sudo"
+    else
+      log_warn "Not running as root and 'sudo' not found – installations may fail."
+    fi
+  fi
+
+  # Helper: refresh apt cache once if needed
+  local _apt_updated=false
+  _apt_update_once() {
+    if [ "$_apt_updated" = false ] && [ "$PKG_MGR" = "apt" ]; then
+      log_info "Updating apt package index..."
+      $SUDO apt-get update -qq
+      _apt_updated=true
+    fi
+  }
+
+  # ── install_docker ──────────────────────────────────────────────────────────
+  _install_docker() {
+    log_info "Installing Docker Engine..."
+    if [ "$PKG_MGR" = "apt" ]; then
+      _apt_update_once
+      $SUDO apt-get install -y -qq ca-certificates gnupg lsb-release curl >/dev/null 2>&1
+      $SUDO install -m 0755 -d /etc/apt/keyrings
+      curl -fsSL https://download.docker.com/linux/ubuntu/gpg | \
+        $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null
+      $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
+      echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
+        $SUDO tee /etc/apt/sources.list.d/docker.list >/dev/null
+      $SUDO apt-get update -qq
+      $SUDO apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin >/dev/null
+    elif [ "$PKG_MGR" = "dnf" ] || [ "$PKG_MGR" = "yum" ]; then
+      $SUDO "$PKG_MGR" install -y -q yum-utils >/dev/null
+      $SUDO yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo >/dev/null
+      $SUDO "$PKG_MGR" install -y -q docker-ce docker-ce-cli containerd.io >/dev/null
+    else
+      log_warn "Cannot install Docker automatically. Please install Docker manually: https://docs.docker.com/engine/install/"
+      return 1
+    fi
+    $SUDO systemctl enable --now docker 2>/dev/null || true
+    $SUDO systemctl start docker 2>/dev/null || true
+    $SUDO service docker start 2>/dev/null || true
+
+    # Wait for docker socket to appear
+    local _w=0
+    while [ ! -S /var/run/docker.sock ] && [ $_w -lt 20 ]; do
+      sleep 0.5
+      _w=$((_w + 1))
+    done
+
+    # Allow current user to use docker permanently
+    $SUDO usermod -aG docker "$USER" 2>/dev/null || true
+
+    # Make socket immediately accessible for the current running process
+    if [ -S /var/run/docker.sock ]; then
+      $SUDO chmod 666 /var/run/docker.sock 2>/dev/null || true
+      command -v setfacl >/dev/null 2>&1 && $SUDO setfacl -m u:"$USER":rw /var/run/docker.sock 2>/dev/null || true
+    fi
+    log_success "Docker installed."
+  }
+
+  # ── install_kind ────────────────────────────────────────────────────────────
+  _install_kind() {
+    log_info "Installing KinD (Kubernetes in Docker)..."
+    local arch
+    arch=$(uname -m)
+    case "$arch" in
+      x86_64)  arch="amd64" ;;
+      aarch64) arch="arm64" ;;
+      *)        log_warn "Unsupported arch $arch for KinD"; return 1 ;;
+    esac
+    local kind_version
+    kind_version=$(curl -fsSL https://api.github.com/repos/kubernetes-sigs/kind/releases/latest \
+      | grep '"tag_name"' | cut -d'"' -f4)
+    kind_version="${kind_version:-v0.23.0}"
+    curl -fsSL "https://kind.sigs.k8s.io/dl/${kind_version}/kind-linux-${arch}" \
+      -o /tmp/kind-bin
+    chmod +x /tmp/kind-bin
+    $SUDO mv /tmp/kind-bin /usr/local/bin/kind
+    log_success "KinD ${kind_version} installed."
+  }
+
+  # ── install_kubectl ─────────────────────────────────────────────────────────
+  _install_kubectl() {
+    log_info "Installing kubectl..."
+    local arch
+    arch=$(uname -m); [ "$arch" = "x86_64" ] && arch="amd64" || arch="arm64"
+    local k8s_version
+    k8s_version=$(curl -fsSL https://dl.k8s.io/release/stable.txt)
+    k8s_version="${k8s_version:-v1.30.0}"
+    curl -fsSL "https://dl.k8s.io/release/${k8s_version}/bin/linux/${arch}/kubectl" \
+      -o /tmp/kubectl-bin
+    chmod +x /tmp/kubectl-bin
+    $SUDO mv /tmp/kubectl-bin /usr/local/bin/kubectl
+    log_success "kubectl ${k8s_version} installed."
+  }
+
+  # ── install_helm ────────────────────────────────────────────────────────────
+  _install_helm() {
+    log_info "Installing Helm v3..."
+    curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | \
+      $SUDO bash >/dev/null 2>&1
+    log_success "Helm installed ($(helm version --short 2>/dev/null || echo 'ok'))."
+  }
+
+  # ── install_clusteradm ──────────────────────────────────────────────────────
+  _install_clusteradm() {
+    log_info "Installing clusteradm (OCM CLI)..."
+    curl -fsSL https://raw.githubusercontent.com/open-cluster-management-io/clusteradm/main/install.sh | \
+      $SUDO bash >/dev/null 2>&1
+    # Fallback: manual binary download if the installer script fails
+    if ! command -v clusteradm >/dev/null 2>&1; then
+      local arch
+      arch=$(uname -m); [ "$arch" = "x86_64" ] && arch="amd64" || arch="arm64"
+      local ver
+      ver=$(curl -fsSL https://api.github.com/repos/open-cluster-management-io/clusteradm/releases/latest \
+        | grep '"tag_name"' | cut -d'"' -f4)
+      ver="${ver:-v0.7.0}"
+      curl -fsSL "https://github.com/open-cluster-management-io/clusteradm/releases/download/${ver}/clusteradm_linux_${arch}.tar.gz" \
+        | $SUDO tar -xz -C /usr/local/bin clusteradm
+    fi
+    log_success "clusteradm installed."
+  }
+
+  # ── install_jq ──────────────────────────────────────────────────────────────
+  _install_jq() {
+    log_info "Installing jq..."
+    if [ "$PKG_MGR" = "apt" ]; then
+      _apt_update_once
+      $SUDO apt-get install -y -qq jq >/dev/null
+    elif [ "$PKG_MGR" = "dnf" ] || [ "$PKG_MGR" = "yum" ]; then
+      $SUDO "$PKG_MGR" install -y -q jq >/dev/null
+    else
+      local arch
+      arch=$(uname -m); [ "$arch" = "x86_64" ] && arch="amd64" || arch="arm64"
+      local ver
+      ver=$(curl -fsSL https://api.github.com/repos/jqlang/jq/releases/latest \
+        | grep '"tag_name"' | cut -d'"' -f4)
+      ver="${ver:-jq-1.7.1}"
+      curl -fsSL "https://github.com/jqlang/jq/releases/download/${ver}/jq-linux-${arch}" \
+        -o /tmp/jq-bin
+      chmod +x /tmp/jq-bin
+      $SUDO mv /tmp/jq-bin /usr/local/bin/jq
+    fi
+    log_success "jq installed."
+  }
+
+  # ── install_curl ────────────────────────────────────────────────────────────
+  _install_curl() {
+    log_info "Installing curl..."
+    if [ "$PKG_MGR" = "apt" ]; then
+      _apt_update_once
+      $SUDO apt-get install -y -qq curl >/dev/null
+    elif [ "$PKG_MGR" = "dnf" ] || [ "$PKG_MGR" = "yum" ]; then
+      $SUDO "$PKG_MGR" install -y -q curl >/dev/null
+    else
+      log_warn "Please install curl manually."
+      return 1
+    fi
+    log_success "curl installed."
+  }
+
+  # ── install_wireguard ───────────────────────────────────────────────────────
+  _install_wireguard() {
+    log_info "Installing WireGuard tools..."
+    if [ "$PKG_MGR" = "apt" ]; then
+      _apt_update_once
+      $SUDO apt-get install -y -qq wireguard wireguard-tools >/dev/null
+    elif [ "$PKG_MGR" = "dnf" ] || [ "$PKG_MGR" = "yum" ]; then
+      $SUDO "$PKG_MGR" install -y -q wireguard-tools >/dev/null
+    else
+      log_warn "Please install wireguard-tools manually."
+      return 1
+    fi
+    log_success "WireGuard tools installed."
+  }
+
+  # ── install_git ─────────────────────────────────────────────────────────────
+  _install_git() {
+    log_info "Installing git..."
+    if [ "$PKG_MGR" = "apt" ]; then
+      _apt_update_once
+      $SUDO apt-get install -y -qq git >/dev/null
+    elif [ "$PKG_MGR" = "dnf" ] || [ "$PKG_MGR" = "yum" ]; then
+      $SUDO "$PKG_MGR" install -y -q git >/dev/null
+    else
+      log_warn "Please install git manually."
+      return 1
+    fi
+    log_success "git installed."
+  }
+
+  # ── Dispatch: check + install each tool ────────────────────────────────────
+  local failed=()
+
+  _check_and_install() {
+    local tool="$1"
+    local installer="$2"
+    if ! command -v "$tool" >/dev/null 2>&1; then
+      log_warn "'$tool' not found – attempting automatic installation..."
+      if $installer; then
+        if command -v "$tool" >/dev/null 2>&1; then
+          log_success "'$tool' is now available."
+        else
+          log_error "Installation of '$tool' completed but binary not found in PATH."
+          failed+=("$tool")
+        fi
+      else
+        log_error "Failed to install '$tool' automatically."
+        failed+=("$tool")
+      fi
+    else
+      log_info "'$tool' already installed: $(command -v "$tool")"
+    fi
+  }
+
+  _check_and_install git         _install_git
+  _check_and_install docker      _install_docker
+  _check_and_install kind        _install_kind
+  _check_and_install kubectl     _install_kubectl
+  _check_and_install helm        _install_helm
+  _check_and_install clusteradm  _install_clusteradm
+  _check_and_install jq          _install_jq
+  _check_and_install curl        _install_curl
+  _check_and_install wg          _install_wireguard
+
+  if [ ${#failed[@]} -gt 0 ]; then
+    log_error "The following tools could not be installed automatically: ${failed[*]}"
+    log_error "Please install them manually and re-run the script."
+    exit 1
+  fi
+
+  log_success "All required tools are available."
+
+  # ── Ensure Docker daemon is running & socket accessible to current user ────
+  ensure_docker_access
+  if ! docker info >/dev/null 2>&1; then
+    log_error "Cannot connect to the Docker daemon at unix:///var/run/docker.sock."
+    log_error "Permission denied or Docker daemon is not active."
+    log_error "Please run: sudo chmod 666 /var/run/docker.sock && sudo systemctl start docker"
+    exit 1
+  fi
+  log_success "Docker daemon is running and accessible."
+
+  # ── Ensure 01-Sandbox repository is available locally ──────────────────────
+  ensure_sandbox_repo || log_warn "Repository clone pending; will retry in Phase 10."
+
+  # Load WireGuard kernel module (non-fatal; may be built-in)
+  $SUDO modprobe wireguard 2>/dev/null || modprobe wireguard 2>/dev/null || true
+}
+
+# ── Phase 2: Transit network + WireGuard key generation ────────────────────────
+phase_02_transit_network_and_wg_keys() {
+  log_step "PHASE 2: Transit Network & WireGuard Key Generation"
+
+  if ! docker network ls --format '{{.Name}}' | grep -q "^${TRANSIT_NET_NAME}$"; then
+    log_info "Creating Docker transit network ($TRANSIT_SUBNET)..."
+    docker network create \
+      --driver bridge \
+      --subnet "$TRANSIT_SUBNET" \
+      --opt "com.docker.network.bridge.name"="br-01transit" \
+      "$TRANSIT_NET_NAME"
+  else
+    log_info "Transit network '$TRANSIT_NET_NAME' already exists."
+  fi
+
+  for entity in gateway primaryhub secondaryhub spoke1 spoke2; do
+    if [ ! -s "${WG_DIR}/${entity}.key" ] || [ ! -s "${WG_DIR}/${entity}.pub" ]; then
+      log_info "Generating WireGuard keypair for $entity..."
+      read -r priv pub < <(python3 -c "
+from cryptography.hazmat.primitives.asymmetric import x25519
+import base64
+k = x25519.X25519PrivateKey.generate()
+print(f'{base64.b64encode(k.private_bytes_raw()).decode()} {base64.b64encode(k.public_key().public_bytes_raw()).decode()}')
+")
+      echo "$priv" > "${WG_DIR}/${entity}.key"
+      echo "$pub"  > "${WG_DIR}/${entity}.pub"
+    fi
+    WG_PRIV[$entity]=$(tr -d '\r\n' < "${WG_DIR}/${entity}.key")
+    WG_PUB[$entity]=$(tr -d '\r\n'  < "${WG_DIR}/${entity}.pub")
+  done
+
+  log_success "WireGuard keypairs ready for all 5 entities."
+}
+
+# ── Phase 3: Create hub clusters (PrimaryHub + SecondaryHub) ───────────────────
+phase_03_create_hub_clusters() {
+  log_step "PHASE 3: Creating Hub Clusters (PrimaryHub + SecondaryHub)"
+
+  # PrimaryHub – this IS the Root CA source
+  _create_kind_cluster "primaryhub" "10.244.0.0/16" "10.96.0.0/16" "$HUB1_TRANSIT_IP" "false"
+
+  # Extract shared Root CA + ServiceAccount keys from PrimaryHub
+  log_info "Extracting shared Root CA & ServiceAccount keys from primaryhub..."
+  docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt"
+  docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key"
+  docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
+  docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
+
+  # SecondaryHub – mounted with PrimaryHub's shared Root CA
+  _create_kind_cluster "secondaryhub" "10.245.0.0/16" "10.97.0.0/16" "$HUB2_TRANSIT_IP" "true"
+
+  log_success "Hub clusters created."
+}
+
+# ── Phase 4: Install CRDs on hub clusters ─────────────────────────────────────
+phase_04_install_crds_on_hubs() {
+  log_step "PHASE 4: Installing CRDs on Hub Clusters"
+
+  for hub in primaryhub secondaryhub; do
+    _install_crds "kind-${hub}"
+  done
+  log_success "CRDs installed on all hub clusters."
+}
+
+# ── Phase 5: WireGuard overlay on hub clusters ────────────────────────────────
+phase_05_wireguard_on_hubs() {
+  log_step "PHASE 5: Bringing Up WireGuard Overlay on Hub Clusters"
+
+  _setup_wireguard "primaryhub-control-plane"   "primaryhub"   "$WG_HUB1_IP"
+  _setup_wireguard "secondaryhub-control-plane" "secondaryhub" "$WG_HUB2_IP"
+
+  log_success "WireGuard overlay active on hub clusters."
+}
+
+# ── Phase 6: Envoy Gateway VIP container ──────────────────────────────────────
+phase_06_envoy_gateway() {
+  log_step "PHASE 6: Deploying Envoy Gateway (VIP: ${WG_VIP})"
+
+  # Static part (no variable substitution needed)
+  cat > "${ENVOY_DIR}/envoy.yaml" <<'ENVOY_EOF'
 admin:
   address:
     socket_address:
       protocol: TCP
       address: 127.0.0.1
       port_value: 9901
-
 static_resources:
   listeners:
   - name: ingress_http_listener
@@ -445,7 +970,6 @@ static_resources:
           "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
           stat_prefix: ingress_http
           cluster: ingress_http_cluster
-
   - name: ingress_kube_api_listener
     address:
       socket_address:
@@ -461,7 +985,10 @@ static_resources:
           cluster: ingress_kube_api_cluster
           idle_timeout: 5s
           max_downstream_connection_duration: 60s
+ENVOY_EOF
 
+  # Dynamic cluster section with IP substitution
+  cat >> "${ENVOY_DIR}/envoy.yaml" <<EOF
   clusters:
   - name: ingress_http_cluster
     connect_timeout: 0.5s
@@ -491,7 +1018,6 @@ static_resources:
               socket_address:
                 address: ${WG_HUB2_IP}
                 port_value: 30080
-
   - name: ingress_kube_api_cluster
     connect_timeout: 0.5s
     type: STATIC
@@ -522,35 +1048,30 @@ static_resources:
                 port_value: 6443
 EOF
 
-# Render Gateway WireGuard config
-cat << EOF > "${ENVOY_DIR}/wg0.conf"
+  cat > "${ENVOY_DIR}/wg0.conf" <<EOF
 [Interface]
 Address = ${WG_GATEWAY_IP}/24, ${WG_VIP}/32
 ListenPort = 51820
 PrivateKey = ${WG_PRIV["gateway"]}
 
-# PrimaryHub Peer
 [Peer]
 PublicKey = ${WG_PUB["primaryhub"]}
 AllowedIPs = ${WG_HUB1_IP}/32
 Endpoint = ${HUB1_TRANSIT_IP}:51820
 PersistentKeepalive = 25
 
-# SecondaryHub Peer
 [Peer]
 PublicKey = ${WG_PUB["secondaryhub"]}
 AllowedIPs = ${WG_HUB2_IP}/32
 Endpoint = ${HUB2_TRANSIT_IP}:51820
 PersistentKeepalive = 25
 
-# Spoke1 Peer
 [Peer]
 PublicKey = ${WG_PUB["spoke1"]}
 AllowedIPs = ${WG_SPOKE1_IP}/32
 Endpoint = ${SPOKE1_TRANSIT_IP}:51820
 PersistentKeepalive = 25
 
-# Spoke2 Peer
 [Peer]
 PublicKey = ${WG_PUB["spoke2"]}
 AllowedIPs = ${WG_SPOKE2_IP}/32
@@ -558,306 +1079,473 @@ Endpoint = ${SPOKE2_TRANSIT_IP}:51820
 PersistentKeepalive = 25
 EOF
 
-# Launch / Update Envoy Gateway container
-if docker ps -a --format '{{.Names}}' | grep -q '^envoy-gateway$'; then
   docker rm -f envoy-gateway 2>/dev/null || true
-fi
 
-# Launch / Update Envoy Gateway container
-# Check if pre-baked envoy image exists to avoid apt-get delay
-ENVOY_IMAGE="01sandbox-envoy:v1"
-ENVOY_CMD="wg-quick up wg0 && envoy -c /etc/envoy/envoy.yaml"
-
-if ! docker image inspect "$ENVOY_IMAGE" >/dev/null 2>&1; then
-  ENVOY_IMAGE="envoyproxy/envoy:v1.31-latest"
-  ENVOY_CMD="apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq wireguard-tools iproute2 iptables >/dev/null 2>&1 || true; wg-quick up wg0; envoy -c /etc/envoy/envoy.yaml"
-fi
-
-log_info "Starting envoy-gateway container on transit network ($GW_TRANSIT_IP) using $ENVOY_IMAGE..."
-docker run -d --name envoy-gateway \
-  --restart unless-stopped \
-  --privileged \
-  --user root \
-  --cap-add=NET_ADMIN \
-  --cap-add=SYS_MODULE \
-  --net "$TRANSIT_NET_NAME" \
-  --ip "$GW_TRANSIT_IP" \
-  -v "${ENVOY_DIR}/envoy.yaml":/etc/envoy/envoy.yaml:ro \
-  -v "${ENVOY_DIR}/wg0.conf":/etc/wireguard/wg0.conf:ro \
-  --entrypoint /bin/sh \
-  "$ENVOY_IMAGE" \
-  -c "$ENVOY_CMD"
-
-# If we booted with vanilla envoy and installed packages, commit it for instant future restarts & reboots
-if [ "$ENVOY_IMAGE" != "01sandbox-envoy:v1" ]; then
-  (docker commit --pause=false envoy-gateway 01sandbox-envoy:v1 >/dev/null 2>&1 &) || true
-fi
-
-# Verify WireGuard mesh ping from primaryhub to gateway VIP
-log_info "Verifying WireGuard overlay connectivity across containers..."
-for i in {1..10}; do
-  if docker exec primaryhub-control-plane ping -c 1 -W 1 "$WG_VIP" >/dev/null 2>&1; then
-    log_success "WireGuard overlay connectivity verified! primaryhub can reach Gateway VIP ($WG_VIP)."
-    break
-  fi
-  sleep 1
-done
-
-# ==============================================================================
-# PHASE 6: VERIFY SHARED ROOT CA & VIP TLS SANS
-# ==============================================================================
-log_step "PHASE 6: Verifying Shared Root CA & Dynamic TLS SANs"
-
-PRIMARY_CA_HASH=$(docker exec primaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt | awk '{print $1}')
-SECONDARY_CA_HASH=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt | awk '{print $1}')
-
-if [ "$PRIMARY_CA_HASH" != "$SECONDARY_CA_HASH" ]; then
-  log_error "Root CA mismatch detected between primaryhub and secondaryhub!"
-  exit 1
-fi
-
-log_success "Root CA cryptographically synchronized ($PRIMARY_CA_HASH)."
-
-# Verify and ensure ServiceAccount key synchronization
-PRIMARY_SA_HASH=$(docker exec primaryhub-control-plane sha256sum /etc/kubernetes/pki/sa.pub 2>/dev/null | awk '{print $1}' || echo "none")
-SECONDARY_SA_HASH=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/sa.pub 2>/dev/null | awk '{print $1}' || echo "none")
-if [ "$PRIMARY_SA_HASH" != "$SECONDARY_SA_HASH" ]; then
-  log_info "Synchronizing ServiceAccount public/private keys from primaryhub to secondaryhub..."
-  docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
-  docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
-  docker cp "${PKI_DIR}/sa.key" secondaryhub-control-plane:/etc/kubernetes/pki/sa.key
-  docker cp "${PKI_DIR}/sa.pub" secondaryhub-control-plane:/etc/kubernetes/pki/sa.pub
-fi
-log_success "ServiceAccount crypto identity cryptographically synchronized."
-
-# Ensure cluster-info advertises the Virtual IP endpoint (10.99.0.100:6443)
-log_info "Configuring kube-public/cluster-info on hubs to advertise Gateway VIP..."
-for ctx in kind-primaryhub kind-secondaryhub; do
-  kubectl --context "$ctx" get configmap cluster-info -n kube-public -o yaml 2>/dev/null | \
-    sed "s|server:.*|server: https://${WG_VIP}:6443|g" | \
-    kubectl --context "$ctx" apply -f - 2>/dev/null || true
-done
-
-log_success "VIP TLS SANs and cluster endpoints configured across both hubs."
-
-# ==============================================================================
-# PHASE 7: INITIALIZE OCM HUBS & CLOUD-NATIVE AUTO-ACCEPTOR
-# ==============================================================================
-log_step "PHASE 7: Initializing OCM Hubs & Auto-Acceptor"
-
-for hub in primaryhub secondaryhub; do
-  log_info "Checking OCM initialization on $hub..."
-  if ! kubectl --context "kind-${hub}" get crd managedclusters.cluster.open-cluster-management.io >/dev/null 2>&1; then
-    clusteradm init --context "kind-${hub}" --wait || true
-  fi
-done
-
-# Deploy OCM Auto-Acceptor on primaryhub
-AUTO_ACCEPTOR_PATH="${ROOT_DIR}/docs/multi-cluster/vm-level-ocm-multi-cluster/manifests/ocm-auto-acceptor-k8s.yaml"
-if [ -f "$AUTO_ACCEPTOR_PATH" ]; then
-  log_info "Deploying ocm-auto-acceptor on primaryhub..."
-  kubectl --context kind-primaryhub apply -f "$AUTO_ACCEPTOR_PATH" || true
-fi
-
-# ==============================================================================
-# PHASE 8: REGISTER SPOKES TO OCM VIA GATEWAY VIP (10.99.0.100:6443)
-# ==============================================================================
-log_step "PHASE 8: Joining Spoke Clusters to OCM Hub via Virtual IP (${WG_VIP})"
-
-# Obtain join token from primaryhub
-HUB_TOKEN=$(clusteradm get token --context kind-primaryhub 2>/dev/null | grep '^token=' | cut -d'=' -f2)
-
-# Verify Gateway VIP is healthy and reachable from spoke containers
-log_info "Verifying Gateway VIP (https://${WG_VIP}:6443) readiness from spokes..."
-for i in {1..20}; do
-  if docker exec spoke1-control-plane curl -k -m 2 -s "https://${WG_VIP}:6443/version" >/dev/null 2>&1; then
-    log_success "Gateway VIP is healthy and routing spoke traffic!"
-    break
-  fi
-  sleep 1
-done
-
-for spoke in spoke1 spoke2; do
-  # Ensure clusteradm binary is available inside the spoke container
-  if ! docker exec "${spoke}-control-plane" test -f /usr/local/bin/clusteradm; then
-    docker cp /usr/local/bin/clusteradm "${spoke}-control-plane:/usr/local/bin/clusteradm"
+  local envoy_image="01sandbox-envoy:v1"
+  local envoy_cmd="wg-quick up wg0 && envoy -c /etc/envoy/envoy.yaml"
+  if ! docker image inspect "$envoy_image" >/dev/null 2>&1; then
+    envoy_image="envoyproxy/envoy:v1.31-latest"
+    envoy_cmd="apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq wireguard-tools iproute2 iptables >/dev/null 2>&1 || true; wg-quick up wg0; envoy -c /etc/envoy/envoy.yaml"
   fi
 
-  SPOKE_READY=$(kubectl --context kind-primaryhub get managedcluster "$spoke" -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null || echo "False")
-  if [ "$SPOKE_READY" == "True" ]; then
-    log_info "Spoke '$spoke' is already joined and Available."
+  log_info "Starting envoy-gateway using $envoy_image..."
+  docker run -d --name envoy-gateway \
+    --restart unless-stopped \
+    --privileged --user root \
+    --cap-add=NET_ADMIN --cap-add=SYS_MODULE \
+    --net "$TRANSIT_NET_NAME" --ip "$GW_TRANSIT_IP" \
+    -v "${ENVOY_DIR}/envoy.yaml":/etc/envoy/envoy.yaml:ro \
+    -v "${ENVOY_DIR}/wg0.conf":/etc/wireguard/wg0.conf:ro \
+    --entrypoint /bin/sh \
+    "$envoy_image" -c "$envoy_cmd"
+
+  # Commit to fast-start image if packages were freshly installed
+  [ "$envoy_image" != "01sandbox-envoy:v1" ] && \
+    (docker commit --pause=false envoy-gateway 01sandbox-envoy:v1 >/dev/null 2>&1 &) || true
+
+  log_info "Verifying VIP ${WG_VIP} reachability from primaryhub..."
+  for i in {1..15}; do
+    if docker exec primaryhub-control-plane ping -c 1 -W 1 "$WG_VIP" >/dev/null 2>&1; then
+      log_success "VIP ${WG_VIP} reachable over WireGuard overlay!"; break
+    fi
+    sleep 1
+  done
+}
+
+# ── Phase 7: Verify shared Root CA + configure cluster-info VIP ───────────────
+phase_07_verify_root_ca_and_vip() {
+  log_step "PHASE 7: Verifying Shared Root CA & VIP TLS SANs"
+
+  local primary_ca secondary_ca
+  primary_ca=$(docker exec primaryhub-control-plane   sha256sum /etc/kubernetes/pki/ca.crt | awk '{print $1}')
+  secondary_ca=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt | awk '{print $1}')
+
+  if [ "$primary_ca" != "$secondary_ca" ]; then
+    log_error "Root CA MISMATCH between primaryhub and secondaryhub!"
+    exit 1
+  fi
+  log_success "Root CA synchronized (${primary_ca})."
+
+  local primary_sa secondary_sa
+  primary_sa=$(docker exec primaryhub-control-plane     sha256sum /etc/kubernetes/pki/sa.pub 2>/dev/null | awk '{print $1}' || echo "none")
+  secondary_sa=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/sa.pub 2>/dev/null | awk '{print $1}' || echo "none")
+
+  if [ "$primary_sa" != "$secondary_sa" ]; then
+    log_info "Syncing ServiceAccount keys from primaryhub to secondaryhub..."
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
+    docker cp "${PKI_DIR}/sa.key" secondaryhub-control-plane:/etc/kubernetes/pki/sa.key
+    docker cp "${PKI_DIR}/sa.pub" secondaryhub-control-plane:/etc/kubernetes/pki/sa.pub
+  fi
+  log_success "ServiceAccount keys synchronized."
+
+  log_info "Updating cluster-info to advertise Gateway VIP..."
+  for ctx in kind-primaryhub kind-secondaryhub; do
+    kubectl --context "$ctx" get configmap cluster-info -n kube-public -o yaml 2>/dev/null | \
+      sed "s|server:.*|server: https://${WG_VIP}:6443|g" | \
+      kubectl --context "$ctx" apply -f - 2>/dev/null || true
+  done
+}
+
+# ── Phase 8: Initialize OCM on both hubs ──────────────────────────────────────
+phase_08_ocm_init() {
+  log_step "PHASE 8: Initializing OCM on PrimaryHub & SecondaryHub"
+
+  for hub in primaryhub secondaryhub; do
+    log_info "Checking OCM on $hub..."
+    if ! kubectl --context "kind-${hub}" get crd \
+         managedclusters.cluster.open-cluster-management.io >/dev/null 2>&1; then
+      clusteradm init --context "kind-${hub}" --wait || true
+    else
+      log_info "OCM already initialized on $hub."
+    fi
+  done
+
+  local auto_acceptor="${SANDBOX_REPO_DIR}/docs/multi-cluster/vm-level-ocm-multi-cluster/manifests/ocm-auto-acceptor-k8s.yaml"
+  [ ! -f "$auto_acceptor" ] && auto_acceptor="${ROOT_DIR}/docs/multi-cluster/vm-level-ocm-multi-cluster/manifests/ocm-auto-acceptor-k8s.yaml"
+  if [ -f "$auto_acceptor" ]; then
+    log_info "Deploying ocm-auto-acceptor on primaryhub..."
+    kubectl --context kind-primaryhub apply -f "$auto_acceptor" || true
+  fi
+}
+
+# ── Phase 9: Create application namespaces on both hubs ───────────────────────
+phase_09_create_namespaces() {
+  log_step "PHASE 9: Creating Application Namespaces on Hub Clusters"
+
+  for hub in primaryhub secondaryhub; do
+    for ns in opensandbox-system metallb-system agentgateway-system; do
+      kubectl --context "kind-${hub}" create namespace "$ns" \
+        --dry-run=client -o yaml | kubectl --context "kind-${hub}" apply -f -
+    done
+  done
+
+  log_success "Namespaces ready on both hubs."
+}
+
+# ── Phase 10: Build & load custom opensandbox-server image ────────────────────
+phase_10_load_custom_image() {
+  log_step "PHASE 10: Building & Loading Custom opensandbox-server Image"
+
+  local img="01community/01sandbox-opensandbox-server:v0.7.10-ocm"
+  if ! docker image inspect "$img" >/dev/null 2>&1; then
+    log_info "Ensuring 01-Sandbox repository is available for build..."
+    ensure_sandbox_repo
+
+    if [ ! -d "${OPENSANDBOX_BUILD_DIR}" ] || [ ! -f "${OPENSANDBOX_BUILD_DIR}/Dockerfile" ]; then
+      log_error "Dockerfile not found at detected build path: ${OPENSANDBOX_BUILD_DIR}"
+      log_error "Failed to locate opensandbox-server/docker-build context."
+      exit 1
+    fi
+
+    log_info "Building $img from detected path: ${OPENSANDBOX_BUILD_DIR}..."
+    docker build -t "$img" "${OPENSANDBOX_BUILD_DIR}"
+    log_success "Built $img successfully."
   else
-    log_info "Joining $spoke via Gateway VIP (https://${WG_VIP}:6443)..."
+    log_info "Image $img already exists in local Docker cache."
+  fi
+
+  for hub in primaryhub secondaryhub; do
+    log_info "Loading $img into $hub..."
+    kind load docker-image "$img" --name "$hub" 2>/dev/null || true
+  done
+
+  log_success "Custom image ready on both hubs."
+}
+
+# ── Phase 11: PrimaryHub – PostgreSQL first, then full stack ──────────────────
+phase_11_primaryhub_deploy() {
+  log_step "PHASE 11a: PrimaryHub – PostgreSQL (CNPG Primary) First"
+
+  # Ensure codeInspector repository and templates are ready
+  ensure_sandbox_repo
+  local cmap_tmpl="${CODE_INSPECTOR_DIR}/charts/apiServer/templates/configmap.yaml"
+  if [ -f "$cmap_tmpl" ]; then
+    sed -i 's/tpl \$value \$/tpl (\$value | toString) \$/g' "$cmap_tmpl" 2>/dev/null || true
+  fi
+
+  # Ensure no stale validating admission policy blocks the release
+  kubectl --context kind-primaryhub delete validatingadmissionpolicy safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+  kubectl --context kind-primaryhub delete validatingadmissionpolicybinding safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+
+  log_info "Deploying CNPG operator + PostgreSQL primary on primaryhub..."
+  helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
+    --skip-crds \
+    --kube-context kind-primaryhub \
+    --namespace opensandbox-system \
+    --create-namespace \
+    --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --set agentgateway.enabled=false \
+    --set "agentgateway-controller.enabled=false" \
+    --set apiServer.enabled=true \
+    --set apiServer.failoverController.enabled=false \
+    --set-string apiServer.configMap.ALLOW_MOCK_KEYS="true" \
+    --set opensandbox.enabled=false \
+    --set metallb.enabled=false \
+    --set "sealed-secrets.enabled=false" \
+    --set prometheus.enabled=false \
+    --set grafana.enabled=false \
+    --set opensandboxResourcePool.enabled=false \
+    --atomic --timeout 5m
+
+  log_info "Waiting for postgresql-primary-1 to be Ready before deploying full stack..."
+  _wait_for_pod "kind-primaryhub" "opensandbox-system" "postgresql-primary-1" 60 "postgresql-primary-1"
+
+  log_step "PHASE 11b: PrimaryHub – Full Stack (agentgateway, apiServer, opensandbox, metallb…)"
+
+  helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
+    --skip-crds \
+    --kube-context kind-primaryhub \
+    --namespace opensandbox-system \
+    --create-namespace \
+    --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --set-string apiServer.configMap.ALLOW_MOCK_KEYS="true" \
+    --timeout 10m
+
+  kubectl --context kind-primaryhub rollout status deployment/valkey \
+    -n opensandbox-system --timeout=120s || true
+  kubectl --context kind-primaryhub rollout status deployment/sandbox-api \
+    -n opensandbox-system --timeout=120s || true
+
+  log_success "PrimaryHub full stack deployed."
+}
+
+# ── Phase 12: SecondaryHub – PostgreSQL first, then full stack ────────────────
+phase_12_secondaryhub_deploy() {
+  log_step "PHASE 12a: SecondaryHub – PostgreSQL (CNPG Standby) First"
+
+  # Ensure codeInspector repository and templates are ready
+  ensure_sandbox_repo
+  local cmap_tmpl="${CODE_INSPECTOR_DIR}/charts/apiServer/templates/configmap.yaml"
+  if [ -f "$cmap_tmpl" ]; then
+    sed -i 's/tpl \$value \$/tpl (\$value | toString) \$/g' "$cmap_tmpl" 2>/dev/null || true
+  fi
+
+  # Ensure no stale validating admission policy blocks the release
+  kubectl --context kind-secondaryhub delete validatingadmissionpolicy safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+  kubectl --context kind-secondaryhub delete validatingadmissionpolicybinding safe-upgrades.gateway.networking.k8s.io >/dev/null 2>&1 || true
+
+  log_info "Deploying CNPG standby on secondaryhub (WAL from ${WG_HUB1_IP}:30432)..."
+  helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
+    --skip-crds \
+    --kube-context kind-secondaryhub \
+    --namespace opensandbox-system \
+    --create-namespace \
+    --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --values "${CODE_INSPECTOR_DIR}/values-secondary.yaml" \
+    --set agentgateway.enabled=false \
+    --set "agentgateway-controller.enabled=false" \
+    --set apiServer.enabled=true \
+    --set apiServer.failoverController.enabled=false \
+    --set-string apiServer.configMap.ALLOW_MOCK_KEYS="true" \
+    --set apiServer.valkey.replication.primaryHost="${WG_HUB1_IP}" \
+    --set apiServer.valkey.replication.primaryPort=30379 \
+    --set apiServer.cnpg.replication.primaryHost="${WG_HUB1_IP}" \
+    --set apiServer.cnpg.replication.primaryPort=30432 \
+    --set apiServer.failoverController.primaryHost="${WG_HUB1_IP}" \
+    --set apiServer.failoverController.primaryPort=30432 \
+    --set opensandbox.enabled=false \
+    --set metallb.enabled=false \
+    --set "sealed-secrets.enabled=false" \
+    --set prometheus.enabled=false \
+    --set grafana.enabled=false \
+    --set opensandboxResourcePool.enabled=false \
+    --atomic --timeout 5m
+
+  log_info "Waiting for postgresql-secondary-1 to be Ready before deploying full stack..."
+  _wait_for_pod "kind-secondaryhub" "opensandbox-system" "postgresql-secondary-1" 60 "postgresql-secondary-1"
+
+  log_step "PHASE 12b: SecondaryHub – Full Stack + Failover Controller"
+
+  helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
+    --skip-crds \
+    --kube-context kind-secondaryhub \
+    --namespace opensandbox-system \
+    --create-namespace \
+    --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --values "${CODE_INSPECTOR_DIR}/values-secondary.yaml" \
+    --set apiServer.valkey.replication.primaryHost="${WG_HUB1_IP}" \
+    --set apiServer.valkey.replication.primaryPort=30379 \
+    --set apiServer.cnpg.replication.primaryHost="${WG_HUB1_IP}" \
+    --set apiServer.cnpg.replication.primaryPort=30432 \
+    --set apiServer.failoverController.primaryHost="${WG_HUB1_IP}" \
+    --set apiServer.failoverController.primaryPort=30432 \
+    --set-string apiServer.configMap.ALLOW_MOCK_KEYS="true" \
+    --timeout 10m
+
+  kubectl --context kind-secondaryhub rollout status deployment/valkey \
+    -n opensandbox-system --timeout=120s || true
+  kubectl --context kind-secondaryhub rollout status deployment/sandbox-api \
+    -n opensandbox-system --timeout=120s || true
+  kubectl --context kind-secondaryhub rollout status deployment/ocm-failover-controller \
+    -n opensandbox-system --timeout=120s || true
+
+  # Pre-render secondary CNPG re-clone manifest for in-controller failback
+  mkdir -p "$SEC_DIR"
+  helm template codeinspector "${CODE_INSPECTOR_DIR}" \
+    -s charts/apiServer/templates/cnpg-cluster.yaml \
+    --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --values "${CODE_INSPECTOR_DIR}/values-secondary.yaml" \
+    --set apiServer.cnpg.replication.primaryHost="${WG_HUB1_IP}" \
+    --set apiServer.cnpg.replication.primaryPort=30432 \
+    > "${SEC_DIR}/postgresql-secondary-cluster.yaml"
+  docker cp "${SEC_DIR}/postgresql-secondary-cluster.yaml" \
+    secondaryhub-control-plane:/root/postgresql-secondary-cluster.yaml 2>/dev/null || true
+
+  log_success "SecondaryHub full stack deployed."
+}
+
+# ── Phase 13: Create spoke clusters ───────────────────────────────────────────
+phase_13_create_spoke_clusters() {
+  log_step "PHASE 13: Creating Spoke Clusters"
+
+  _create_kind_cluster "spoke1" "10.246.0.0/16" "10.98.0.0/16"  "$SPOKE1_TRANSIT_IP" "false"
+  _create_kind_cluster "spoke2" "10.247.0.0/16" "10.100.0.0/16" "$SPOKE2_TRANSIT_IP" "false"
+
+  log_success "Spoke clusters created."
+}
+
+# ── Phase 14: WireGuard on spoke clusters (+ hub re-apply with spoke peers) ───
+phase_14_wireguard_on_all_clusters() {
+  log_step "PHASE 14: WireGuard on All Clusters (Spokes + Hub Re-apply)"
+
+  _setup_wireguard "spoke1-control-plane" "spoke1" "$WG_SPOKE1_IP"
+  _setup_wireguard "spoke2-control-plane" "spoke2" "$WG_SPOKE2_IP"
+
+  # Re-apply on hubs so their wg0.conf now includes the spoke [Peer] entries
+  log_info "Re-applying WireGuard on hubs (spoke peers now included)..."
+  _setup_wireguard "primaryhub-control-plane"   "primaryhub"   "$WG_HUB1_IP"
+  _setup_wireguard "secondaryhub-control-plane" "secondaryhub" "$WG_HUB2_IP"
+
+  log_success "WireGuard overlay peer-complete on all 4 clusters."
+}
+
+# ── Phase 15: Install CRDs on spoke clusters ──────────────────────────────────
+phase_15_install_crds_on_spokes() {
+  log_step "PHASE 15: Installing CRDs on Spoke Clusters"
+
+  for spoke in spoke1 spoke2; do
+    _install_crds "kind-${spoke}"
+  done
+  log_success "CRDs installed on all spoke clusters."
+}
+
+# ── Phase 16: Join spokes to OCM via Gateway VIP ─────────────────────────────
+phase_16_join_spokes_to_ocm() {
+  log_step "PHASE 16: Joining Spoke Clusters to OCM via VIP (${WG_VIP}:6443)"
+
+  log_info "Waiting for Gateway VIP to respond from spokes..."
+  for i in {1..20}; do
+    if docker exec spoke1-control-plane curl -k -m 2 -s \
+         "https://${WG_VIP}:6443/version" >/dev/null 2>&1; then
+      log_success "Gateway VIP is healthy!"; break
+    fi
+    sleep 2
+  done
+
+  local hub_token
+  hub_token=$(clusteradm get token --context kind-primaryhub 2>/dev/null \
+    | grep '^token=' | cut -d'=' -f2)
+
+  for spoke in spoke1 spoke2; do
+    if ! docker exec "${spoke}-control-plane" test -f /usr/local/bin/clusteradm; then
+      docker cp /usr/local/bin/clusteradm "${spoke}-control-plane:/usr/local/bin/clusteradm"
+    fi
+
+    local spoke_ready
+    spoke_ready=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
+      -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' \
+      2>/dev/null || echo "False")
+
+    if [ "$spoke_ready" == "True" ]; then
+      log_info "Spoke '$spoke' already joined and Available."
+      continue
+    fi
+
+    log_info "Joining $spoke via VIP (https://${WG_VIP}:6443)..."
     for attempt in {1..3}; do
       docker exec "${spoke}-control-plane" bash -c "
         export KUBECONFIG=/etc/kubernetes/admin.conf
         clusteradm join \
-          --hub-token '$HUB_TOKEN' \
+          --hub-token '${hub_token}' \
           --hub-apiserver 'https://${WG_VIP}:6443' \
-          --cluster-name '$spoke'
+          --cluster-name '${spoke}'
       " 2>/dev/null || true
 
-      # Poll and accept CSRs on PrimaryHub
       for i in {1..20}; do
-        if clusteradm accept --context kind-primaryhub --clusters "$spoke" 2>/dev/null; then
-          log_success "Spoke '$spoke' accepted on PrimaryHub!"
-          break
-        fi
+        clusteradm accept --context kind-primaryhub --clusters "$spoke" 2>/dev/null && break
         sleep 2
       done
 
       sleep 3
-      if [ "$(kubectl --context kind-primaryhub get managedcluster "$spoke" -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null)" == "True" ]; then
-        log_success "Spoke '$spoke' is joined and Available!"
-        break
+      local ready
+      ready=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
+        -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' \
+        2>/dev/null || echo "False")
+      if [ "$ready" == "True" ]; then
+        log_success "Spoke '$spoke' joined and Available!"; break
       fi
-      log_warn "Join attempt $attempt for $spoke not yet Available. Retrying in 2s..."
+      log_warn "Join attempt $attempt for $spoke not yet Available – retrying..."
       sleep 2
     done
-  fi
-done
-
-# Ensure second-stage work CSRs are approved
-for spoke in spoke1 spoke2; do
-  clusteradm accept --context kind-primaryhub --clusters "$spoke" 2>/dev/null || true
-done
-
-# Synchronize spoke registration resources and RBAC to secondaryhub for seamless failover
-log_info "Synchronizing spoke registration and RBAC to secondaryhub..."
-for spoke in spoke1 spoke2; do
-  kubectl --context kind-primaryhub get namespace "$spoke" -o yaml 2>/dev/null | kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-  kubectl --context kind-primaryhub get clusterrole "open-cluster-management:managedcluster:${spoke}" -o yaml 2>/dev/null | kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-  kubectl --context kind-primaryhub get clusterrolebinding "open-cluster-management:managedcluster:${spoke}" -o yaml 2>/dev/null | kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-  kubectl --context kind-primaryhub get rolebinding -n "$spoke" -o yaml 2>/dev/null | kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-  kubectl --context kind-primaryhub get managedcluster "$spoke" -o yaml 2>/dev/null | kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-done
-kubectl --context kind-primaryhub get managedclusterset sandbox-spokes -o yaml 2>/dev/null | kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-kubectl --context kind-primaryhub get managedclustersetbinding -A -o yaml 2>/dev/null | kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-
-kubectl --context kind-primaryhub label managedcluster spoke1 wireguard-ip="${WG_SPOKE1_IP}" sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true --overwrite 2>/dev/null || true
-kubectl --context kind-primaryhub label managedcluster spoke2 wireguard-ip="${WG_SPOKE2_IP}" sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true --overwrite 2>/dev/null || true
-kubectl --context kind-secondaryhub label managedcluster spoke1 wireguard-ip="${WG_SPOKE1_IP}" sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true --overwrite 2>/dev/null || true
-kubectl --context kind-secondaryhub label managedcluster spoke2 wireguard-ip="${WG_SPOKE2_IP}" sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true --overwrite 2>/dev/null || true
-log_success "Spoke clusters joined through VIP and labeled with WireGuard IPs."
-
-# ==============================================================================
-# PHASE 9: DEPLOY CLOUDNATIVE-PG & VALKEY REPLICATION
-# ==============================================================================
-log_step "PHASE 9: Deploying CloudNativePG & Valkey Continuous Replication"
-
-# Ensure required namespaces exist on both hubs
-for hub in primaryhub secondaryhub; do
-  for ns in opensandbox-system metallb-system agentgateway-system; do
-    kubectl --context "kind-${hub}" create namespace "$ns" --dry-run=client -o yaml | kubectl --context "kind-${hub}" apply -f -
   done
-done
 
-# Pre-apply all CustomResourceDefinitions server-side on both hubs
-for hub in primaryhub secondaryhub; do
-  log_info "Applying all CustomResourceDefinitions on $hub..."
-  for f in "${CODE_INSPECTOR_DIR}/crds/"*.yaml; do
-    kubectl --context "kind-${hub}" apply --server-side --force-conflicts -f "$f" 2>/dev/null || true
+  # Second-pass CSR approval (work-agent registration)
+  for spoke in spoke1 spoke2; do
+    clusteradm accept --context kind-primaryhub --clusters "$spoke" 2>/dev/null || true
   done
-done
+}
 
-# Ensure local custom opensandbox-server image is built and loaded into both hubs
-OSBX_IMG="01community/01sandbox-opensandbox-server:v0.7.10-ocm"
-if ! docker image inspect "$OSBX_IMG" >/dev/null 2>&1; then
-  log_info "Building local custom OCM image '$OSBX_IMG'..."
-  docker build -t "$OSBX_IMG" "${ROOT_DIR}/opensandbox-server/docker-build"
-fi
+# ── Phase 17: Label spokes & sync registration to SecondaryHub ────────────────
+phase_17_sync_spokes_to_secondaryhub() {
+  log_step "PHASE 17: Labeling Spokes & Syncing Registration to SecondaryHub"
 
-for hub in primaryhub secondaryhub; do
-  log_info "Loading $OSBX_IMG into $hub..."
-  kind load docker-image "$OSBX_IMG" --name "$hub" 2>/dev/null || true
-done
+  for spoke in spoke1 spoke2; do
+    local spoke_wg_ip
+    [ "$spoke" == "spoke1" ] && spoke_wg_ip="$WG_SPOKE1_IP" || spoke_wg_ip="$WG_SPOKE2_IP"
 
-# Deploy PrimaryHub (Master RW)
-log_info "Deploying codeinspector on primaryhub (Master RW)..."
-helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
-  --kube-context kind-primaryhub \
-  --namespace opensandbox-system \
-  --create-namespace \
-  --values "${CODE_INSPECTOR_DIR}/values.yaml" \
-  --set apiServer.configMap.ALLOW_MOCK_KEYS='true'
+    for ctx in kind-primaryhub kind-secondaryhub; do
+      kubectl --context "$ctx" label managedcluster "$spoke" \
+        wireguard-ip="${spoke_wg_ip}" \
+        sandbox-workload-capable=true \
+        runtime.gvisor=true runtime.kata=true \
+        --overwrite 2>/dev/null || true
+    done
+  done
 
-# Deploy SecondaryHub (Standby RO streaming from 10.99.0.1:5432)
-log_info "Deploying codeinspector on secondaryhub (Standby RO streaming from ${WG_HUB1_IP})..."
-helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
-  --kube-context kind-secondaryhub \
-  --namespace opensandbox-system \
-  --create-namespace \
-  --values "${CODE_INSPECTOR_DIR}/values.yaml" \
-  --values "${CODE_INSPECTOR_DIR}/values-secondary.yaml" \
-  --set apiServer.valkey.replication.primaryHost="${WG_HUB1_IP}" \
-  --set apiServer.valkey.replication.primaryPort=30379 \
-  --set apiServer.cnpg.replication.primaryHost="${WG_HUB1_IP}" \
-  --set apiServer.cnpg.replication.primaryPort=30432 \
-  --set apiServer.failoverController.primaryHost="${WG_HUB1_IP}" \
-  --set apiServer.failoverController.primaryPort=30432 \
-  --set apiServer.configMap.ALLOW_MOCK_KEYS='true'
+  log_info "Syncing spoke registration resources to secondaryhub..."
+  for spoke in spoke1 spoke2; do
+    kubectl --context kind-primaryhub get namespace "$spoke" -o yaml 2>/dev/null | \
+      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+    kubectl --context kind-primaryhub get clusterrole \
+      "open-cluster-management:managedcluster:${spoke}" -o yaml 2>/dev/null | \
+      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+    kubectl --context kind-primaryhub get clusterrolebinding \
+      "open-cluster-management:managedcluster:${spoke}" -o yaml 2>/dev/null | \
+      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+    kubectl --context kind-primaryhub get rolebinding -n "$spoke" -o yaml 2>/dev/null | \
+      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+    kubectl --context kind-primaryhub get managedcluster "$spoke" -o yaml 2>/dev/null | \
+      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+  done
 
-# Generate secondary standalone template for split-brain safe re-cloning
-mkdir -p "$SEC_DIR"
-helm template codeinspector "${CODE_INSPECTOR_DIR}" \
-  -s charts/apiServer/templates/cnpg-cluster.yaml \
-  --values "${CODE_INSPECTOR_DIR}/values.yaml" \
-  --values "${CODE_INSPECTOR_DIR}/values-secondary.yaml" \
-  --set apiServer.cnpg.replication.primaryHost="${WG_HUB1_IP}" \
-  --set apiServer.cnpg.replication.primaryPort=30432 \
-  --set apiServer.failoverController.primaryHost="${WG_HUB1_IP}" \
-  --set apiServer.failoverController.primaryPort=30432 \
-  > "${SEC_DIR}/postgresql-secondary-cluster.yaml"
+  kubectl --context kind-primaryhub get managedclusterset sandbox-spokes -o yaml 2>/dev/null | \
+    kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+  kubectl --context kind-primaryhub get managedclustersetbinding -A -o yaml 2>/dev/null | \
+    kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
 
-docker cp "${SEC_DIR}/postgresql-secondary-cluster.yaml" secondaryhub-control-plane:/root/postgresql-secondary-cluster.yaml 2>/dev/null || true
+  log_success "Spoke registration synced to both hubs."
+}
 
-log_info "Waiting for database and cache pods to become Ready..."
-kubectl --context kind-primaryhub rollout status deployment/valkey -n opensandbox-system --timeout=120s || true
-kubectl --context kind-secondaryhub rollout status deployment/valkey -n opensandbox-system --timeout=120s || true
+# ── Phase 18: End-to-end verification + summary ───────────────────────────────
+phase_18_verify_and_summary() {
+  run_verification
 
-for i in {1..45}; do
-  if kubectl --context kind-primaryhub get pod -n opensandbox-system postgresql-primary-1 2>/dev/null | grep -q '1/1.*Running'; then
-    log_success "postgresql-primary-1 is 1/1 Running!"
-    break
-  fi
-  log_info "Waiting for postgresql-primary-1 to become Ready ($i/45)..."
-  sleep 3
-done
-
-for i in {1..45}; do
-  if kubectl --context kind-secondaryhub get pod -n opensandbox-system postgresql-secondary-1 2>/dev/null | grep -q '1/1.*Running'; then
-    log_success "postgresql-secondary-1 is 1/1 Running!"
-    break
-  fi
-  log_info "Waiting for postgresql-secondary-1 to become Ready ($i/45)..."
-  sleep 3
-done
-
-log_success "CloudNativePG and Valkey replication deployed across WireGuard overlay."
+  echo -e "\n${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
+  echo -e "${GREEN}${BOLD}  MULTI-CLUSTER SETUP COMPLETE${NC}"
+  echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
+  echo -e "  Transit Network : ${TRANSIT_NET_NAME} (${TRANSIT_SUBNET})"
+  echo -e "  WireGuard Mesh  : ${WG_SUBNET_PREFIX}.0/24 (encrypted overlay)"
+  echo -e "  Gateway VIP     : https://${WG_VIP}:6443 & :80 (Envoy)"
+  echo -e "  PrimaryHub      : ${WG_HUB1_IP} (Master Read-Write)"
+  echo -e "  SecondaryHub    : ${WG_HUB2_IP} (Warm Standby)"
+  echo -e "  Spoke1          : ${WG_SPOKE1_IP} (workload)"
+  echo -e "  Spoke2          : ${WG_SPOKE2_IP} (workload)"
+  echo -e "  DB Replication  : PostgreSQL physical WAL streaming (primary -> standby)"
+  echo -e "  Failover Ctrl   : ocm-failover-controller active on SecondaryHub"
+  echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}\n"
+}
 
 # ==============================================================================
-# PHASE 10: VERIFY IN-CLUSTER FAILOVER CONTROLLER
+# ══ MAIN – calls every phase in order ════════════════════════════════════════
+# To skip or reorder a phase, comment it out or move it below.
 # ==============================================================================
-log_step "PHASE 10: Verifying In-Cluster Failover Controller on SecondaryHub"
-
-kubectl --context kind-secondaryhub rollout status deployment/ocm-failover-controller -n opensandbox-system --timeout=120s || true
-log_success "In-cluster failover controller active on secondaryhub."
+main() {
+  phase_01_preflight
+  phase_02_transit_network_and_wg_keys
+  phase_03_create_hub_clusters
+  phase_04_install_crds_on_hubs
+  phase_05_wireguard_on_hubs
+  phase_06_envoy_gateway
+  phase_07_verify_root_ca_and_vip
+  phase_08_ocm_init
+  phase_09_create_namespaces
+  phase_10_load_custom_image
+  phase_11_primaryhub_deploy
+  phase_12_secondaryhub_deploy
+  phase_13_create_spoke_clusters
+  phase_14_wireguard_on_all_clusters
+  phase_15_install_crds_on_spokes
+  phase_16_join_spokes_to_ocm
+  phase_17_sync_spokes_to_secondaryhub
+  phase_18_verify_and_summary
+}
 
 # ==============================================================================
-# PHASE 11: END-TO-END VERIFICATION & HEALTH CHECKS
+# Entry point
 # ==============================================================================
-run_verification
-
-echo -e "\n${GREEN}${BOLD}======================================================================${NC}"
-echo -e "${GREEN}${BOLD}🎉 PURE DOCKER MULTI-CLUSTER SETUP COMPLETE (ZERO VMS REQUIRED)!${NC}"
-echo -e "${GREEN}${BOLD}======================================================================${NC}"
-echo -e "Summary:"
-echo -e "  - Transit Bridge Network:     ${TRANSIT_NET_NAME} (${TRANSIT_SUBNET})"
-echo -e "  - WireGuard Overlay Mesh:     ${WG_SUBNET_PREFIX}.0/24 (Encrypted In-Container)"
-echo -e "  - Gateway VIP:                https://${WG_VIP}:6443 & :80 (Envoy Proxy)"
-echo -e "  - PrimaryHub:                 ${WG_HUB1_IP} (Master Read-Write)"
-echo -e "  - SecondaryHub:               ${WG_HUB2_IP} (Standby Read-Only Replica)"
-echo -e "  - Spokes:                     spoke1 (${WG_SPOKE1_IP}), spoke2 (${WG_SPOKE2_IP}) via VIP"
-echo -e "  - Database Replication:       PostgreSQL physical streaming replication active"
-echo -e "  - Automated Failover:         ocm-failover-controller active on SecondaryHub"
-echo -e "======================================================================\n"
+case "$ACTION" in
+  clean)  cleanup_environment ;;
+  verify) run_verification    ;;
+  *)      main                ;;
+esac
