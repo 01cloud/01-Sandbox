@@ -1636,75 +1636,289 @@ phase_15_install_crds_on_spokes() {
 }
 
 # ── Phase 16: Join spokes to OCM via Gateway VIP ─────────────────────────────
-phase_16_join_spokes_to_ocm() {
-  log_step "PHASE 16: Joining Spoke Clusters to OCM via VIP (${WG_VIP}:6443)"
+# ==============================================================================
+# Replacement for phase_16_join_spokes_to_ocm() in docker-multi-cluster.sh
+# (delete the old function + paste this block in its place; main() is unchanged)
+#
+# Flow per spoke:
+#   1. clusteradm join against PrimaryHub's WG IP (installs klusterlet operator + CR)
+#   2. Create one bootstrap-kubeconfig secret per hub in open-cluster-management-agent
+#        primaryhub-kubeconfig   -> https://10.99.0.1:6443  (index 0 = priority 1)
+#        secondaryhub-kubeconfig -> https://10.99.0.2:6443  (index 1 = priority 2)
+#   3. Patch klusterlet: MultipleHubs feature gate + LocalSecrets bootstrap
+#   4. Accept the spoke's CSR on the hub(s) and wait for Available
+# ==============================================================================
 
-  log_info "Waiting for Gateway VIP to respond from spokes..."
-  local vip_ok=false
-  for i in {1..20}; do
-    if docker exec spoke1-control-plane curl -k -m 2 -s \
-         "https://${WG_VIP}:6443/version" >/dev/null 2>&1; then
-      log_success "Gateway VIP is healthy!"; vip_ok=true; break
+# Build a bootstrap kubeconfig that talks DIRECTLY to one hub over the WG overlay.
+# Both hubs share the same Root CA (phase 3/7), so one CA bundle works for both.
+# Args: <out-file> <server-url> <token>
+_write_hub_bootstrap_kubeconfig() {
+  local out="$1" server="$2" token="$3" ca_b64
+  ca_b64=$(base64 -w0 < "${PKI_DIR}/ca.crt")
+  cat > "$out" <<EOF
+apiVersion: v1
+kind: Config
+clusters:
+- name: hub
+  cluster:
+    server: ${server}
+    certificate-authority-data: ${ca_b64}
+contexts:
+- name: bootstrap
+  context:
+    cluster: hub
+    user: bootstrap
+current-context: bootstrap
+users:
+- name: bootstrap
+  user:
+    token: ${token}
+EOF
+  chmod 600 "$out"
+}
+
+# Extract the join token from `clusteradm get token`
+# Args: <hub-context>
+_get_hub_token() {
+  local ctx="$1" out tok err_file
+  err_file=$(mktemp)
+
+  # After an apiserver restart the OCM hub controllers need a moment to recover
+  kubectl --context "$ctx" -n open-cluster-management-hub wait \
+    --for=condition=Available deployment --all --timeout=120s >&2 2>/dev/null || true
+
+  for i in $(seq 1 20); do
+    out=$(clusteradm get token --context "$ctx" 2>"$err_file" || true)
+    tok=$(echo "$out" | grep '^token=' | head -1 | cut -d'=' -f2- || true)
+    if [ -z "$tok" ]; then
+      tok=$(echo "$out" | grep -oP '(?<=--hub-token )\S+' | head -1 || true)
+    fi
+    if [ -n "$tok" ]; then
+      rm -f "$err_file"
+      echo "$tok"
+      return 0
+    fi
+    sleep 5
+  done
+
+  log_warn "clusteradm get token failed for ${ctx}. Last error:" >&2
+  sed 's/^/    /' "$err_file" >&2 || true
+  kubectl --context "$ctx" get clustermanager 2>&1 | sed 's/^/    /' >&2 || true
+  kubectl --context "$ctx" -n open-cluster-management-hub get pods 2>&1 | sed 's/^/    /' >&2 || true
+  rm -f "$err_file"
+  echo ""
+}
+
+
+_dump_klusterlet_debug() {
+  local ctx="$1"
+  log_warn "── Klusterlet debug for ${ctx} ──"
+  kubectl --context "$ctx" -n open-cluster-management-agent get pods 2>&1 || true
+  kubectl --context "$ctx" -n open-cluster-management-agent get secrets 2>&1 || true
+  kubectl --context "$ctx" -n open-cluster-management-agent logs deploy/klusterlet-registration-agent --tail=30 2>&1 || true
+  kubectl --context "$ctx" get klusterlet klusterlet \
+    -o jsonpath='{range .status.conditions[*]}{.type}={.status} {.message}{"\n"}{end}' 2>&1 || true
+}
+
+# Make sure a hub's kube-apiserver serving cert is valid for the WG overlay IPs.
+# Existing KinD clusters keep their old cert, so the certSANs in the kind config
+# are not applied retroactively. This regenerates apiserver.crt (same CA) with the
+# extra SANs and restarts the apiserver static pod. Idempotent.
+# Args: <cluster-name> <service-cidr>
+_ensure_hub_apiserver_sans() {
+  local cluster="$1" svc_cidr="$2" node="${1}-control-plane"
+  local crt_text
+  crt_text=$(docker exec "$node" cat /etc/kubernetes/pki/apiserver.crt 2>/dev/null \
+             | openssl x509 -noout -text 2>/dev/null || true)
+
+  if echo "$crt_text" | grep -q "IP Address:${WG_HUB1_IP}\b" && \
+     echo "$crt_text" | grep -q "IP Address:${WG_HUB2_IP}\b" && \
+     echo "$crt_text" | grep -q "IP Address:${WG_VIP}\b"; then
+    log_info "${cluster}: apiserver cert already contains WG SANs."
+    return 0
+  fi
+
+  log_warn "${cluster}: apiserver cert is missing WG SANs – regenerating (CA unchanged)..."
+  local node_ip transit_ip sans
+  node_ip=$(docker inspect -f '{{ .NetworkSettings.Networks.kind.IPAddress }}' "$node")
+  transit_ip=$(docker inspect -f "{{ (index .NetworkSettings.Networks \"${TRANSIT_NET_NAME}\").IPAddress }}" "$node" 2>/dev/null || true)
+  sans="localhost,127.0.0.1,0.0.0.0,${WG_HUB1_IP},${WG_HUB2_IP},${WG_VIP},${node_ip}"
+  [ -n "$transit_ip" ] && sans="${sans},${transit_ip}"
+
+  docker exec "$node" bash -c "
+    set -e
+    cd /etc/kubernetes/pki
+    mkdir -p /root/pki-backup && cp -f apiserver.crt apiserver.key /root/pki-backup/
+    rm -f apiserver.crt apiserver.key
+    kubeadm init phase certs apiserver \
+      --cert-dir /etc/kubernetes/pki \
+      --kubernetes-version \$(kubeadm version -o short) \
+      --service-cidr '${svc_cidr}' \
+      --apiserver-advertise-address '${node_ip}' \
+      --apiserver-cert-extra-sans '${sans}'
+    # kubelet recreates the static pod, which loads the new cert
+    crictl ps --name kube-apiserver -q | xargs -r crictl stop >/dev/null
+  "
+
+  log_info "${cluster}: waiting for kube-apiserver to come back..."
+  local ok=false
+  for i in $(seq 1 60); do
+    if docker exec "$node" curl -sk -m 3 https://127.0.0.1:6443/readyz >/dev/null 2>&1; then
+      ok=true; break
     fi
     sleep 2
   done
+  [ "$ok" = true ] || { log_error "${cluster}: apiserver did not become ready after cert rotation."; exit 1; }
 
-  if [ "$vip_ok" = false ]; then
-    log_warn "Gateway VIP (${WG_VIP}:6443) not responding from spoke1. Checking and restarting envoy-gateway..."
-    phase_06_envoy_gateway
-    sleep 3
+  if docker exec "$node" cat /etc/kubernetes/pki/apiserver.crt | openssl x509 -noout -text \
+       | grep -q "IP Address:${WG_HUB1_IP}\b"; then
+    log_success "${cluster}: apiserver cert now valid for ${WG_HUB1_IP}, ${WG_HUB2_IP}, ${WG_VIP}."
+  else
+    log_error "${cluster}: cert regeneration did not add the WG SANs."
+    exit 1
+  fi
+}
+
+phase_16_join_spokes_to_ocm() {
+  log_step "PHASE 16: Joining Spokes to OCM (MultipleHubs: primaryhub → secondaryhub)"
+
+  # Hubs must present a cert valid for their WG IPs, or spoke TLS will fail
+  _ensure_hub_apiserver_sans "primaryhub"   "10.96.0.0/16"
+  _ensure_hub_apiserver_sans "secondaryhub" "10.97.0.0/16"
+
+  local agent_ns="open-cluster-management-agent"
+  local hub1_url="https://${WG_HUB1_IP}:6443"
+  local hub2_url="https://${WG_HUB2_IP}:6443"
+
+  # ── Tokens (one per hub – each hub has its own bootstrap identity) ──────────
+  local hub1_token hub2_token
+  hub1_token=$(_get_hub_token kind-primaryhub)
+  hub2_token=$(_get_hub_token kind-secondaryhub)
+  if [ -z "$hub1_token" ] || [ -z "$hub2_token" ]; then
+    log_error "Could not obtain join token(s): primaryhub='${hub1_token:+ok}' secondaryhub='${hub2_token:+ok}'"
+    log_error "Is OCM initialised on both hubs? (phase 8)"
+    exit 1
   fi
 
-  local hub_token
-  hub_token=$(clusteradm get token --context kind-primaryhub 2>/dev/null \
-    | grep '^token=' | cut -d'=' -f2)
+  # Write bootstrap kubeconfigs (order matters: index 0 = primary)
+  _write_hub_bootstrap_kubeconfig "${STATE_DIR}/primaryhub-bootstrap.kubeconfig"   "$hub1_url" "$hub1_token"
+  _write_hub_bootstrap_kubeconfig "${STATE_DIR}/secondaryhub-bootstrap.kubeconfig" "$hub2_url" "$hub2_token"
 
   for spoke in spoke1 spoke2; do
-    if ! docker exec "${spoke}-control-plane" test -f /usr/local/bin/clusteradm; then
-      docker cp /usr/local/bin/clusteradm "${spoke}-control-plane:/usr/local/bin/clusteradm"
-    fi
+    local ctx="kind-${spoke}"
+    log_info "── ${spoke} ──"
 
-    local spoke_ready
-    spoke_ready=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
-      -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' \
-      2>/dev/null || echo "False")
+    # Underlay/overlay reachability sanity check (direct to each hub API server)
+    for target in "$hub1_url" "$hub2_url"; do
+      if docker exec "${spoke}-control-plane" curl -sk -m 5 "${target}/version" >/dev/null 2>&1; then
+        log_success "${spoke} can reach ${target}"
+      else
+        log_warn "${spoke} cannot reach ${target} over WireGuard – check phase 14."
+      fi
+    done
 
-    if [ "$spoke_ready" == "True" ]; then
-      log_info "Spoke '$spoke' already joined and Available."
-      continue
-    fi
-
-    log_info "Joining $spoke via VIP (https://${WG_VIP}:6443)..."
-    for attempt in {1..3}; do
+    # 1. Install klusterlet (operator + CR) if it is not there yet ──────────────
+    if ! kubectl --context "$ctx" get klusterlet klusterlet >/dev/null 2>&1; then
+      log_info "Running clusteradm join for ${spoke} (initial bootstrap via primaryhub)..."
+      # NOTE: must run INSIDE the spoke node – clusteradm contacts the hub API
+      # (cluster-info) and 10.99.0.x is only routable from within the WG overlay.
+      if ! docker exec "${spoke}-control-plane" test -x /usr/local/bin/clusteradm; then
+        docker cp "$(command -v clusteradm)" "${spoke}-control-plane:/usr/local/bin/clusteradm"
+      fi
       docker exec "${spoke}-control-plane" bash -c "
         export KUBECONFIG=/etc/kubernetes/admin.conf
         clusteradm join \
-          --hub-token '${hub_token}' \
-          --hub-apiserver 'https://${WG_VIP}:6443' \
+          --hub-token '${hub1_token}' \
+          --hub-apiserver '${hub1_url}' \
           --cluster-name '${spoke}'
-      " 2>/dev/null || true
+      " || log_warn "clusteradm join returned non-zero; continuing to verify."
 
-      for i in {1..20}; do
-        clusteradm accept --context kind-primaryhub --clusters "$spoke" 2>/dev/null && break
+      kubectl --context "$ctx" wait --for=condition=established \
+        crd/klusterlets.operator.open-cluster-management.io --timeout=120s || true
+
+      local k_ok=false
+      for i in $(seq 1 30); do
+        if kubectl --context "$ctx" get klusterlet klusterlet >/dev/null 2>&1; then
+          k_ok=true; break
+        fi
         sleep 2
       done
-
-      sleep 3
-      local ready
-      ready=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
-        -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' \
-        2>/dev/null || echo "False")
-      if [ "$ready" == "True" ]; then
-        log_success "Spoke '$spoke' joined and Available!"; break
+      if [ "$k_ok" = false ]; then
+        log_error "Klusterlet CR was not created on ${spoke}."
+        _dump_klusterlet_debug "$ctx"
+        exit 1
       fi
-      log_warn "Join attempt $attempt for $spoke not yet Available – retrying..."
+    else
+      log_info "Klusterlet already present on ${spoke}."
+    fi
+
+    # 2. Per-hub bootstrap kubeconfig secrets (key name MUST be 'kubeconfig') ───
+    kubectl --context "$ctx" create namespace "$agent_ns" --dry-run=client -o yaml \
+      | kubectl --context "$ctx" apply -f - >/dev/null
+
+    kubectl --context "$ctx" -n "$agent_ns" create secret generic primaryhub-kubeconfig \
+      --from-file=kubeconfig="${STATE_DIR}/primaryhub-bootstrap.kubeconfig" \
+      --dry-run=client -o yaml | kubectl --context "$ctx" apply -f -
+    kubectl --context "$ctx" -n "$agent_ns" create secret generic secondaryhub-kubeconfig \
+      --from-file=kubeconfig="${STATE_DIR}/secondaryhub-bootstrap.kubeconfig" \
+      --dry-run=client -o yaml | kubectl --context "$ctx" apply -f -
+
+    # 3. Enable MultipleHubs on the klusterlet ─────────────────────────────────
+    #    Priority = array order: [0] primaryhub, [1] secondaryhub
+    #    hubConnectionTimeoutSeconds must be >= 180 (CRD validation)
+    log_info "Patching klusterlet on ${spoke}: MultipleHubs + LocalSecrets..."
+    kubectl --context "$ctx" patch klusterlet klusterlet --type=merge -p '{
+      "spec": {
+        "registrationConfiguration": {
+          "featureGates": [
+            { "feature": "MultipleHubs", "mode": "Enable" }
+          ],
+          "bootstrapKubeConfigs": {
+            "type": "LocalSecrets",
+            "localSecretsConfig": {
+              "hubConnectionTimeoutSeconds": 180,
+              "kubeConfigSecrets": [
+                { "name": "primaryhub-kubeconfig" },
+                { "name": "secondaryhub-kubeconfig" }
+              ]
+            }
+          }
+        }
+      }
+    }'
+
+    # 4. Approve registration on the active (primary) hub ──────────────────────
+    log_info "Accepting ${spoke} on primaryhub..."
+    local accepted=false
+    for i in $(seq 1 45); do
+      if clusteradm accept --context kind-primaryhub --clusters "$spoke" >/dev/null 2>&1; then
+        accepted=true; break
+      fi
       sleep 2
     done
-  done
+    [ "$accepted" = false ] && log_warn "clusteradm accept did not succeed for ${spoke} yet (CSR may still be pending)."
 
-  # Second-pass CSR approval (work-agent registration)
-  for spoke in spoke1 spoke2; do
-    clusteradm accept --context kind-primaryhub --clusters "$spoke" 2>/dev/null || true
+    # Wait for ManagedClusterConditionAvailable on primaryhub
+    local avail="False"
+    for i in $(seq 1 45); do
+      # Re-run accept: the work-agent registration produces a second CSR
+      clusteradm accept --context kind-primaryhub --clusters "$spoke" >/dev/null 2>&1 || true
+      avail=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
+        -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' \
+        2>/dev/null || echo "False")
+      [ "$avail" == "True" ] && break
+      sleep 4
+    done
+
+    if [ "$avail" == "True" ]; then
+      log_success "Spoke '${spoke}' joined primaryhub and is Available (secondaryhub kept as standby)."
+    else
+      log_error "Spoke '${spoke}' did not become Available on primaryhub."
+      _dump_klusterlet_debug "$ctx"
+    fi
+
+    # Best-effort: pre-approve on the standby hub (no-op until the agent fails over / phase 17 sync)
+    clusteradm accept --context kind-secondaryhub --clusters "$spoke" >/dev/null 2>&1 || true
   done
 }
 
