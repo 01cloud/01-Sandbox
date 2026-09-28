@@ -1232,11 +1232,20 @@ EOF
   docker rm -f envoy-gateway 2>/dev/null || true
 
   local envoy_image="01sandbox-envoy:v1"
-  local envoy_cmd="wg-quick up wg0 && envoy -c /etc/envoy/envoy.yaml"
-  if ! docker image inspect "$envoy_image" >/dev/null 2>&1; then
-    envoy_image="envoyproxy/envoy:v1.31-latest"
-    envoy_cmd="apt-get update -qq >/dev/null 2>&1 && apt-get install -y -qq wireguard-tools iproute2 iptables >/dev/null 2>&1 || true; wg-quick up wg0; envoy -c /etc/envoy/envoy.yaml"
+  if ! docker image inspect "$envoy_image" >/dev/null 2>&1 || \
+     ! docker run --rm --entrypoint which "$envoy_image" wg-quick >/dev/null 2>&1; then
+    log_info "Building robust envoy-gateway image ($envoy_image) with wireguard-tools..."
+    cat <<'EOF_ENVOY_DOCKER' | docker build -t "$envoy_image" -
+FROM envoyproxy/envoy:v1.31-latest
+USER root
+RUN apt-get update -qq && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends \
+      wireguard-tools iproute2 iptables curl procps && \
+    rm -rf /var/lib/apt/lists/*
+EOF_ENVOY_DOCKER
   fi
+
+  local envoy_cmd="wg-quick up wg0 && envoy -c /etc/envoy/envoy.yaml"
 
   log_info "Starting envoy-gateway using $envoy_image..."
   docker run -d --name envoy-gateway \
@@ -1249,17 +1258,20 @@ EOF
     --entrypoint /bin/sh \
     "$envoy_image" -c "$envoy_cmd"
 
-  # Commit to fast-start image if packages were freshly installed
-  [ "$envoy_image" != "01sandbox-envoy:v1" ] && \
-    (docker commit --pause=false envoy-gateway 01sandbox-envoy:v1 >/dev/null 2>&1 &) || true
-
   log_info "Verifying VIP ${WG_VIP} reachability from primaryhub..."
-  for i in {1..15}; do
+  local vip_ok=false
+  for i in {1..20}; do
     if docker exec primaryhub-control-plane ping -c 1 -W 1 "$WG_VIP" >/dev/null 2>&1; then
-      log_success "VIP ${WG_VIP} reachable over WireGuard overlay!"; break
+      log_success "VIP ${WG_VIP} reachable over WireGuard overlay!"
+      vip_ok=true
+      break
     fi
     sleep 1
   done
+  if [ "$vip_ok" = false ]; then
+    log_warn "VIP ${WG_VIP} not immediately pingable from primaryhub – checking container logs..."
+    docker logs --tail 20 envoy-gateway || true
+  fi
 }
 
 # ── Phase 7: Verify shared Root CA + configure cluster-info VIP ───────────────
@@ -1573,13 +1585,20 @@ phase_16_join_spokes_to_ocm() {
   log_step "PHASE 16: Joining Spoke Clusters to OCM via VIP (${WG_VIP}:6443)"
 
   log_info "Waiting for Gateway VIP to respond from spokes..."
+  local vip_ok=false
   for i in {1..20}; do
     if docker exec spoke1-control-plane curl -k -m 2 -s \
          "https://${WG_VIP}:6443/version" >/dev/null 2>&1; then
-      log_success "Gateway VIP is healthy!"; break
+      log_success "Gateway VIP is healthy!"; vip_ok=true; break
     fi
     sleep 2
   done
+
+  if [ "$vip_ok" = false ]; then
+    log_warn "Gateway VIP (${WG_VIP}:6443) not responding from spoke1. Checking and restarting envoy-gateway..."
+    phase_06_envoy_gateway
+    sleep 3
+  fi
 
   local hub_token
   hub_token=$(clusteradm get token --context kind-primaryhub 2>/dev/null \
