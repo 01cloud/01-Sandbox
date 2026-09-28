@@ -293,6 +293,28 @@ _wait_for_pod() {
   log_warn "$label did not become Ready within timeout – continuing anyway."
 }
 
+# Strip x-kubernetes-validations from agentgateway-crds.yaml if present to avoid CEL cost budget limits in Kubernetes 1.30+
+_sanitize_agentgateway_crds() {
+  local f="${CODE_INSPECTOR_DIR}/crds/agentgateway-crds.yaml"
+  if [ -f "$f" ] && grep -q "x-kubernetes-validations:" "$f" 2>/dev/null; then
+    log_info "Optimizing agentgateway-crds.yaml (stripping CEL rules exceeding API server cost budget)..."
+    python3 -c "
+import yaml
+with open('$f') as fp:
+    docs = list(yaml.safe_load_all(fp))
+def rm_cel(obj):
+    if isinstance(obj, dict):
+        obj.pop('x-kubernetes-validations', None)
+        for v in obj.values(): rm_cel(v)
+    elif isinstance(obj, list):
+        for item in obj: rm_cel(item)
+for d in docs: rm_cel(d)
+with open('$f', 'w') as fp:
+    yaml.dump_all(docs, fp, default_flow_style=False, sort_keys=False)
+" 2>/dev/null || true
+  fi
+}
+
 # Verify and enforce that all required CRDs are applied and established on a cluster context.
 _ensure_hub_crds() {
   local ctx="$1"
@@ -319,6 +341,7 @@ _ensure_hub_crds() {
   if ! kubectl --context "$ctx" get crd agentgatewaypolicies.agentgateway.dev >/dev/null 2>&1 || \
      ! kubectl --context "$ctx" get crd agentgatewaybackends.agentgateway.dev >/dev/null 2>&1; then
     log_info "Ensuring AgentGateway CRDs (including AgentgatewayPolicy) are applied on $ctx..."
+    _sanitize_agentgateway_crds
     if [ -f "${crd_dir}/agentgateway-crds.yaml" ]; then
       kubectl --context "$ctx" apply --server-side --force-conflicts --field-manager=crd-installer -f "${crd_dir}/agentgateway-crds.yaml" >/dev/null 2>&1 || \
       kubectl --context "$ctx" apply --server-side --force-conflicts -f "${crd_dir}/agentgateway-crds.yaml" >/dev/null 2>&1 || true
@@ -1352,6 +1375,7 @@ phase_11_primaryhub_deploy() {
   _ensure_hub_crds "kind-primaryhub"
   if ! kubectl --context kind-primaryhub get crd agentgatewaypolicies.agentgateway.dev >/dev/null 2>&1; then
     log_warn "Explicitly applying agentgateway-crds.yaml on kind-primaryhub..."
+    _sanitize_agentgateway_crds
     kubectl --context kind-primaryhub apply --server-side --force-conflicts --field-manager=crd-installer -f "${CODE_INSPECTOR_DIR}/crds/agentgateway-crds.yaml"
     kubectl --context kind-primaryhub wait --for condition=established --timeout=60s crd/agentgatewaypolicies.agentgateway.dev
   fi
@@ -1426,6 +1450,7 @@ phase_12_secondaryhub_deploy() {
   _ensure_hub_crds "kind-secondaryhub"
   if ! kubectl --context kind-secondaryhub get crd agentgatewaypolicies.agentgateway.dev >/dev/null 2>&1; then
     log_warn "Explicitly applying agentgateway-crds.yaml on kind-secondaryhub..."
+    _sanitize_agentgateway_crds
     kubectl --context kind-secondaryhub apply --server-side --force-conflicts --field-manager=crd-installer -f "${CODE_INSPECTOR_DIR}/crds/agentgateway-crds.yaml"
     kubectl --context kind-secondaryhub wait --for condition=established --timeout=60s crd/agentgatewaypolicies.agentgateway.dev
   fi
