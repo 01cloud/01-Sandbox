@@ -143,11 +143,42 @@ done
 # ── UTILITY HELPERS ────────────────────────────────────────────────────────────
 # ==============================================================================
 
+# Ensure host inotify limits are sufficient for running multiple KinD clusters.
+# KinD control-plane nodes run systemd, containerd, and multiple daemonsets.
+# Default limits (watches: 8192/65536, instances: 128) lead to EMFILE /
+# "could not find a log line that matches Reached target Multi-User System" when
+# launching the 3rd or 4th cluster.
+ensure_kernel_inotify_limits() {
+  local cur_watches cur_instances
+  cur_watches=$(cat /proc/sys/fs/inotify/max_user_watches 2>/dev/null || echo 0)
+  cur_instances=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)
+
+  local need_watches=524288
+  local need_instances=8192
+
+  if [ "${cur_watches:-0}" -lt "$need_watches" ] || [ "${cur_instances:-0}" -lt "$need_instances" ]; then
+    log_info "Tuning host inotify limits for multi-cluster KinD (watches: $cur_watches -> $need_watches, instances: $cur_instances -> $need_instances)..."
+    local SUDO=""
+    if [ "$EUID" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+      SUDO="sudo"
+    fi
+    $SUDO sysctl -w fs.inotify.max_user_watches=$need_watches >/dev/null 2>&1 || sysctl -w fs.inotify.max_user_watches=$need_watches >/dev/null 2>&1 || true
+    $SUDO sysctl -w fs.inotify.max_user_instances=$need_instances >/dev/null 2>&1 || sysctl -w fs.inotify.max_user_instances=$need_instances >/dev/null 2>&1 || true
+
+    if [ -d /etc/sysctl.d ]; then
+      printf "fs.inotify.max_user_watches = %d\nfs.inotify.max_user_instances = %d\n" "$need_watches" "$need_instances" | \
+        $SUDO tee /etc/sysctl.d/99-kind-inotify.conf >/dev/null 2>&1 || true
+    fi
+  fi
+}
+
 # Create a KinD cluster and attach it to the transit network.
 # Args: <name> <pod-subnet> <svc-subnet> <transit-ip> [use-shared-ca=false]
 _create_kind_cluster() {
   local name="$1" pod_subnet="$2" svc_subnet="$3" transit_ip="$4"
   local use_shared_ca="${5:-false}"
+
+  ensure_kernel_inotify_limits
 
   if kind get clusters 2>/dev/null | grep -q "^${name}$"; then
     log_info "KinD cluster '$name' already exists – preserving."
@@ -981,6 +1012,9 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
 
   # Load WireGuard kernel module (non-fatal; may be built-in)
   $SUDO modprobe wireguard 2>/dev/null || modprobe wireguard 2>/dev/null || true
+
+  # Ensure kernel inotify limits for multi-cluster KinD
+  ensure_kernel_inotify_limits
 }
 
 # ── Phase 2: Transit network + WireGuard key generation ────────────────────────
