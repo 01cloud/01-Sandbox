@@ -43,7 +43,7 @@ agentgateway:
   gateway:
     gatewayClassName: agentgateway
     addresses:
-      - value: 172.18.255.200
+      - value: 172.30.0.200
     listeners:
       - protocol: HTTP
         port: 80
@@ -67,7 +67,7 @@ agentgateway:
     authenticationType: "jwt"
     jwtMode: "Strict"
     rateLimit:
-      enabled: false
+      enabled: true
       requests: 7
       unit: "Minutes"
 ################################################################
@@ -155,10 +155,9 @@ apiServer:
       runAsUser: 1000
       fsGroup: 1000
   service:
-    type: NodePort
+    type: ClusterIP
     port: 80
     targetPort: 8000
-    nodePort: 30080
   ingress:
     enabled: false
     className: nginx
@@ -226,7 +225,7 @@ metallb:
   namespace: metallb-system
   ipAddressPool:
     addresses:
-      - 172.18.255.200-172.18.255.250
+      - 172.30.0.200-172.30.0.200
   l2Advertisement:
     enabled: true
 # ################################################################

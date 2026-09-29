@@ -81,6 +81,8 @@ HUB1_TRANSIT_IP="172.30.0.20"
 HUB2_TRANSIT_IP="172.30.0.21"
 SPOKE1_TRANSIT_IP="172.30.0.30"
 SPOKE2_TRANSIT_IP="172.30.0.31"
+HUB1_METALLB_IP="172.30.0.200"
+HUB2_METALLB_IP="172.30.0.201"
 
 # WireGuard overlay (all application / K8s traffic)
 WG_SUBNET_PREFIX="10.99.0"
@@ -1192,15 +1194,15 @@ ENVOY_EOF
         - endpoint:
             address:
               socket_address:
-                address: ${WG_HUB1_IP}
-                port_value: 30080
+                address: ${HUB1_METALLB_IP}
+                port_value: 80
       - priority: 1
         lb_endpoints:
         - endpoint:
             address:
               socket_address:
-                address: ${WG_HUB2_IP}
-                port_value: 30080
+                address: ${HUB2_METALLB_IP}
+                port_value: 80
   - name: ingress_kube_api_cluster
     connect_timeout: 0.5s
     type: STATIC

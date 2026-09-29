@@ -3,7 +3,7 @@ namespace: metallb-system
 
 ipAddressPool:
   addresses:
-    - 172.18.0.200-172.18.0.250
+    - 172.30.0.200-172.30.0.220
 
 l2Advertisement:
   enabled: true

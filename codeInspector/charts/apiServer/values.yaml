@@ -54,10 +54,9 @@ deployment:
     fsGroup: 1000
 
 service:
-  type: NodePort
+  type: ClusterIP
   port: 80
   targetPort: 8000
-  nodePort: 30080
 
 ingress:
   enabled: true

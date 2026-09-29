@@ -15,7 +15,12 @@ agentgateway:
     hostnames: []
   gateway:
     addresses:
-      - value: 172.18.255.200
+      - value: 172.30.0.201
+  policy:
+    rateLimit:
+      enabled: true
+      requests: 7
+      unit: "Minutes"
 
 apiServer:
   enabled: true
@@ -112,3 +117,12 @@ nodeNetworkAgent:
   enabled: true
   namespace: kube-system
   image: "alpine:3.19"
+
+metallb:
+  enabled: true
+  namespace: metallb-system
+  ipAddressPool:
+    addresses:
+      - 172.30.0.201-172.30.0.201
+  l2Advertisement:
+    enabled: true
