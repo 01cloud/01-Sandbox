@@ -51,6 +51,14 @@ _get_hub_token() {
     --for=condition=Available deployment --all --timeout=120s >/dev/null 2>&1 || true
 
   for i in $(seq 1 20); do
+    # Generate long-lived (10-year) token for agent-registration-bootstrap so bootstrap secrets never expire
+    tok=$(kubectl --context "$ctx" -n open-cluster-management create token agent-registration-bootstrap --duration=87600h 2>/dev/null || true)
+    if [ -n "$tok" ]; then
+      rm -f "$err_file"
+      echo "$tok"
+      return 0
+    fi
+
     out=$(clusteradm get token --context "$ctx" 2>"$err_file" || true)
     tok=$(echo "$out" | grep '^token=' | head -1 | cut -d'=' -f2- || true)
     if [ -z "$tok" ]; then

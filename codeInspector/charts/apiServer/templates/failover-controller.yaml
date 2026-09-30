@@ -20,8 +20,11 @@ rules:
   resources: ["clusters"]
   verbs: ["get", "list", "watch", "patch", "update", "delete", "create"]
 - apiGroups: ["cluster.open-cluster-management.io"]
-  resources: ["managedclusters", "managedclusters/status"]
-  verbs: ["get", "list", "watch", "patch", "update"]
+  resources: ["managedclusters", "managedclusters/status", "managedclusters/accept"]
+  verbs: ["get", "list", "watch", "patch", "update", "create"]
+- apiGroups: ["register.open-cluster-management.io"]
+  resources: ["managedclusters", "managedclusters/accept"]
+  verbs: ["get", "list", "watch", "patch", "update", "create"]
 - apiGroups: ["certificates.k8s.io"]
   resources: ["certificatesigningrequests", "certificatesigningrequests/approval"]
   verbs: ["get", "list", "watch", "create", "update", "patch"]
@@ -262,7 +265,7 @@ data:
           NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000000Z")
           for spoke in spoke1 spoke2; do
             kubectl patch managedcluster "$spoke" --type merge \
-              -p '{"spec":{"hubAcceptsClient":true,"taints":[]}}' 2>/dev/null || true
+              -p '{"spec":{"hubAcceptsClient":true,"taints":[]}}' || true
 
             # Immediately update the Lease renewTime so OCM marks the cluster Available with zero delay
             kubectl patch lease managed-cluster-lease -n "$spoke" --type merge \
@@ -302,10 +305,13 @@ data:
           approve_csrs
           for spoke in spoke1 spoke2; do
             IS_ACCEPTED=$(kubectl get managedcluster "$spoke" -o jsonpath='{.spec.hubAcceptsClient}' 2>/dev/null || echo "false")
-            IS_AVAIL=$(kubectl get managedcluster "$spoke" -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null || echo "Unknown")
-            if [ "$IS_ACCEPTED" = "false" ] || [ "$IS_AVAIL" != "True" ]; then
+            if [ "$IS_ACCEPTED" = "false" ]; then
+              log "Ensuring spoke $spoke is accepted on secondaryhub..."
               kubectl patch managedcluster "$spoke" --type merge \
-                -p '{"spec":{"hubAcceptsClient":true,"taints":[]}}' 2>/dev/null || true
+                -p '{"spec":{"hubAcceptsClient":true,"taints":[]}}' || true
+            fi
+            IS_AVAIL=$(kubectl get managedcluster "$spoke" -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null || echo "Unknown")
+            if [ "$IS_AVAIL" != "True" ]; then
               set_spoke_status "$spoke" "True" "ManagedClusterAvailable" "Managed cluster is available"
             fi
           done
