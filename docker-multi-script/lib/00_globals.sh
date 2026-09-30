@@ -50,7 +50,12 @@ PKI_DIR="${STATE_DIR}/pki"
 WG_DIR="${STATE_DIR}/wg"
 ENVOY_DIR="${STATE_DIR}/envoy"
 SEC_DIR="${STATE_DIR}/sec"
-mkdir -p "$PKI_DIR" "$WG_DIR" "$ENVOY_DIR" "$SEC_DIR"
+KATA_CACHE_DIR="${STATE_DIR}/kata-assets"
+mkdir -p "$PKI_DIR" "$WG_DIR" "$ENVOY_DIR" "$SEC_DIR" "$KATA_CACHE_DIR"
+
+# ─── Kata Firecracker configuration ───────────────────────────────────────────
+KATA_VERSION="${KATA_VERSION:-3.18.0}"
+FIRECRACKER_VERSION="${FIRECRACKER_VERSION:-v1.11.1}"
 
 # ─── Pin KUBECONFIG to a known-writable path ──────────────────────────────────
 # Prevents failures on VMs where $KUBECONFIG already points at /etc/rancher/...

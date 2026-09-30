@@ -683,6 +683,120 @@ for name in "hub1-vm" "hub2-vm" "spoke1-vm" "spoke2-vm"; do
   log_success "Toolchain verified on $name ($ip)."
 done
 
+# Spoke VMs specific: Kata Containers (3.18.0) + Firecracker (v1.11.1) + LVM Thin-Pool
+for name in "spoke1-vm" "spoke2-vm"; do
+  ip="${ALL_VMS[$name]}"
+  log_info "Configuring Kata Firecracker & LVM Thinpool prerequisites on $name ($ip)..."
+  run_ssh_sudo "$ip" "
+    # 1. Host packages
+    DEBIAN_FRONTEND=noninteractive apt-get update -qq && apt-get install -y -qq \
+      cpu-checker lvm2 thin-provisioning-tools curl jq tar xz-utils libseccomp-dev >/dev/null 2>&1 || true
+
+    # 2. Hardware virtualization check
+    if [ ! -e /dev/kvm ]; then
+      echo '[WARN] /dev/kvm was not detected on $name. Ensure nested virtualization is enabled on host.'
+    fi
+
+    # 3. Dedicated LVM thinpool on loopback disk (Isolated from ubuntu-vg to prevent initramfs boot hang)
+    systemctl enable --now lvm2-monitor.service >/dev/null 2>&1 || true
+
+    IMG='/var/lib/containerd-pool-disk.img'
+    VG='containerd-vg'
+    POOL='containerd-pool'
+
+    if [ ! -f \"\$IMG\" ]; then
+      truncate -s 15G \"\$IMG\"
+    fi
+
+    cat << 'EOF' > /usr/local/sbin/ensure-containerd-loopback.sh
+#!/bin/sh
+set -e
+IMG=\"/var/lib/containerd-pool-disk.img\"
+VG=\"containerd-vg\"
+modprobe dm_thin_pool 2>/dev/null || true
+if ! losetup -a | grep -qF \"\$IMG\"; then
+  losetup -fP --show \"\$IMG\"
+fi
+pvscan --cache >/dev/null 2>&1 || true
+vgchange -ay --monitor y \"\$VG\" >/dev/null 2>&1 || true
+EOF
+    chmod +x /usr/local/sbin/ensure-containerd-loopback.sh
+
+    cat << 'EOF' > /etc/systemd/system/containerd-loopback.service
+[Unit]
+Description=Setup loopback device for containerd devmapper thinpool
+DefaultDependencies=no
+After=systemd-modules-load.service local-fs.target lvm2-monitor.service
+Before=docker.service containerd.service
+Requires=local-fs.target lvm2-monitor.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/ensure-containerd-loopback.sh
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    cat << 'EOF' > /etc/systemd/system/containerd-loopback.timer
+[Unit]
+Description=Periodically ensure containerd loopback + VG stay active
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+
+[Install]
+WantedBy=timers.target
+EOF
+
+    systemctl daemon-reload
+    systemctl enable --now containerd-loopback.service >/dev/null 2>&1 || true
+    systemctl enable --now containerd-loopback.timer >/dev/null 2>&1 || true
+
+    /usr/local/sbin/ensure-containerd-loopback.sh
+    LOOP_DEV=\$(losetup -a | grep -F \"\$IMG\" | head -n 1 | cut -d: -f1)
+    if [ -n \"\$LOOP_DEV\" ] && ! vgs \"\$VG\" >/dev/null 2>&1; then
+      pvcreate -y \"\$LOOP_DEV\" >/dev/null 2>&1 || true
+      vgcreate \"\$VG\" \"\$LOOP_DEV\" >/dev/null 2>&1 || true
+      lvcreate -y --config 'activation { udev_sync = 0 udev_rules = 0 }' -W n -Z n --size 12G --thinpool \"\$POOL\" \"\$VG\" >/dev/null 2>&1 || true
+      vgchange -ay --monitor y \"\$VG\" >/dev/null 2>&1 || true
+    fi
+
+    # 4. Install Firecracker binary
+    if [ ! -f /usr/local/bin/firecracker ]; then
+      ARCH=\$(uname -m)
+      FC_VER='v1.11.1'
+      curl -fSL \"https://github.com/firecracker-microvm/firecracker/releases/download/\${FC_VER}/firecracker-\${FC_VER}-\${ARCH}.tgz\" -o /tmp/fc.tgz
+      tar -xzf /tmp/fc.tgz -C /tmp
+      mv /tmp/release-\${FC_VER}-\${ARCH}/firecracker-\${FC_VER}-\${ARCH} /usr/local/bin/firecracker
+      mv /tmp/release-\${FC_VER}-\${ARCH}/jailer-\${FC_VER}-\${ARCH} /usr/local/bin/jailer 2>/dev/null || true
+      chmod +x /usr/local/bin/firecracker /usr/local/bin/jailer 2>/dev/null || true
+      rm -rf /tmp/fc.tgz /tmp/release-\${FC_VER}-\${ARCH}
+    fi
+
+    # 5. Install Kata Containers 3.18.0 static binaries
+    if [ ! -f /opt/kata/bin/containerd-shim-kata-v2 ]; then
+      mkdir -p /opt/kata
+      curl -fSL \"https://github.com/kata-containers/kata-containers/releases/download/3.18.0/kata-static-3.18.0-amd64.tar.xz\" -o /tmp/kata.tar.xz
+      tar -xJf /tmp/kata.tar.xz -C /
+      rm -f /tmp/kata.tar.xz
+      ln -sf /opt/kata/bin/kata-runtime /usr/local/bin/kata-runtime
+      ln -sf /opt/kata/bin/kata-ctl /usr/local/bin/kata-ctl
+      ln -sf /opt/kata/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-v2
+    fi
+
+    # 6. Configure /etc/kata-containers/configuration.toml
+    mkdir -p /etc/kata-containers
+    if [ ! -f /etc/kata-containers/configuration.toml ]; then
+      cp /opt/kata/share/defaults/kata-containers/configuration-fc.toml /etc/kata-containers/configuration.toml 2>/dev/null || true
+      sed -i 's|^path = .*|path = \"/usr/local/bin/firecracker\"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
+    fi
+  "
+  log_success "Kata Firecracker host setup verified on $name ($ip)."
+done
+
 # Gateway VM specific: Docker + Envoy
 log_info "Ensuring Docker is available on gateway-vm ($GATEWAY_IP)..."
 run_ssh_sudo "$GATEWAY_IP" "
@@ -805,6 +919,11 @@ nodes:
   - containerPort: 6443
     hostPort: 6443
     protocol: TCP
+  extraMounts:
+  - hostPath: /dev/kvm
+    containerPath: /dev/kvm
+  - hostPath: /dev/net/tun
+    containerPath: /dev/net/tun
 EOF
   kind create cluster --name spoke1 --config /tmp/kind-spoke1.yaml
 fi
@@ -812,6 +931,101 @@ mkdir -p /home/${SSH_USER}/.kube
 kind export kubeconfig --name spoke1 --kubeconfig /home/${SSH_USER}/.kube/config 2>/dev/null || cp /root/.kube/config /home/${SSH_USER}/.kube/config 2>/dev/null || true
 sed -i 's|https://0.0.0.0:6443|https://127.0.0.1:6443|g' /home/${SSH_USER}/.kube/config 2>/dev/null || true
 sudo chown -R ${SSH_USER}:${SSH_USER} /home/${SSH_USER}/.kube 2>/dev/null || true
+
+# Configure Kata Firecracker runtime inside spoke1 KinD container
+echo \"Configuring Kata Firecracker in spoke1 container...\"
+docker exec spoke1-control-plane bash -c '
+  dpkg --purge linux-image-rt-amd64 2>/dev/null || true
+  apt-get update -qq && apt-get install -y -qq -f >/dev/null 2>&1 || true
+  apt-get install -y -qq lvm2 thin-provisioning-tools >/dev/null 2>&1 || true
+  mkdir -p /opt/kata/bin /opt/kata/share/kata-containers /etc/kata-containers /var/lib/containerd/io.containerd.snapshotter.v1.devmapper
+'
+if [ -f /usr/bin/containerd ]; then
+  docker cp /usr/bin/containerd spoke1-control-plane:/usr/local/bin/containerd
+fi
+docker cp /opt/kata/bin/containerd-shim-kata-v2 spoke1-control-plane:/opt/kata/bin/ 2>/dev/null || true
+docker cp /opt/kata/bin/firecracker spoke1-control-plane:/opt/kata/bin/ 2>/dev/null || true
+docker cp /opt/kata/bin/jailer spoke1-control-plane:/opt/kata/bin/ 2>/dev/null || true
+docker cp /opt/kata/bin/kata-runtime spoke1-control-plane:/opt/kata/bin/ 2>/dev/null || true
+docker cp /opt/kata/bin/kata-ctl spoke1-control-plane:/opt/kata/bin/ 2>/dev/null || true
+docker cp /opt/kata/share/kata-containers/. spoke1-control-plane:/opt/kata/share/kata-containers/ 2>/dev/null || true
+docker cp /etc/kata-containers/configuration.toml spoke1-control-plane:/etc/kata-containers/configuration.toml 2>/dev/null || true
+
+docker exec spoke1-control-plane bash -c '
+  ln -sf /opt/kata/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-v2
+  ln -sf /opt/kata/bin/firecracker /usr/local/bin/firecracker
+  ln -sf /opt/kata/bin/jailer /usr/local/bin/jailer 2>/dev/null || true
+  ln -sf /opt/kata/bin/kata-runtime /usr/local/bin/kata-runtime 2>/dev/null || true
+  ln -sf /opt/kata/bin/kata-ctl /usr/local/bin/kata-ctl 2>/dev/null || true
+
+  if [ ! -f /usr/sbin/dmsetup.orig ]; then
+    mv /usr/sbin/dmsetup /usr/sbin/dmsetup.orig
+  fi
+  cat << \"EOF\" > /usr/sbin/dmsetup
+#!/bin/sh
+/usr/sbin/dmsetup.orig \"\$@\"
+ret=\$?
+if [ \$ret -eq 0 ]; then
+  /usr/sbin/dmsetup.orig mknodes >/dev/null 2>&1 || true
+  /usr/sbin/dmsetup.orig ls 2>/dev/null | while read -r name majmin; do
+    maj=\$(echo \"\$majmin\" | tr -d \"()\" | cut -d: -f1)
+    min=\$(echo \"\$majmin\" | tr -d \"()\" | cut -d: -f2)
+    if [ -n \"\$maj\" ] && [ -n \"\$min\" ]; then
+      [ ! -e \"/dev/dm-\${min}\" ] && mknod \"/dev/dm-\${min}\" b \"\$maj\" \"\$min\" 2>/dev/null || true
+      [ ! -e \"/dev/mapper/\${name}\" ] && ln -sf \"/dev/dm-\${min}\" \"/dev/mapper/\${name}\" 2>/dev/null || true
+    fi
+  done
+fi
+exit \$ret
+EOF
+  chmod +x /usr/sbin/dmsetup
+
+  IMG=\"/var/lib/containerd-pool-disk.img\"
+  VG=\"containerd-vg\"
+  POOL=\"containerd-pool\"
+  if ! vgs \"\$VG\" >/dev/null 2>&1; then
+    truncate -s 15G \"\$IMG\"
+    LOOP_DEV=\$(losetup -fP --show \"\$IMG\")
+    pvcreate -y \"\$LOOP_DEV\" >/dev/null 2>&1
+    vgcreate \"\$VG\" \"\$LOOP_DEV\" >/dev/null 2>&1
+    lvcreate -y --config 'activation { udev_sync = 0 udev_rules = 0 }' -W n -Z n --size 12G --thinpool \"\$POOL\" \"\$VG\" >/dev/null 2>&1
+  fi
+  vgchange -ay --monitor y \"\$VG\" >/dev/null 2>&1 || true
+  /usr/sbin/dmsetup mknodes >/dev/null 2>&1 || true
+
+  sed -i \"s/discard_unpacked_layers = true/discard_unpacked_layers = false/\" /etc/containerd/config.toml 2>/dev/null || true
+
+  if ! grep -q 'plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc' /etc/containerd/config.toml; then
+    cat << \"EOF\" >> /etc/containerd/config.toml
+
+# Kata Firecracker Runtime (kata-fc) using devmapper snapshotter
+[plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc]
+  runtime_type = \"io.containerd.kata.v2\"
+  snapshotter = \"devmapper\"
+
+[plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc.options]
+  ConfigPath = \"/etc/kata-containers/configuration.toml\"
+
+# Devmapper Snapshotter Plugin for Kata
+[plugins.\"io.containerd.snapshotter.v1.devmapper\"]
+  root_path = \"/var/lib/containerd/io.containerd.snapshotter.v1.devmapper\"
+  pool_name = \"containerd--vg-containerd--pool\"
+  base_image_size = \"4GB\"
+  discard_blocks = false
+  fs_type = \"ext4\"
+EOF
+  fi
+
+  systemctl restart containerd
+'
+
+cat << 'EOF' | kubectl apply -f - >/dev/null
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-fc
+handler: kata-fc
+EOF
 "
 
 # 4. spoke2-vm: spoke2 (serviceSubnet set to 10.100.0.0/16 to avoid collision with WireGuard 10.99.0.0/24)
@@ -836,6 +1050,11 @@ nodes:
   - containerPort: 6443
     hostPort: 6443
     protocol: TCP
+  extraMounts:
+  - hostPath: /dev/kvm
+    containerPath: /dev/kvm
+  - hostPath: /dev/net/tun
+    containerPath: /dev/net/tun
 EOF
   kind create cluster --name spoke2 --config /tmp/kind-spoke2.yaml
 fi
@@ -843,6 +1062,101 @@ mkdir -p /home/${SSH_USER}/.kube
 kind export kubeconfig --name spoke2 --kubeconfig /home/${SSH_USER}/.kube/config 2>/dev/null || cp /root/.kube/config /home/${SSH_USER}/.kube/config 2>/dev/null || true
 sed -i 's|https://0.0.0.0:6443|https://127.0.0.1:6443|g' /home/${SSH_USER}/.kube/config 2>/dev/null || true
 sudo chown -R ${SSH_USER}:${SSH_USER} /home/${SSH_USER}/.kube 2>/dev/null || true
+
+# Configure Kata Firecracker runtime inside spoke2 KinD container
+echo \"Configuring Kata Firecracker in spoke2 container...\"
+docker exec spoke2-control-plane bash -c '
+  dpkg --purge linux-image-rt-amd64 2>/dev/null || true
+  apt-get update -qq && apt-get install -y -qq -f >/dev/null 2>&1 || true
+  apt-get install -y -qq lvm2 thin-provisioning-tools >/dev/null 2>&1 || true
+  mkdir -p /opt/kata/bin /opt/kata/share/kata-containers /etc/kata-containers /var/lib/containerd/io.containerd.snapshotter.v1.devmapper
+'
+if [ -f /usr/bin/containerd ]; then
+  docker cp /usr/bin/containerd spoke2-control-plane:/usr/local/bin/containerd
+fi
+docker cp /opt/kata/bin/containerd-shim-kata-v2 spoke2-control-plane:/opt/kata/bin/ 2>/dev/null || true
+docker cp /opt/kata/bin/firecracker spoke2-control-plane:/opt/kata/bin/ 2>/dev/null || true
+docker cp /opt/kata/bin/jailer spoke2-control-plane:/opt/kata/bin/ 2>/dev/null || true
+docker cp /opt/kata/bin/kata-runtime spoke2-control-plane:/opt/kata/bin/ 2>/dev/null || true
+docker cp /opt/kata/bin/kata-ctl spoke2-control-plane:/opt/kata/bin/ 2>/dev/null || true
+docker cp /opt/kata/share/kata-containers/. spoke2-control-plane:/opt/kata/share/kata-containers/ 2>/dev/null || true
+docker cp /etc/kata-containers/configuration.toml spoke2-control-plane:/etc/kata-containers/configuration.toml 2>/dev/null || true
+
+docker exec spoke2-control-plane bash -c '
+  ln -sf /opt/kata/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-v2
+  ln -sf /opt/kata/bin/firecracker /usr/local/bin/firecracker
+  ln -sf /opt/kata/bin/jailer /usr/local/bin/jailer 2>/dev/null || true
+  ln -sf /opt/kata/bin/kata-runtime /usr/local/bin/kata-runtime 2>/dev/null || true
+  ln -sf /opt/kata/bin/kata-ctl /usr/local/bin/kata-ctl 2>/dev/null || true
+
+  if [ ! -f /usr/sbin/dmsetup.orig ]; then
+    mv /usr/sbin/dmsetup /usr/sbin/dmsetup.orig
+  fi
+  cat << \"EOF\" > /usr/sbin/dmsetup
+#!/bin/sh
+/usr/sbin/dmsetup.orig \"\$@\"
+ret=\$?
+if [ \$ret -eq 0 ]; then
+  /usr/sbin/dmsetup.orig mknodes >/dev/null 2>&1 || true
+  /usr/sbin/dmsetup.orig ls 2>/dev/null | while read -r name majmin; do
+    maj=\$(echo \"\$majmin\" | tr -d \"()\" | cut -d: -f1)
+    min=\$(echo \"\$majmin\" | tr -d \"()\" | cut -d: -f2)
+    if [ -n \"\$maj\" ] && [ -n \"\$min\" ]; then
+      [ ! -e \"/dev/dm-\${min}\" ] && mknod \"/dev/dm-\${min}\" b \"\$maj\" \"\$min\" 2>/dev/null || true
+      [ ! -e \"/dev/mapper/\${name}\" ] && ln -sf \"/dev/dm-\${min}\" \"/dev/mapper/\${name}\" 2>/dev/null || true
+    fi
+  done
+fi
+exit \$ret
+EOF
+  chmod +x /usr/sbin/dmsetup
+
+  IMG=\"/var/lib/containerd-pool-disk.img\"
+  VG=\"containerd-vg\"
+  POOL=\"containerd-pool\"
+  if ! vgs \"\$VG\" >/dev/null 2>&1; then
+    truncate -s 15G \"\$IMG\"
+    LOOP_DEV=\$(losetup -fP --show \"\$IMG\")
+    pvcreate -y \"\$LOOP_DEV\" >/dev/null 2>&1
+    vgcreate \"\$VG\" \"\$LOOP_DEV\" >/dev/null 2>&1
+    lvcreate -y --config 'activation { udev_sync = 0 udev_rules = 0 }' -W n -Z n --size 12G --thinpool \"\$POOL\" \"\$VG\" >/dev/null 2>&1
+  fi
+  vgchange -ay --monitor y \"\$VG\" >/dev/null 2>&1 || true
+  /usr/sbin/dmsetup mknodes >/dev/null 2>&1 || true
+
+  sed -i \"s/discard_unpacked_layers = true/discard_unpacked_layers = false/\" /etc/containerd/config.toml 2>/dev/null || true
+
+  if ! grep -q 'plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc' /etc/containerd/config.toml; then
+    cat << \"EOF\" >> /etc/containerd/config.toml
+
+# Kata Firecracker Runtime (kata-fc) using devmapper snapshotter
+[plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc]
+  runtime_type = \"io.containerd.kata.v2\"
+  snapshotter = \"devmapper\"
+
+[plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc.options]
+  ConfigPath = \"/etc/kata-containers/configuration.toml\"
+
+# Devmapper Snapshotter Plugin for Kata
+[plugins.\"io.containerd.snapshotter.v1.devmapper\"]
+  root_path = \"/var/lib/containerd/io.containerd.snapshotter.v1.devmapper\"
+  pool_name = \"containerd--vg-containerd--pool\"
+  base_image_size = \"4GB\"
+  discard_blocks = false
+  fs_type = \"ext4\"
+EOF
+  fi
+
+  systemctl restart containerd
+'
+
+cat << 'EOF' | kubectl apply -f - >/dev/null
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-fc
+handler: kata-fc
+EOF
 "
 
 log_success "All 4 KinD clusters verified with isolated CIDRs."
@@ -1179,8 +1493,8 @@ run_ssh "$HUB1_IP" "
   for spoke in spoke1 spoke2; do
     clusteradm accept --clusters \$spoke 2>/dev/null || true
   done
-  kubectl label managedcluster spoke1 wireguard-ip='${WG_SPOKE1_IP}' sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true --overwrite 2>/dev/null || true
-  kubectl label managedcluster spoke2 wireguard-ip='${WG_SPOKE2_IP}' sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true --overwrite 2>/dev/null || true
+  kubectl label managedcluster spoke1 wireguard-ip='${WG_SPOKE1_IP}' sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true runtime.kata-fc=true --overwrite 2>/dev/null || true
+  kubectl label managedcluster spoke2 wireguard-ip='${WG_SPOKE2_IP}' sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true runtime.kata-fc=true --overwrite 2>/dev/null || true
   kubectl label node primaryhub-control-plane wireguard-ip='${WG_HUB1_IP}' cluster-role=primaryhub --overwrite 2>/dev/null || true
   clusteradm clusterset create sandbox-spokes 2>/dev/null || true
   clusteradm clusterset set sandbox-spokes --clusters spoke1,spoke2 2>/dev/null || true

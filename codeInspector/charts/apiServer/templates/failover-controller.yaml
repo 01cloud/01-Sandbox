@@ -170,12 +170,12 @@ data:
 
           log "PrimaryHub PostgreSQL is healthy. Starting automated zero-touch failback & synchronization..."
 
-          # Step 1: Instantly release OCM spoke clusters on secondaryhub so PrimaryHub can take over immediately!
-          log "Step 1: Instantly releasing OCM spoke clusters on secondaryhub back to PrimaryHub..."
-          for spoke in spoke1 spoke2; do
-            kubectl patch managedcluster "$spoke" --type merge \
-              -p '{"spec":{"hubAcceptsClient":false,"taints":[{"key":"cluster.open-cluster-management.io/unreachable","effect":"NoSelect"}]}}' 2>/dev/null || true
-            set_spoke_status "$spoke" "Unknown" "ManagedClusterLeaseUpdateStopped" "Registration agent stopped updating its lease."
+          # Step 1: Release spokes immediately on SecondaryHub to enforce failback to PrimaryHub (Priority 0)
+          log "Step 1: PrimaryHub is restored. Releasing spoke clusters from SecondaryHub to prevent split-brain..."
+          for CLUSTER in $(kubectl get managedclusters -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+            kubectl patch managedcluster "$CLUSTER" --type merge -p '{"spec":{"hubAcceptsClient":false,"taints":[{"key":"cluster.open-cluster-management.io/unreachable","effect":"NoSelect"}]}}' 2>/dev/null || true
+            kubectl delete lease --all -n "$CLUSTER" --ignore-not-found=true 2>/dev/null || true
+            set_spoke_status "$CLUSTER" "Unknown" "ManagedClusterLeaseUpdateStopped" "Released by SecondaryHub on failback"
           done
 
           # Step 2: Declarative Delta Synchronization via Kubernetes Job
@@ -237,15 +237,15 @@ data:
             log "WARNING: postgresql-secondary-1 did not become ready within timeout. Remaining in FAILOVER_ACTIVE."
           fi
         else
-          # Enforce STANDBY invariant: SecondaryHub must NOT accept spokes while Primary is healthy
-          for spoke in spoke1 spoke2; do
-            IS_ACCEPTED=$(kubectl get managedcluster "$spoke" -o jsonpath='{.spec.hubAcceptsClient}' 2>/dev/null || echo "false")
-            IS_AVAIL=$(kubectl get managedcluster "$spoke" -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null || echo "Unknown")
-            if [ "$IS_ACCEPTED" = "true" ] || [ "$IS_AVAIL" = "True" ]; then
-              log "Enforcing STANDBY: Releasing spoke $spoke on secondaryhub..."
-              kubectl patch managedcluster "$spoke" --type merge \
-                -p '{"spec":{"hubAcceptsClient":false,"taints":[{"key":"cluster.open-cluster-management.io/unreachable","effect":"NoSelect"}]}}' 2>/dev/null || true
-              set_spoke_status "$spoke" "Unknown" "ManagedClusterLeaseUpdateStopped" "Registration agent stopped updating its lease."
+          # Standby invariant: SecondaryHub MUST NOT accept spokes while PrimaryHub is healthy.
+          # Spokes must remain connected exclusively to PrimaryHub (Priority 0).
+          for CLUSTER in $(kubectl get managedclusters -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+            IS_ACCEPTED=$(kubectl get managedcluster "$CLUSTER" -o jsonpath='{.spec.hubAcceptsClient}' 2>/dev/null || echo "false")
+            if [ "$IS_ACCEPTED" != "false" ]; then
+              log "STANDBY: Ensuring $CLUSTER is released from SecondaryHub..."
+              kubectl patch managedcluster "$CLUSTER" --type merge -p '{"spec":{"hubAcceptsClient":false,"taints":[{"key":"cluster.open-cluster-management.io/unreachable","effect":"NoSelect"}]}}' 2>/dev/null || true
+              kubectl delete lease --all -n "$CLUSTER" --ignore-not-found=true 2>/dev/null || true
+              set_spoke_status "$CLUSTER" "Unknown" "ManagedClusterLeaseUpdateStopped" "Released by SecondaryHub on standby"
             fi
           done
         fi
@@ -255,23 +255,18 @@ data:
       # --------------------------------------------------------------------------
       else
         FAIL_COUNT=$((FAIL_COUNT + 1))
-        log "Primary check failed ($FAIL_COUNT/$FAIL_THRESHOLD)"
+        if [ "$STATE" = "STANDBY" ]; then
+          log "Primary check failed ($FAIL_COUNT/$FAIL_THRESHOLD)"
+        fi
 
         if [ "$FAIL_COUNT" -ge "$FAIL_THRESHOLD" ] && [ "$STATE" = "STANDBY" ]; then
           log "CRITICAL: PrimaryHub is DOWN ($FAIL_COUNT failures). Triggering automated in-place failover..."
 
-          # Step 1: Instantly accept, untaint, refresh leases, and set Available status for OCM Spoke clusters so they are available without delay!
-          log "Step 1: Instantly accepting and making OCM spoke clusters available (spoke1, spoke2)..."
-          NOW=$(date -u +"%Y-%m-%dT%H:%M:%S.000000Z")
+          # Step 1: Ensure OCM spoke clusters are accepted and ready on secondaryhub with 5s lease duration
+          log "Step 1: Ensuring OCM spoke clusters are accepted on secondaryhub (spoke1, spoke2)..."
           for spoke in spoke1 spoke2; do
             kubectl patch managedcluster "$spoke" --type merge \
-              -p '{"spec":{"hubAcceptsClient":true,"taints":[]}}' || true
-
-            # Immediately update the Lease renewTime so OCM marks the cluster Available with zero delay
-            kubectl patch lease managed-cluster-lease -n "$spoke" --type merge \
-              -p "{\"spec\":{\"renewTime\":\"$NOW\"}}" 2>/dev/null || true
-
-            set_spoke_status "$spoke" "True" "ManagedClusterAvailable" "Managed cluster is available"
+              -p '{"spec":{"hubAcceptsClient":true,"leaseDurationSeconds":5,"taints":[]}}' 2>/dev/null || true
           done
           approve_csrs
 
@@ -300,7 +295,7 @@ data:
           log "SUCCESS: Automated Failover complete. SecondaryHub is now active Read-Write cluster. Zero downtime!"
         fi
 
-        # While in FAILOVER_ACTIVE, continuously approve spoke CSRs and ensure spokes remain accepted and Available
+        # While in FAILOVER_ACTIVE, continuously approve spoke CSRs and ensure spokes remain accepted
         if [ "$STATE" = "FAILOVER_ACTIVE" ]; then
           approve_csrs
           for spoke in spoke1 spoke2; do
@@ -308,11 +303,7 @@ data:
             if [ "$IS_ACCEPTED" = "false" ]; then
               log "Ensuring spoke $spoke is accepted on secondaryhub..."
               kubectl patch managedcluster "$spoke" --type merge \
-                -p '{"spec":{"hubAcceptsClient":true,"taints":[]}}' || true
-            fi
-            IS_AVAIL=$(kubectl get managedcluster "$spoke" -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null || echo "Unknown")
-            if [ "$IS_AVAIL" != "True" ]; then
-              set_spoke_status "$spoke" "True" "ManagedClusterAvailable" "Managed cluster is available"
+                -p '{"spec":{"hubAcceptsClient":true,"leaseDurationSeconds":5,"taints":[]}}' 2>/dev/null || true
             fi
           done
         fi

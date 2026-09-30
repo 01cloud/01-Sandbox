@@ -245,8 +245,10 @@ _do_phase_16_join_spokes_to_ocm() {
       --from-file=kubeconfig="${STATE_DIR}/secondaryhub-bootstrap.kubeconfig" \
       --dry-run=client -o yaml | kubectl --context "$ctx" apply -f -
 
-    # 3. Patch klusterlet for MultipleHubs
-    log_info "Patching klusterlet on ${spoke}: MultipleHubs + LocalSecrets..."
+    # 3. Patch klusterlet for MultipleHubs with fast 15s failover timeout
+    log_info "Patching CRD schema and klusterlet on ${spoke}: MultipleHubs + LocalSecrets (15s fast failover)..."
+    kubectl --context "$ctx" patch crd klusterlets.operator.open-cluster-management.io --type json -p '[{"op":"replace","path":"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/registrationConfiguration/properties/bootstrapKubeConfigs/properties/localSecretsConfig/properties/hubConnectionTimeoutSeconds/minimum","value":10}]' 2>/dev/null || true
+
     kubectl --context "$ctx" patch klusterlet klusterlet --type=merge -p '{
       "spec": {
         "registrationConfiguration": {
@@ -256,7 +258,7 @@ _do_phase_16_join_spokes_to_ocm() {
           "bootstrapKubeConfigs": {
             "type": "LocalSecrets",
             "localSecretsConfig": {
-              "hubConnectionTimeoutSeconds": 180,
+              "hubConnectionTimeoutSeconds": 15,
               "kubeConfigSecrets": [
                 { "name": "primaryhub-kubeconfig" },
                 { "name": "secondaryhub-kubeconfig" }
@@ -277,6 +279,7 @@ _do_phase_16_join_spokes_to_ocm() {
       sleep 2
     done
     [ "$accepted" = false ] && log_warn "clusteradm accept did not succeed for ${spoke} yet (CSR may still be pending)."
+    kubectl --context kind-primaryhub patch managedcluster "$spoke" --type merge -p '{"spec":{"leaseDurationSeconds":5}}' 2>/dev/null || true
 
     # Poll until ManagedClusterConditionAvailable = True
     local avail="False"

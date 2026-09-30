@@ -23,6 +23,7 @@ main() {
   phase_13_create_spoke_clusters
   phase_14_wireguard_on_all_clusters
   phase_15_install_crds_on_spokes
+  phase_15b_setup_kata_firecracker
   phase_16_join_spokes_to_ocm
   phase_17_sync_spokes_to_secondaryhub
   phase_18_verify_and_summary

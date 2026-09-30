@@ -16,19 +16,6 @@ _check_phase_17() {
 }
 
 _do_phase_17_sync_spokes_to_secondaryhub() {
-  for spoke in spoke1 spoke2; do
-    local spoke_wg_ip
-    [ "$spoke" == "spoke1" ] && spoke_wg_ip="$WG_SPOKE1_IP" || spoke_wg_ip="$WG_SPOKE2_IP"
-
-    for ctx in kind-primaryhub kind-secondaryhub; do
-      kubectl --context "$ctx" label managedcluster "$spoke" \
-        wireguard-ip="${spoke_wg_ip}" \
-        sandbox-workload-capable=true \
-        runtime.gvisor=true runtime.kata=true \
-        --overwrite 2>/dev/null || true
-    done
-  done
-
   log_info "Syncing spoke registration resources to secondaryhub..."
   for spoke in spoke1 spoke2; do
     kubectl --context kind-primaryhub get namespace "$spoke" -o yaml 2>/dev/null | \
@@ -41,7 +28,8 @@ _do_phase_17_sync_spokes_to_secondaryhub() {
       kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
     kubectl --context kind-primaryhub get rolebinding -n "$spoke" -o yaml 2>/dev/null | \
       kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-    kubectl --context kind-primaryhub get managedcluster "$spoke" -o yaml 2>/dev/null | \
+    kubectl --context kind-primaryhub get managedcluster "$spoke" -o json 2>/dev/null | \
+      jq 'del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.ownerReferences, .status)' | \
       kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
   done
 
@@ -49,6 +37,19 @@ _do_phase_17_sync_spokes_to_secondaryhub() {
     kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
   kubectl --context kind-primaryhub get managedclustersetbinding -A -o yaml 2>/dev/null | \
     kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+
+  for spoke in spoke1 spoke2; do
+    local spoke_wg_ip
+    [ "$spoke" == "spoke1" ] && spoke_wg_ip="$WG_SPOKE1_IP" || spoke_wg_ip="$WG_SPOKE2_IP"
+
+    for ctx in kind-primaryhub kind-secondaryhub; do
+      kubectl --context "$ctx" label managedcluster "$spoke" \
+        wireguard-ip="${spoke_wg_ip}" \
+        sandbox-workload-capable=true \
+        runtime.gvisor=true runtime.kata=true runtime.kata-fc=true \
+        --overwrite 2>/dev/null || true
+    done
+  done
 
   log_success "Spoke registration synced to both hubs."
 }
