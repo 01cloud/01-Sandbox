@@ -16,6 +16,7 @@ import Dashboard from "./pages/Dashboard.tsx";
 import Health from "./pages/Health.tsx";
 import RepoScanner from "./pages/RepoScanner.tsx";
 import Metrics from "./pages/Metrics.tsx";
+import Changelog from "./pages/Changelog.tsx";
 
 
 import CookieBanner from "./components/CookieBanner.tsx";
@@ -138,6 +139,7 @@ const App = () => (
                 <Route path="/health" element={<Health />} />
                 <Route path="/repo-scanner" element={<RepoScanner />} />
                 <Route path="/metrics" element={<Metrics />} />
+                <Route path="/changelog" element={<Changelog />} />
                 <Route path="*" element={<NotFound />} />
               </Routes>
             </main>
