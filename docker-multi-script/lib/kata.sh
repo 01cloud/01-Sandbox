@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# lib/phase_15b_kata_fc.sh – Setup Kata Containers + Firecracker (kata-fc) Runtime
+# lib/kata.sh – Kata Containers + Firecracker (kata-fc) runtime setup
+#
+# Configures Kata 3.x with the Firecracker VMM and LVM-backed devmapper
+# snapshotter on spoke1 and spoke2 so isolated microVM sandboxes can be
+# scheduled using `runtimeClassName: kata-fc`.
+#
+# Functions:
+#   _ensure_kata_host_assets    – download or reuse static Kata release tarball
+#   _install_kata_on_spoke      – install binaries, config, and containerd shim
+#   setup_kata_firecracker      – orchestrator: install kata-fc on all spokes
+# ==============================================================================
 #
 # Configures Kata Containers 3.x with the Firecracker VMM and LVM-backed devmapper
 # snapshotter on spoke1 and spoke2 so that isolated microVM sandboxes can be
 # scheduled using `runtimeClassName: kata-fc`.
-# ==============================================================================
 
 _check_phase_15b() {
   local spoke

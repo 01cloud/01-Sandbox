@@ -1,12 +1,136 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# lib/phase_06_envoy.sh – Deploy Envoy Gateway container (VIP: WG_VIP)
+# lib/network.sh – Transit network, WireGuard overlay, PKI, and Envoy Gateway
+#
+# Functions:
+#   setup_transit_network_and_wg_keys  – Docker transit net + WG keypair generation
+#   setup_wireguard_on_hubs            – configure wg0 on hub containers
+#   verify_root_ca_and_vip             – validate shared CA and VIP reachability
+#   setup_envoy_gateway                – deploy Envoy as the WG overlay L4 proxy
+# ==============================================================================
+
+_check_phase_02() {
+  docker network ls --format '{{.Name}}' | grep -q "^${TRANSIT_NET_NAME}$" || return 1
+
+  local entity
+  for entity in gateway primaryhub secondaryhub spoke1 spoke2; do
+    [ -s "${WG_DIR}/${entity}.key" ] && [ -s "${WG_DIR}/${entity}.pub" ] || return 1
+  done
+
+  # Load keypairs into memory so later phases can use them even when skipped
+  for entity in gateway primaryhub secondaryhub spoke1 spoke2; do
+    WG_PRIV[$entity]=$(tr -d '\r\n' < "${WG_DIR}/${entity}.key")
+    WG_PUB[$entity]=$(tr -d '\r\n'  < "${WG_DIR}/${entity}.pub")
+  done
+  return 0
+}
+
+_do_phase_02_transit_network_and_wg_keys() {
+  if ! docker network ls --format '{{.Name}}' | grep -q "^${TRANSIT_NET_NAME}$"; then
+    log_info "Creating Docker transit network ($TRANSIT_SUBNET)..."
+    docker network create \
+      --driver bridge \
+      --subnet "$TRANSIT_SUBNET" \
+      --opt "com.docker.network.bridge.name"="br-01transit" \
+      "$TRANSIT_NET_NAME"
+  else
+    log_info "Transit network '$TRANSIT_NET_NAME' already exists."
+  fi
+
+  for entity in gateway primaryhub secondaryhub spoke1 spoke2; do
+    if [ ! -s "${WG_DIR}/${entity}.key" ] || [ ! -s "${WG_DIR}/${entity}.pub" ]; then
+      log_info "Generating WireGuard keypair for $entity..."
+      read -r priv pub < <(python3 -c "
+from cryptography.hazmat.primitives.asymmetric import x25519
+import base64
+k = x25519.X25519PrivateKey.generate()
+print(f'{base64.b64encode(k.private_bytes_raw()).decode()} {base64.b64encode(k.public_key().public_bytes_raw()).decode()}')
+")
+      echo "$priv" > "${WG_DIR}/${entity}.key"
+      echo "$pub"  > "${WG_DIR}/${entity}.pub"
+    fi
+    WG_PRIV[$entity]=$(tr -d '\r\n' < "${WG_DIR}/${entity}.key")
+    WG_PUB[$entity]=$(tr -d '\r\n'  < "${WG_DIR}/${entity}.pub")
+  done
+
+  log_success "WireGuard keypairs ready for all 5 entities."
+}
+
+phase_02_transit_network_and_wg_keys() {
+  run_phase "02" "Transit Network & WireGuard Key Generation" _check_phase_02 _do_phase_02_transit_network_and_wg_keys
+}
+
+_check_phase_05() {
+  _check_wg_active primaryhub-control-plane   "$WG_HUB1_IP" || return 1
+  _check_wg_active secondaryhub-control-plane "$WG_HUB2_IP" || return 1
+  return 0
+}
+
+_do_phase_05_wireguard_on_hubs() {
+  _setup_wireguard "primaryhub-control-plane"   "primaryhub"   "$WG_HUB1_IP"
+  _setup_wireguard "secondaryhub-control-plane" "secondaryhub" "$WG_HUB2_IP"
+
+  log_success "WireGuard overlay active on hub clusters."
+}
+
+phase_05_wireguard_on_hubs() {
+  run_phase "05" "Bringing Up WireGuard Overlay on Hub Clusters" _check_phase_05 _do_phase_05_wireguard_on_hubs
+}
+
+_check_phase_07() {
+  local pca sca
+  pca=$(docker exec primaryhub-control-plane   sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
+  sca=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
+  [ -n "$pca" ] && [ "$pca" == "$sca" ] || return 1
+
+  local ctx
+  for ctx in kind-primaryhub kind-secondaryhub; do
+    kubectl --context "$ctx" get configmap cluster-info -n kube-public -o jsonpath='{.data.kubeconfig}' 2>/dev/null \
+      | grep -q "$WG_VIP" || return 1
+  done
+  return 0
+}
+
+_do_phase_07_verify_root_ca_and_vip() {
+  local primary_ca secondary_ca
+  primary_ca=$(docker exec primaryhub-control-plane   sha256sum /etc/kubernetes/pki/ca.crt | awk '{print $1}')
+  secondary_ca=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt | awk '{print $1}')
+
+  if [ "$primary_ca" != "$secondary_ca" ]; then
+    log_error "Root CA MISMATCH between primaryhub and secondaryhub!"
+    exit 1
+  fi
+  log_success "Root CA synchronized (${primary_ca})."
+
+  local primary_sa secondary_sa
+  primary_sa=$(docker exec primaryhub-control-plane     sha256sum /etc/kubernetes/pki/sa.pub 2>/dev/null | awk '{print $1}' || echo "none")
+  secondary_sa=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/sa.pub 2>/dev/null | awk '{print $1}' || echo "none")
+
+  if [ "$primary_sa" != "$secondary_sa" ]; then
+    log_info "Syncing ServiceAccount keys from primaryhub to secondaryhub..."
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
+    docker cp "${PKI_DIR}/sa.key" secondaryhub-control-plane:/etc/kubernetes/pki/sa.key
+    docker cp "${PKI_DIR}/sa.pub" secondaryhub-control-plane:/etc/kubernetes/pki/sa.pub
+  fi
+  log_success "ServiceAccount keys synchronized."
+
+  log_info "Updating cluster-info to advertise Gateway VIP..."
+  for ctx in kind-primaryhub kind-secondaryhub; do
+    kubectl --context "$ctx" get configmap cluster-info -n kube-public -o yaml 2>/dev/null | \
+      sed "s|server:.*|server: https://${WG_VIP}:6443|g" | \
+      kubectl --context "$ctx" apply -f - 2>/dev/null || true
+  done
+}
+
+phase_07_verify_root_ca_and_vip() {
+  run_phase "07" "Verifying Shared Root CA & VIP TLS SANs" _check_phase_07 _do_phase_07_verify_root_ca_and_vip
+}
 #
 # The envoy-gateway container runs WireGuard (wg0) and Envoy side-by-side.
 # It sits on the transit network and presents a single VIP (10.99.0.100) that
 # load-balances HTTP:80 and Kube-API:6443 across PrimaryHub and SecondaryHub
 # over the encrypted WireGuard overlay.
-# ==============================================================================
 
 _check_phase_06() {
   [ "$(docker inspect -f '{{.State.Running}}' envoy-gateway 2>/dev/null)" = "true" ] || return 1
