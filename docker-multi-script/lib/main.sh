@@ -90,24 +90,24 @@ _print_summary() {
 }
 
 main() {
-  run_phase "01" "Preflight: Host Toolchain Check & Auto-Install"  _check_preflight        run_preflight
-  run_phase "02" "Transit Network & WireGuard Key Generation"      _check_transit_network  setup_transit_network_and_wg_keys
-  run_phase "03" "Create Hub Clusters (primaryhub + secondaryhub)" _check_hub_clusters     create_hub_clusters
-  run_phase "04" "Install CRDs on Hubs"                           _check_hub_crds_on_hubs install_crds_on_hubs
-  run_phase "05" "WireGuard on Hubs"                              _check_hub_wireguard    setup_wireguard_on_hubs
-  run_phase "06" "Envoy Gateway (Overlay L4 Proxy)"               _check_envoy            setup_envoy_gateway
-  run_phase "07" "Root CA & VIP Verification"                     _check_pki              verify_root_ca_and_vip
-  run_phase "08" "OCM Init on Hubs"                               _check_ocm_init         ocm_init
-  run_phase "09" "Create Namespaces"                              _check_namespaces       create_namespaces
-  run_phase "10" "Build & Load Custom opensandbox-server Image"    _check_custom_image     load_custom_image
-  run_phase "11" "PrimaryHub – PostgreSQL First, then Full Stack"  _check_primaryhub       deploy_primaryhub
-  run_phase "12" "SecondaryHub – PostgreSQL First, then Full Stack" _check_secondaryhub    deploy_secondaryhub
-  run_phase "13" "Create Spoke Clusters"                          _check_spoke_clusters   create_spoke_clusters
-  run_phase "14" "WireGuard on All Clusters"                      _check_all_wireguard    wireguard_on_all_clusters
-  run_phase "15" "Install CRDs on Spokes"                         _check_spoke_crds       install_crds_on_spokes
-  run_phase "16" "Kata Containers + Firecracker Runtime"          _check_kata             setup_kata_firecracker
-  run_phase "17" "Join Spokes to OCM (MultipleHubs)"              _check_ocm_join         join_spokes_to_ocm
-  run_phase "18" "Label Spokes & Sync to SecondaryHub"            _check_spoke_sync       sync_spokes_to_secondaryhub
+  phase_01_preflight
+  phase_02_transit_network_and_wg_keys
+  phase_03_create_hub_clusters
+  phase_04_install_crds_on_hubs
+  phase_05_wireguard_on_hubs
+  phase_06_envoy_gateway
+  phase_07_verify_root_ca_and_vip
+  phase_08_ocm_init
+  phase_09_create_namespaces
+  phase_10_load_custom_image
+  phase_11_primaryhub_deploy
+  phase_12_secondaryhub_deploy
+  phase_13_create_spoke_clusters
+  phase_14_wireguard_on_all_clusters
+  phase_15_install_crds_on_spokes
+  phase_15b_setup_kata_firecracker
+  phase_16_join_spokes_to_ocm
+  phase_17_sync_spokes_to_secondaryhub
 
   run_verification
   _print_summary
