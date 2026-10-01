@@ -14,7 +14,7 @@ if not JWT_TOKEN:
     )
     sys.exit(1)
 
-API_BASE_URL = os.environ.get("API_URL", "https://api-sandbox.01security.com")
+API_BASE_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 URLS = [
     "https://github.com/tiangolo/fastapi",

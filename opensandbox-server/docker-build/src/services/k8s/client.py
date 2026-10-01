@@ -89,6 +89,10 @@ class K8sClient:
             self._custom_objects_api = client.CustomObjectsApi()
         return self._custom_objects_api
 
+    @property
+    def custom_api(self) -> CustomObjectsApi:
+        return self.get_custom_objects_api()
+
     def get_node_v1_api(self) -> NodeV1Api:
         if self._node_v1_api is None:
             self._node_v1_api = client.NodeV1Api()

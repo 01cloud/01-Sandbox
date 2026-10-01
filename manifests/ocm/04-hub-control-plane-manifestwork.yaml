@@ -1,0 +1,191 @@
+apiVersion: work.open-cluster-management.io/v1
+kind: ManifestWork
+metadata:
+  name: deploy-01sandbox-control-plane
+  namespace: primaryhub
+spec:
+  workload:
+    manifests:
+      # 1. Namespace
+      - apiVersion: v1
+        kind: Namespace
+        metadata:
+          name: opensandbox
+          labels:
+            app.kubernetes.io/part-of: 01sandbox
+            ocm.opensandbox.io/role: hub
+
+      # 2. Redis Cache Deployment
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: redis
+          namespace: opensandbox
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: redis
+          template:
+            metadata:
+              labels:
+                app: redis
+            spec:
+              containers:
+                - name: redis
+                  image: redis:7-alpine
+                  ports:
+                    - containerPort: 6379
+
+      # 3. RabbitMQ Message Broker
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: rabbitmq
+          namespace: opensandbox
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: rabbitmq
+          template:
+            metadata:
+              labels:
+                app: rabbitmq
+            spec:
+              containers:
+                - name: rabbitmq
+                  image: rabbitmq:3-management-alpine
+                  ports:
+                    - containerPort: 5672
+                    - containerPort: 15672
+
+      # 4. PostgreSQL Relational Store
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: postgresql
+          namespace: opensandbox
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: postgresql
+          template:
+            metadata:
+              labels:
+                app: postgresql
+            spec:
+              containers:
+                - name: postgresql
+                  image: postgres:15-alpine
+                  env:
+                    - name: POSTGRES_DB
+                      value: "apikeys"
+                    - name: POSTGRES_USER
+                      value: "postgres"
+                    - name: POSTGRES_PASSWORD
+                      value: "password123"
+                  ports:
+                    - containerPort: 5432
+
+      # 5. apiServer (FastAPI Control Plane Gateway & Auth)
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: sandbox-api
+          namespace: opensandbox
+        spec:
+          replicas: 2
+          selector:
+            matchLabels:
+              app: sandbox-api
+          template:
+            metadata:
+              labels:
+                app: sandbox-api
+            spec:
+              containers:
+                - name: sandbox-api
+                  image: 01community/01sandbox-api:v0.7.9
+                  ports:
+                    - containerPort: 8000
+                  env:
+                    - name: WORKLOAD_PROVIDER
+                      value: "ocm"
+                    - name: PLACEMENT_NAME
+                      value: "sandbox-spoke-placement"
+                    - name: BACKEND_URL_OPENSANDBOX
+                      value: "http://opensandbox-server.opensandbox.svc.cluster.local:8080"
+
+      # 6. agentgateway (Edge Ingress & Security Gateway)
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: agentgateway-proxy
+          namespace: opensandbox
+        spec:
+          replicas: 2
+          selector:
+            matchLabels:
+              app: agentgateway-proxy
+          template:
+            metadata:
+              labels:
+                app: agentgateway-proxy
+            spec:
+              containers:
+                - name: agentgateway-proxy
+                  image: 01community/01sandbox-agentgateway:latest
+                  ports:
+                    - containerPort: 80
+                    - containerPort: 443
+
+      # 7. opensandbox-server Deployment (OCM Multi-Cluster Scheduler)
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: opensandbox-server
+          namespace: opensandbox
+        spec:
+          replicas: 2
+          selector:
+            matchLabels:
+              app: opensandbox-server
+          template:
+            metadata:
+              labels:
+                app: opensandbox-server
+            spec:
+              containers:
+                - name: opensandbox-server
+                  image: sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/server:v0.1.7
+                  ports:
+                    - containerPort: 8080
+                  env:
+                    - name: WORKLOAD_PROVIDER
+                      value: "ocm"
+                    - name: PLACEMENT_NAME
+                      value: "sandbox-spoke-placement"
+
+      # 8. opensandbox-controller Deployment (Pool Reconciler)
+      - apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: opensandbox-controller
+          namespace: opensandbox
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: opensandbox-controller
+          template:
+            metadata:
+              labels:
+                app: opensandbox-controller
+            spec:
+              containers:
+                - name: controller
+                  image: 01community/01sandbox-opensandbox-controller:v0.7.3
+                  ports:
+                    - containerPort: 8080

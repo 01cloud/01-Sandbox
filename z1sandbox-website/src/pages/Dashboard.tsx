@@ -1,6 +1,7 @@
 import { useAuth0 } from "@auth0/auth0-react";
 import { useEffect, useState, useRef } from "react";
 import DOMPurify from 'dompurify';
+import { getApiBaseUrl, resolveBackendUrl, getDefaultBackends } from "@/lib/apiConfig";
 import {
   Plus,
   Trash2,
@@ -80,28 +81,7 @@ interface APIKey {
 }
 
 const Dashboard = () => {
-  // Derive the API base URL.
-  // Priority: explicit VITE_API_BASE_URL → origin extracted from the first backend's
-  // baseUrl (works in production where baseUrl is an absolute URL like
-  // "https://api-sandbox.01security.com/api/v1/01sbx") → "" (local dev, same origin).
-  const API_BASE_URL = (() => {
-    if (import.meta.env.DEV) return "";
-    const explicit = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL;
-    if (explicit) return explicit;
-    try {
-      const backendsRaw = (window as any)._env_?.VITE_DASHBOARD_BACKENDS_JSON
-        || import.meta.env.VITE_DASHBOARD_BACKENDS_JSON;
-      if (backendsRaw) {
-        const backends = JSON.parse(backendsRaw);
-        if (Array.isArray(backends) && backends.length > 0) {
-          const parsed = new URL(backends[0].baseUrl);
-          // Only use cross-origin API servers; same-origin relative paths return ""
-          if (parsed.origin !== window.location.origin) return parsed.origin;
-        }
-      }
-    } catch { /* local dev uses relative paths — fall through */ }
-    return "";
-  })();
+  const API_BASE_URL = getApiBaseUrl();
   const { user, getAccessTokenSilently, isAuthenticated, isLoading: authLoading } = useAuth0();
   const [keys, setKeys] = useState<APIKey[]>([]);
   const [authToken, setAuthToken] = useState<string>("");
@@ -458,10 +438,20 @@ const Dashboard = () => {
 
       if (response.ok) {
         const data = await response.json();
-        setBackends(data);
+        const resolved = data.map((b: any) => {
+          const defaultBase = b.baseUrl || `/api/v1/${b.id.toLowerCase()}`;
+          const bUrl = resolveBackendUrl(defaultBase);
+          const docUrl = b.documentationUrl ? resolveBackendUrl(b.documentationUrl) : `${bUrl}/docs`;
+          return {
+            ...b,
+            baseUrl: bUrl,
+            documentationUrl: docUrl
+          };
+        });
+        setBackends(resolved);
         // Sync selectedBackend if it's currently open
         if (selectedBackend) {
-          const updated = data.find((b: any) => b.id === selectedBackend.id);
+          const updated = resolved.find((b: any) => b.id === selectedBackend.id);
           if (updated) {
             setSelectedBackend(updated);
           }
@@ -472,39 +462,7 @@ const Dashboard = () => {
       console.error("Failed to load backends config from API, falling back to environment:", e);
     }
 
-    try {
-      const envBackendsJson = (window as any)._env_?.VITE_DASHBOARD_BACKENDS_JSON || import.meta.env.VITE_DASHBOARD_BACKENDS_JSON;
-
-      if (envBackendsJson) {
-        let rawJson = typeof envBackendsJson === 'string' ? envBackendsJson.trim() : envBackendsJson;
-        // Strip leading/trailing single quotes if they exist
-        if (typeof rawJson === 'string' && rawJson.startsWith("'") && rawJson.endsWith("'")) {
-          rawJson = rawJson.substring(1, rawJson.length - 1);
-        }
-
-        const data = typeof rawJson === 'string' ? JSON.parse(rawJson) : rawJson;
-
-        // Process backends to ensure they have all required fields dynamically
-        const processed = data.map((b: any) => {
-          // If a backend misses a baseUrl, dynamically compose one relative to 'v1'
-          const defaultBase = b.baseUrl || `/api/v1/${b.id.toLowerCase()}`;
-          return {
-            ...b,
-            baseUrl: defaultBase,
-            documentationUrl: b.documentationUrl || `${defaultBase}/docs`,
-            isSubscribed: b.id === "Z1_SANDBOX"
-          };
-        });
-        setBackends(processed);
-        return;
-      }
-
-      // Default fallback if no env is set
-      setBackends([]);
-    } catch (e) {
-      console.error("Failed to load backends config from environment:", e);
-      setBackends([]);
-    }
+    setBackends(getDefaultBackends());
   };
 
   // fetchKeys function

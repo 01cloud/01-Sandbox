@@ -23,9 +23,12 @@ metadata:
   name: rabbitmq-mgmt-route
   namespace: {{ .Values.configMap.GATEWAY_SECRET_NAMESPACE | default "agentgateway-system" }}
 spec:
+{{- if .Values.ingressHostnames }}
   hostnames:
-    - api-sandbox.01security.com
-    - 10.0.10.9
+  {{- range .Values.ingressHostnames }}
+  - {{ . | quote }}
+  {{- end }}
+{{- end }}
   parentRefs:
     - group: gateway.networking.k8s.io
       kind: Gateway

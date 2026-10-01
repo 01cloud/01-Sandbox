@@ -113,6 +113,23 @@ helm install codeInspector ./codeInspector \
 | `opensandboxResourcePool.pool.capacitySpec.poolMin` | Minimum pool size | `1` |
 | `opensandboxResourcePool.pool.capacitySpec.poolMax` | Maximum pool size | `50` |
 
+### Node Network Agent Values (Kubernetes-Native Node Routing)
+
+A Kubernetes-native DaemonSet deployed to `kube-system` that manages node-level kernel forwarding and network routing readiness across the cluster nodes.
+
+> **Note**: **Zero configuration is required.** Sensible defaults are automatically applied out of the box.
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `nodeNetworkAgent.enabled` | Enable Kubernetes-native node network agent DaemonSet | `true` |
+| `nodeNetworkAgent.namespace` | Target namespace for the DaemonSet | `kube-system` |
+| `nodeNetworkAgent.image` | Container image for the network agent | `alpine:3.19` |
+| `nodeNetworkAgent.resources.requests.cpu` | CPU request | `10m` |
+| `nodeNetworkAgent.resources.requests.memory` | Memory request | `16Mi` |
+| `nodeNetworkAgent.resources.limits.cpu` | CPU limit | `50m` |
+| `nodeNetworkAgent.resources.limits.memory` | Memory limit | `32Mi` |
+
+
 ## Uninstall
 
 ```bash

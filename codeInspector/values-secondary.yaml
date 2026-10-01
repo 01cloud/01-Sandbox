@@ -1,0 +1,128 @@
+################################################################
+# Secondary Hub (Warm Standby) Values Profile
+################################################################
+
+global:
+  ocm:
+    enabled: true
+    role: "hub"
+    clusterSet: "sandbox-spokes"
+    placementName: "sandbox-spoke-placement"
+
+agentgateway:
+  enabled: true
+  httproute:
+    hostnames: []
+  gateway:
+    addresses:
+      - value: 172.30.0.201
+  policy:
+    rateLimit:
+      enabled: true
+      requests: 7
+      unit: "Minutes"
+
+apiServer:
+  enabled: true
+  configMap:
+    APP_ENV: "production"
+    WORKLOAD_PROVIDER: "ocm"
+    PLACEMENT_NAME: "sandbox-spoke-placement"
+  deployment:
+    replicaCount: 1 # Warm Standby
+    image:
+      repository: 01community/01sandbox-api
+      tag: "v0.7.9"
+      pullPolicy: IfNotPresent
+  sealedSecrets:
+    enabled: false
+  postgresql:
+    enabled: false
+  cnpg:
+    enabled: true
+    instances: 1
+    storage: "5Gi"
+    storageClassName: "standard"
+    database: "apikeys"
+    user: "postgres"
+    password: "password123"
+    replication:
+      enabled: true
+      role: "standby"
+      primaryHost: "10.99.0.1"
+      primaryPort: 30432
+  redis:
+    enabled: false
+  valkey:
+    enabled: true
+    host: "redis-service"
+    port: 6379
+    password: ""
+    image:
+      repository: valkey/valkey
+      tag: "7.2-alpine"
+      pullPolicy: IfNotPresent
+    replication:
+      enabled: true
+      role: "standby"
+      primaryHost: "10.99.0.1"
+      primaryPort: 30379
+  failoverController:
+    enabled: true
+    primaryHost: "10.99.0.1"
+    primaryPort: 30432
+    image:
+      repository: bitnami/kubectl
+      tag: latest
+      pullPolicy: IfNotPresent
+
+
+opensandbox:
+  enabled: true
+  multiCluster:
+    enabled: true
+    clusterSet: "sandbox-spokes"
+    placementName: "sandbox-spoke-placement"
+  server:
+    replicaCount: 1 # Warm Standby
+    workloadProvider: "ocm"
+    placementName: "sandbox-spoke-placement"
+    image:
+      repository: 01community/01sandbox-opensandbox-server
+      tag: "v0.7.10-ocm"
+      pullPolicy: IfNotPresent
+    storage:
+      storageClassName: "standard"
+  controller:
+    replicaCount: 1
+    image:
+      repository: 01community/01sandbox-opensandbox-controller
+      tag: "v0.7.3"
+      pullPolicy: IfNotPresent
+
+cloudnative-pg:
+  enabled: true
+  crds:
+    create: false
+  webhook:
+    mutating:
+      failurePolicy: Ignore
+    validating:
+      failurePolicy: Ignore
+
+###############################################################
+# Kubernetes-Native Node Network Agent (DaemonSet)
+###############################################################
+nodeNetworkAgent:
+  enabled: true
+  namespace: kube-system
+  image: "alpine:3.19"
+
+metallb:
+  enabled: true
+  namespace: metallb-system
+  ipAddressPool:
+    addresses:
+      - 172.30.0.201-172.30.0.201
+  l2Advertisement:
+    enabled: true

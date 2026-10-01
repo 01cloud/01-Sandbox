@@ -12,6 +12,25 @@ global:
     - "10."
     - "127.0.0.1"
     - "::1"
+  ocm:
+    enabled: true
+    role: "hub" # "hub" or "spoke"
+    primaryHub: "primaryhub"
+    primaryHubIp: "10.9.9.10"
+    secondaryHub: "secondaryhub"
+    secondaryHubIp: "10.9.9.20"
+    clusterSet: "sandbox-spokes"
+    placementName: "sandbox-spoke-placement"
+    spokes:
+      - name: "spoke-us-east-1"
+        region: "us-east-1"
+        wireguardIp: "10.9.9.30"
+      - name: "spoke-eu-central-1"
+        region: "eu-central-1"
+        wireguardIp: "10.9.9.40"
+      - name: "spoke-us-west-1"
+        region: "us-west-1"
+        wireguardIp: "10.9.9.50"
 ################################################################
 # Agent Gateway  values
 ################################################################
@@ -64,7 +83,7 @@ agentgateway-controller:
     extraEnv:
       KGW_ENABLE_GATEWAY_API_EXPERIMENTAL_FEATURES: "true"
     image:
-      pullPolicy: Always
+      pullPolicy: IfNotPresent
 ################################################################
 # API Server component values
 ################################################################
@@ -99,7 +118,7 @@ apiServer:
     AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com"
     AUTH0_AUDIENCE: "https://code-inspector-api"
     OPENSANDBOX_ROUTE_PREFIX: "{{ .Values.global.apiRoutePrefix }}"
-    DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"http://10.0.8.9{{ .Values.global.apiRoutePrefix }}","documentationUrl":"http://10.0.8.9{{ .Values.global.apiRoutePrefix }}/docs"}]'
+    DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"{{ .Values.global.apiRoutePrefix }}","documentationUrl":"{{ .Values.global.apiRoutePrefix }}/docs"}]'
     JWT_PUBLIC_JWKS: ""
     SENDGRID_FROM_EMAIL: "sandbox@01security.com"
     MAX_CONCURRENT_LANG_PODS: "10"
@@ -144,7 +163,7 @@ apiServer:
     image:
       repository: 199012118961/01sandbox-api
       tag: "dev"
-      pullPolicy: Always
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: "100m"
@@ -183,7 +202,7 @@ apiServer:
     password: "password123"
     database: "apikeys"
     storage: "5Gi"
-    storageClassName: "longhorn"
+    storageClassName: "standard"
   redis:
     enabled: true
     host: "redis-service"
@@ -221,7 +240,7 @@ opensandbox:
     image:
       repository: 199012118961/01sandbox-opensandbox-controller
       tag: "dev"
-      pullPolicy: Always
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: 100m
@@ -246,9 +265,9 @@ opensandbox:
     autoTerminationSeconds: 0
     runtimeClassName: "gvisor"
     image:
-      repository: 199012118961/01sandbox-opensandbox-server
-      tag: "dev"
-      pullPolicy: Always
+      repository: 01community/01sandbox-opensandbox-server
+      tag: "v0.7.10-ocm"
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: 100m
@@ -262,7 +281,7 @@ opensandbox:
       size: "10Gi"
       accessMode: "ReadWriteMany"
       mountPath: "/data"
-      storageClassName: "longhorn"
+      storageClassName: "standard"
 ################################################################
 # OpenSandbox Resource Pool component values
 ################################################################

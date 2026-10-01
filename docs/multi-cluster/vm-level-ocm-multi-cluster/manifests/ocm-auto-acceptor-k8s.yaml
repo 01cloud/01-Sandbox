@@ -53,39 +53,46 @@ data:
   auto-acceptor.sh: |
     #!/bin/sh
     echo "[$(date -Iseconds)] Starting OCM Priority Auto-Acceptor Loop in Kubernetes..."
-    PRIMARY_HUB="10.99.0.1"
+    # WireGuard Overlay IP of PrimaryHub (cluster: primaryhub)
+    PRIMARY_HUB_WG_IP="${PRIMARY_HUB_WG_IP:-${PRIMARY_HUB:-__PRIMARY_HUB_WG_IP__}}"
 
     while true; do
-      # Determine if running on Secondary Hub by checking node name or env var
       NODE_NAME=$(kubectl get nodes -o jsonpath='{.items[0].metadata.name}' 2>/dev/null)
       if echo "$NODE_NAME" | grep -q "secondaryhub"; then
-        IS_SECONDARY=true
-      elif [ "$HUB_ROLE" = "secondary" ]; then
         IS_SECONDARY=true
       else
         IS_SECONDARY=false
       fi
 
-      # Check if Primary Hub (10.99.0.1) is UP and reachable
-      if curl -k -m 2 -s https://${PRIMARY_HUB}:6443/livez >/dev/null 2>&1; then
+      if curl -k -m 2 -s https://${PRIMARY_HUB_WG_IP}:6443/livez >/dev/null 2>&1; then
         PRIMARY_ALIVE=true
       else
         PRIMARY_ALIVE=false
       fi
 
       if [ "$IS_SECONDARY" = "true" ] && [ "$PRIMARY_ALIVE" = "true" ]; then
-        # Primary Hub is UP -> Secondary Hub MUST YIELD & CANCEL SPOKE ACCEPTANCE IMMEDIATELY
-        TARGET_SPOKES=$(kubectl get managedcluster -o json 2>/dev/null | jq -r '.items[]? | select(.spec.hubAcceptsClient == true or (.status.conditions[]? | select(.type=="ManagedClusterConditionAvailable" and .status!="False"))) | .metadata.name')
-        for spoke in $TARGET_SPOKES; do
-          if [ -n "$spoke" ]; then
-            echo "[$(date -Iseconds)] Primary Hub is UP. Yielding standby: setting hubAcceptsClient=false & AVAILABLE=False for $spoke"
+        for spoke in $(kubectl get managedcluster -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+          CURRENT_STATUS=$(kubectl get managedcluster "$spoke" -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null)
+          CURRENT_ACCEPT=$(kubectl get managedcluster "$spoke" -o jsonpath='{.spec.hubAcceptsClient}' 2>/dev/null)
+
+          if [ "$CURRENT_STATUS" = "True" ] || [ "$CURRENT_ACCEPT" = "true" ]; then
+            echo "[$(date -Iseconds)] Primary Hub is UP. Setting hubAcceptsClient=false & AVAILABLE=False for $spoke"
             kubectl patch managedcluster "$spoke" --type merge -p '{"spec":{"hubAcceptsClient":false}}' 2>/dev/null || true
-            kubectl patch managedcluster "$spoke" --subresource=status --type merge -p "{\"status\":{\"conditions\":[{\"type\":\"ManagedClusterConditionAvailable\",\"status\":\"False\",\"reason\":\"PrimaryHubActive\",\"message\":\"Primary hub active; secondary hub yielding standby\",\"lastTransitionTime\":\"$(date -u +%Y-%m-%dT%H:%M:%SZ)\"}]}}" 2>/dev/null || true
-            kubectl delete lease managed-cluster-lease -n "$spoke" 2>/dev/null || true
+            kubectl get managedcluster "$spoke" -o json 2>/dev/null | jq '
+              .status.conditions = [
+                (.status.conditions[]? | select(.type != "ManagedClusterConditionAvailable")),
+                {
+                  "type": "ManagedClusterConditionAvailable",
+                  "status": "False",
+                  "reason": "SecondaryStandby",
+                  "message": "Primary hub is active; secondary hub in standby",
+                  "lastTransitionTime": (now | todate)
+                }
+              ]
+            ' | kubectl replace --subresource=status -f - 2>/dev/null || true
           fi
         done
       else
-        # Either we are Primary Hub OR Primary Hub is DOWN -> Accept spokes
         PENDING_CSRS=$(kubectl get csr -o json 2>/dev/null | jq -r '.items[]? | select(.status.conditions == null and (.spec.signerName == "kubernetes.io/kube-apiserver-client" or .spec.signerName == "open-cluster-management.io/sub-k8s-signer")) | .metadata.name')
         for csr in $PENDING_CSRS; do
           if [ -n "$csr" ]; then
@@ -94,25 +101,42 @@ data:
           fi
         done
 
-        UNACCEPTED=$(kubectl get managedcluster -o json 2>/dev/null | jq -r '.items[]? | select(.spec.hubAcceptsClient == false) | .metadata.name')
-        for spoke in $UNACCEPTED; do
-          if [ -n "$spoke" ]; then
+        for spoke in $(kubectl get managedcluster -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+          CURRENT_ACCEPT=$(kubectl get managedcluster "$spoke" -o jsonpath='{.spec.hubAcceptsClient}' 2>/dev/null)
+          CURRENT_STATUS=$(kubectl get managedcluster "$spoke" -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null)
+
+          if [ "$CURRENT_ACCEPT" != "true" ]; then
             echo "[$(date -Iseconds)] Auto-accepting managedcluster: $spoke"
             kubectl patch managedcluster "$spoke" --type merge -p '{"spec":{"hubAcceptsClient":true}}' 2>/dev/null || true
+          fi
+
+          if [ "$CURRENT_STATUS" != "True" ]; then
+            echo "[$(date -Iseconds)] Restoring AVAILABLE=True for $spoke"
+            kubectl get managedcluster "$spoke" -o json 2>/dev/null | jq '
+              .status.conditions = [
+                (.status.conditions[]? | select(.type != "ManagedClusterConditionAvailable")),
+                {
+                  "type": "ManagedClusterConditionAvailable",
+                  "status": "True",
+                  "reason": "ManagedClusterAvailable",
+                  "message": "Managed cluster is available",
+                  "lastTransitionTime": (now | todate)
+                }
+              ]
+            ' | kubectl replace --subresource=status -f - 2>/dev/null || true
           fi
         done
       fi
 
-      # Auto-prune old approved CSRs to prevent hitting OCM 10-CSR limit
       APPROVED_CSRS=$(kubectl get csr -o json 2>/dev/null | jq -r '.items[]? | select(.status.conditions[]?.type == "Approved") | .metadata.name')
       CSR_COUNT=$(echo "$APPROVED_CSRS" | wc -w)
-      if [ "$CSR_COUNT" -gt 3 ]; then
+      if [ "$CSR_COUNT" -gt 5 ]; then
         for csr in $APPROVED_CSRS; do
           kubectl delete csr "$csr" 2>/dev/null || true
         done
       fi
 
-      sleep 2
+      sleep 3
     done
 ---
 apiVersion: apps/v1
@@ -137,6 +161,9 @@ spec:
       - name: auto-acceptor
         image: bitnami/kubectl:latest
         imagePullPolicy: IfNotPresent
+        env:
+        - name: PRIMARY_HUB
+          value: "__PRIMARY_HUB_IP__"
         command: ["/bin/sh", "/scripts/auto-acceptor.sh"]
         volumeMounts:
         - name: script-vol

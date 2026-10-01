@@ -46,7 +46,7 @@ if not JWT_TOKEN:
     print("Example: JWT_TOKEN=eyJ... python3 delete_existing_scans.py <target>")
     sys.exit(1)
 
-API_BASE_URL = os.environ.get("API_URL", "https://api-sandbox.01security.com")
+API_BASE_URL = os.environ.get("API_URL", "http://localhost:8000")
 PURGE = os.environ.get("PURGE", "true").lower() == "true"
 
 HEADERS = {

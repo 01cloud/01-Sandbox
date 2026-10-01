@@ -1,4 +1,4 @@
-{{- if .Values.redis.enabled }}
+{{- if and .Values.redis.enabled (not (and .Values.valkey .Values.valkey.enabled)) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,7 +24,18 @@ spec:
               name: sandbox-api-secret
               key: REDIS_PASSWORD
               optional: true
-        command: ["sh", "-c", "if [ -z \"$REDIS_PASSWORD\" ]; then redis-server; else redis-server --requirepass \"$REDIS_PASSWORD\"; fi"]
+        command:
+        - sh
+        - -c
+        - |
+          EXTRA_ARGS=""
+          {{- if and .Values.redis.replication .Values.redis.replication.enabled (eq .Values.redis.replication.role "standby") }}
+          EXTRA_ARGS="--replicaof {{ .Values.redis.replication.primaryHost }} {{ .Values.redis.replication.primaryPort }}"
+          {{- end }}
+          if [ -n "$REDIS_PASSWORD" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --requirepass $REDIS_PASSWORD --masterauth $REDIS_PASSWORD"
+          fi
+          exec redis-server $EXTRA_ARGS
         ports:
         - containerPort: 6379
 ---

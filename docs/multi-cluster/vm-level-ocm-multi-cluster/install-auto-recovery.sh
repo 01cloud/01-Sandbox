@@ -8,11 +8,16 @@ set -euo pipefail
 
 echo "🚀 Installing automated post-reboot recovery service (ocm-mesh-boot.service)..."
 
+HUB1_IP="${HUB1_IP:-192.168.100.20}"
+HUB2_IP="${HUB2_IP:-192.168.101.20}"
+SPOKE1_IP="${SPOKE1_IP:-192.168.102.20}"
+SPOKE2_IP="${SPOKE2_IP:-192.168.103.20}"
+
 declare -A VM_IPS=(
-  ["hub1-vm"]="192.168.100.20"
-  ["hub2-vm"]="192.168.101.20"
-  ["spoke1-vm"]="192.168.102.20"
-  ["spoke2-vm"]="192.168.103.20"
+  ["hub1-vm"]="$HUB1_IP"
+  ["hub2-vm"]="$HUB2_IP"
+  ["spoke1-vm"]="$SPOKE1_IP"
+  ["spoke2-vm"]="$SPOKE2_IP"
 )
 
 for vm in "hub1-vm" "hub2-vm" "spoke1-vm" "spoke2-vm"; do
@@ -30,6 +35,10 @@ for vm in "hub1-vm" "hub2-vm" "spoke1-vm" "spoke2-vm"; do
   esac
 
   ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "ubuntu@$IP" "sudo bash -s" << EOF
+systemctl stop primaryhub-redis-forward.service primaryhub-pg-forward.service socat-redis.service socat-pg.service 2>/dev/null || true
+systemctl disable primaryhub-redis-forward.service primaryhub-pg-forward.service socat-redis.service socat-pg.service 2>/dev/null || true
+rm -f /etc/systemd/system/primaryhub-redis-forward.service /etc/systemd/system/primaryhub-pg-forward.service 2>/dev/null || true
+
 cat > /usr/local/bin/ocm-mesh-boot.sh << 'SCRIPT'
 #!/bin/bash
 set -eo pipefail
@@ -43,6 +52,7 @@ if ! ip link show wg0 >/dev/null 2>&1; then
 fi
 
 echo "[ocm-mesh-boot] Resetting containerd inside KinD $CONTAINER..."
+docker update --restart=always $CONTAINER 2>/dev/null || true
 docker exec $CONTAINER systemctl restart containerd 2>/dev/null || docker restart $CONTAINER || true
 sleep 5
 
@@ -57,6 +67,22 @@ iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 8091 -j DNAT --to-destina
 
 iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 32379 -j DNAT --to-destination \${DOCKER_IP}:32379 2>/dev/null || \
 iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 32379 -j DNAT --to-destination \${DOCKER_IP}:32379
+
+# Valkey continuous sync (WireGuard 10.99.0.1:6379 -> KinD NodePort 30379)
+iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination \${DOCKER_IP}:30379 2>/dev/null || \
+iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 6379 -j DNAT --to-destination \${DOCKER_IP}:30379
+
+# PostgreSQL continuous replication (WireGuard 10.99.0.1:5432 -> KinD NodePort 30432)
+iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432 2>/dev/null || \
+iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 5432 -j DNAT --to-destination \${DOCKER_IP}:30432
+
+# AgentGateway & MetalLB API Ingress (Port 80 -> MetalLB LoadBalancer 172.18.255.200:80)
+iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80 2>/dev/null || \
+iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 80 -j DNAT --to-destination 172.18.255.200:80
+
+# AgentGateway & MetalLB HTTPS Ingress (Port 443 -> MetalLB LoadBalancer 172.18.255.200:443)
+iptables -t nat -C PREROUTING ! -i br-+ -p tcp --dport 443 -j DNAT --to-destination 172.18.255.200:443 2>/dev/null || \
+iptables -t nat -A PREROUTING ! -i br-+ -p tcp --dport 443 -j DNAT --to-destination 172.18.255.200:443
 
 iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || \
 iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE
@@ -119,8 +145,7 @@ echo "----------------------------------------------------------------------"
 echo "📦 Configuring gateway-vm (192.168.100.10) for VIP Watchdog & Netplan..."
 echo "----------------------------------------------------------------------"
 ssh -o UserKnownHostsFile=/dev/null -o StrictHostKeyChecking=no "ubuntu@192.168.100.10" "sudo bash -s" << 'EOF'
-systemctl stop ocm-vip-watchdog.service 2>/dev/null || true
-systemctl disable ocm-vip-watchdog.service 2>/dev/null || true
+docker rm -f ocm-vip-watchdog 2>/dev/null || true
 
 cat > /etc/netplan/60-gateway.yaml << 'NETPLAN'
 network:
@@ -148,57 +173,93 @@ NETPLAN
 chmod 600 /etc/netplan/60-gateway.yaml
 netplan apply 2>/dev/null || true
 
-docker rm -f ocm-vip-watchdog 2>/dev/null || true
-docker run -d \
-  --name ocm-vip-watchdog \
-  --restart always \
-  --network host \
-  --cap-add NET_ADMIN \
-  alpine:latest \
-  /bin/sh -c '
-    apk add --no-cache curl iptables iproute2 bash >/dev/null 2>&1
-    PRIMARY_HUB="10.99.0.1"
-    SECONDARY_HUB="10.99.0.2"
-    VIP="10.99.0.100"
-    ACTIVE_TARGET=""
+cat > /usr/local/bin/ocm-vip-watchdog.sh << 'WATCHDOG_SCRIPT'
+#!/bin/bash
+set -eo pipefail
+
+PRIMARY_HUB="10.99.0.1"
+SECONDARY_HUB="10.99.0.2"
+VIP="10.99.0.100"
+GW_PHYSICAL="192.168.100.10"
+ACTIVE_TARGET=""
+FAIL_COUNT=0
+FAIL_THRESHOLD=3
+
+ip addr add ${VIP}/32 dev wg0 2>/dev/null || true
+sysctl -w net.ipv4.ip_forward=1 >/dev/null
+iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE
+
+while true; do
+  if curl -k -m 2 -s https://${PRIMARY_HUB}:6443/livez >/dev/null 2>&1; then
     FAIL_COUNT=0
-    FAIL_THRESHOLD=3
-
-    ip addr add ${VIP}/32 dev wg0 2>/dev/null || true
-    sysctl -w net.ipv4.ip_forward=1 >/dev/null
-
-    while true; do
-      if curl -k -m 2 -s https://${PRIMARY_HUB}:6443/livez >/dev/null; then
-        FAIL_COUNT=0
-        TARGET="${PRIMARY_HUB}"
+    TARGET="${PRIMARY_HUB}"
+  else
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+    echo "[$(date -Iseconds)] [ocm-vip-watchdog] Primary check failed (${FAIL_COUNT}/${FAIL_THRESHOLD})"
+    if [ "$FAIL_COUNT" -ge "$FAIL_THRESHOLD" ]; then
+      if curl -k -m 2 -s https://${SECONDARY_HUB}:6443/livez >/dev/null 2>&1; then
+        TARGET="${SECONDARY_HUB}"
       else
-        FAIL_COUNT=$((FAIL_COUNT + 1))
-        echo "[$(date -Iseconds)] [ocm-vip-watchdog] Primary check failed (${FAIL_COUNT}/${FAIL_THRESHOLD})"
-        if [ "$FAIL_COUNT" -ge "$FAIL_THRESHOLD" ]; then
-          if curl -k -m 2 -s https://${SECONDARY_HUB}:6443/livez >/dev/null; then
-            TARGET="${SECONDARY_HUB}"
-          else
-            TARGET="${PRIMARY_HUB}"
-          fi
-        else
-          TARGET="${ACTIVE_TARGET:-${PRIMARY_HUB}}"
-        fi
+        TARGET="${PRIMARY_HUB}"
       fi
+    else
+      TARGET="${ACTIVE_TARGET:-${PRIMARY_HUB}}"
+    fi
+  fi
 
-      if [ -n "$TARGET" ] && [ "$TARGET" != "$ACTIVE_TARGET" ]; then
-        echo "[$(date -Iseconds)] [ocm-vip-watchdog] Failover event: Switching VIP target to ${TARGET}"
-        iptables -t nat -D PREROUTING -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${PRIMARY_HUB}:6443 2>/dev/null || true
-        iptables -t nat -D PREROUTING -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${SECONDARY_HUB}:6443 2>/dev/null || true
-        iptables -t nat -D OUTPUT -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${PRIMARY_HUB}:6443 2>/dev/null || true
-        iptables -t nat -D OUTPUT -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${SECONDARY_HUB}:6443 2>/dev/null || true
+  if [ -n "$TARGET" ] && [ "$TARGET" != "$ACTIVE_TARGET" ]; then
+    echo "[$(date -Iseconds)] [ocm-vip-watchdog] Switching VIP target to ${TARGET}"
 
-        iptables -t nat -I PREROUTING 1 -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${TARGET}:6443
-        iptables -t nat -I OUTPUT 1 -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${TARGET}:6443
-        ACTIVE_TARGET="${TARGET}"
-      fi
-      sleep 2
-    done
-  '
+    iptables -t nat -D PREROUTING -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${PRIMARY_HUB}:6443 2>/dev/null || true
+    iptables -t nat -D PREROUTING -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${SECONDARY_HUB}:6443 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${PRIMARY_HUB}:6443 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${SECONDARY_HUB}:6443 2>/dev/null || true
+
+    iptables -t nat -D PREROUTING -d ${VIP} -p tcp --dport 80 -j DNAT --to-destination ${PRIMARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D PREROUTING -d ${VIP} -p tcp --dport 80 -j DNAT --to-destination ${SECONDARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d ${VIP} -p tcp --dport 80 -j DNAT --to-destination ${PRIMARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d ${VIP} -p tcp --dport 80 -j DNAT --to-destination ${SECONDARY_HUB}:80 2>/dev/null || true
+
+    iptables -t nat -D PREROUTING -d ${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination ${PRIMARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D PREROUTING -d ${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination ${SECONDARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d ${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination ${PRIMARY_HUB}:80 2>/dev/null || true
+    iptables -t nat -D OUTPUT -d ${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination ${SECONDARY_HUB}:80 2>/dev/null || true
+
+    iptables -t nat -I PREROUTING 1 -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${TARGET}:6443
+    iptables -t nat -I OUTPUT 1 -d ${VIP} -p tcp --dport 6443 -j DNAT --to-destination ${TARGET}:6443
+
+    iptables -t nat -I PREROUTING 1 -d ${VIP} -p tcp --dport 80 -j DNAT --to-destination ${TARGET}:80
+    iptables -t nat -I OUTPUT 1 -d ${VIP} -p tcp --dport 80 -j DNAT --to-destination ${TARGET}:80
+
+    iptables -t nat -I PREROUTING 1 -d ${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination ${TARGET}:80
+    iptables -t nat -I OUTPUT 1 -d ${GW_PHYSICAL} -p tcp --dport 80 -j DNAT --to-destination ${TARGET}:80
+
+    ACTIVE_TARGET="${TARGET}"
+    conntrack -D -d ${VIP} 2>/dev/null || true
+    conntrack -D -d ${GW_PHYSICAL} 2>/dev/null || true
+  fi
+  sleep 2
+done
+WATCHDOG_SCRIPT
+
+chmod +x /usr/local/bin/ocm-vip-watchdog.sh
+
+cat > /etc/systemd/system/ocm-vip-watchdog.service << 'WATCHDOG_SERVICE'
+[Unit]
+Description=OCM High-Availability VIP Watchdog (Ports 6443 and 80)
+After=network-online.target wg-quick@wg0.service
+
+[Service]
+ExecStart=/usr/local/bin/ocm-vip-watchdog.sh
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
+WATCHDOG_SERVICE
+
+systemctl daemon-reload
+systemctl enable --now ocm-vip-watchdog.service
 EOF
 
 echo "----------------------------------------------------------------------"

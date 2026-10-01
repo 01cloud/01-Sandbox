@@ -75,7 +75,8 @@ flowchart TD
 19. [Step 18: End-to-End Cross-Cluster Submariner Verification](#step-18-end-to-end-cross-cluster-submariner-verification)
 20. [Step 19: Score-Based Placement & Workload Replication](#step-19-score-based-placement--workload-replication-addonplacementscore--manifestworkreplicaset)
 21. [Step 20: Install Persistent Post-Reboot Auto-Recovery Services](#step-20-install-persistent-post-reboot-auto-recovery-services)
-22. [Step 21: Deploy Cloud-Native Priority OCM Auto-Acceptor & Standby Yield Controller](#step-21-deploy-cloud-native-ocm-auto-acceptor-kubernetes-deployment--configmap)
+22. [Step 21: Deploy Cloud-Native Priority OCM Auto-Acceptor & Standby Yield Controller](#step-21-deploy-cloud-native-priority-ocm-auto-acceptor--standby-yield-controller)
+23. [Step 22: High Availability Failover Architecture & Verification (Single Klusterlet vs. Dual Agents)](#step-22-high-availability-failover-architecture--verification-single-klusterlet-vs-dual-agents)
 
 ---
 
@@ -1260,4 +1261,109 @@ scp manifests/ocm-auto-acceptor-k8s.yaml ubuntu@$HUB2_IP:/home/ubuntu/ocm/manife
 ssh_cmd ubuntu@$HUB2_IP 'kubectl apply -f /home/ubuntu/ocm/manifests/ocm-auto-acceptor-k8s.yaml && kubectl rollout restart deployment ocm-auto-acceptor -n open-cluster-management-auto-acceptor'
 
 echo "🎉 Complete 21-Step End-to-End OCM + WireGuard VIP HA Deployment & Cloud-Native Priority Auto-Acceptor Finished Successfully!"
+```
+
+---
+
+## Step 22: High Availability Failover Architecture & Verification (Single Klusterlet vs. Dual Agents)
+
+A common architectural question in active-standby multi-cluster deployments is whether each spoke requires two separate agent deployments (e.g. `klusterlet` for primary and `klusterlet-secondary` for secondary).
+
+This deployment implements a **Single Klusterlet with Floating Virtual IP (`10.99.0.100:6443`)**, which is significantly lighter, cleaner, and more resilient.
+
+### Architectural Comparison: Single Klusterlet vs. Dual Agents
+
+| Feature | Single Klusterlet + Floating VIP (Our Architecture) ✅ | Dual Klusterlet Agents (`klusterlet` + `klusterlet-secondary`) ❌ |
+| :--- | :--- | :--- |
+| **Agent Deployments** | **1 per spoke** (`klusterlet-registration-agent` + `klusterlet-work-agent`) | 2 per spoke (double pods, double daemons) |
+| **Spoke Target Endpoint** | `https://10.99.0.100:6443` (Floating Virtual IP) | Hub 1 IP (`10.99.0.1`) and Hub 2 IP (`10.99.0.2`) hardcoded |
+| **Resource Overhead** | **Low** (~150MB RAM, minimal CPU per spoke) | **High** (~300MB+ RAM, redundant work agents polling) |
+| **Controller Conflicts** | **Zero chance of race conditions**: only one work agent manages the spoke | **High risk**: two independent work agents can fight over identical `ManifestWork` CRs |
+| **Failover Handshake** | **Instant**: Gateway router points VIP to `secondaryhub`, which auto-accepts spokes | Spokes must swap active agent context or maintain dual leases |
+
+---
+
+### How Failover Operates Across the Components
+
+```
+                    ┌────────────────────────┐
+                    │    spoke1 & spoke2     │
+                    │  Single Klusterlet     │
+                    └───────────┬────────────┘
+                                │ Connects to https://10.99.0.100:6443 (VIP)
+                                ▼
+                    ┌────────────────────────┐
+                    │       gateway-vm       │
+                    │   (VIP: 10.99.0.100)   │
+                    └───────────┬────────────┘
+                                │
+             ┌──────────────────┴──────────────────┐
+             │                                     │
+    [NORMAL OPERATION]                     [WHEN PRIMARY FAILS]
+             │                                     │
+             ▼                                     ▼
+   Routes to Primary Hub                 VIP floats / routes to
+        (10.99.0.1)                           Secondary Hub
+                                               (10.99.0.2)
+```
+
+1. **Under Normal Operation (Primary Active):**
+   - Spoke Klusterlet connects to `https://10.99.0.100:6443`.
+   - `gateway-vm` routes all traffic to `primaryhub` (`10.99.0.1:6443`).
+   - `primaryhub` accepts spokes (`hubAcceptsClient: true`, `AVAILABLE: True`).
+   - `secondaryhub` auto-acceptor yields standby (`hubAcceptsClient: false`, `AVAILABLE: False (SecondaryStandby)`).
+
+2. **When `primaryhub` Goes Down:**
+   - **Detection (< 3 seconds):** `ocm-vip-watchdog` on `gateway-vm` detects `10.99.0.1:6443` is down and flips the DNAT rule to route `10.99.0.100:6443` $\rightarrow$ `10.99.0.2:6443` (`secondaryhub`). Conntrack tables are flushed to terminate stale TCP sessions.
+   - **Auto-Acceptance (< 3 seconds):** The `ocm-auto-acceptor` pod on `secondaryhub` detects `primaryhub` is unreachable. It immediately sets `spec.hubAcceptsClient: true`, auto-approves incoming spoke CSRs, and restores `AVAILABLE: True`.
+   - **Workload Dispatch:** `opensandbox-server` and `sandbox-spoke-placement` on `secondaryhub` immediately dispatch `ManifestWork` to `spoke1` and `spoke2`.
+   - **Zero Spoke Disruption:** The existing containers/sandboxes running on `spoke1` and `spoke2` **never restart or drop**.
+
+3. **When `primaryhub` Recovers (Failback):**
+   - `ocm-vip-watchdog` detects `10.99.0.1:6443` is healthy and re-points the VIP to `primaryhub`.
+   - `secondaryhub`'s auto-acceptor detects `primaryhub` is alive and immediately yields standby (`hubAcceptsClient: false`).
+   - Spoke traffic seamlessly returns to `primaryhub`.
+
+---
+
+### Verification Commands
+
+#### 1. Verify Single Klusterlet on Spokes
+Check that only one agent runs on each spoke and it connects to the VIP:
+```bash
+# On spoke1-vm:
+kubectl get pods -n open-cluster-management-agent
+kubectl get secret -n open-cluster-management-agent hub-kubeconfig-secret -o jsonpath='{.data.kubeconfig}' | base64 -d | grep server
+# Expected: server: https://10.99.0.100:6443
+
+# On spoke2-vm:
+kubectl get pods -n open-cluster-management-agent
+kubectl get secret -n open-cluster-management-agent hub-kubeconfig-secret -o jsonpath='{.data.kubeconfig}' | base64 -d | grep server
+# Expected: server: https://10.99.0.100:6443
+```
+
+#### 2. Check Active vs Standby Status on Hubs
+```bash
+# On primaryhub:
+kubectl get managedclusters
+# Expected: spoke1 and spoke2 are HUB ACCEPTED: true, AVAILABLE: True
+
+# On secondaryhub:
+kubectl get managedclusters
+# Expected: spoke1 and spoke2 are HUB ACCEPTED: false, AVAILABLE: Unknown/False (SecondaryStandby)
+```
+
+#### 3. Test Automated Failover
+Simulate a primary hub crash:
+```bash
+# On primaryhub (hub1-vm):
+docker stop primaryhub-control-plane
+
+# Within 5 seconds, check secondaryhub:
+kubectl get managedclusters
+# Expected: spoke1 and spoke2 automatically flip to HUB ACCEPTED: true, AVAILABLE: True!
+
+# Bring primary back:
+docker start primaryhub-control-plane
+# Within 5 seconds, secondaryhub yields standby again!
 ```

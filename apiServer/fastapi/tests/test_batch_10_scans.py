@@ -12,7 +12,7 @@ if not JWT_TOKEN and len(sys.argv) > 1:
 if not JWT_TOKEN:
     JWT_TOKEN = "eyJhbGciOiJSUzI1NiIsImtpZCI6ImNvZGUtaW5zcGVjdG9yLWtleS0wMSIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJnb29nbGUtb2F1dGgyfDEwOTQwMzkxOTIxOTUxNjg5NjYyMiIsImlhdCI6MTc4Mjk5MTYyNSwiZXhwIjo0OTM2NTkxNjI1LCJpc3MiOiIwMSBTYW5kYm94IiwiYXVkIjoiY29kZS1pbnNwZWN0b3ItYXBpIiwianRpIjoiMDczYjNjZjktYjlmOC00Y2M1LTg4MGQtZGM4OTU3MGUzYmIzIiwiYmFja2VuZCI6IloxX1NBTkRCT1gifQ.iS5GwT_fF2ecuSPWEWY99QYRvLXA_CecGqex4h_10PSnzKYeDqZg4X4qTWKd1gXg_9mQpoJOx1yZX3j6X77fpk-IynXvZmAPoKu7tob2eljCfwRsD8JRDqqBcejSXX-O9sp_Vkq4z58lnSgS0Z1hVKdCwgJ58N1ZmoOTwWTx843XU6isIlu0u4Mcxr0uN8RB_us3G-TohCZOBHvb7Tu8LLgwD18fgQW6Kkb9gBDGdHoVmJc6M2P0H7AoRLsBOnereCQluSSXYFuzZYXIAv9a7M4vtPYLZ_HPWSv41ar5GlYa_qOwwH-tHUX96d18aZ7tglDrX6Bn2DPgccM20FulMQ"
 
-API_BASE_URL = os.environ.get("API_URL", "https://api-sandbox.01security.com")
+API_BASE_URL = os.environ.get("API_URL", "http://localhost:8000")
 
 # 10 popular GitHub repositories for batch testing
 URLS = [

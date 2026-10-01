@@ -1,0 +1,16 @@
+apiVersion: cluster.open-cluster-management.io/v1beta1
+kind: Placement
+metadata:
+  name: sandbox-spoke-placement
+  namespace: opensandbox-system
+spec:
+  clusterSets:
+    - sandbox-spokes
+  numberOfClusters: 1
+  predicates:
+    - requiredClusterSelector:
+        labelSelector:
+          matchLabels:
+            sandbox-workload-capable: "true"
+            runtime.gvisor: "true"
+            runtime.kata: "true"

@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Menu, X, LogIn, LogOut, LayoutDashboard, User, Settings } from "lucide-react";
+import { Menu, X, LogIn, LogOut, LayoutDashboard, User, Settings, Github } from "lucide-react";
 import { useAuth0 } from "@auth0/auth0-react";
 import ThemeToggle from "./ThemeToggle";
 import UserSettingsDialog from "./UserSettingsDialog";
@@ -14,7 +14,6 @@ import {
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 
 const links = [
-  { href: "/#runtimes", label: "Isolated Runtimes" },
   { href: "/#features", label: "Features" },
   { href: "/#security", label: "Security" },
   // { href: "/#architecture", label: "Architecture" },
@@ -89,6 +88,15 @@ const Navbar = () => {
           </div>
 
           <div className="hidden md:flex items-center gap-3">
+            <a
+              href="https://github.com/01cloud/01-Sandbox"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="GitHub"
+              className="p-2 rounded-xl text-muted-foreground/70 hover:text-foreground hover:bg-foreground/[0.04] transition-all"
+            >
+              <Github className="w-4 h-4" />
+            </a>
             <ThemeToggle />
             <div className="w-px h-5 bg-border mx-1" />
 

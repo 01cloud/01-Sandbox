@@ -1,0 +1,20 @@
+[Unit]
+Description=Envoy Active-Passive Multi-Cluster Gateway
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Restart=always
+RestartSec=3s
+ExecStartPre=-/usr/bin/docker stop envoy-gateway
+ExecStartPre=-/usr/bin/docker rm envoy-gateway
+ExecStart=/usr/bin/docker run --name envoy-gateway \
+  --net=host \
+  -e ENVOY_UID=0 \
+  -v /etc/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro \
+  envoyproxy/envoy:v1.31-latest -c /etc/envoy/envoy.yaml
+ExecStop=/usr/bin/docker stop envoy-gateway
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,97 @@
+admin:
+  address:
+    socket_address:
+      protocol: TCP
+      address: 127.0.0.1
+      port_value: 9901
+
+static_resources:
+  listeners:
+  - name: ingress_http_listener
+    address:
+      socket_address:
+        protocol: TCP
+        address: 0.0.0.0
+        port_value: 80
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.tcp_proxy
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+          stat_prefix: ingress_http
+          cluster: ingress_http_cluster
+
+  - name: ingress_kube_api_listener
+    address:
+      socket_address:
+        protocol: TCP
+        address: 0.0.0.0
+        port_value: 6443
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.tcp_proxy
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+          stat_prefix: ingress_kube_api
+          cluster: ingress_kube_api_cluster
+          idle_timeout: 5s
+          max_downstream_connection_duration: 60s
+
+  clusters:
+  - name: ingress_http_cluster
+    connect_timeout: 0.5s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    close_connections_on_host_health_failure: true
+    health_checks:
+    - timeout: 1s
+      interval: 1s
+      unhealthy_threshold: 2
+      healthy_threshold: 2
+      tcp_health_check: {}
+    load_assignment:
+      cluster_name: ingress_http_cluster
+      endpoints:
+      - priority: 0
+        lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: ${PRIMARY_HUB_IP}
+                port_value: 80
+      - priority: 1
+        lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: ${SECONDARY_HUB_IP}
+                port_value: 80
+
+  - name: ingress_kube_api_cluster
+    connect_timeout: 0.5s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    close_connections_on_host_health_failure: true
+    health_checks:
+    - timeout: 1s
+      interval: 1s
+      unhealthy_threshold: 2
+      healthy_threshold: 2
+      tcp_health_check: {}
+    load_assignment:
+      cluster_name: ingress_kube_api_cluster
+      endpoints:
+      - priority: 0
+        lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: ${PRIMARY_HUB_IP}
+                port_value: 6443
+      - priority: 1
+        lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: ${SECONDARY_HUB_IP}
+                port_value: 6443

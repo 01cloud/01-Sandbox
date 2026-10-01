@@ -24,6 +24,7 @@ import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { useJobStore } from "@/hooks/useJobStore";
+import { resolveBackendUrl } from "@/lib/apiConfig";
 import { UnifiedPipelineView } from "./UnifiedPipelineView";
 import { JobsPanel } from "./JobsPanel";
 import { InlineApiKeyPanel } from "./InlineApiKeyPanel";
@@ -233,6 +234,7 @@ resource "aws_security_group_rule" "allow_all" {
 ];
 
 const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken, inline = false, onSwitchTab }: SecurityScannerProps) => {
+  const effectiveBaseUrl = resolveBackendUrl(baseUrl);
   const effectiveApiKey = apiKey || "";
   const [code, setCode] = useState("# Simple Code Example\ndef greet(name):\n    return f\"Hello, {name}!\"\n\nprint(greet(\"User\"))");
   const [isScanning, setIsScanning] = useState(false);
@@ -271,7 +273,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
     openStream,
     lazyFetchResult,
     syncFromServer,
-  } = useJobStore("quick-scan", baseUrl, effectiveApiKey);
+  } = useJobStore("quick-scan", effectiveBaseUrl, effectiveApiKey);
 
   // Auto-select latest job if any
   useEffect(() => {
@@ -403,7 +405,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       const filename = `input.${apiExt}`;
 
       // POST asynchronously to support SSE streams
-      const response = await fetch(`${baseUrl}/scan-jobs?async=true`, {
+      const response = await fetch(`${effectiveBaseUrl}/scan-jobs?async=true`, {
         method: "POST",
         headers: {
           "accept": "application/json",
@@ -462,7 +464,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       return;
     }
     try {
-      const response = await fetch(`${baseUrl}/v1/jobs/${jobId}`, {
+      const response = await fetch(`${effectiveBaseUrl}/v1/jobs/${jobId}`, {
         method: "DELETE",
         headers: {
           "Authorization": `Bearer ${effectiveApiKey}`

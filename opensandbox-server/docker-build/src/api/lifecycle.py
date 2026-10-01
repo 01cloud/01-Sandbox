@@ -606,6 +606,15 @@ async def create_scan_job(
         extensions["runtimeClassName"] = metadata.get("runtime")
     elif metadata.get("runtime_class"):
         extensions["runtimeClassName"] = metadata.get("runtime_class")
+
+    # Pass submitted code files and routing metadata in extensions for remote spoke execution
+    extensions["files"] = json.dumps(files_to_save)
+    extensions["job_id"] = str(job_id)
+    if metadata.get("region"):
+        extensions["region"] = str(metadata.get("region"))
+    if metadata.get("target_cluster"):
+        extensions["target_cluster"] = str(metadata.get("target_cluster"))
+
     # Ensure all metadata values are primitive strings so Kubernetes labels/annotations and schema validation succeed
     sanitized_metadata = {}
     if metadata:
@@ -619,8 +628,8 @@ async def create_scan_job(
         image=ImageSpec(uri=target_image),
         resourceLimits=SchemaResourceLimits(
             root={
-                "cpu": os.environ.get("SANDBOX_CPU", "200m"),
-                "memory": os.environ.get("SANDBOX_MEMORY", "512Mi"),
+                "cpu": os.environ.get("SANDBOX_CPU", "500m"),
+                "memory": os.environ.get("SANDBOX_MEMORY", "1536Mi"),
             }
         ),
         entrypoint=["/opt/opensandbox/code-interpreter.sh"],
@@ -706,6 +715,32 @@ async def create_scan_job(
                             break
                     except (json.JSONDecodeError, OSError):
                         pass
+
+            if found_report is None:
+                # Also check process.log for stdout report markers
+                possible_log_paths = [
+                    os.path.join(data_root, subpath_prefix, "reports", "process.log"),
+                    os.path.join(data_root, job_id, "reports", "process.log"),
+                ]
+                for lpath in possible_log_paths:
+                    if os.path.exists(lpath):
+                        try:
+                            with open(lpath, "r", errors="ignore") as lf:
+                                lcontent = lf.read()
+                            if (
+                                "---SCAN_REPORT_START---" in lcontent
+                                and "---SCAN_REPORT_END---" in lcontent
+                            ):
+                                raw_rep = (
+                                    lcontent.split("---SCAN_REPORT_START---")[1]
+                                    .split("---SCAN_REPORT_END---")[0]
+                                    .strip()
+                                )
+                                found_report = json.loads(raw_rep)
+                                if found_report:
+                                    break
+                        except Exception:
+                            pass
 
             if found_report is not None:
                 final_response = ScanJobResponse(
@@ -839,6 +874,35 @@ async def create_scan_job(
         status="FAILED",
         error="Scan timed out waiting for the report to be written to the PVC.",
     )
+
+
+@router.post("/scan-jobs/{job_id}/report", tags=["Security Scan Pipeline"])
+async def upload_scan_report(job_id: str, request: Request):
+    """
+    Receives scan report directly from remote sandboxes (spoke clusters).
+    Saves to the host storage under data_root/job_id/reports/security_scan_report.json.
+    """
+    import json
+    import os
+
+    try:
+        report_data = await request.json()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_JSON", "message": str(e)},
+        )
+    data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
+    reports_dir = os.path.join(data_root, job_id, "reports")
+    os.makedirs(reports_dir, exist_ok=True)
+    report_path = os.path.join(reports_dir, "security_scan_report.json")
+    with open(report_path, "w") as f:
+        json.dump(report_data, f, indent=2)
+    log_job_event(
+        job_id,
+        f"[SERVER] Received remote scan report for job {job_id} ({len(report_data.get('findings', []))} findings)",
+    )
+    return {"status": "SUCCESS", "job_id": job_id}
 
 
 @router.get("/scan-jobs/{job_id}/report", tags=["Security Scan Pipeline"])

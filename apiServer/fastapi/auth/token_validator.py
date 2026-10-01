@@ -279,6 +279,13 @@ async def validate_token(request: Request):
                 signing_key = key
                 break
 
+        if not signing_key:
+            auth_failures_total.labels(reason="signing_key_not_found").inc()
+            raise HTTPException(
+                status_code=401,
+                detail=f"Invalid token: signing key with kid '{kid}' not found in JWKS",
+            )
+
         # Decode and verify signature
         try:
             payload = jwt.decode(

@@ -18,6 +18,7 @@ description: OpenSandbox Lifecycle API server for sandbox creation and managemen
 type: application
 version: 0.1.0
 appVersion: "0.1.0"
+icon: https://raw.githubusercontent.com/cncf/artwork/main/projects/kubernetes/icon/color/kubernetes-icon-color.png
 
 keywords:
   - sandbox

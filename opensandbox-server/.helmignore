@@ -18,3 +18,5 @@
 .vscode/
 OWNERS
 Makefile
+docker-build/
+.venv/

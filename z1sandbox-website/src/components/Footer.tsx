@@ -1,3 +1,5 @@
+import { Github } from "lucide-react";
+
 const Footer = () => {
   return (
     <footer className="py-12 bg-background border-t border-border/50 relative overflow-hidden">
@@ -5,19 +7,30 @@ const Footer = () => {
 
       <div className="container mx-auto px-6">
         <div className="flex flex-col md:flex-row items-center justify-between gap-10">
-          {/* Brand Section */}
-          <a href="/" className="flex items-center gap-3 hover:opacity-90 transition-opacity">
-            <div className="w-8 h-8 rounded-lg bg-foreground/5 flex items-center justify-center p-1.5 ring-1 ring-border/50">
-              <img
-                src="/01cloud.png"
-                alt="01 logo"
-                className="w-full h-full object-contain dark:brightness-110"
-              />
-            </div>
-            <span className="font-display font-black text-xl tracking-tighter text-gradient">
-              Sandbox
-            </span>
-          </a>
+          {/* Brand + GitHub */}
+          <div className="flex items-center gap-4">
+            <a href="/" className="flex items-center gap-3 hover:opacity-90 transition-opacity">
+              <div className="w-8 h-8 rounded-lg bg-foreground/5 flex items-center justify-center p-1.5 ring-1 ring-border/50">
+                <img
+                  src="/01cloud.png"
+                  alt="01 logo"
+                  className="w-full h-full object-contain dark:brightness-110"
+                />
+              </div>
+              <span className="font-display font-black text-xl tracking-tighter text-gradient">
+                Sandbox
+              </span>
+            </a>
+            <a
+              href="https://github.com/01cloud/01-Sandbox"
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label="GitHub Repository"
+              className="p-2 rounded-lg text-muted-foreground/50 hover:text-foreground hover:bg-foreground/[0.05] transition-all"
+            >
+              <Github className="w-4 h-4" />
+            </a>
+          </div>
 
           {/* Copyright Section */}
           <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-[0.2em]">
@@ -26,6 +39,10 @@ const Footer = () => {
 
           {/* Links Section */}
           <div className="flex flex-wrap items-center justify-center gap-x-8 gap-y-4 text-[11px] font-bold uppercase tracking-widest text-muted-foreground/60">
+            <a href="/changelog" className="hover:text-foreground transition-colors flex items-center gap-1.5">
+              <Github className="w-3 h-3" />
+              Changelog
+            </a>
             <a href="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</a>
             <a href="/terms" className="hover:text-foreground transition-colors">Terms of Use</a>
             <a href="/contact" className="hover:text-foreground transition-colors">Contact Us</a>

@@ -1,0 +1,89 @@
+{{- if and .Values.valkey .Values.valkey.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: valkey
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: valkey
+  template:
+    metadata:
+      labels:
+        app: valkey
+    spec:
+      containers:
+      - name: valkey
+        image: "{{ .Values.valkey.image.repository | default "valkey/valkey" }}:{{ .Values.valkey.image.tag | default "7.2-alpine" }}"
+        imagePullPolicy: {{ .Values.valkey.image.pullPolicy | default "IfNotPresent" }}
+        env:
+        - name: VALKEY_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: sandbox-api-secret
+              key: REDIS_PASSWORD
+              optional: true
+        command:
+        - sh
+        - -c
+        - |
+          EXTRA_ARGS=""
+          {{- if and .Values.valkey.replication .Values.valkey.replication.enabled (eq .Values.valkey.replication.role "standby") }}
+          EXTRA_ARGS="--replicaof {{ .Values.valkey.replication.primaryHost }} {{ .Values.valkey.replication.primaryPort }}"
+          {{- end }}
+          if [ -n "$VALKEY_PASSWORD" ]; then
+            EXTRA_ARGS="$EXTRA_ARGS --requirepass $VALKEY_PASSWORD --masterauth $VALKEY_PASSWORD"
+          fi
+          exec valkey-server $EXTRA_ARGS
+        ports:
+        - containerPort: 6379
+          name: valkey
+---
+# Compatibility service alias for microservices connecting to redis-service
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.valkey.host | default "redis-service" }}
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: valkey
+  ports:
+  - port: {{ .Values.valkey.port | default 6379 }}
+    targetPort: 6379
+    name: redis-compat
+---
+# Native Valkey service
+apiVersion: v1
+kind: Service
+metadata:
+  name: valkey-service
+  namespace: {{ .Values.namespace }}
+spec:
+  selector:
+    app: valkey
+  ports:
+  - port: 6379
+    targetPort: 6379
+    name: valkey
+{{- if and .Values.valkey.replication .Values.valkey.replication.enabled (eq (.Values.valkey.replication.role | default "primary") "primary") }}
+---
+# Expose primary Valkey replication service via NodePort directly in Kubernetes (replaces host-level socat)
+apiVersion: v1
+kind: Service
+metadata:
+  name: redis-replication
+  namespace: {{ .Values.namespace }}
+spec:
+  type: NodePort
+  selector:
+    app: valkey
+  ports:
+  - port: 6379
+    targetPort: 6379
+    nodePort: 30379
+    name: valkey-repl
+{{- end }}
+{{- end }}

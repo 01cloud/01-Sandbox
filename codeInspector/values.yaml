@@ -10,6 +10,25 @@ global:
     - "10."
     - "127.0.0.1"
     - "::1"
+  ocm:
+    enabled: true
+    role: "hub" # "hub" or "spoke"
+    primaryHub: "primaryhub"
+    primaryHubIp: "10.9.9.10"
+    secondaryHub: "secondaryhub"
+    secondaryHubIp: "10.9.9.20"
+    clusterSet: "sandbox-spokes"
+    placementName: "sandbox-spoke-placement"
+    spokes:
+      - name: "spoke-us-east-1"
+        region: "us-east-1"
+        wireguardIp: "10.9.9.30"
+      - name: "spoke-eu-central-1"
+        region: "eu-central-1"
+        wireguardIp: "10.9.9.40"
+      - name: "spoke-us-west-1"
+        region: "us-west-1"
+        wireguardIp: "10.9.9.50"
 ################################################################
 # Agent Gateway  values
 ################################################################
@@ -17,16 +36,14 @@ agentgateway:
   enabled: true
   namespace: agentgateway-system
   httproute:
-    hostnames:
-      - api-sandbox.01security.com
-      - 10.0.10.9
+    hostnames: []
     backendService:
       name: sandbox-api-service
       port: 80
   gateway:
     gatewayClassName: agentgateway
     addresses:
-      - value: 10.0.10.9
+      - value: 172.30.0.200
     listeners:
       - protocol: HTTP
         port: 80
@@ -50,7 +67,7 @@ agentgateway:
     authenticationType: "jwt"
     jwtMode: "Strict"
     rateLimit:
-      enabled: false
+      enabled: true
       requests: 7
       unit: "Minutes"
 ################################################################
@@ -62,13 +79,15 @@ agentgateway-controller:
     extraEnv:
       KGW_ENABLE_GATEWAY_API_EXPERIMENTAL_FEATURES: "true"
     image:
-      pullPolicy: Always
+      pullPolicy: IfNotPresent
 ################################################################
 # API Server component values
 ################################################################
 apiServer:
   enabled: true
   namespace: opensandbox-system
+  failoverController:
+    enabled: false
   configMap:
     PYTHONUNBUFFERED: "1"
     APP_ENV: "production"
@@ -77,6 +96,8 @@ apiServer:
     ALLOW_MOCK_KEYS: "false"
     PORT: "8000"
     BACKEND_URL_OPENSANDBOX: "http://opensandbox-server.opensandbox-system.svc.cluster.local"
+    WORKLOAD_PROVIDER: "ocm"
+    PLACEMENT_NAME: "sandbox-spoke-placement"
     RATE_LIMIT_REQUESTS: "20"
     RATE_LIMIT_WINDOW_SECS: "60"
     GATEWAY_SECRET_NAME: "apikey"
@@ -85,10 +106,10 @@ apiServer:
     JWT_EXPIRATION_MINUTES: "60"
     JWT_ISSUER: "01 Sandbox"
     JWT_ALGORITHM: "RS256"
-    AUTH0_DOMAIN: "dev-1u502t8piuwyzb28.us.auth0.com"
-    AUTH0_AUDIENCE: "https://api-sandbox"
+    AUTH0_DOMAIN: "dev-axwc0ui527kw0c5d.us.auth0.com"
+    AUTH0_AUDIENCE: "https://code-inspector-api"
     OPENSANDBOX_ROUTE_PREFIX: "{{ .Values.global.apiRoutePrefix }}"
-    DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}","documentationUrl":"https://api-sandbox.01security.com{{ .Values.global.apiRoutePrefix }}/docs"}]'
+    DASHBOARD_BACKENDS_JSON: '[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"{{ .Values.global.apiRoutePrefix }}","documentationUrl":"{{ .Values.global.apiRoutePrefix }}/docs"}]'
     SCANNER_IMAGE_PYTHON: "01community/01sandbox-scanner-python:1.0.0"
     SCANNER_IMAGE_GO: "01community/01sandbox-scanner-go:1.0.0"
     SCANNER_IMAGE_JAVA: "01community/01sandbox-scanner-java:1.0.0"
@@ -107,7 +128,7 @@ apiServer:
     JWT_PUBLIC_JWKS: ""
     SENDGRID_API_KEY: ""
   sealedSecrets:
-    enabled: true
+    enabled: false
     encryptedData:
       E2B_API_KEY: ""
       JWT_PRIVATE_KEY: ""
@@ -121,7 +142,7 @@ apiServer:
     image:
       repository: 01community/01sandbox-api
       tag: "v0.7.9"
-      pullPolicy: Always
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: "100m"
@@ -134,10 +155,9 @@ apiServer:
       runAsUser: 1000
       fsGroup: 1000
   service:
-    type: NodePort
+    type: ClusterIP
     port: 80
     targetPort: 8000
-    nodePort: 30080
   ingress:
     enabled: false
     className: nginx
@@ -153,19 +173,42 @@ apiServer:
     targetCPUUtilizationPercentage: 70
     targetMemoryUtilizationPercentage: 80
   postgresql:
-    enabled: true
+    enabled: false
     host: "postgresql-service"
     port: 5432
     user: "postgres"
     password: "password123"
     database: "apikeys"
     storage: "5Gi"
-    storageClassName: "longhorn"
+    storageClassName: "standard"
+  cnpg:
+    enabled: true
+    instances: 1
+    storage: "5Gi"
+    storageClassName: "standard"
+    database: "apikeys"
+    user: "postgres"
+    password: "password123"
+    replication:
+      enabled: true
+      role: "primary"
   redis:
+    enabled: false
+    host: "redis-service"
+    port: 6379
+    password: ""
+  valkey:
     enabled: true
     host: "redis-service"
     port: 6379
     password: ""
+    image:
+      repository: valkey/valkey
+      tag: "7.2-alpine"
+      pullPolicy: IfNotPresent
+    replication:
+      enabled: true
+      role: "primary"
   rabbitmq:
     enabled: true
     host: "rabbitmq-service"
@@ -182,8 +225,7 @@ metallb:
   namespace: metallb-system
   ipAddressPool:
     addresses:
-      # - 172.18.0.200-172.18.0.250
-      - 10.0.10.9-10.0.10.9
+      - 172.30.0.200-172.30.0.200
   l2Advertisement:
     enabled: true
 # ################################################################
@@ -201,12 +243,21 @@ metallb:
 opensandbox:
   enabled: true
   namespace: opensandbox-system
+  multiCluster:
+    enabled: true
+    clusterSet: "sandbox-spokes"
+    placementName: "sandbox-spoke-placement"
+    targetSpokes:
+      - name: "spoke-us-east-1"
+        region: "us-east-1"
+      - name: "spoke-eu-central-1"
+        region: "eu-central-1"
   controller:
     replicaCount: 1
     image:
       repository: 01community/01sandbox-opensandbox-controller
       tag: "v0.7.3"
-      pullPolicy: Always
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: 100m
@@ -216,6 +267,8 @@ opensandbox:
         memory: 512Mi
   server:
     replicaCount: 1
+    workloadProvider: "ocm"
+    placementName: "sandbox-spoke-placement"
     sandboxImage: "01community/01sandbox-codeinterpreter:v0.7.10"
     scannerImagePython: "01community/01sandbox-scanner-python:1.0.0"
     scannerImageGo: "01community/01sandbox-scanner-go:1.0.0"
@@ -232,8 +285,8 @@ opensandbox:
     runtimeClassName: "gvisor"
     image:
       repository: 01community/01sandbox-opensandbox-server
-      tag: "v0.7.10"
-      pullPolicy: Always
+      tag: "v0.7.10-ocm"
+      pullPolicy: IfNotPresent
     resources:
       requests:
         cpu: 100m
@@ -247,7 +300,7 @@ opensandbox:
       size: "10Gi"
       accessMode: "ReadWriteMany"
       mountPath: "/data"
-      storageClassName: "longhorn"
+      storageClassName: "standard"
 ################################################################
 # OpenSandbox Resource Pool component values
 ################################################################
@@ -343,3 +396,24 @@ grafana:
 ###############################################################
 sealed-secrets:
   enabled: true
+
+###############################################################
+# CloudNativePG Operator subchart values
+###############################################################
+cloudnative-pg:
+  enabled: true
+  crds:
+    create: false
+  webhook:
+    mutating:
+      failurePolicy: Ignore
+    validating:
+      failurePolicy: Ignore
+
+###############################################################
+# Kubernetes-Native Node Network Agent (DaemonSet)
+###############################################################
+nodeNetworkAgent:
+  enabled: true
+  namespace: kube-system
+  image: "alpine:3.19"

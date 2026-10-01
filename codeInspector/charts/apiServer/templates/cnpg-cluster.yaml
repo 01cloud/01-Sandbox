@@ -1,0 +1,143 @@
+{{- if and .Values.cnpg .Values.cnpg.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: postgresql-primary-credentials
+  namespace: {{ .Values.namespace }}
+type: Opaque
+stringData:
+  username: {{ .Values.cnpg.user | default "postgres" }}
+  password: {{ .Values.cnpg.password | default "password123" }}
+---
+{{- if eq (.Values.cnpg.replication.role | default "primary") "primary" }}
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgresql-primary
+  namespace: {{ .Values.namespace }}
+spec:
+  instances: {{ .Values.cnpg.instances | default 1 }}
+  imageName: {{ .Values.cnpg.imageName | default "ghcr.io/cloudnative-pg/postgresql:15.6" | quote }}
+  primaryUpdateStrategy: unsupervised
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+      wal_level: logical
+      max_wal_senders: "10"
+      wal_keep_size: "1GB"
+    pg_hba:
+      - host replication all all scram-sha-256
+      - host replication all all md5
+      - host all all all scram-sha-256
+      - host all all all md5
+
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: postgresql-primary-credentials
+
+  bootstrap:
+    initdb:
+      database: {{ .Values.cnpg.database | default "apikeys" }}
+      owner: {{ .Values.cnpg.user | default "postgres" }}
+      secret:
+        name: postgresql-primary-credentials
+
+  storage:
+    size: {{ .Values.cnpg.storage | default "5Gi" }}
+    storageClass: {{ .Values.cnpg.storageClassName | default "standard" }}
+---
+# Expose primary replication service via NodePort directly in Kubernetes (replaces host-level socat)
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-replication
+  namespace: {{ .Values.namespace }}
+spec:
+  type: NodePort
+  selector:
+    cnpg.io/cluster: postgresql-primary
+    role: primary
+  ports:
+  - port: 5432
+    targetPort: 5432
+    nodePort: 30432
+    name: postgresql
+---
+# Compatibility service alias for sandbox-api and other microservices
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-service
+  namespace: {{ .Values.namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    cnpg.io/cluster: postgresql-primary
+    role: primary
+  ports:
+  - port: 5432
+    targetPort: 5432
+    name: postgresql
+{{- else }}
+# Standby Replica Cluster on secondaryhub
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: postgresql-secondary
+  namespace: {{ .Values.namespace }}
+spec:
+  instances: {{ .Values.cnpg.instances | default 1 }}
+  imageName: {{ .Values.cnpg.imageName | default "ghcr.io/cloudnative-pg/postgresql:15.6" | quote }}
+
+  postgresql:
+    parameters:
+      max_connections: "200"
+
+  enableSuperuserAccess: true
+  superuserSecret:
+    name: postgresql-primary-credentials
+
+  smartShutdownTimeout: 10
+  stopDelay: 30
+
+  replica:
+    enabled: true
+    source: postgresql-primary
+
+  bootstrap:
+    pg_basebackup:
+      source: postgresql-primary
+
+  externalClusters:
+  - name: postgresql-primary
+    connectionParameters:
+      host: {{ .Values.cnpg.replication.primaryHost | quote }}
+      port: {{ .Values.cnpg.replication.primaryPort | default 5432 | quote }}
+      user: {{ .Values.cnpg.user | default "postgres" | quote }}
+      dbname: {{ .Values.cnpg.database | default "apikeys" | quote }}
+      sslmode: prefer
+    password:
+      name: postgresql-primary-credentials
+      key: password
+
+  storage:
+    size: {{ .Values.cnpg.storage | default "5Gi" }}
+    storageClass: {{ .Values.cnpg.storageClassName | default "standard" }}
+---
+# Compatibility service alias on secondaryhub
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-service
+  namespace: {{ .Values.namespace }}
+spec:
+  type: ClusterIP
+  selector:
+    cnpg.io/cluster: postgresql-secondary
+  ports:
+  - port: 5432
+    targetPort: 5432
+    name: postgresql
+{{- end }}
+{{- end }}

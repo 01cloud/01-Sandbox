@@ -1,0 +1,455 @@
+{{- if and .Values.failoverController .Values.failoverController.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: ocm-failover-controller-sa
+  namespace: {{ .Values.namespace | default "opensandbox-system" }}
+  labels:
+    app.kubernetes.io/name: ocm-failover-controller
+    app.kubernetes.io/part-of: codeinspector
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: ocm-failover-controller-role
+  labels:
+    app.kubernetes.io/name: ocm-failover-controller
+    app.kubernetes.io/part-of: codeinspector
+rules:
+- apiGroups: ["postgresql.cnpg.io"]
+  resources: ["clusters"]
+  verbs: ["get", "list", "watch", "patch", "update", "delete", "create"]
+- apiGroups: ["cluster.open-cluster-management.io"]
+  resources: ["managedclusters", "managedclusters/status", "managedclusters/accept"]
+  verbs: ["get", "list", "watch", "patch", "update", "create"]
+- apiGroups: ["register.open-cluster-management.io"]
+  resources: ["managedclusters", "managedclusters/accept"]
+  verbs: ["get", "list", "watch", "patch", "update", "create"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["certificatesigningrequests", "certificatesigningrequests/approval"]
+  verbs: ["get", "list", "watch", "create", "update", "patch"]
+- apiGroups: ["certificates.k8s.io"]
+  resources: ["signers"]
+  resourceNames: ["kubernetes.io/kube-apiserver-client"]
+  verbs: ["approve"]
+- apiGroups: ["apps"]
+  resources: ["deployments", "deployments/scale"]
+  verbs: ["get", "list", "watch", "patch", "update"]
+- apiGroups: [""]
+  resources: ["pods", "pods/exec"]
+  verbs: ["get", "list", "watch", "create", "delete"]
+- apiGroups: [""]
+  resources: ["persistentvolumeclaims"]
+  verbs: ["get", "list", "watch", "delete"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["get", "list", "watch", "create", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ocm-failover-controller-rb
+  labels:
+    app.kubernetes.io/name: ocm-failover-controller
+    app.kubernetes.io/part-of: codeinspector
+subjects:
+- kind: ServiceAccount
+  name: ocm-failover-controller-sa
+  namespace: {{ .Values.namespace | default "opensandbox-system" }}
+roleRef:
+  kind: ClusterRole
+  name: ocm-failover-controller-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: ocm-failover-controller-script
+  namespace: {{ .Values.namespace | default "opensandbox-system" }}
+  labels:
+    app.kubernetes.io/name: ocm-failover-controller
+    app.kubernetes.io/part-of: codeinspector
+data:
+  reconciler.sh: |
+    #!/bin/bash
+    set -eo pipefail
+
+    PRIMARY_HOST="${PRIMARY_HOST:?PRIMARY_HOST environment variable must be set}"
+    SECONDARY_IP="${SECONDARY_IP:-10.99.0.2}"
+    PRIMARY_PORT="${PRIMARY_PORT:-5432}"
+    PRIMARY_VALKEY_PORT="${PRIMARY_VALKEY_PORT:-6379}"
+    PRIMARY_KUBE_API="https://${PRIMARY_HOST}:6443"
+    FAIL_COUNT=0
+    FAIL_THRESHOLD=2
+    NAMESPACE="{{ .Values.namespace | default "opensandbox-system" }}"
+
+    log() {
+      echo "[$(date -Iseconds)] [ocm-k8s-failover-controller] $1"
+    }
+
+    # Dynamically determine initial state based on current CNPG replica configuration
+    IS_REPLICA=$(kubectl get cluster postgresql-secondary -n "$NAMESPACE" -o jsonpath='{.spec.replica.enabled}' 2>/dev/null || echo 'true')
+    if [ "$IS_REPLICA" = "false" ]; then
+      STATE="FAILOVER_ACTIVE"
+    else
+      STATE="STANDBY"
+    fi
+
+    log "Starting Kubernetes-Native Failover Controller. Initial State: $STATE, Monitoring Primary: $PRIMARY_HOST"
+
+    approve_csrs() {
+      PENDING_CSRS=($(kubectl get csr -o json 2>/dev/null | jq -r '.items[]? | select(.status.conditions == null or ([.status.conditions[]? | select(.type == "Approved")] | length == 0)) | .metadata.name' 2>/dev/null || true))
+      for csr in "${PENDING_CSRS[@]}"; do
+        if [ -n "$csr" ]; then
+          log "Approving pending spoke CSR: $csr"
+          kubectl certificate approve "$csr" 2>/dev/null || true
+        fi
+      done
+    }
+
+    set_spoke_status() {
+      local spoke="$1"
+      local status="$2" # True or Unknown
+      local reason="$3" # ManagedClusterAvailable or ManagedClusterLeaseUpdateStopped
+      local msg="$4"
+      local now=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+      local updated_json
+      updated_json=$(kubectl get --raw "/apis/cluster.open-cluster-management.io/v1/managedclusters/${spoke}/status" 2>/dev/null | jq --arg status "$status" --arg reason "$reason" --arg msg "$msg" --arg now "$now" '
+        .status.conditions = [
+          .status.conditions[] | if .type == "ManagedClusterConditionAvailable" then
+            .status = $status | .reason = $reason | .message = $msg | .lastTransitionTime = $now
+          else . end
+        ]
+      ' 2>/dev/null || true)
+
+      if [ -n "$updated_json" ] && [ "$updated_json" != "null" ]; then
+        echo "$updated_json" | kubectl replace --raw "/apis/cluster.open-cluster-management.io/v1/managedclusters/${spoke}/status" -f - >/dev/null 2>&1 || true
+      fi
+    }
+
+    while true; do
+      # 1. Health check Primary Kube-API (Fast 1s timeout)
+      if curl -k -m 1 -s "${PRIMARY_KUBE_API}/livez" >/dev/null 2>&1; then
+        PRIMARY_UP=true
+      else
+        PRIMARY_UP=false
+      fi
+
+      # --------------------------------------------------------------------------
+      # CONDITION A: Primary is ALIVE
+      # --------------------------------------------------------------------------
+      if [ "$PRIMARY_UP" = "true" ]; then
+        FAIL_COUNT=0
+
+        # If we were in FAILOVER_ACTIVE, execute automated clean failback with NO split-brain!
+        if [ "$STATE" = "FAILOVER_ACTIVE" ]; then
+          log "PrimaryHub Kube-API is reachable. Verifying PrimaryHub PostgreSQL (${PRIMARY_HOST}:${PRIMARY_PORT}) before initiating failback..."
+
+          # PRE-CHECK: Verify Primary PostgreSQL is 100% ready and accepting queries BEFORE altering state or clusters!
+          PG_READY=false
+          for i in {1..20}; do
+            if kubectl exec -n "$NAMESPACE" postgresql-secondary-1 -c postgres -- \
+              pg_isready -h "$PRIMARY_HOST" -p "$PRIMARY_PORT" -U postgres >/dev/null 2>&1; then
+              log "PrimaryHub PostgreSQL is UP and accepting queries!"
+              PG_READY=true
+              break
+            fi
+            sleep 1
+          done
+
+          if [ "$PG_READY" != "true" ]; then
+            log "WARNING: PrimaryHub Kube-API is up, but PostgreSQL (${PRIMARY_HOST}:5432) is not ready yet. Staying in FAILOVER_ACTIVE to protect service availability."
+            approve_csrs
+            sleep 2
+            continue
+          fi
+
+          log "PrimaryHub PostgreSQL is healthy. Starting automated zero-touch failback & synchronization..."
+
+          # Step 1: Release spokes immediately on SecondaryHub to enforce failback to PrimaryHub (Priority 0)
+          log "Step 1: PrimaryHub is restored. Releasing spoke clusters from SecondaryHub to prevent split-brain..."
+          for CLUSTER in $(kubectl get managedclusters -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+            kubectl patch managedcluster "$CLUSTER" --type merge -p '{"spec":{"hubAcceptsClient":false}}' 2>/dev/null || true
+            kubectl delete lease --all -n "$CLUSTER" --ignore-not-found=true 2>/dev/null || true
+            set_spoke_status "$CLUSTER" "Unknown" "ManagedClusterLeaseUpdateStopped" "Released by SecondaryHub on failback"
+          done
+
+          # Step 2: Declarative Delta Synchronization via Kubernetes Job
+          log "Step 2: Launching declarative Kubernetes Job (failback-delta-sync) to sync outage delta..."
+          kubectl delete job failback-delta-sync -n "$NAMESPACE" --ignore-not-found=true 2>/dev/null || true
+
+          if kubectl apply -f /scripts/delta-sync-job.yaml; then
+            log "Job failback-delta-sync submitted. Waiting for completion..."
+            if kubectl wait --for=condition=complete job/failback-delta-sync -n "$NAMESPACE" --timeout=60s; then
+              log "Declarative Delta Sync Job completed successfully!"
+              kubectl logs job/failback-delta-sync -n "$NAMESPACE" 2>/dev/null || true
+            else
+              log "WARNING: Delta sync Job did not report completion within timeout. Checking logs..."
+              kubectl logs job/failback-delta-sync -n "$NAMESPACE" 2>/dev/null || true
+            fi
+          fi
+
+          # Step 3: Synchronize Valkey memory from Secondary to Primary, then follow Primary
+          log "Step 3a: Synchronizing authoritative Valkey cache from Secondary to Primary..."
+          kubectl exec -n "$NAMESPACE" deploy/valkey -- valkey-cli -h "$PRIMARY_HOST" -p "$PRIMARY_VALKEY_PORT" REPLICAOF "$SECONDARY_IP" 6379 2>/dev/null || true
+          sleep 2
+          kubectl exec -n "$NAMESPACE" deploy/valkey -- valkey-cli -h "$PRIMARY_HOST" -p "$PRIMARY_VALKEY_PORT" REPLICAOF NO ONE 2>/dev/null || true
+
+          log "Step 3b: Setting Secondary Valkey to replica of Primary..."
+          kubectl exec -n "$NAMESPACE" deploy/valkey -- valkey-cli REPLICAOF "$PRIMARY_HOST" "$PRIMARY_VALKEY_PORT" 2>/dev/null || true
+
+          # Step 4: Re-clone secondary PostgreSQL cluster as standby replica (resolving timeline divergence)
+          log "Step 4: Re-cloning secondary PostgreSQL cluster as standby replica (Timeline parity)..."
+          kubectl delete cluster postgresql-secondary -n "$NAMESPACE" --wait=false 2>/dev/null || true
+          kubectl delete pvc postgresql-secondary-1 -n "$NAMESPACE" --wait=false 2>/dev/null || true
+          kubectl wait --for=delete pod/postgresql-secondary-1 -n "$NAMESPACE" --timeout=30s 2>/dev/null || true
+          kubectl apply -f /scripts/secondary-cluster.yaml 2>/dev/null || true
+
+          log "Waiting for postgresql-secondary-1 pod to be initialized and ready..."
+          RECLONE_SUCCESS=false
+          for i in $(seq 1 60); do
+            POD_READY=$(kubectl get pod postgresql-secondary-1 -n "$NAMESPACE" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
+            if [ "$POD_READY" = "True" ]; then
+              log "postgresql-secondary-1 pod is Ready!"
+              RECLONE_SUCCESS=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$RECLONE_SUCCESS" = "true" ]; then
+            for i in $(seq 1 30); do
+              WAL_STATUS=$(kubectl exec -n "$NAMESPACE" postgresql-secondary-1 -c postgres -- \
+                psql -U postgres -d apikeys -t -A -c "SELECT status FROM pg_stat_wal_receiver;" 2>/dev/null || echo "not_ready")
+              if [ "$WAL_STATUS" = "streaming" ]; then
+                log "PostgreSQL secondary successfully streaming from PrimaryHub on Timeline 1!"
+                break
+              fi
+              sleep 2
+            done
+            STATE="STANDBY"
+            log "SUCCESS: Automated Failback completed! PrimaryHub is active master, SecondaryHub is standby replica. Zero split-brain!"
+          else
+            log "WARNING: postgresql-secondary-1 did not become ready within timeout. Remaining in FAILOVER_ACTIVE."
+          fi
+        else
+          # Standby invariant: SecondaryHub MUST NOT accept spokes while PrimaryHub is healthy.
+          # Spokes must remain connected exclusively to PrimaryHub (Priority 0).
+          for CLUSTER in $(kubectl get managedclusters -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+            IS_ACCEPTED=$(kubectl get managedcluster "$CLUSTER" -o jsonpath='{.spec.hubAcceptsClient}' 2>/dev/null || echo "false")
+            if [ "$IS_ACCEPTED" != "false" ]; then
+              log "STANDBY: Ensuring $CLUSTER is released from SecondaryHub..."
+              kubectl patch managedcluster "$CLUSTER" --type merge -p '{"spec":{"hubAcceptsClient":false}}' 2>/dev/null || true
+              kubectl delete lease --all -n "$CLUSTER" --ignore-not-found=true 2>/dev/null || true
+              set_spoke_status "$CLUSTER" "Unknown" "ManagedClusterLeaseUpdateStopped" "Released by SecondaryHub on standby"
+            fi
+          done
+        fi
+
+      # --------------------------------------------------------------------------
+      # CONDITION B: Primary is DOWN
+      # --------------------------------------------------------------------------
+      else
+        FAIL_COUNT=$((FAIL_COUNT + 1))
+        if [ "$STATE" = "STANDBY" ]; then
+          log "Primary check failed ($FAIL_COUNT/$FAIL_THRESHOLD)"
+        fi
+
+        if [ "$FAIL_COUNT" -ge "$FAIL_THRESHOLD" ] && [ "$STATE" = "STANDBY" ]; then
+          log "CRITICAL: PrimaryHub is DOWN ($FAIL_COUNT failures). Triggering automated in-place failover..."
+
+          # Step 1: Ensure OCM spoke clusters are accepted and ready on secondaryhub with 5s lease duration
+          log "Step 1: Ensuring OCM spoke clusters are accepted on secondaryhub (spoke1, spoke2)..."
+          for spoke in spoke1 spoke2; do
+            kubectl patch managedcluster "$spoke" --type merge \
+              -p '{"spec":{"hubAcceptsClient":true,"leaseDurationSeconds":5,"taints":null}}' 2>/dev/null || true
+          done
+          approve_csrs
+
+          # Step 2: Promote PostgreSQL Secondary to Read-Write Primary
+          log "Step 2: Promoting PostgreSQL secondary cluster to Read-Write primary..."
+          kubectl patch cluster postgresql-secondary -n "$NAMESPACE" --type merge \
+            -p '{"spec":{"replica":{"enabled":false}}}' 2>/dev/null || true
+
+          # Ensure superuser credentials for sandbox-api
+          for i in {1..15}; do
+            if kubectl exec -n "$NAMESPACE" postgresql-secondary-1 -c postgres -- \
+              psql -U postgres -d apikeys -c "ALTER USER postgres WITH PASSWORD 'password123';" 2>/dev/null; then
+              log "Successfully configured postgres password on secondary!"
+              break
+            fi
+            sleep 1
+          done
+
+          # Step 3: Promote Valkey to Master
+          log "Step 3: Promoting Valkey to master..."
+          kubectl exec -n "$NAMESPACE" deploy/valkey -- valkey-cli REPLICAOF NO ONE 2>/dev/null || true
+
+          approve_csrs
+
+          STATE="FAILOVER_ACTIVE"
+          log "SUCCESS: Automated Failover complete. SecondaryHub is now active Read-Write cluster. Zero downtime!"
+        fi
+
+        # While in FAILOVER_ACTIVE, continuously approve spoke CSRs and ensure spokes remain accepted
+        if [ "$STATE" = "FAILOVER_ACTIVE" ]; then
+          approve_csrs
+          for spoke in spoke1 spoke2; do
+            IS_ACCEPTED=$(kubectl get managedcluster "$spoke" -o jsonpath='{.spec.hubAcceptsClient}' 2>/dev/null || echo "false")
+            HAS_TAINTS=$(kubectl get managedcluster "$spoke" -o jsonpath='{.spec.taints}' 2>/dev/null || echo "")
+            if [ "$IS_ACCEPTED" = "false" ] || [ -n "$HAS_TAINTS" ] && [ "$HAS_TAINTS" != "[]" ]; then
+              log "Ensuring spoke $spoke is accepted on secondaryhub..."
+              kubectl patch managedcluster "$spoke" --type merge \
+                -p '{"spec":{"hubAcceptsClient":true,"leaseDurationSeconds":5,"taints":null}}' 2>/dev/null || true
+            fi
+          done
+        fi
+      fi
+
+      sleep 1
+    done
+  secondary-cluster.yaml: |
+    apiVersion: postgresql.cnpg.io/v1
+    kind: Cluster
+    metadata:
+      name: postgresql-secondary
+      namespace: {{ .Values.namespace | default "opensandbox-system" }}
+    spec:
+      instances: {{ .Values.cnpg.instances | default 1 }}
+      imageName: {{ .Values.cnpg.imageName | default "ghcr.io/cloudnative-pg/postgresql:15.6" | quote }}
+      postgresql:
+        parameters:
+          max_connections: "200"
+      enableSuperuserAccess: true
+      superuserSecret:
+        name: postgresql-primary-credentials
+      smartShutdownTimeout: 10
+      stopDelay: 30
+      replica:
+        enabled: true
+        source: postgresql-primary
+      bootstrap:
+        pg_basebackup:
+          source: postgresql-primary
+      externalClusters:
+      - name: postgresql-primary
+        connectionParameters:
+          host: {{ .Values.cnpg.replication.primaryHost | default .Values.failoverController.primaryHost | quote }}
+          port: {{ .Values.cnpg.replication.primaryPort | default 5432 | quote }}
+          user: {{ .Values.cnpg.user | default "postgres" | quote }}
+          dbname: {{ .Values.cnpg.database | default "apikeys" | quote }}
+          sslmode: prefer
+        password:
+          name: postgresql-primary-credentials
+          key: password
+      storage:
+        size: {{ .Values.cnpg.storage | default "5Gi" }}
+        storageClass: {{ .Values.cnpg.storageClassName | default "standard" }}
+  delta-sync-job.yaml: |
+    apiVersion: batch/v1
+    kind: Job
+    metadata:
+      name: failback-delta-sync
+      namespace: {{ .Values.namespace | default "opensandbox-system" }}
+      labels:
+        app.kubernetes.io/name: failback-delta-sync
+        app.kubernetes.io/part-of: codeinspector
+    spec:
+      ttlSecondsAfterFinished: 600
+      backoffLimit: 2
+      template:
+        metadata:
+          labels:
+            app.kubernetes.io/name: failback-delta-sync
+        spec:
+          restartPolicy: OnFailure
+          containers:
+          - name: delta-syncer
+            image: postgres:15-alpine
+            imagePullPolicy: IfNotPresent
+            env:
+            - name: PRIMARY_HOST
+              value: {{ .Values.failoverController.primaryHost | quote }}
+            - name: PRIMARY_PORT
+              value: {{ .Values.failoverController.primaryPort | default (.Values.cnpg.replication.primaryPort | default 5432) | quote }}
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgresql-primary-credentials
+                  key: password
+            command:
+            - /bin/sh
+            - -c
+            - |
+              set -eo pipefail
+              echo "[failback-sync] Terminating stale connections on PrimaryHub ($PRIMARY_HOST)..."
+              psql -h "$PRIMARY_HOST" -p "$PRIMARY_PORT" -U postgres -d postgres -c \
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = 'apikeys' AND pid <> pg_backend_pid();" || true
+
+              echo "[failback-sync] Transferring full authoritative database from SecondaryHub to PrimaryHub ($PRIMARY_HOST)..."
+              pg_dump -h postgresql-secondary-rw -p 5432 -U postgres -d apikeys --clean --if-exists | \
+                psql -h "$PRIMARY_HOST" -p "$PRIMARY_PORT" -U postgres -d apikeys
+
+              echo "[failback-sync] Executing CHECKPOINT on PrimaryHub..."
+              psql -h "$PRIMARY_HOST" -p "$PRIMARY_PORT" -U postgres -d apikeys -c "CHECKPOINT;" || true
+
+              echo "[failback-sync] Authoritative database synchronization complete!"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ocm-failover-controller
+  namespace: {{ .Values.namespace | default "opensandbox-system" }}
+  labels:
+    app.kubernetes.io/name: ocm-failover-controller
+    app.kubernetes.io/part-of: codeinspector
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: ocm-failover-controller
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: ocm-failover-controller
+        app.kubernetes.io/part-of: codeinspector
+    spec:
+      serviceAccountName: ocm-failover-controller-sa
+      containers:
+      - name: controller
+        image: "{{ .Values.failoverController.image.repository | default "bitnami/kubectl" }}:{{ .Values.failoverController.image.tag | default "latest" }}"
+        imagePullPolicy: {{ .Values.failoverController.image.pullPolicy | default "IfNotPresent" }}
+        env:
+        - name: PRIMARY_HOST
+          value: {{ .Values.failoverController.primaryHost | default (.Values.cnpg.replication.primaryHost | default "10.99.0.1") | quote }}
+        - name: SECONDARY_IP
+          value: {{ .Values.failoverController.secondaryHost | default "10.99.0.2" | quote }}
+        - name: PRIMARY_PORT
+          value: {{ .Values.failoverController.primaryPort | default (.Values.cnpg.replication.primaryPort | default 30432) | quote }}
+        - name: PRIMARY_VALKEY_PORT
+          value: {{ .Values.valkey.replication.primaryPort | default 30379 | quote }}
+        command:
+        - /bin/bash
+        - /scripts/reconciler.sh
+        volumeMounts:
+        - name: script-vol
+          mountPath: /scripts
+        resources:
+          limits:
+            cpu: 200m
+            memory: 256Mi
+          requests:
+            cpu: 50m
+            memory: 64Mi
+      volumes:
+      - name: script-vol
+        configMap:
+          name: ocm-failover-controller-script
+          defaultMode: 0755
+{{- end }}

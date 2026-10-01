@@ -18,6 +18,12 @@ rules:
   - apiGroups: ["sandbox.opensandbox.io"]
     resources: ["batchsandboxes", "batchsandboxes/status", "batchsandboxes/finalizers", "pools", "pools/status", "pools/finalizers"]
     verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["work.open-cluster-management.io"]
+    resources: ["manifestworks", "manifestworks/status"]
+    verbs: ["create", "delete", "get", "list", "patch", "update", "watch"]
+  - apiGroups: ["cluster.open-cluster-management.io"]
+    resources: ["managedclustersets", "managedclustersetbindings", "placements", "placementdecisions", "managedclusters"]
+    verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

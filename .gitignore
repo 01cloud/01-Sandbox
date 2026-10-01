@@ -1,6 +1,7 @@
 venv
 .venv
 .env
+.sandbox-state/
 
 # Local Python dependencies (Local Shadowing)
 apiServer/fastapi/fastapi/
