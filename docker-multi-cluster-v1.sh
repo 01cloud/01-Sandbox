@@ -1883,8 +1883,10 @@ phase_16_join_spokes_to_ocm() {
 
     # 3. Enable MultipleHubs on the klusterlet ─────────────────────────────────
     #    Priority = array order: [0] primaryhub, [1] secondaryhub
-    #    hubConnectionTimeoutSeconds must be >= 180 (CRD validation)
-    log_info "Patching klusterlet on ${spoke}: MultipleHubs + LocalSecrets..."
+    #    Patch CRD schema to allow sub-minute hubConnectionTimeoutSeconds (60s failover)
+    log_info "Patching CRD schema and klusterlet on ${spoke}: MultipleHubs + LocalSecrets (60s failover)..."
+    kubectl --context "$ctx" patch crd klusterlets.operator.open-cluster-management.io --type json -p '[{"op":"replace","path":"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/registrationConfiguration/properties/bootstrapKubeConfigs/properties/localSecretsConfig/properties/hubConnectionTimeoutSeconds/minimum","value":10}]' 2>/dev/null || true
+
     kubectl --context "$ctx" patch klusterlet klusterlet --type=merge -p '{
       "spec": {
         "registrationConfiguration": {
@@ -1894,7 +1896,7 @@ phase_16_join_spokes_to_ocm() {
           "bootstrapKubeConfigs": {
             "type": "LocalSecrets",
             "localSecretsConfig": {
-              "hubConnectionTimeoutSeconds": 180,
+              "hubConnectionTimeoutSeconds": 60,
               "kubeConfigSecrets": [
                 { "name": "primaryhub-kubeconfig" },
                 { "name": "secondaryhub-kubeconfig" }
@@ -1904,6 +1906,8 @@ phase_16_join_spokes_to_ocm() {
         }
       }
     }'
+    # Clean restart of registration agent to apply updated settings without backoff delay
+    kubectl --context "$ctx" -n "$agent_ns" delete pod -l app=klusterlet-registration-agent 2>/dev/null || true
 
     # 4. Approve registration on the active (primary) hub ──────────────────────
     log_info "Accepting ${spoke} on primaryhub..."
@@ -1915,6 +1919,7 @@ phase_16_join_spokes_to_ocm() {
       sleep 2
     done
     [ "$accepted" = false ] && log_warn "clusteradm accept did not succeed for ${spoke} yet (CSR may still be pending)."
+    kubectl --context kind-primaryhub patch managedcluster "$spoke" --type merge -p '{"spec":{"leaseDurationSeconds":5}}' 2>/dev/null || true
 
     # Wait for ManagedClusterConditionAvailable on primaryhub
     local avail="False"
@@ -1952,7 +1957,7 @@ phase_17_sync_spokes_to_secondaryhub() {
       kubectl --context "$ctx" label managedcluster "$spoke" \
         wireguard-ip="${spoke_wg_ip}" \
         sandbox-workload-capable=true \
-        runtime.gvisor=true runtime.kata=true \
+        runtime.gvisor=true runtime.kata=true runtime.kata-fc=true \
         --overwrite 2>/dev/null || true
     done
   done
@@ -1969,7 +1974,8 @@ phase_17_sync_spokes_to_secondaryhub() {
       kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
     kubectl --context kind-primaryhub get rolebinding -n "$spoke" -o yaml 2>/dev/null | \
       kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-    kubectl --context kind-primaryhub get managedcluster "$spoke" -o yaml 2>/dev/null | \
+    kubectl --context kind-primaryhub get managedcluster "$spoke" -o json 2>/dev/null | \
+      jq 'del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.ownerReferences, .status) | .spec.hubAcceptsClient = false' | \
       kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
   done
 
