@@ -1,5 +1,66 @@
 # Changelog
 
+## [0.7.11](https://github.com/01cloud/01-Sandbox/compare/v0.7.10...v0.7.11) (2026-09-09)
+
+
+### 🚀 New Features
+
+* update logo ([ef78b47](https://github.com/01cloud/01-Sandbox/commit/ef78b47fa9d6da369d15a074e7bad43290472572))
+* update the website with contents of gvisor and kata container ([d08710d](https://github.com/01cloud/01-Sandbox/commit/d08710d03656e392b87513c6691fb3301bc3db34))
+* update the website with contents of gvisor and kata container ([8bdaa77](https://github.com/01cloud/01-Sandbox/commit/8bdaa774061266a70380ec13f81d3f5e687ee834))
+* update the website with contents of gvisor and kata container ([2f1bf4e](https://github.com/01cloud/01-Sandbox/commit/2f1bf4e00e9b8b29ae2168d06b371b21e373f787))
+
+
+### 🐛 Bug Fixes
+
+* **docs:** fix Mermaid diagram syntax in multi-cluster.md ([5459857](https://github.com/01cloud/01-Sandbox/commit/5459857f9bed572da2266439a61707996622847d))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.10 [skip ci] ([def67d3](https://github.com/01cloud/01-Sandbox/commit/def67d38d6f7f7096d23da76738b5dcd8aa05bb1))
+* **multi-cluster:** add CEO Executive Briefing section ([1be2231](https://github.com/01cloud/01-Sandbox/commit/1be2231ee0f5e0df57b74b32c4f0b5247bb6fd2b))
+* **multi-cluster:** add config reference to ha-failover doc ([719ece4](https://github.com/01cloud/01-Sandbox/commit/719ece4d01870ed98b75b0c6810bc6b70d85b58d))
+* **multi-cluster:** add HA failover executive summary ([8ddf5c2](https://github.com/01cloud/01-Sandbox/commit/8ddf5c2805edb972568c9456ee7d949e6a315ebb))
+* **multi-cluster:** add Issue 21 and TLS rotation steps ([815accb](https://github.com/01cloud/01-Sandbox/commit/815accb0b2d5c8fe194c434e80d44401ef94d2b2))
+* **multi-cluster:** add issues 13-19 and failover test steps ([0ecc324](https://github.com/01cloud/01-Sandbox/commit/0ecc324793e73cfbce55796c417724965b919583))
+* **multi-cluster:** add multi-cluster-final.md for post-CIDR migration ([8addba8](https://github.com/01cloud/01-Sandbox/commit/8addba885f687da9baf07a209a682c2e51e46c6c))
+* **multi-cluster:** add reboot persistence and cloud production notes ([0478d4b](https://github.com/01cloud/01-Sandbox/commit/0478d4b5bcc81819893c56276fd2fb26f74801fe))
+* **multi-cluster:** add SCP over WireGuard instructions and Issue 20 ([14de10a](https://github.com/01cloud/01-Sandbox/commit/14de10a1568d8c093ebdca541dc9137b3f892201))
+* **multi-cluster:** add Section 3.5 note on Cilium WireGuard ([5310d31](https://github.com/01cloud/01-Sandbox/commit/5310d317818f7ab285a92319b0453b6d96621a9c))
+* **multi-cluster:** add Section 8 troubleshooting guide ([1bfd14a](https://github.com/01cloud/01-Sandbox/commit/1bfd14a3e08ae2ba7d6cf3b01743aa8de918a550))
+* **multi-cluster:** embed configs inside component sections ([08d002d](https://github.com/01cloud/01-Sandbox/commit/08d002dd0747186ce123d692e9f70cd50894e601))
+* **multi-cluster:** update multi-cluster-final.md ([9d20ed8](https://github.com/01cloud/01-Sandbox/commit/9d20ed8de2438c1d0795ab7bf5138f512026acd0))
+* **multi-cluster:** update Section 3.5 for Cilium In-Cluster WireGuard ([afcad8f](https://github.com/01cloud/01-Sandbox/commit/afcad8f09e790690b4d0d18a403a9b38408221bd))
+* **multi-cluster:** update witness script in multi-cluster-final.md ([1b70240](https://github.com/01cloud/01-Sandbox/commit/1b702403f97e333b065fe98582acba1b1e8eb354))
+* **readme:** update multicluster in kind ([df3e61b](https://github.com/01cloud/01-Sandbox/commit/df3e61bcc25ecffc7fb5e6e309118c7242744171))
+* **readme:** update readme file ([24de7d2](https://github.com/01cloud/01-Sandbox/commit/24de7d27fc51a4120e10d8721f85c2fb6f857a98))
+* **readme:** update readme file ([181dbb5](https://github.com/01cloud/01-Sandbox/commit/181dbb55f0280150a3807eaa9532fefa7183b0f1))
+* **readme:** update readme file ([b50f89f](https://github.com/01cloud/01-Sandbox/commit/b50f89fe696ef92c58c2bd5615b7ea10748b1d86))
+* **readme:** update readme file ([d8779ca](https://github.com/01cloud/01-Sandbox/commit/d8779cae8c136d6ec3e9a069ede431d5b7760fa5))
+* **readme:** update readme file ([58b032e](https://github.com/01cloud/01-Sandbox/commit/58b032e0b007ea4def50bca21462495010f3d71f))
+* **readme:** update readme file ([c64c7ad](https://github.com/01cloud/01-Sandbox/commit/c64c7adccd209f68873d360bbca2e3c50090df88))
+* **readme:** update readme file ([28c7e8f](https://github.com/01cloud/01-Sandbox/commit/28c7e8f0d47314e61c5df65ec1990a167c96d78c))
+* **readme:** update readme file ([116eeae](https://github.com/01cloud/01-Sandbox/commit/116eeaed42e3d196cf1e2991cc460f05ca20ec64))
+* **readme:** update readme file ([bf9b133](https://github.com/01cloud/01-Sandbox/commit/bf9b1334eb87190db886295d8120f814317a4b15))
+* **readme:** update readme file ([cf992b7](https://github.com/01cloud/01-Sandbox/commit/cf992b7dde90a2c69a08b6e99bcb8f5ceae38bfb))
+* **readme:** update readme file ([6b97a5f](https://github.com/01cloud/01-Sandbox/commit/6b97a5fe5dbb5715f1db6ba723cb1e38c489d57a))
+* **readme:** update readme file ([f22770b](https://github.com/01cloud/01-Sandbox/commit/f22770b3d458c134ebfe4e0241fca8742d0f135f))
+* **readme:** update readme file ([c104d77](https://github.com/01cloud/01-Sandbox/commit/c104d777333ce6ec454598a5fcbefda468dc410a))
+* **readme:** update readme file ([f4bab72](https://github.com/01cloud/01-Sandbox/commit/f4bab72862ffac87e92f11de393d929eac5905cf))
+* **readme:** update readme file ([22aee0b](https://github.com/01cloud/01-Sandbox/commit/22aee0ba618adf11d3bd929fef1ef2d20b73e75a))
+* **readme:** update readme file ([c71933f](https://github.com/01cloud/01-Sandbox/commit/c71933fb5c2fc03b4f28712698a60b0934cd8cef))
+* **readme:** update readme file ([4594e32](https://github.com/01cloud/01-Sandbox/commit/4594e3242bc6b49e5ecff2424e70197f5f6eebd1))
+* **readme:** update readmefile ([d2e7826](https://github.com/01cloud/01-Sandbox/commit/d2e782654668c0281d7d30d126bd1e90ce4a4a65))
+* **readme:** update readmefile ([3a666dd](https://github.com/01cloud/01-Sandbox/commit/3a666dd33a310ee27b2176e74993bc4cd7351dec))
+* **readme:** update readmefile ([4d383cb](https://github.com/01cloud/01-Sandbox/commit/4d383cb9f1e887974aee61bcc9edafb9e8ec165a))
+* **readme:** update readmefile ([3b06544](https://github.com/01cloud/01-Sandbox/commit/3b06544d9af254660fe2414d6fae1a043af72f6e))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.10 [skip ci] ([f64caaa](https://github.com/01cloud/01-Sandbox/commit/f64caaaa63fdd26d7aaac09a994dc906948970c7))
+
 ## [0.7.10](https://github.com/01cloud/01-Sandbox/compare/v0.7.9...v0.7.10) (2026-07-29)
 
 
