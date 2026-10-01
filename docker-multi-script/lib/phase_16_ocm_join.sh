@@ -116,6 +116,14 @@ _ensure_hub_apiserver_sans() {
 
   docker exec "$node" bash -c "
     set -e
+    # Ensure /kind/kubeadm.conf preserves SANs across container restarts/reboots
+    if [ -f /kind/kubeadm.conf ]; then
+      for ip in ${WG_HUB1_IP} ${WG_HUB2_IP} ${WG_VIP} 0.0.0.0; do
+        if ! grep -q \"\- \${ip}\" /kind/kubeadm.conf; then
+          sed -i \"/certSANs:/a \ \ - \${ip}\" /kind/kubeadm.conf
+        fi
+      done
+    fi
     cd /etc/kubernetes/pki
     mkdir -p /root/pki-backup && cp -f apiserver.crt apiserver.key /root/pki-backup/
     rm -f apiserver.crt apiserver.key
@@ -245,8 +253,8 @@ _do_phase_16_join_spokes_to_ocm() {
       --from-file=kubeconfig="${STATE_DIR}/secondaryhub-bootstrap.kubeconfig" \
       --dry-run=client -o yaml | kubectl --context "$ctx" apply -f -
 
-    # 3. Patch klusterlet for MultipleHubs with fast 15s failover timeout
-    log_info "Patching CRD schema and klusterlet on ${spoke}: MultipleHubs + LocalSecrets (15s fast failover)..."
+    # 3. Patch klusterlet for MultipleHubs with 60s failover timeout
+    log_info "Patching CRD schema and klusterlet on ${spoke}: MultipleHubs + LocalSecrets (60s failover)..."
     kubectl --context "$ctx" patch crd klusterlets.operator.open-cluster-management.io --type json -p '[{"op":"replace","path":"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/registrationConfiguration/properties/bootstrapKubeConfigs/properties/localSecretsConfig/properties/hubConnectionTimeoutSeconds/minimum","value":10}]' 2>/dev/null || true
 
     kubectl --context "$ctx" patch klusterlet klusterlet --type=merge -p '{
@@ -258,7 +266,7 @@ _do_phase_16_join_spokes_to_ocm() {
           "bootstrapKubeConfigs": {
             "type": "LocalSecrets",
             "localSecretsConfig": {
-              "hubConnectionTimeoutSeconds": 15,
+              "hubConnectionTimeoutSeconds": 60,
               "kubeConfigSecrets": [
                 { "name": "primaryhub-kubeconfig" },
                 { "name": "secondaryhub-kubeconfig" }

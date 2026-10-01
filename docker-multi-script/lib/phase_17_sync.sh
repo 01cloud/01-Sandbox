@@ -29,7 +29,7 @@ _do_phase_17_sync_spokes_to_secondaryhub() {
     kubectl --context kind-primaryhub get rolebinding -n "$spoke" -o yaml 2>/dev/null | \
       kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
     kubectl --context kind-primaryhub get managedcluster "$spoke" -o json 2>/dev/null | \
-      jq 'del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.ownerReferences, .status)' | \
+      jq 'del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.ownerReferences, .status) | .spec.hubAcceptsClient = false' | \
       kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
   done
 

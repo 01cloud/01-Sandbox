@@ -101,7 +101,7 @@ data:
     log "Starting Kubernetes-Native Failover Controller. Initial State: $STATE, Monitoring Primary: $PRIMARY_HOST"
 
     approve_csrs() {
-      PENDING_CSRS=($(kubectl get csr -o json 2>/dev/null | jq -r '.items[]? | select(.status.conditions == null) | .metadata.name' 2>/dev/null || true))
+      PENDING_CSRS=($(kubectl get csr -o json 2>/dev/null | jq -r '.items[]? | select(.status.conditions == null or ([.status.conditions[]? | select(.type == "Approved")] | length == 0)) | .metadata.name' 2>/dev/null || true))
       for csr in "${PENDING_CSRS[@]}"; do
         if [ -n "$csr" ]; then
           log "Approving pending spoke CSR: $csr"
@@ -173,7 +173,7 @@ data:
           # Step 1: Release spokes immediately on SecondaryHub to enforce failback to PrimaryHub (Priority 0)
           log "Step 1: PrimaryHub is restored. Releasing spoke clusters from SecondaryHub to prevent split-brain..."
           for CLUSTER in $(kubectl get managedclusters -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
-            kubectl patch managedcluster "$CLUSTER" --type merge -p '{"spec":{"hubAcceptsClient":false,"taints":[{"key":"cluster.open-cluster-management.io/unreachable","effect":"NoSelect"}]}}' 2>/dev/null || true
+            kubectl patch managedcluster "$CLUSTER" --type merge -p '{"spec":{"hubAcceptsClient":false}}' 2>/dev/null || true
             kubectl delete lease --all -n "$CLUSTER" --ignore-not-found=true 2>/dev/null || true
             set_spoke_status "$CLUSTER" "Unknown" "ManagedClusterLeaseUpdateStopped" "Released by SecondaryHub on failback"
           done
@@ -243,7 +243,7 @@ data:
             IS_ACCEPTED=$(kubectl get managedcluster "$CLUSTER" -o jsonpath='{.spec.hubAcceptsClient}' 2>/dev/null || echo "false")
             if [ "$IS_ACCEPTED" != "false" ]; then
               log "STANDBY: Ensuring $CLUSTER is released from SecondaryHub..."
-              kubectl patch managedcluster "$CLUSTER" --type merge -p '{"spec":{"hubAcceptsClient":false,"taints":[{"key":"cluster.open-cluster-management.io/unreachable","effect":"NoSelect"}]}}' 2>/dev/null || true
+              kubectl patch managedcluster "$CLUSTER" --type merge -p '{"spec":{"hubAcceptsClient":false}}' 2>/dev/null || true
               kubectl delete lease --all -n "$CLUSTER" --ignore-not-found=true 2>/dev/null || true
               set_spoke_status "$CLUSTER" "Unknown" "ManagedClusterLeaseUpdateStopped" "Released by SecondaryHub on standby"
             fi
@@ -266,7 +266,7 @@ data:
           log "Step 1: Ensuring OCM spoke clusters are accepted on secondaryhub (spoke1, spoke2)..."
           for spoke in spoke1 spoke2; do
             kubectl patch managedcluster "$spoke" --type merge \
-              -p '{"spec":{"hubAcceptsClient":true,"leaseDurationSeconds":5,"taints":[]}}' 2>/dev/null || true
+              -p '{"spec":{"hubAcceptsClient":true,"leaseDurationSeconds":5,"taints":null}}' 2>/dev/null || true
           done
           approve_csrs
 
@@ -300,10 +300,11 @@ data:
           approve_csrs
           for spoke in spoke1 spoke2; do
             IS_ACCEPTED=$(kubectl get managedcluster "$spoke" -o jsonpath='{.spec.hubAcceptsClient}' 2>/dev/null || echo "false")
-            if [ "$IS_ACCEPTED" = "false" ]; then
+            HAS_TAINTS=$(kubectl get managedcluster "$spoke" -o jsonpath='{.spec.taints}' 2>/dev/null || echo "")
+            if [ "$IS_ACCEPTED" = "false" ] || [ -n "$HAS_TAINTS" ] && [ "$HAS_TAINTS" != "[]" ]; then
               log "Ensuring spoke $spoke is accepted on secondaryhub..."
               kubectl patch managedcluster "$spoke" --type merge \
-                -p '{"spec":{"hubAcceptsClient":true,"leaseDurationSeconds":5,"taints":[]}}' 2>/dev/null || true
+                -p '{"spec":{"hubAcceptsClient":true,"leaseDurationSeconds":5,"taints":null}}' 2>/dev/null || true
             fi
           done
         fi
