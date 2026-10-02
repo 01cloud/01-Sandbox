@@ -19,7 +19,7 @@ agentgateway:
   policy:
     rateLimit:
       enabled: true
-      requests: 7
+      requests: 500
       unit: "Minutes"
 
 apiServer:
