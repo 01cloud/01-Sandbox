@@ -25,7 +25,11 @@ CODE_INSPECTOR_DIR="${ROOT_DIR}/codeInspector"
 OPENSANDBOX_BUILD_DIR="${ROOT_DIR}/opensandbox-server/docker-build"
 
 # Detect repository location relative to the script or common paths
-if [ -d "${ROOT_DIR}/01-Sandbox/codeInspector" ]; then
+if [ -d "${SCRIPT_DIR}/../codeInspector" ]; then
+  SANDBOX_REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+  CODE_INSPECTOR_DIR="${SANDBOX_REPO_DIR}/codeInspector"
+  OPENSANDBOX_BUILD_DIR="${SANDBOX_REPO_DIR}/opensandbox-server/docker-build"
+elif [ -d "${ROOT_DIR}/01-Sandbox/codeInspector" ]; then
   SANDBOX_REPO_DIR="${ROOT_DIR}/01-Sandbox"
   CODE_INSPECTOR_DIR="${ROOT_DIR}/01-Sandbox/codeInspector"
   OPENSANDBOX_BUILD_DIR="${ROOT_DIR}/01-Sandbox/opensandbox-server/docker-build"
@@ -33,14 +37,14 @@ elif [ -d "${ROOT_DIR}/codeInspector" ]; then
   SANDBOX_REPO_DIR="${ROOT_DIR}"
   CODE_INSPECTOR_DIR="${ROOT_DIR}/codeInspector"
   OPENSANDBOX_BUILD_DIR="${ROOT_DIR}/opensandbox-server/docker-build"
-elif [ -d "/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector" ]; then
-  SANDBOX_REPO_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox"
-  CODE_INSPECTOR_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector"
-  OPENSANDBOX_BUILD_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox/opensandbox-server/docker-build"
 elif [ -d "$(pwd)/codeInspector" ]; then
   SANDBOX_REPO_DIR="$(pwd)"
   CODE_INSPECTOR_DIR="$(pwd)/codeInspector"
   OPENSANDBOX_BUILD_DIR="$(pwd)/opensandbox-server/docker-build"
+elif [ -d "/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector" ]; then
+  SANDBOX_REPO_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox"
+  CODE_INSPECTOR_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector"
+  OPENSANDBOX_BUILD_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox/opensandbox-server/docker-build"
 fi
 
 STATE_DIR="${ROOT_DIR}/.sandbox-state"

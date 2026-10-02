@@ -120,6 +120,7 @@ ensure_sandbox_repo() {
 
   # 2. Search well-known candidate locations
   local candidates=(
+    "${SCRIPT_DIR}/.."
     "${ROOT_DIR}/01-Sandbox"
     "${ROOT_DIR}"
     "$(pwd)/01-Sandbox"
