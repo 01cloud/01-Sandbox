@@ -68,7 +68,7 @@ agentgateway:
     jwtMode: "Strict"
     rateLimit:
       enabled: true
-      requests: 7
+      requests: 500
       unit: "Minutes"
 ################################################################
 # Agent Gateway Controller values

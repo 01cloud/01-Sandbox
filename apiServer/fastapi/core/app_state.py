@@ -173,6 +173,18 @@ class AppState:
                 )
             """
             )
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_subscriptions (
+                    id TEXT PRIMARY KEY,
+                    user_id TEXT NOT NULL,
+                    backend_id TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    created_at TEXT,
+                    UNIQUE (user_id, backend_id)
+                )
+            """
+            )
 
             # Performance Indexes
             try:

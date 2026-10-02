@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 
 load_dotenv()  # Load .env for local development (AUTH0_DOMAIN, etc.)
 
+import psycopg2.errors
 from api_keys import get_api_keys_router
 from auth import validate_token
 
@@ -20,8 +21,9 @@ from auth import validate_token
 from core import AppState, lifespan, state
 from core.docs import register_docs_routes
 from core.middleware import cookie_auth_redirect_middleware, log_headers
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # Router factories
 from health import get_health_router
@@ -51,10 +53,24 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
+@app.exception_handler(psycopg2.errors.ReadOnlySqlTransaction)
+async def readonly_sql_handler(
+    request: Request, exc: psycopg2.errors.ReadOnlySqlTransaction
+):
+    return JSONResponse(
+        status_code=503,
+        content={
+            "detail": "Cluster database is currently in read-only standby mode. Please retry on PrimaryHub."
+        },
+        headers={"Retry-After": "1", "Connection": "close"},
+    )
+
+
 # CORS configuration
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https?://(localhost|sandbox\.01security\.com|.*\.01security\.com)(:\d+)?",
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|sandbox\.01security\.com|.*\.01security\.com)(:\d+)?",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

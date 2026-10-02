@@ -1,1 +1,0 @@
-../docs/01-sandbox-multi-cluster/codeinspector-changes.md

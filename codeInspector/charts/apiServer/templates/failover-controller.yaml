@@ -83,7 +83,9 @@ data:
     PRIMARY_VALKEY_PORT="${PRIMARY_VALKEY_PORT:-6379}"
     PRIMARY_KUBE_API="https://${PRIMARY_HOST}:6443"
     FAIL_COUNT=0
-    FAIL_THRESHOLD=2
+    # Issue 2/3 fix: require 5 consecutive 3-second failures (~15s) before
+    # declaring PrimaryHub down, preventing CPU-spike false positives.
+    FAIL_THRESHOLD=5
     NAMESPACE="{{ .Values.namespace | default "opensandbox-system" }}"
 
     log() {
@@ -132,8 +134,8 @@ data:
     }
 
     while true; do
-      # 1. Health check Primary Kube-API (Fast 1s timeout)
-      if curl -k -m 1 -s "${PRIMARY_KUBE_API}/livez" >/dev/null 2>&1; then
+      # 1. Health check Primary Kube-API (3s timeout — tolerates transient CPU spikes)
+      if curl -k -m 3 -s "${PRIMARY_KUBE_API}/livez" >/dev/null 2>&1; then
         PRIMARY_UP=true
       else
         PRIMARY_UP=false
@@ -204,10 +206,31 @@ data:
 
           # Step 4: Re-clone secondary PostgreSQL cluster as standby replica (resolving timeline divergence)
           log "Step 4: Re-cloning secondary PostgreSQL cluster as standby replica (Timeline parity)..."
-          kubectl delete cluster postgresql-secondary -n "$NAMESPACE" --wait=false 2>/dev/null || true
-          kubectl delete pvc postgresql-secondary-1 -n "$NAMESPACE" --wait=false 2>/dev/null || true
-          kubectl wait --for=delete pod/postgresql-secondary-1 -n "$NAMESPACE" --timeout=30s 2>/dev/null || true
-          kubectl apply -f /scripts/secondary-cluster.yaml 2>/dev/null || true
+
+          # Issue 3 fix: guard against re-deleting a pod that is already bootstrapping
+          # (pg_basebackup in progress or ContainerCreating). Only delete if pod is NOT
+          # in a healthy initialisation state to break the infinite re-deletion death spiral.
+          SKIP_RECLONE=false
+          POD_PHASE=$(kubectl get pod postgresql-secondary-1 -n "$NAMESPACE" \
+            -o jsonpath='{.status.phase}' 2>/dev/null || echo "")
+          INIT_CONTAINERS=$(kubectl get pod postgresql-secondary-1 -n "$NAMESPACE" \
+            -o jsonpath='{.status.initContainerStatuses[0].state.running}' 2>/dev/null || echo "")
+          if [ "$POD_PHASE" = "Pending" ] && [ -n "$INIT_CONTAINERS" ]; then
+            log "Step 4: postgresql-secondary-1 is already bootstrapping (pg_basebackup in progress). Skipping re-deletion."
+            SKIP_RECLONE=true
+          fi
+
+          if [ "$SKIP_RECLONE" = "false" ]; then
+            kubectl delete cluster postgresql-secondary -n "$NAMESPACE" --wait=false 2>/dev/null || true
+            kubectl delete pvc postgresql-secondary-1 -n "$NAMESPACE" --wait=false 2>/dev/null || true
+
+            # Issue 3 fix: allow 60s for graceful termination; force-delete if still stuck
+            if ! kubectl wait --for=delete pod/postgresql-secondary-1 -n "$NAMESPACE" --timeout=60s 2>/dev/null; then
+              log "Step 4: Pod still Terminating after 60s — force removing to unblock PVC mount..."
+              kubectl delete pod postgresql-secondary-1 -n "$NAMESPACE" --force --grace-period=0 2>/dev/null || true
+            fi
+            kubectl apply -f /scripts/secondary-cluster.yaml 2>/dev/null || true
+          fi
 
           log "Waiting for postgresql-secondary-1 pod to be initialized and ready..."
           RECLONE_SUCCESS=false
@@ -233,6 +256,8 @@ data:
             done
             STATE="STANDBY"
             log "SUCCESS: Automated Failback completed! PrimaryHub is active master, SecondaryHub is standby replica. Zero split-brain!"
+            log "Step 5: Recycling SecondaryHub sandbox-api to release any lingering failover connections..."
+            kubectl rollout restart deployment/sandbox-api -n "$NAMESPACE" 2>/dev/null || true
           else
             log "WARNING: postgresql-secondary-1 did not become ready within timeout. Remaining in FAILOVER_ACTIVE."
           fi

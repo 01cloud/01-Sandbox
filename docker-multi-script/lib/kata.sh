@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# lib/phase_15b_kata_fc.sh – Setup Kata Containers + Firecracker (kata-fc) Runtime
+# lib/kata.sh – Kata Containers + Firecracker (kata-fc) runtime setup
+#
+# Configures Kata 3.x with the Firecracker VMM and LVM-backed devmapper
+# snapshotter on spoke1 and spoke2 so isolated microVM sandboxes can be
+# scheduled using `runtimeClassName: kata-fc`.
+#
+# Functions:
+#   _ensure_kata_host_assets    – download or reuse static Kata release tarball
+#   _install_kata_on_spoke      – install binaries, config, and containerd shim
+#   setup_kata_firecracker      – orchestrator: install kata-fc on all spokes
+# ==============================================================================
 #
 # Configures Kata Containers 3.x with the Firecracker VMM and LVM-backed devmapper
 # snapshotter on spoke1 and spoke2 so that isolated microVM sandboxes can be
 # scheduled using `runtimeClassName: kata-fc`.
-# ==============================================================================
 
 _check_phase_15b() {
   local spoke
@@ -155,20 +164,58 @@ EOF
     vgchange -ay --monitor y \"\$VG\" >/dev/null 2>&1 || true
     /usr/sbin/dmsetup mknodes >/dev/null 2>&1 || true
 
-    cat << \"UNITEOF\" > /etc/systemd/system/containerd-devmapper.service
+    cat << 'SCRIPTEOF' > /usr/local/bin/init-containerd-devmapper.sh
+#!/bin/bash
+for img in /var/lib/*.img; do
+  if [ -f "\$img" ]; then
+    if ! losetup -j "\$img" 2>/dev/null | grep -q "\$img"; then
+      losetup -fP "\$img" 2>/dev/null || true
+    fi
+  fi
+done
+
+vgchange -ay 2>/dev/null || true
+
+mkdir -p /dev/mapper
+if [ -x /usr/sbin/dmsetup.orig ]; then
+  /usr/sbin/dmsetup.orig mknodes 2>/dev/null || true
+  /usr/sbin/dmsetup.orig ls 2>/dev/null | while read -r name majmin; do
+    maj=\$(echo "\$majmin" | tr -d '()' | cut -d: -f1)
+    min=\$(echo "\$majmin" | tr -d '()' | cut -d: -f2)
+    if [ -n "\$maj" ] && [ -n "\$min" ]; then
+      [ ! -e "/dev/dm-\${min}" ] && mknod "/dev/dm-\${min}" b "\$maj" "\$min" 2>/dev/null || true
+      [ ! -e "/dev/mapper/\${name}" ] && ln -sf "/dev/dm-\${min}" "/dev/mapper/\${name}" 2>/dev/null || true
+    fi
+  done
+elif [ -x /usr/sbin/dmsetup ]; then
+  /usr/sbin/dmsetup mknodes 2>/dev/null || true
+fi
+exit 0
+SCRIPTEOF
+    chmod +x /usr/local/bin/init-containerd-devmapper.sh
+
+    cat << 'UNITEOF' > /etc/systemd/system/containerd-devmapper.service
 [Unit]
 Description=Ensure Loop Devices and LVM Thin Pool for Containerd Devmapper
 DefaultDependencies=no
 Before=containerd.service
+After=local-fs.target
 
 [Service]
 Type=oneshot
-ExecStart=/bin/bash -c \"for img in /var/lib/*.img; do [ -f \\\"\\\$img\\\" ] && losetup -fP \\\"\\\$img\\\" 2>/dev/null || true; done; vgchange -ay 2>/dev/null || true; /usr/sbin/dmsetup mknodes 2>/dev/null || true\"
+ExecStart=/usr/local/bin/init-containerd-devmapper.sh
 RemainAfterExit=yes
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=multi-user.target containerd.service
 UNITEOF
+
+    mkdir -p /etc/systemd/system/containerd.service.d
+    cat << 'DROPINEOF' > /etc/systemd/system/containerd.service.d/10-devmapper.conf
+[Service]
+ExecStartPre=/usr/local/bin/init-containerd-devmapper.sh
+DROPINEOF
+
     systemctl daemon-reload
     systemctl enable containerd-devmapper.service
   "

@@ -1,6 +1,15 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# lib/phase_16_ocm_join.sh – Join spokes to OCM with MultipleHubs klusterlet
+# lib/ocm.sh – OCM spoke join (MultipleHubs) and registration sync
+#
+# Functions:
+#   _write_hub_bootstrap_kubeconfig  – write a bootstrap kubeconfig for one hub
+#   _get_hub_token                   – extract join token from clusteradm
+#   _dump_klusterlet_debug           – dump klusterlet diagnostics to stderr
+#   _ensure_hub_apiserver_sans       – regenerate apiserver cert with WG SANs
+#   join_spokes_to_ocm               – full MultipleHubs klusterlet join + CSR approval
+#   sync_spokes_to_secondaryhub      – label spokes + sync registration resources
+# ==============================================================================
 #
 # Flow per spoke:
 #   1. Patch hub apiserver certs to include WG SANs (cert rotation if needed)
@@ -9,7 +18,6 @@
 #   4. Create per-hub bootstrap-kubeconfig secrets in open-cluster-management-agent
 #   5. Patch klusterlet: enable MultipleHubs feature gate + LocalSecrets config
 #   6. Approve CSRs on primaryhub; best-effort pre-approve on secondaryhub
-# ==============================================================================
 
 # Write a bootstrap kubeconfig pointing directly at one hub over the WG overlay.
 # Both hubs share the same Root CA (phases 3/7), so one CA bundle serves both.
@@ -277,7 +285,14 @@ _do_phase_16_join_spokes_to_ocm() {
       }
     }'
 
-    # 4. Approve CSRs on primaryhub
+    # 4. Restart registration agent so it picks up the new MultipleHubs config immediately
+    log_info "Restarting klusterlet-registration-agent on ${spoke} to apply MultipleHubs config..."
+    kubectl --context "$ctx" -n open-cluster-management-agent delete pod \
+      -l app=klusterlet-registration-agent --ignore-not-found=true 2>/dev/null || true
+    # Wait briefly for the pod to be recreated before accepting
+    sleep 5
+
+    # 5. Approve CSRs on primaryhub
     log_info "Accepting ${spoke} on primaryhub..."
     local accepted=false
     for i in $(seq 1 45); do
@@ -291,7 +306,7 @@ _do_phase_16_join_spokes_to_ocm() {
 
     # Poll until ManagedClusterConditionAvailable = True
     local avail="False"
-    for i in $(seq 1 45); do
+    for i in $(seq 1 60); do
       clusteradm accept --context kind-primaryhub --clusters "$spoke" >/dev/null 2>&1 || true
       avail=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
         -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' \
@@ -314,4 +329,68 @@ _do_phase_16_join_spokes_to_ocm() {
 
 phase_16_join_spokes_to_ocm() {
   run_phase "16" "Joining Spokes to OCM (MultipleHubs: primaryhub → secondaryhub)" _check_phase_16 _do_phase_16_join_spokes_to_ocm
+}
+
+_check_phase_17() {
+  local spoke lbl
+  for spoke in spoke1 spoke2; do
+    kubectl --context kind-secondaryhub get managedcluster "$spoke" >/dev/null 2>&1 || return 1
+    lbl=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
+      -o jsonpath='{.metadata.labels.sandbox-workload-capable}' 2>/dev/null || echo "")
+    [ "$lbl" == "true" ] || return 1
+  done
+  kubectl --context kind-secondaryhub get managedclusterset sandbox-spokes >/dev/null 2>&1 || return 1
+  return 0
+}
+
+_do_phase_17_sync_spokes_to_secondaryhub() {
+  log_info "Syncing spoke registration resources to secondaryhub..."
+  for spoke in spoke1 spoke2; do
+    kubectl --context kind-primaryhub get namespace "$spoke" -o yaml 2>/dev/null | \
+      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+    kubectl --context kind-primaryhub get clusterrole \
+      "open-cluster-management:managedcluster:${spoke}" -o yaml 2>/dev/null | \
+      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+    kubectl --context kind-primaryhub get clusterrolebinding \
+      "open-cluster-management:managedcluster:${spoke}" -o yaml 2>/dev/null | \
+      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+    kubectl --context kind-primaryhub get rolebinding -n "$spoke" -o yaml 2>/dev/null | \
+      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+    kubectl --context kind-primaryhub get managedcluster "$spoke" -o json 2>/dev/null | \
+      jq 'del(
+            .metadata.uid,
+            .metadata.resourceVersion,
+            .metadata.creationTimestamp,
+            .metadata.ownerReferences,
+            .metadata.managedFields,
+            .metadata.annotations,
+            .metadata.finalizers,
+            .status
+          ) | .spec.hubAcceptsClient = false' | \
+      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+  done
+
+  kubectl --context kind-primaryhub get managedclusterset sandbox-spokes -o yaml 2>/dev/null | \
+    kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+  kubectl --context kind-primaryhub get managedclustersetbinding -A -o yaml 2>/dev/null | \
+    kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+
+  for spoke in spoke1 spoke2; do
+    local spoke_wg_ip
+    [ "$spoke" == "spoke1" ] && spoke_wg_ip="$WG_SPOKE1_IP" || spoke_wg_ip="$WG_SPOKE2_IP"
+
+    for ctx in kind-primaryhub kind-secondaryhub; do
+      kubectl --context "$ctx" label managedcluster "$spoke" \
+        wireguard-ip="${spoke_wg_ip}" \
+        sandbox-workload-capable=true \
+        runtime.gvisor=true runtime.kata=true runtime.kata-fc=true \
+        --overwrite 2>/dev/null || true
+    done
+  done
+
+  log_success "Spoke registration synced to both hubs."
+}
+
+phase_17_sync_spokes_to_secondaryhub() {
+  run_phase "17" "Labeling Spokes & Syncing Registration to SecondaryHub" _check_phase_17 _do_phase_17_sync_spokes_to_secondaryhub
 }

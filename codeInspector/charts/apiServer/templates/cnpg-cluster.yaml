@@ -42,6 +42,12 @@ spec:
       owner: {{ .Values.cnpg.user | default "postgres" }}
       secret:
         name: postgresql-primary-credentials
+      # Issue 1 fix: pre-create the 'app' role so CNPG reconciler can
+      # execute ALTER ROLE "app" without hitting SQLSTATE 42704.
+      # pg_basebackup clones this role to postgresql-secondary automatically.
+      postInitSQL:
+        - >-
+          DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app') THEN CREATE ROLE app WITH LOGIN SUPERUSER PASSWORD '{{ .Values.cnpg.password | default "password123" }}'; END IF; END $$;
 
   storage:
     size: {{ .Values.cnpg.storage | default "5Gi" }}
