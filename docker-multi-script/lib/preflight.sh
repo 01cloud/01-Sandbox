@@ -125,7 +125,6 @@ ensure_sandbox_repo() {
     "${ROOT_DIR}"
     "$(pwd)/01-Sandbox"
     "$(pwd)"
-    "/home/berrybytes/Desktop/Kamal/01-Sandbox"
   )
 
   for cand in "${candidates[@]}"; do

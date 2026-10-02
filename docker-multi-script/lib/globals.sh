@@ -41,10 +41,6 @@ elif [ -d "$(pwd)/codeInspector" ]; then
   SANDBOX_REPO_DIR="$(pwd)"
   CODE_INSPECTOR_DIR="$(pwd)/codeInspector"
   OPENSANDBOX_BUILD_DIR="$(pwd)/opensandbox-server/docker-build"
-elif [ -d "/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector" ]; then
-  SANDBOX_REPO_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox"
-  CODE_INSPECTOR_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector"
-  OPENSANDBOX_BUILD_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox/opensandbox-server/docker-build"
 fi
 
 STATE_DIR="${ROOT_DIR}/.sandbox-state"

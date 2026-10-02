@@ -51,10 +51,6 @@ elif [ -d "${ROOT_DIR}/codeInspector" ]; then
   SANDBOX_REPO_DIR="${ROOT_DIR}"
   CODE_INSPECTOR_DIR="${ROOT_DIR}/codeInspector"
   OPENSANDBOX_BUILD_DIR="${ROOT_DIR}/opensandbox-server/docker-build"
-elif [ -d "/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector" ]; then
-  SANDBOX_REPO_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox"
-  CODE_INSPECTOR_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector"
-  OPENSANDBOX_BUILD_DIR="/home/berrybytes/Desktop/Kamal/01-Sandbox/opensandbox-server/docker-build"
 elif [ -d "$(pwd)/01-Sandbox/codeInspector" ]; then
   SANDBOX_REPO_DIR="$(pwd)/01-Sandbox"
   CODE_INSPECTOR_DIR="$(pwd)/01-Sandbox/codeInspector"
@@ -741,7 +737,6 @@ ensure_sandbox_repo() {
     "${ROOT_DIR}"
     "$(pwd)/01-Sandbox"
     "$(pwd)"
-    "/home/berrybytes/Desktop/Kamal/01-Sandbox"
   )
 
   for cand in "${candidates[@]}"; do
