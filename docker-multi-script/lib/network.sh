@@ -157,11 +157,29 @@ static_resources:
         port_value: 80
     filter_chains:
     - filters:
-      - name: envoy.filters.network.tcp_proxy
+      - name: envoy.filters.network.http_connection_manager
         typed_config:
-          "@type": type.googleapis.com/envoy.extensions.filters.network.tcp_proxy.v3.TcpProxy
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
           stat_prefix: ingress_http
-          cluster: ingress_http_cluster
+          codec_type: AUTO
+          stream_idle_timeout: 15s
+          route_config:
+            name: ingress_http_route
+            virtual_hosts:
+            - name: backend
+              domains: ["*"]
+              routes:
+              - match:
+                  prefix: "/"
+                route:
+                  cluster: ingress_http_cluster
+                  timeout: 120s
+                  upgrade_configs:
+                  - upgrade_type: websocket
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
   - name: ingress_kube_api_listener
     address:
       socket_address:

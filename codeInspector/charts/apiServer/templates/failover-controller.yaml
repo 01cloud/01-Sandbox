@@ -256,6 +256,8 @@ data:
             done
             STATE="STANDBY"
             log "SUCCESS: Automated Failback completed! PrimaryHub is active master, SecondaryHub is standby replica. Zero split-brain!"
+            log "Step 5: Recycling SecondaryHub sandbox-api to release any lingering failover connections..."
+            kubectl rollout restart deployment/sandbox-api -n "$NAMESPACE" 2>/dev/null || true
           else
             log "WARNING: postgresql-secondary-1 did not become ready within timeout. Remaining in FAILOVER_ACTIVE."
           fi
