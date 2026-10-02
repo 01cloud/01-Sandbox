@@ -24,6 +24,7 @@ source "${LIB_DIR}/network.sh"    # transit net, WireGuard, PKI, Envoy
 source "${LIB_DIR}/clusters.sh"   # KinD clusters, CRDs, OCM init, images
 source "${LIB_DIR}/deploy.sh"     # Helm: primaryhub + secondaryhub stacks
 source "${LIB_DIR}/kata.sh"       # Kata Containers + Firecracker runtime
+source "${LIB_DIR}/gvisor.sh"     # Google gVisor (runsc) runtime for spokes
 source "${LIB_DIR}/ocm.sh"        # OCM join (MultipleHubs) + registration sync
 source "${LIB_DIR}/main.sh"       # teardown, verification, main() orchestrator
 

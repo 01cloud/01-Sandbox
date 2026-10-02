@@ -90,6 +90,7 @@ _print_summary() {
   echo -e "  Spoke2          : ${WG_SPOKE2_IP} (workload)"
   echo -e "  DB Replication  : PostgreSQL physical WAL streaming (primary → standby)"
   echo -e "  Failover Ctrl   : ocm-failover-controller active on SecondaryHub"
+  echo -e "  Spoke Runtimes  : kata-fc (Firecracker MicroVM) + gvisor (Sandbox Kernel)"
   echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
 
   echo -e "\n${CYAN}${BOLD}  ┌──────────────────────────────────────────────────────────────────┐${NC}"
@@ -130,6 +131,7 @@ main() {
   phase_14_wireguard_on_all_clusters
   phase_15_install_crds_on_spokes
   phase_15b_setup_kata_firecracker
+  phase_15c_setup_gvisor
   phase_16_join_spokes_to_ocm
   phase_17_sync_spokes_to_secondaryhub
 

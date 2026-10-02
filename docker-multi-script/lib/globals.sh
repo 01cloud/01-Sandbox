@@ -49,7 +49,8 @@ WG_DIR="${STATE_DIR}/wg"
 ENVOY_DIR="${STATE_DIR}/envoy"
 SEC_DIR="${STATE_DIR}/sec"
 KATA_CACHE_DIR="${STATE_DIR}/kata-assets"
-mkdir -p "$PKI_DIR" "$WG_DIR" "$ENVOY_DIR" "$SEC_DIR" "$KATA_CACHE_DIR"
+GVISOR_CACHE_DIR="${STATE_DIR}/gvisor-assets"
+mkdir -p "$PKI_DIR" "$WG_DIR" "$ENVOY_DIR" "$SEC_DIR" "$KATA_CACHE_DIR" "$GVISOR_CACHE_DIR"
 
 # Pin KUBECONFIG to a known-writable path
 export KUBECONFIG="${HOME}/.kube/config"
