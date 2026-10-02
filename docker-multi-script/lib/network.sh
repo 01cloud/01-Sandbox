@@ -293,6 +293,7 @@ EOF_ENVOY_DOCKER
   log_info "Starting envoy-gateway using $envoy_image..."
   docker run -d --name envoy-gateway \
     --restart unless-stopped \
+    -p 80:80 \
     --privileged --user root \
     --cap-add=NET_ADMIN --cap-add=SYS_MODULE \
     --net "$TRANSIT_NET_NAME" --ip "$GW_TRANSIT_IP" \
