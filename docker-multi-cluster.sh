@@ -2280,6 +2280,11 @@ phase_17_sync_spokes_to_secondaryhub() {
 phase_18_verify_and_summary() {
   run_verification
 
+  local host_ip
+  host_ip=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
+  [ -z "$host_ip" ] && host_ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+  [ -z "$host_ip" ] && host_ip="127.0.0.1"
+
   echo -e "\n${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
   echo -e "${GREEN}${BOLD}  MULTI-CLUSTER SETUP COMPLETE${NC}"
   echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
@@ -2292,7 +2297,27 @@ phase_18_verify_and_summary() {
   echo -e "  Spoke2          : ${WG_SPOKE2_IP} (workload)"
   echo -e "  DB Replication  : PostgreSQL physical WAL streaming (primary -> standby)"
   echo -e "  Failover Ctrl   : ocm-failover-controller active on SecondaryHub"
-  echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}\n"
+  echo -e "${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
+
+  echo -e "\n${CYAN}${BOLD}  ┌──────────────────────────────────────────────────────────────────┐${NC}"
+  echo -e "${CYAN}${BOLD}  │              🚀 FRONTEND & API INTEGRATION DETAILS               │${NC}"
+  echo -e "${CYAN}${BOLD}  ├──────────────────────────────────────────────────────────────────┤${NC}"
+  echo -e "${CYAN}${BOLD}  │${NC} Detected Machine IP : ${YELLOW}${BOLD}${host_ip}${NC}"
+  echo -e "${CYAN}${BOLD}  │${NC} Envoy Gateway Port  : ${YELLOW}80${NC} (mapped from 172.30.0.10:80)"
+  echo -e "${CYAN}${BOLD}  │${NC}"
+  echo -e "${CYAN}${BOLD}  │${NC} Set this in your frontend ${BOLD}z1sandbox-website/.env${NC}:"
+  echo -e "${CYAN}${BOLD}  │${NC}   ${GREEN}${BOLD}VITE_API_BASE_URL=http://${host_ip}${NC}"
+  echo -e "${CYAN}${BOLD}  │${NC}"
+  echo -e "${CYAN}${BOLD}  │${NC} Health Check URL    : ${BLUE}http://${host_ip}/health${NC}"
+  echo -e "${CYAN}${BOLD}  │${NC} Swagger API Docs    : ${BLUE}http://${host_ip}/docs${NC}"
+  echo -e "${CYAN}${BOLD}  └──────────────────────────────────────────────────────────────────┘${NC}\n"
+
+  # Auto-update z1sandbox-website/.env if present
+  local env_file="${ROOT_DIR}/z1sandbox-website/.env"
+  if [ -f "$env_file" ]; then
+    sed -i -E "s|^VITE_API_BASE_URL=.*|VITE_API_BASE_URL=http://${host_ip}|" "$env_file" 2>/dev/null || true
+    echo -e "  ${GREEN}✔ Automatically updated ${env_file} with VITE_API_BASE_URL=http://${host_ip}${NC}\n"
+  fi
 }
 
 # ==============================================================================
