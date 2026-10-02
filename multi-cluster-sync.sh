@@ -1,1 +1,0 @@
-docs/multi-cluster-sync.sh
