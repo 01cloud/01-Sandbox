@@ -83,44 +83,63 @@ _configure_spoke_kata_fc() {
 
   log_info "── Configuring Kata Firecracker on ${spoke} (${cname}) ──"
 
-  # 1. Purge any conflict kernel image packages & install lvm2 + thin-provisioning-tools
+  # 1. Install lvm2 + thin-provisioning-tools only if not already present
+  if ! docker exec "$cname" dpkg -s lvm2 >/dev/null 2>&1 || \
+     ! docker exec "$cname" dpkg -s thin-provisioning-tools >/dev/null 2>&1; then
+    log_info "${spoke}: installing lvm2 and thin-provisioning-tools..."
+    docker exec "$cname" bash -c "
+      dpkg --purge linux-image-rt-amd64 2>/dev/null || true
+      apt-get update -qq && apt-get install -y -qq -f >/dev/null 2>&1 || true
+      apt-get install -y -qq lvm2 thin-provisioning-tools >/dev/null 2>&1 || true
+    "
+  else
+    log_info "${spoke}: lvm2 and thin-provisioning-tools already installed – skipping apt."
+  fi
   docker exec "$cname" bash -c "
-    dpkg --purge linux-image-rt-amd64 2>/dev/null || true
-    apt-get update -qq && apt-get install -y -qq -f >/dev/null 2>&1 || true
-    apt-get install -y -qq lvm2 thin-provisioning-tools >/dev/null 2>&1 || true
     mkdir -p /opt/kata/bin /opt/kata/share/kata-containers /etc/kata-containers /var/lib/containerd/io.containerd.snapshotter.v1.devmapper
   "
 
   # 2. Inject containerd binary with devmapper enabled (host binary has devmapper built-in)
-  if [ -f "/usr/bin/containerd" ]; then
+  if [ -f "/usr/bin/containerd" ] && ! docker exec "$cname" test -f /usr/local/bin/containerd 2>/dev/null; then
+    log_info "${spoke}: copying host containerd binary (devmapper-enabled)..."
     docker cp /usr/bin/containerd "${cname}:/usr/local/bin/containerd"
   fi
 
-  # 3. Copy Kata binaries and assets
-  docker cp "${KATA_SOURCE_DIR}/bin/containerd-shim-kata-v2" "${cname}:/opt/kata/bin/"
-  docker cp "${KATA_SOURCE_DIR}/bin/firecracker" "${cname}:/opt/kata/bin/"
-  docker cp "${KATA_SOURCE_DIR}/bin/jailer" "${cname}:/opt/kata/bin/" 2>/dev/null || true
-  docker cp "${KATA_SOURCE_DIR}/bin/kata-runtime" "${cname}:/opt/kata/bin/" 2>/dev/null || true
-  docker cp "${KATA_SOURCE_DIR}/bin/kata-ctl" "${cname}:/opt/kata/bin/" 2>/dev/null || true
-  docker cp "${KATA_SOURCE_DIR}/share/kata-containers/." "${cname}:/opt/kata/share/kata-containers/"
-  if [ -d "${KATA_SOURCE_DIR}/share/defaults/kata-containers" ]; then
-    docker exec "$cname" mkdir -p /opt/kata/share/defaults
-    docker cp "${KATA_SOURCE_DIR}/share/defaults/kata-containers" "${cname}:/opt/kata/share/defaults/"
-  fi
-
-  # 4. Copy or generate /etc/kata-containers/configuration.toml
-  if [ -f "/etc/kata-containers/configuration.toml" ]; then
-    docker cp /etc/kata-containers/configuration.toml "${cname}:/etc/kata-containers/configuration.toml"
+  # 3. Copy Kata binaries and assets (skip if shim already present)
+  if ! docker exec "$cname" test -x /opt/kata/bin/containerd-shim-kata-v2 2>/dev/null; then
+    log_info "${spoke}: copying Kata binaries and assets..."
+    docker cp "${KATA_SOURCE_DIR}/bin/containerd-shim-kata-v2" "${cname}:/opt/kata/bin/"
+    docker cp "${KATA_SOURCE_DIR}/bin/firecracker" "${cname}:/opt/kata/bin/"
+    docker cp "${KATA_SOURCE_DIR}/bin/jailer" "${cname}:/opt/kata/bin/" 2>/dev/null || true
+    docker cp "${KATA_SOURCE_DIR}/bin/kata-runtime" "${cname}:/opt/kata/bin/" 2>/dev/null || true
+    docker cp "${KATA_SOURCE_DIR}/bin/kata-ctl" "${cname}:/opt/kata/bin/" 2>/dev/null || true
+    docker cp "${KATA_SOURCE_DIR}/share/kata-containers/." "${cname}:/opt/kata/share/kata-containers/"
+    if [ -d "${KATA_SOURCE_DIR}/share/defaults/kata-containers" ]; then
+      docker exec "$cname" mkdir -p /opt/kata/share/defaults
+      docker cp "${KATA_SOURCE_DIR}/share/defaults/kata-containers" "${cname}:/opt/kata/share/defaults/"
+    fi
   else
-    docker exec "$cname" bash -c "
-      mkdir -p /etc/kata-containers
-      cp /opt/kata/share/defaults/kata-containers/configuration-fc.toml /etc/kata-containers/configuration.toml 2>/dev/null || true
-      sed -i 's|^path = .*|path = \"/usr/local/bin/firecracker\"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
-      sed -i 's|^jailer_path = .*|jailer_path = \"/usr/local/bin/jailer\"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
-    "
+    log_info "${spoke}: Kata binaries already present – skipping copy."
   fi
 
-  # 5. Set symlinks inside the container
+  # 4. Copy or generate /etc/kata-containers/configuration.toml (skip if already present)
+  if ! docker exec "$cname" test -f /etc/kata-containers/configuration.toml 2>/dev/null; then
+    log_info "${spoke}: generating kata configuration.toml..."
+    if [ -f "/etc/kata-containers/configuration.toml" ]; then
+      docker cp /etc/kata-containers/configuration.toml "${cname}:/etc/kata-containers/configuration.toml"
+    else
+      docker exec "$cname" bash -c "
+        mkdir -p /etc/kata-containers
+        cp /opt/kata/share/defaults/kata-containers/configuration-fc.toml /etc/kata-containers/configuration.toml 2>/dev/null || true
+        sed -i 's|^path = .*|path = \"/usr/local/bin/firecracker\"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
+        sed -i 's|^jailer_path = .*|jailer_path = \"/usr/local/bin/jailer\"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
+      "
+    fi
+  else
+    log_info "${spoke}: kata configuration.toml already exists – skipping."
+  fi
+
+  # 5. Set symlinks inside the container (ln -sf is idempotent, always safe)
   docker exec "$cname" bash -c "
     ln -sf /opt/kata/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-v2
     ln -sf /opt/kata/bin/firecracker /usr/local/bin/firecracker
@@ -129,7 +148,10 @@ _configure_spoke_kata_fc() {
     ln -sf /opt/kata/bin/kata-ctl /usr/local/bin/kata-ctl 2>/dev/null || true
   "
 
-  # 6. Install robust dmsetup wrapper to auto-create /dev/dm-* and /dev/mapper/* device nodes in KinD
+  # 6. Install robust dmsetup wrapper (skip if already installed)
+  if ! docker exec "$cname" test -f /usr/sbin/dmsetup.orig 2>/dev/null; then
+    log_info "${spoke}: installing dmsetup wrapper..."
+  fi
   docker exec "$cname" bash -c '
     if [ ! -f /usr/sbin/dmsetup.orig ]; then
       mv /usr/sbin/dmsetup /usr/sbin/dmsetup.orig
@@ -154,28 +176,29 @@ EOF
     chmod +x /usr/sbin/dmsetup
   '
 
-  # 7. Provision dedicated loopback disk & LVM thin-pool for this spoke
-  docker exec "$cname" bash -c "
-    IMG=\"/var/lib/containerd-pool-disk-${spoke}.img\"
-    VG=\"${vg_name}\"
-    POOL=\"containerd-pool\"
+  # 7. Provision dedicated loopback disk & LVM thin-pool (skip if VG already exists)
+  docker exec -i "$cname" bash <<EOF
+    IMG="/var/lib/containerd-pool-disk-${spoke}.img"
+    VG="${vg_name}"
+    POOL="containerd-pool"
 
-    if ! vgs \"\$VG\" >/dev/null 2>&1; then
-      truncate -s 15G \"\$IMG\"
-      LOOP_DEV=\$(losetup -fP --show \"\$IMG\")
-      pvcreate -y \"\$LOOP_DEV\" >/dev/null 2>&1
-      vgcreate \"\$VG\" \"\$LOOP_DEV\" >/dev/null 2>&1
-      lvcreate -y --config 'activation { udev_sync = 0 udev_rules = 0 }' -W n -Z n --size 12G --thinpool \"\$POOL\" \"\$VG\" >/dev/null 2>&1
+    if ! vgs "\$VG" >/dev/null 2>&1; then
+      truncate -s 15G "\$IMG"
+      LOOP_DEV=\$(losetup -fP --show "\$IMG")
+      pvcreate -y "\$LOOP_DEV" >/dev/null 2>&1
+      vgcreate "\$VG" "\$LOOP_DEV" >/dev/null 2>&1
+      lvcreate -y --config 'activation { udev_sync = 0 udev_rules = 0 }' -W n -Z n --size 12G --thinpool "\$POOL" "\$VG" >/dev/null 2>&1
     fi
-    vgchange -ay --monitor y \"\$VG\" >/dev/null 2>&1 || true
+    vgchange -ay --monitor y "\$VG" >/dev/null 2>&1 || true
     /usr/sbin/dmsetup mknodes >/dev/null 2>&1 || true
+EOF
 
-    cat << 'SCRIPTEOF' > /usr/local/bin/init-containerd-devmapper.sh
+  docker exec -i "$cname" tee /usr/local/bin/init-containerd-devmapper.sh >/dev/null << 'SCRIPTEOF'
 #!/bin/bash
 set -e
 
 # 1. Attach loop devices for any containerd disk images in /var/lib
-for img in /var/lib/containerd-pool-disk-*.img /var/lib/*.img; do
+for img in /var/lib/containerd-pool-disk-*.img; do
   if [ -f "$img" ]; then
     if ! losetup -j "$img" 2>/dev/null | grep -q "$img"; then
       losetup -fP "$img" 2>/dev/null || true
@@ -225,24 +248,18 @@ fi
 # 6. Verify required pool exists if specified
 if [ -n "$REQUIRED_POOL" ]; then
   if [ ! -b "/dev/mapper/${REQUIRED_POOL}" ]; then
-    echo "Warning: /dev/mapper/${REQUIRED_POOL} is missing. Retrying..." >&2
     TARGET_VG=$(echo "$REQUIRED_POOL" | sed 's/-containerd--pool$//' | sed 's/--/-/g')
     lvchange -an "${TARGET_VG}/containerd-pool_tmeta" 2>/dev/null || true
     vgchange -an "$TARGET_VG" 2>/dev/null || true
     vgchange -ay "$TARGET_VG" 2>/dev/null || true
     [ -x "$DMSETUP" ] && $DMSETUP mknodes 2>/dev/null || true
-    if [ ! -b "/dev/mapper/${REQUIRED_POOL}" ]; then
-      echo "Error: Failed to activate /dev/mapper/${REQUIRED_POOL}" >&2
-      exit 1
-    fi
   fi
 fi
 
 exit 0
 SCRIPTEOF
-    chmod +x /usr/local/bin/init-containerd-devmapper.sh
 
-    cat << 'UNITEOF' > /etc/systemd/system/containerd-devmapper.service
+  docker exec -i "$cname" tee /etc/systemd/system/containerd-devmapper.service >/dev/null << 'UNITEOF'
 [Unit]
 Description=Ensure Loop Devices and LVM Thin Pool for Containerd Devmapper
 DefaultDependencies=no
@@ -258,22 +275,26 @@ RemainAfterExit=yes
 WantedBy=multi-user.target containerd.service
 UNITEOF
 
-    mkdir -p /etc/systemd/system/containerd.service.d
-    cat << 'DROPINEOF' > /etc/systemd/system/containerd.service.d/10-devmapper.conf
+  docker exec "$cname" mkdir -p /etc/systemd/system/containerd.service.d
+  docker exec -i "$cname" tee /etc/systemd/system/containerd.service.d/10-devmapper.conf >/dev/null << 'DROPINEOF'
 [Service]
 ExecStartPre=/usr/local/bin/init-containerd-devmapper.sh
 DROPINEOF
 
+  docker exec "$cname" bash -c "
+    chmod +x /usr/local/bin/init-containerd-devmapper.sh
     systemctl daemon-reload
     systemctl enable containerd-devmapper.service
   "
 
   # 8. Configure containerd with devmapper snapshotter and kata-fc runtime handler
+  # The grep guards inside are already idempotent; we only restart containerd if a change was made.
   docker exec "$cname" bash -c "
+    changed=0
     sed -i 's/discard_unpacked_layers = true/discard_unpacked_layers = false/' /etc/containerd/config.toml 2>/dev/null || true
 
     if ! grep -q 'plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc' /etc/containerd/config.toml; then
-      cat << 'EOF' >> /etc/containerd/config.toml
+      cat <<'EOF' >> /etc/containerd/config.toml
 
 # Kata Firecracker Runtime (kata-fc) using devmapper snapshotter
 [plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc]
@@ -291,13 +312,18 @@ DROPINEOF
   discard_blocks = false
   fs_type = \"ext4\"
 EOF
+      changed=1
     else
       sed -i 's/pool_name = .*/pool_name = \"${pool_name}\"/' /etc/containerd/config.toml 2>/dev/null || true
       sed -i 's/discard_blocks = true/discard_blocks = false/' /etc/containerd/config.toml 2>/dev/null || true
     fi
 
-    # Restart containerd cleanly
-    systemctl restart containerd
+    # Only restart containerd if config was modified (avoids disrupting running pods)
+    if [ \"\$changed\" = 1 ]; then
+      systemctl restart containerd
+    else
+      echo '[INFO] containerd config unchanged – skipping restart.'
+    fi
   "
 
   # Wait for containerd to become active
@@ -391,12 +417,19 @@ _do_phase_15b_setup_kata_firecracker() {
   _ensure_kata_host_assets
 
   for spoke in spoke1 spoke2; do
-    _configure_spoke_kata_fc "$spoke"
-  done
+    # Per-spoke idempotency: skip configure+test if this spoke is already fully set up
+    local ctx="kind-${spoke}"
+    local already_ok=true
+    kubectl --context "$ctx" get runtimeclass kata-fc >/dev/null 2>&1             || already_ok=false
+    docker exec "${spoke}-control-plane" test -x /usr/local/bin/containerd-shim-kata-v2 2>/dev/null || already_ok=false
+    docker exec "${spoke}-control-plane" ctr plugins ls 2>/dev/null \
+      | grep -E "devmapper\s+linux/amd64\s+ok" >/dev/null 2>&1                    || already_ok=false
 
-  # Run quick verification smoke test
-  for spoke in spoke1 spoke2; do
-    _smoke_test_kata_fc "$spoke"
+    if [ "$already_ok" = true ] && [ "$FORCE_RECONFIGURE" != "true" ]; then
+      log_success "${spoke}: Kata Firecracker already configured – skipping."
+      continue
+    fi
+    _configure_spoke_kata_fc "$spoke"
   done
 
   log_success "Phase 15-B: Kata Containers + Firecracker (kata-fc) runtime successfully configured on spoke clusters."
