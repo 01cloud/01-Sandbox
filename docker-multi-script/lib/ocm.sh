@@ -308,6 +308,9 @@ _do_phase_16_join_spokes_to_ocm() {
     kubectl --context "$ctx" -n "$agent_ns" create secret generic secondaryhub-kubeconfig \
       --from-file=kubeconfig="${STATE_DIR}/secondaryhub-bootstrap.kubeconfig" \
       --dry-run=client -o yaml | kubectl --context "$ctx" apply -f -
+    kubectl --context "$ctx" -n "$agent_ns" create secret generic bootstrap-hub-kubeconfig \
+      --from-file=kubeconfig="${STATE_DIR}/primaryhub-bootstrap.kubeconfig" \
+      --dry-run=client -o yaml | kubectl --context "$ctx" apply -f -
 
     # 3. Patch klusterlet for MultipleHubs with 60s failover timeout
     log_info "Patching CRD schema and klusterlet on ${spoke}: MultipleHubs + LocalSecrets (60s failover)..."

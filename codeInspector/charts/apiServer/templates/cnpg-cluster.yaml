@@ -46,8 +46,7 @@ spec:
       # execute ALTER ROLE "app" without hitting SQLSTATE 42704.
       # pg_basebackup clones this role to postgresql-secondary automatically.
       postInitSQL:
-        - >-
-          DO $$ BEGIN IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app') THEN CREATE ROLE app WITH LOGIN SUPERUSER PASSWORD '{{ .Values.cnpg.password | default "password123" }}'; END IF; END $$;
+        - "CREATE ROLE app WITH LOGIN SUPERUSER PASSWORD '{{ .Values.cnpg.password | default "password123" }}';"
 
   storage:
     size: {{ .Values.cnpg.storage | default "5Gi" }}
