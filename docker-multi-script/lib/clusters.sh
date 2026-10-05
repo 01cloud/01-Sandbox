@@ -36,6 +36,7 @@ _create_kind_cluster() {
 
   if kind get clusters 2>/dev/null | grep -q "^${name}$"; then
     log_info "KinD cluster '$name' already exists – preserving."
+    kind export kubeconfig --name "$name" 2>/dev/null || true
   else
     log_info "Creating KinD cluster '$name' (Pod:$pod_subnet  Svc:$svc_subnet)..."
 
@@ -99,6 +100,13 @@ EOF
   fi
 
   local cname="${name}-control-plane"
+  if ! docker inspect "$cname" >/dev/null 2>&1; then
+    log_warn "Cluster container '$cname' not found. Retrying creation..."
+    kind delete cluster --name "$name" 2>/dev/null || true
+    kind create cluster --name "$name" --config "/tmp/kind-${name}.yaml"
+  fi
+
+  kind export kubeconfig --name "$name" 2>/dev/null || true
   docker update --restart=always "$cname" 2>/dev/null || true
   if ! docker inspect "$cname" --format '{{json .NetworkSettings.Networks}}' \
        2>/dev/null | grep -q "$TRANSIT_NET_NAME"; then
@@ -306,6 +314,11 @@ _ensure_hub_crds() {
 # Args: <context>
 _install_crds() {
   local ctx="$1"
+  if [ "$FORCE_RECONFIGURE" != "true" ] && _check_hub_crds_established "$ctx"; then
+    log_success "All required CRDs already established on [${ctx}]. Skipping re-install."
+    return 0
+  fi
+
   log_info "Installing Custom Resource Definitions (CRDs) on $ctx..."
 
   ensure_sandbox_repo || true
@@ -554,21 +567,28 @@ _check_phase_10() {
 _do_phase_10_load_custom_image() {
   ensure_sandbox_repo
 
-  if [ ! -d "${OPENSANDBOX_BUILD_DIR}" ] || [ ! -f "${OPENSANDBOX_BUILD_DIR}/Dockerfile" ]; then
-    log_error "Dockerfile not found at detected build path: ${OPENSANDBOX_BUILD_DIR}"
-    log_error "Failed to locate opensandbox-server/docker-build context."
-    exit 1
+  local img="01community/01sandbox-opensandbox-server:v0.7.10-ocm"
+  if docker image inspect "$img" >/dev/null 2>&1 && [ "$FORCE_RECONFIGURE" != "true" ]; then
+    log_info "Image $img already built locally – skipping build."
+  else
+    if [ ! -d "${OPENSANDBOX_BUILD_DIR}" ] || [ ! -f "${OPENSANDBOX_BUILD_DIR}/Dockerfile" ]; then
+      log_error "Dockerfile not found at detected build path: ${OPENSANDBOX_BUILD_DIR}"
+      log_error "Failed to locate opensandbox-server/docker-build context."
+      exit 1
+    fi
+    log_info "Building $img from: ${OPENSANDBOX_BUILD_DIR}..."
+    docker build -t "$img" "${OPENSANDBOX_BUILD_DIR}"
+    log_success "Built $img successfully with OCM workload provider support."
   fi
 
-  local img="01community/01sandbox-opensandbox-server:v0.7.10-ocm"
-  log_info "Building $img from: ${OPENSANDBOX_BUILD_DIR}..."
-  docker build -t "$img" "${OPENSANDBOX_BUILD_DIR}"
-  log_success "Built $img successfully with OCM workload provider support."
-
   for hub in primaryhub secondaryhub; do
-    log_info "Loading $img into $hub..."
-    kind load docker-image "$img" --name "$hub"
-    kubectl --context "kind-${hub}" rollout restart deployment/opensandbox-server -n opensandbox-system 2>/dev/null || true
+    if docker exec "${hub}-control-plane" crictl images 2>/dev/null | grep -q "01sandbox-opensandbox-server" && [ "$FORCE_RECONFIGURE" != "true" ]; then
+      log_info "$img already loaded in $hub – skipping kind load."
+    else
+      log_info "Loading $img into $hub..."
+      kind load docker-image "$img" --name "$hub"
+      kubectl --context "kind-${hub}" rollout restart deployment/opensandbox-server -n opensandbox-system 2>/dev/null || true
+    fi
   done
 
   log_success "Custom image ready on both hubs."
@@ -581,14 +601,42 @@ phase_10_load_custom_image() {
 _check_phase_13() {
   kind get clusters 2>/dev/null | grep -q '^spoke1$' || return 1
   kind get clusters 2>/dev/null | grep -q '^spoke2$' || return 1
-  kubectl --context kind-spoke1 get node spoke1-control-plane >/dev/null 2>&1 || return 1
-  kubectl --context kind-spoke2 get node spoke2-control-plane >/dev/null 2>&1 || return 1
+  kind export kubeconfig --name spoke1 2>/dev/null || true
+  kind export kubeconfig --name spoke2 2>/dev/null || true
+  kubectl --context kind-spoke1 get node spoke1-control-plane -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True" || return 1
+  kubectl --context kind-spoke2 get node spoke2-control-plane -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True" || return 1
+  # Ensure the control-plane NoSchedule taint is absent on both spokes
+  kubectl --context kind-spoke1 get node spoke1-control-plane \
+    -o jsonpath='{.spec.taints}' 2>/dev/null | grep -q 'NoSchedule' && return 1 || true
+  kubectl --context kind-spoke2 get node spoke2-control-plane \
+    -o jsonpath='{.spec.taints}' 2>/dev/null | grep -q 'NoSchedule' && return 1 || true
   return 0
 }
 
 _do_phase_13_create_spoke_clusters() {
   _create_kind_cluster "spoke1" "10.246.0.0/16" "10.98.0.0/16"  "$SPOKE1_TRANSIT_IP" "false"
   _create_kind_cluster "spoke2" "10.247.0.0/16" "10.100.0.0/16" "$SPOKE2_TRANSIT_IP" "false"
+
+  # KinD single-node clusters taint the control-plane node with NoSchedule by default.
+  # Since there are no worker nodes on spokes, klusterlet (and all user workloads)
+  # would be permanently stuck in Pending / FailedScheduling.
+  # Remove the taint so pods can schedule on the sole control-plane node.
+  log_info "Removing control-plane NoSchedule taint from spoke nodes..."
+  for spoke in spoke1 spoke2; do
+    kubectl --context "kind-${spoke}" taint node "${spoke}-control-plane" \
+      node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+    kubectl --context "kind-${spoke}" taint node "${spoke}-control-plane" \
+      node-role.kubernetes.io/master:NoSchedule- 2>/dev/null || true
+    log_info "  ${spoke}: control-plane taint removed."
+  done
+
+  # Verify both spoke containers exist before completing Phase 13
+  for spoke in spoke1 spoke2; do
+    if ! docker inspect "${spoke}-control-plane" >/dev/null 2>&1; then
+      log_error "Critical: ${spoke}-control-plane container does not exist after Phase 13!"
+      return 1
+    fi
+  done
 
   log_success "Spoke clusters created."
 }

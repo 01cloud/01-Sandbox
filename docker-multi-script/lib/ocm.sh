@@ -20,11 +20,23 @@
 #   6. Approve CSRs on primaryhub; best-effort pre-approve on secondaryhub
 
 # Write a bootstrap kubeconfig pointing directly at one hub over the WG overlay.
-# Both hubs share the same Root CA (phases 3/7), so one CA bundle serves both.
-# Args: <out-file> <server-url> <token>
+# Extracts live CA certificate directly from the specified hub node container to prevent
+# crypto/rsa verification mismatch if hubs have distinct or recreated CAs.
+# Args: <out-file> <server-url> <token> <hub-node-name>
 _write_hub_bootstrap_kubeconfig() {
-  local out="$1" server="$2" token="$3" ca_b64
-  ca_b64=$(base64 -w0 < "${PKI_DIR}/ca.crt")
+  local out="$1" server="$2" token="$3" hub_node="$4" ca_b64=""
+
+  if [ -n "$hub_node" ] && docker exec "$hub_node" test -f /etc/kubernetes/pki/ca.crt >/dev/null 2>&1; then
+    ca_b64=$(docker exec "$hub_node" cat /etc/kubernetes/pki/ca.crt | base64 -w0)
+  elif [ -s "${PKI_DIR}/ca.crt" ]; then
+    ca_b64=$(base64 -w0 < "${PKI_DIR}/ca.crt")
+  fi
+
+  if [ -z "$ca_b64" ]; then
+    log_error "Could not extract CA certificate for hub '${hub_node:-$server}'"
+    return 1
+  fi
+
   cat > "$out" <<EOF
 apiVersion: v1
 kind: Config
@@ -200,13 +212,32 @@ _do_phase_16_join_spokes_to_ocm() {
     exit 1
   fi
 
-  # Write bootstrap kubeconfigs (index 0 = primary priority)
-  _write_hub_bootstrap_kubeconfig "${STATE_DIR}/primaryhub-bootstrap.kubeconfig"   "$hub1_url" "$hub1_token"
-  _write_hub_bootstrap_kubeconfig "${STATE_DIR}/secondaryhub-bootstrap.kubeconfig" "$hub2_url" "$hub2_token"
+  # Ensure PKI_DIR ca.crt is backed up if present on primaryhub
+  if [ ! -s "${PKI_DIR}/ca.crt" ] && docker exec primaryhub-control-plane test -f /etc/kubernetes/pki/ca.crt >/dev/null 2>&1; then
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt" 2>/dev/null || true
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key" 2>/dev/null || true
+  fi
+
+  # Write bootstrap kubeconfigs (index 0 = primary priority), pulling live CA directly from each hub
+  _write_hub_bootstrap_kubeconfig "${STATE_DIR}/primaryhub-bootstrap.kubeconfig"   "$hub1_url" "$hub1_token" "primaryhub-control-plane"
+  _write_hub_bootstrap_kubeconfig "${STATE_DIR}/secondaryhub-bootstrap.kubeconfig" "$hub2_url" "$hub2_token" "secondaryhub-control-plane"
 
   for spoke in spoke1 spoke2; do
+    kind export kubeconfig --name "$spoke" 2>/dev/null || true
     local ctx="kind-${spoke}"
     log_info "── ${spoke} ──"
+
+    # Ensure control-plane NoSchedule taint is removed on single-node spoke clusters.
+    # Without this, klusterlet pods are permanently stuck in FailedScheduling since
+    # KinD marks every control-plane node with node-role.kubernetes.io/control-plane:NoSchedule.
+    if kubectl --context "$ctx" get node "${spoke}-control-plane" \
+        -o jsonpath='{.spec.taints}' 2>/dev/null | grep -q 'NoSchedule'; then
+      log_info "${spoke}: removing control-plane NoSchedule taint to allow pod scheduling..."
+      kubectl --context "$ctx" taint node "${spoke}-control-plane" \
+        node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+      kubectl --context "$ctx" taint node "${spoke}-control-plane" \
+        node-role.kubernetes.io/master:NoSchedule- 2>/dev/null || true
+    fi
 
     # Reachability sanity check
     for target in "$hub1_url" "$hub2_url"; do
@@ -216,6 +247,23 @@ _do_phase_16_join_spokes_to_ocm() {
         log_warn "${spoke} cannot reach ${target} over WireGuard – check phase 14."
       fi
     done
+
+    # Check if spoke is already fully joined, available, and running MultipleHubs
+    local spoke_avail spoke_joined multihub_ok=false
+    spoke_avail=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
+      -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null || echo "")
+    spoke_joined=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
+      -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterJoined")].status}' 2>/dev/null || echo "")
+    if kubectl --context "$ctx" get klusterlet klusterlet \
+      -o jsonpath='{.spec.registrationConfiguration.featureGates[?(@.feature=="MultipleHubs")].mode}' 2>/dev/null \
+      | grep -q "Enable"; then
+      multihub_ok=true
+    fi
+
+    if [ "$spoke_avail" == "True" ] && [ "$spoke_joined" == "True" ] && [ "$multihub_ok" == "true" ] && [ "$FORCE_RECONFIGURE" != "true" ]; then
+      log_success "${spoke}: already joined to OCM with MultipleHubs and Available – skipping join."
+      continue
+    fi
 
     # 1. Install klusterlet (operator + CR) if absent
     if ! kubectl --context "$ctx" get klusterlet klusterlet >/dev/null 2>&1; then

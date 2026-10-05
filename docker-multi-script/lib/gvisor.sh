@@ -57,16 +57,22 @@ _install_gvisor_on_spoke() {
 
   log_step "Installing gVisor (runsc) on ${spoke} (${cname})..."
 
-  # 1. Copy binaries and sidecars into spoke node
-  docker cp "${GVISOR_CACHE_DIR}/runsc" "${cname}:/usr/local/bin/runsc"
-  docker cp "${GVISOR_CACHE_DIR}/containerd-shim-runsc-v1" "${cname}:/usr/local/bin/containerd-shim-runsc-v1"
-  docker cp "${GVISOR_CACHE_DIR}/gvisor-bin" "${cname}:/usr/local/bin/gvisor-bin"
+  # 1. Copy binaries and sidecars into spoke node only if missing
+  if ! docker exec "$cname" test -x /usr/local/bin/runsc 2>/dev/null || \
+     ! docker exec "$cname" test -x /usr/local/bin/containerd-shim-runsc-v1 2>/dev/null; then
+    docker cp "${GVISOR_CACHE_DIR}/runsc" "${cname}:/usr/local/bin/runsc"
+    docker cp "${GVISOR_CACHE_DIR}/containerd-shim-runsc-v1" "${cname}:/usr/local/bin/containerd-shim-runsc-v1"
+    docker cp "${GVISOR_CACHE_DIR}/gvisor-bin" "${cname}:/usr/local/bin/gvisor-bin"
+    docker exec "$cname" bash -c "
+      chmod a+rx /usr/local/bin/runsc /usr/local/bin/containerd-shim-runsc-v1
+      chmod -R a+rx /usr/local/bin/gvisor-bin
+    "
+  else
+    log_info "${spoke}: gVisor binaries already present – skipping copy."
+  fi
 
-  # 2. Set executable permissions and configure containerd
+  # 2. Configure containerd runtime if not already configured
   docker exec "$cname" bash -c "
-    chmod a+rx /usr/local/bin/runsc /usr/local/bin/containerd-shim-runsc-v1
-    chmod -R a+rx /usr/local/bin/gvisor-bin
-
     if ! grep -q 'containerd.runtimes.runsc' /etc/containerd/config.toml; then
       cat << 'EOF' >> /etc/containerd/config.toml
 
@@ -78,6 +84,8 @@ _install_gvisor_on_spoke() {
   runtime_type = \"io.containerd.runsc.v1\"
 EOF
       systemctl restart containerd
+    else
+      echo '[INFO] containerd config already includes runsc – skipping restart.'
     fi
   "
 
@@ -145,6 +153,20 @@ _do_phase_15c_setup_gvisor() {
 
   local spoke
   for spoke in spoke1 spoke2; do
+    local ctx="kind-${spoke}"
+    local cname="${spoke}-control-plane"
+    local already_ok=true
+
+    kubectl --context "$ctx" get runtimeclass gvisor >/dev/null 2>&1                     || already_ok=false
+    docker exec "$cname" test -x /usr/local/bin/runsc 2>/dev/null                         || already_ok=false
+    docker exec "$cname" test -x /usr/local/bin/containerd-shim-runsc-v1 2>/dev/null     || already_ok=false
+    docker exec "$cname" grep -q "containerd.runtimes.runsc" /etc/containerd/config.toml 2>/dev/null || already_ok=false
+
+    if [ "$already_ok" = true ] && [ "$FORCE_RECONFIGURE" != "true" ]; then
+      log_success "${spoke}: gVisor (runsc) already configured – skipping."
+      continue
+    fi
+
     _install_gvisor_on_spoke "$spoke"
     _smoke_test_gvisor "$spoke"
   done

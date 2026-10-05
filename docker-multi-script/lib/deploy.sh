@@ -41,7 +41,17 @@ _do_phase_11_primaryhub_deploy() {
   _ensure_hub_crds "kind-primaryhub"
   _relax_webhook_failure_policy "kind-primaryhub"
 
-  log_info "Using codeInspector directory: ${CODE_INSPECTOR_DIR}"
+  # Check if an existing orphaned PVC is causing initdb to fail with "PGData already exists"
+  local p_ready
+  p_ready=$(kubectl --context kind-primaryhub -n opensandbox-system get pod postgresql-primary-1 -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False")
+  if [ "$p_ready" != "True" ] && kubectl --context kind-primaryhub -n opensandbox-system get pods 2>/dev/null | grep -q "postgresql-primary-1-initdb.*Error"; then
+    log_warn "Detected failing initdb due to stale PGData on an orphaned volume. Clearing stale PVC..."
+    kubectl --context kind-primaryhub -n opensandbox-system delete cluster postgresql-primary --wait=false 2>/dev/null || true
+    kubectl --context kind-primaryhub -n opensandbox-system delete pvc -l cnpg.io/cluster=postgresql-primary 2>/dev/null || true
+    kubectl --context kind-primaryhub -n opensandbox-system delete pods -l cnpg.io/cluster=postgresql-primary --force --grace-period=0 2>/dev/null || true
+    sleep 3
+  fi
+
   log_info "Deploying CNPG operator + PostgreSQL primary on primaryhub..."
   helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
     --skip-crds \
@@ -68,7 +78,42 @@ _do_phase_11_primaryhub_deploy() {
     --timeout 5m
 
   log_info "Waiting for postgresql-primary-1 to be Ready before deploying full stack..."
-  _wait_for_pod "kind-primaryhub" "opensandbox-system" "postgresql-primary-1" 60 "postgresql-primary-1"
+  if ! _wait_for_pod "kind-primaryhub" "opensandbox-system" "postgresql-primary-1" 30 "postgresql-primary-1"; then
+    # Check if initdb is blocked on stale PGData
+    local init_logs
+    init_logs=$(kubectl --context kind-primaryhub -n opensandbox-system logs -l cnpg.io/cluster=postgresql-primary -c initdb --tail=20 2>/dev/null || true)
+    if echo "$init_logs" | grep -q "PGData directories already exist"; then
+      log_warn "initdb failed: PGData directories already exist. Purging orphaned PVC and re-provisioning fresh volume..."
+      kubectl --context kind-primaryhub -n opensandbox-system delete cluster postgresql-primary --wait=false 2>/dev/null || true
+      kubectl --context kind-primaryhub -n opensandbox-system delete pvc -l cnpg.io/cluster=postgresql-primary 2>/dev/null || true
+      kubectl --context kind-primaryhub -n opensandbox-system delete pods -l cnpg.io/cluster=postgresql-primary --force --grace-period=0 2>/dev/null || true
+      sleep 3
+      helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
+        --skip-crds \
+        --kube-context kind-primaryhub \
+        --namespace opensandbox-system \
+        --create-namespace \
+        --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+        --set global.ocm.enabled=false \
+        --set cloudnative-pg.webhook.mutating.failurePolicy=Ignore \
+        --set cloudnative-pg.webhook.validating.failurePolicy=Ignore \
+        --set agentgateway.enabled=false \
+        --set "agentgateway-controller.enabled=false" \
+        --set apiServer.enabled=true \
+        --set apiServer.deployment.replicaCount=0 \
+        --set apiServer.rabbitmq.enabled=false \
+        --set apiServer.failoverController.enabled=false \
+        --set-string apiServer.configMap.ALLOW_MOCK_KEYS="true" \
+        --set opensandbox.enabled=false \
+        --set metallb.enabled=false \
+        --set "sealed-secrets.enabled=false" \
+        --set prometheus.enabled=false \
+        --set grafana.enabled=false \
+        --set opensandboxResourcePool.enabled=false \
+        --timeout 5m
+      _wait_for_pod "kind-primaryhub" "opensandbox-system" "postgresql-primary-1" 60 "postgresql-primary-1"
+    fi
+  fi
 
   log_step "PHASE 11b: PrimaryHub – Full Stack (agentgateway, apiServer, opensandbox, metallb…)"
 
