@@ -457,6 +457,239 @@ curl -sf "http://${HOST_IP}/health" | python3 -m json.tool 2>/dev/null || echo "
 
 ---
 
+## 8 – Frontend Dashboard, Auth0 Login & API Key Replication
+
+The platform includes a modern Vite + React frontend dashboard located in `z1sandbox-website/` that integrates with Auth0 for user authentication and communicates with the multi-cluster backend via Envoy Gateway (port 80).
+
+### 1. Configure and Launch the Frontend
+
+1. Navigate to the frontend directory:
+   ```bash
+   cd ../z1sandbox-website # or /path/to/01-Sandbox/z1sandbox-website
+   ```
+
+2. Configure environment variables (`.env`):
+   ```bash
+   cp .env.example .env
+   ```
+   Ensure `.env` contains your Auth0 client configuration and points to the Envoy Gateway host IP:
+   ```env
+   VITE_AUTH0_DOMAIN=
+   VITE_AUTH0_CLIENT_ID=
+   VITE_AUTH0_AUDIENCE=https://code-inspector-api
+   VITE_API_BASE_URL=http://<HOST_IP_OR_VM_IP>
+   VITE_DASHBOARD_BACKENDS_JSON='[{"id":"Z1_SANDBOX","name":"01 Sandbox","description":"Production-grade hardened cluster for secure code execution.","icon":"terminal","color":"indigo","baseUrl":"/api/v1/01sbx","documentationUrl":"/api/v1/01sbx/docs"}]'
+   VITE_ENABLE_DEV_MODE=false
+   ```
+   > **Note**: Replace `<HOST_IP_OR_VM_IP>` with your host machine or VM IP (e.g. `http://10.0.0.132` or `http://localhost`). Envoy forwards HTTP traffic on port 80 to the active hub's `sandbox-api`.
+
+3. Install dependencies and start the Vite dev server:
+   ```bash
+   npm install
+   npm run dev
+   ```
+   The frontend will be available at `http://localhost:8080`.
+
+---
+
+### 2. Login via Auth0
+
+1. Open your browser and navigate to `http://localhost:8080`.
+2. Click **Log In** / **Sign In**.
+3. You will be redirected to the secure Auth0 Universal Login page.
+4. Enter your credentials or complete sign-up.
+5. Upon successful authentication, Auth0 issues a signed JWT token and redirects back to the dashboard.
+
+---
+
+### 3. Create API Keys in the Dashboard
+
+1. In the dashboard sidebar, navigate to **API Keys** (or **Settings → API Keys**).
+2. Click **Create New Key** / **Generate Key**.
+3. Provide a descriptive key name (e.g., `production-agent-key`) and select required permissions.
+4. Click **Generate** and securely copy the generated secret key token.
+
+*(Alternative)* **Create an API key via cURL directly through Envoy Gateway:**
+```bash
+HOST_IP=$(ip route get 1.1.1.1 2>/dev/null | awk '{print $7; exit}')
+
+curl -X POST "http://${HOST_IP}/api/v1/api-keys" \
+  -H "Authorization: Bearer <YOUR_AUTH0_ACCESS_TOKEN>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "test-key-01"}'
+```
+
+---
+
+### 4. Verify Real-Time Data Replication on SecondaryHub
+
+Every key created on PrimaryHub is instantly replicated to SecondaryHub via continuous physical PostgreSQL WAL streaming and Valkey memory synchronization.
+
+**1. Inspect the key in PrimaryHub PostgreSQL:**
+```bash
+kubectl --context kind-primaryhub exec -n opensandbox-system postgresql-primary-1 \
+  -c postgres -- psql -U postgres -d apikeys \
+  -c "SELECT id, name, user_email, created_at FROM api_keys;"
+```
+
+**2. Verify the key exists in SecondaryHub PostgreSQL (Replication in action):**
+```bash
+kubectl --context kind-secondaryhub exec -n opensandbox-system postgresql-secondary-1 \
+  -c postgres -- psql -U postgres -d apikeys \
+  -c "SELECT id, name, user_email, created_at FROM api_keys;"
+```
+> The exact same key record will be present on SecondaryHub with zero lag.
+
+**3. Verify Valkey cache replication on both hubs:**
+```bash
+echo "=== PrimaryHub Valkey ==="
+kubectl --context kind-primaryhub exec -n opensandbox-system deploy/valkey -- valkey-cli KEYS '*'
+
+echo "=== SecondaryHub Valkey (Replica) ==="
+kubectl --context kind-secondaryhub exec -n opensandbox-system deploy/valkey -- valkey-cli KEYS '*'
+```
+
+**4. Check real-time WAL replication health:**
+```bash
+# Check primary WAL sender:
+kubectl --context kind-primaryhub exec -n opensandbox-system postgresql-primary-1 \
+  -c postgres -- psql -U postgres \
+  -c "SELECT client_addr, state, sync_state FROM pg_stat_replication;"
+
+# Check secondary WAL receiver:
+kubectl --context kind-secondaryhub exec -n opensandbox-system postgresql-secondary-1 \
+  -c postgres -- psql -U postgres -d apikeys \
+  -c "SELECT status, sender_host, written_lsn FROM pg_stat_wal_receiver;"
+```
+
+---
+
+## 9 – High-Availability Failover & Split-Brain Prevention Testing
+
+The platform employs a single-master Active-Passive model with an automated in-cluster Watchdog (`ocm-failover-controller`) on `secondaryhub`.
+
+- **Normal State**: `primaryhub` actively accepts spokes (`spoke1`, `spoke2`) and serves API requests. `secondaryhub` keeps spokes in standby mode (`HUB ACCEPTED: false`, `AVAILABLE: Unknown`) to guarantee zero split-brain.
+- **Failover State**: When `primaryhub` fails, `secondaryhub` promotes its database to Read-Write, un-taints spokes, accepts spokes (`HUB ACCEPTED: true`, `AVAILABLE: True`), and Envoy Gateway redirects all traffic to `secondaryhub`.
+- **Failback State**: When `primaryhub` recovers, `ocm-failover-controller` syncs any delta mutations made during the outage back to PrimaryHub, re-clones Secondary as a replica, releases the spokes on SecondaryHub, and PrimaryHub resumes control.
+
+---
+
+### Step 1: Verify Initial Cluster State
+
+Confirm PrimaryHub is the active manager and SecondaryHub is in standby:
+
+```bash
+echo "=== PrimaryHub ManagedClusters ==="
+kubectl --context kind-primaryhub get managedclusters
+
+echo -e "\n=== SecondaryHub ManagedClusters (Standby) ==="
+kubectl --context kind-secondaryhub get managedclusters
+```
+
+**Expected Output:**
+- `primaryhub`: `spoke1` and `spoke2` have `HUB ACCEPTED: true` and `AVAILABLE: True`.
+- `secondaryhub`: `spoke1` and `spoke2` have `HUB ACCEPTED: false` and `AVAILABLE: Unknown`.
+
+---
+
+### Step 2: Simulate PrimaryHub Outage
+
+Simulate an unexpected crash or maintenance shutdown of the PrimaryHub cluster:
+
+```bash
+docker stop primaryhub-control-plane
+```
+
+**Stream the failover controller logs on SecondaryHub:**
+```bash
+kubectl --context kind-secondaryhub -n opensandbox-system logs -l app.kubernetes.io/name=ocm-failover-controller -f
+```
+
+**What occurs automatically within ~4-10 seconds:**
+1. **Heartbeat Failure Detected**: Probes to `10.99.0.1:6443/livez` fail consecutively.
+2. **Database Promotion**: `postgresql-secondary` is promoted from read-only replica to read-write master (`pg_ctl promote`).
+3. **Spoke Takeover**: SecondaryHub accepts the spoke clusters (`HUB ACCEPTED: true`) and clears `unreachable` taints.
+4. **Traffic Redirection**: Envoy Gateway detects the PrimaryHub failure and routes API traffic to `10.99.0.2` (`secondaryhub`).
+
+**Verify SecondaryHub is now serving the spokes:**
+```bash
+kubectl --context kind-secondaryhub get managedclusters
+```
+*Both `spoke1` and `spoke2` now show `HUB ACCEPTED: true` and `AVAILABLE: True` on `secondaryhub`!*
+
+---
+
+### Step 3: Mutate Data on SecondaryHub during Outage (Simulating Split-Brain Risk)
+
+While PrimaryHub is completely down, create new data on SecondaryHub to simulate real user transactions during an outage:
+
+```bash
+kubectl --context kind-secondaryhub exec -n opensandbox-system postgresql-secondary-1 \
+  -c postgres -- psql -U postgres -d apikeys \
+  -c "INSERT INTO api_keys (name, key_hash) VALUES ('outage-key-01', 'hash_outage_presentation');"
+
+# Confirm key is stored in SecondaryHub:
+kubectl --context kind-secondaryhub exec -n opensandbox-system postgresql-secondary-1 \
+  -c postgres -- psql -U postgres -d apikeys \
+  -c "SELECT id, name, created_at FROM api_keys;"
+```
+
+---
+
+### Step 4: Restore PrimaryHub & Observe Automated Failback
+
+Bring PrimaryHub back online:
+
+```bash
+docker start primaryhub-control-plane
+```
+
+**Follow the reconciliation logs on SecondaryHub:**
+```bash
+kubectl --context kind-secondaryhub -n opensandbox-system logs -l app.kubernetes.io/name=ocm-failover-controller -f
+```
+
+**The 4-Step Failback Process:**
+1. **Health Gate**: The controller waits until PrimaryHub API server and PostgreSQL become fully healthy.
+2. **Authoritative Delta Sync**: Delta records created during the outage (e.g., `outage-key-01`) are synced from SecondaryHub to PrimaryHub.
+3. **Valkey Resynchronization**: Cache memory is flushed and synced with PrimaryHub.
+4. **Spoke Release & Demotion (Zero Split-Brain)**:
+   - SecondaryHub automatically releases the spoke clusters (`HUB ACCEPTED: false`).
+   - PrimaryHub re-accepts the spoke clusters (`HUB ACCEPTED: true`, `AVAILABLE: True`).
+   - Secondary PostgreSQL re-clones and attaches as a standby replica of Primary.
+   - Envoy Gateway shifts client traffic back to PrimaryHub.
+
+---
+
+### Step 5: Verify Complete Recovery and Parity
+
+**1. Verify OCM ManagedClusters on both hubs:**
+```bash
+echo "=== PrimaryHub (Back in Control) ==="
+kubectl --context kind-primaryhub get managedclusters
+
+echo -e "\n=== SecondaryHub (Back in Standby) ==="
+kubectl --context kind-secondaryhub get managedclusters
+```
+- `primaryhub`: `spoke1` and `spoke2` are `HUB ACCEPTED: true` and `AVAILABLE: True`.
+- `secondaryhub`: `spoke1` and `spoke2` are released (`HUB ACCEPTED: false`, `AVAILABLE: Unknown`).
+
+**2. Verify the outage key exists on PrimaryHub without data loss:**
+```bash
+kubectl --context kind-primaryhub exec -n opensandbox-system postgresql-primary-1 \
+  -c postgres -- psql -U postgres -d apikeys \
+  -c "SELECT id, name, created_at FROM api_keys;"
+```
+
+**3. Verify WAL replication is restored:**
+```bash
+kubectl --context kind-primaryhub exec -n opensandbox-system postgresql-primary-1 \
+  -c postgres -- psql -U postgres \
+  -c "SELECT client_addr, state, sync_state FROM pg_stat_replication;"
+```
+
+---
+
 ## Teardown
 
 ```bash
