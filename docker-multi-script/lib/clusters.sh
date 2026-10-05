@@ -99,6 +99,7 @@ EOF
   fi
 
   local cname="${name}-control-plane"
+  docker update --restart=always "$cname" 2>/dev/null || true
   if ! docker inspect "$cname" --format '{{json .NetworkSettings.Networks}}' \
        2>/dev/null | grep -q "$TRANSIT_NET_NAME"; then
     log_info "Connecting $cname to transit net @ $transit_ip..."
