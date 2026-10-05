@@ -103,14 +103,20 @@ _configure_spoke_kata_fc() {
   docker cp "${KATA_SOURCE_DIR}/bin/kata-runtime" "${cname}:/opt/kata/bin/" 2>/dev/null || true
   docker cp "${KATA_SOURCE_DIR}/bin/kata-ctl" "${cname}:/opt/kata/bin/" 2>/dev/null || true
   docker cp "${KATA_SOURCE_DIR}/share/kata-containers/." "${cname}:/opt/kata/share/kata-containers/"
+  if [ -d "${KATA_SOURCE_DIR}/share/defaults/kata-containers" ]; then
+    docker exec "$cname" mkdir -p /opt/kata/share/defaults
+    docker cp "${KATA_SOURCE_DIR}/share/defaults/kata-containers" "${cname}:/opt/kata/share/defaults/"
+  fi
 
   # 4. Copy or generate /etc/kata-containers/configuration.toml
   if [ -f "/etc/kata-containers/configuration.toml" ]; then
     docker cp /etc/kata-containers/configuration.toml "${cname}:/etc/kata-containers/configuration.toml"
   else
     docker exec "$cname" bash -c "
+      mkdir -p /etc/kata-containers
       cp /opt/kata/share/defaults/kata-containers/configuration-fc.toml /etc/kata-containers/configuration.toml 2>/dev/null || true
       sed -i 's|^path = .*|path = \"/usr/local/bin/firecracker\"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
+      sed -i 's|^jailer_path = .*|jailer_path = \"/usr/local/bin/jailer\"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
     "
   fi
 
@@ -166,30 +172,72 @@ EOF
 
     cat << 'SCRIPTEOF' > /usr/local/bin/init-containerd-devmapper.sh
 #!/bin/bash
-for img in /var/lib/*.img; do
-  if [ -f "\$img" ]; then
-    if ! losetup -j "\$img" 2>/dev/null | grep -q "\$img"; then
-      losetup -fP "\$img" 2>/dev/null || true
+set -e
+
+# 1. Attach loop devices for any containerd disk images in /var/lib
+for img in /var/lib/containerd-pool-disk-*.img /var/lib/*.img; do
+  if [ -f "$img" ]; then
+    if ! losetup -j "$img" 2>/dev/null | grep -q "$img"; then
+      losetup -fP "$img" 2>/dev/null || true
     fi
   fi
 done
 
-vgchange -ay 2>/dev/null || true
+# 2. Determine target pool and volume group from containerd config if available
+REQUIRED_POOL=""
+if [ -f /etc/containerd/config.toml ]; then
+  REQUIRED_POOL=$(grep -oP 'pool_name\s*=\s*"\K[^"]+' /etc/containerd/config.toml 2>/dev/null | head -n1 || true)
+fi
 
+# 3. Identify VGs
+VGS=$(vgs --noheadings -o vg_name 2>/dev/null | tr -d ' ' | grep '^containerd-vg' || true)
+if [ -z "$VGS" ]; then
+  vgscan 2>/dev/null || true
+  VGS=$(vgs --noheadings -o vg_name 2>/dev/null | tr -d ' ' | grep '^containerd-vg' || true)
+fi
+
+# 4. Activate volume groups and clear stale metadata locks if inactive
+for vg in $VGS; do
+  vgchange -ay "$vg" 2>/dev/null || true
+  if ! lvs -o lv_attr --noheadings "$vg/containerd-pool" 2>/dev/null | grep -q '^ *twi-a'; then
+    lvchange -an "${vg}/containerd-pool_tmeta" 2>/dev/null || true
+    vgchange -an "$vg" 2>/dev/null || true
+    vgchange -ay "$vg" 2>/dev/null || true
+  fi
+done
+
+# 5. Ensure device nodes exist in /dev and /dev/mapper
 mkdir -p /dev/mapper
-if [ -x /usr/sbin/dmsetup.orig ]; then
-  /usr/sbin/dmsetup.orig mknodes 2>/dev/null || true
-  /usr/sbin/dmsetup.orig ls 2>/dev/null | while read -r name majmin; do
-    maj=\$(echo "\$majmin" | tr -d '()' | cut -d: -f1)
-    min=\$(echo "\$majmin" | tr -d '()' | cut -d: -f2)
-    if [ -n "\$maj" ] && [ -n "\$min" ]; then
-      [ ! -e "/dev/dm-\${min}" ] && mknod "/dev/dm-\${min}" b "\$maj" "\$min" 2>/dev/null || true
-      [ ! -e "/dev/mapper/\${name}" ] && ln -sf "/dev/dm-\${min}" "/dev/mapper/\${name}" 2>/dev/null || true
+DMSETUP="/usr/sbin/dmsetup.orig"
+[ ! -x "$DMSETUP" ] && DMSETUP="/usr/sbin/dmsetup"
+if [ -x "$DMSETUP" ]; then
+  $DMSETUP mknodes 2>/dev/null || true
+  $DMSETUP ls 2>/dev/null | while read -r name majmin; do
+    maj=$(echo "$majmin" | tr -d '()' | cut -d: -f1)
+    min=$(echo "$majmin" | tr -d '()' | cut -d: -f2)
+    if [ -n "$maj" ] && [ -n "$min" ]; then
+      [ ! -e "/dev/dm-${min}" ] && mknod "/dev/dm-${min}" b "$maj" "$min" 2>/dev/null || true
+      [ ! -e "/dev/mapper/${name}" ] && ln -sf "/dev/dm-${min}" "/dev/mapper/${name}" 2>/dev/null || true
     fi
   done
-elif [ -x /usr/sbin/dmsetup ]; then
-  /usr/sbin/dmsetup mknodes 2>/dev/null || true
 fi
+
+# 6. Verify required pool exists if specified
+if [ -n "$REQUIRED_POOL" ]; then
+  if [ ! -b "/dev/mapper/${REQUIRED_POOL}" ]; then
+    echo "Warning: /dev/mapper/${REQUIRED_POOL} is missing. Retrying..." >&2
+    TARGET_VG=$(echo "$REQUIRED_POOL" | sed 's/-containerd--pool$//' | sed 's/--/-/g')
+    lvchange -an "${TARGET_VG}/containerd-pool_tmeta" 2>/dev/null || true
+    vgchange -an "$TARGET_VG" 2>/dev/null || true
+    vgchange -ay "$TARGET_VG" 2>/dev/null || true
+    [ -x "$DMSETUP" ] && $DMSETUP mknodes 2>/dev/null || true
+    if [ ! -b "/dev/mapper/${REQUIRED_POOL}" ]; then
+      echo "Error: Failed to activate /dev/mapper/${REQUIRED_POOL}" >&2
+      exit 1
+    fi
+  fi
+fi
+
 exit 0
 SCRIPTEOF
     chmod +x /usr/local/bin/init-containerd-devmapper.sh

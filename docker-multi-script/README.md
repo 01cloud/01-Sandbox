@@ -170,14 +170,14 @@ for ctx in kind-primaryhub kind-secondaryhub kind-spoke1 kind-spoke2; do
 done
 ```
 
-**Ping across WireGuard mesh (PrimaryHub → SecondaryHub):**
+**Ping across WireGuard mesh from Primaryhub (PrimaryHub → SecondaryHub):**
 ```bash
-docker exec primaryhub-control-plane ping -c 3 10.99.0.2
+ping 10.99.0.2
 ```
 
 **Ping from PrimaryHub → Spoke1:**
 ```bash
-docker exec primaryhub-control-plane ping -c 3 10.99.0.3
+ping 10.99.0.3
 ```
 
 **Verify WireGuard interface is UP on all nodes:**
