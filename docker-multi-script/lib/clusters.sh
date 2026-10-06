@@ -124,6 +124,17 @@ EOF
 _setup_wireguard() {
   local container="$1" entity="$2" wg_ip="$3" extra_ips="${4:-}"
 
+  # If WireGuard wg0 is already configured with all peers and active, skip reconfiguration
+  if [ "$FORCE_RECONFIGURE" != "true" ] && _check_wg_active "$container" "$wg_ip" && \
+     docker exec "$container" grep -q "${WG_PUB["gateway"]}" /etc/wireguard/wg0.conf 2>/dev/null && \
+     docker exec "$container" grep -q "${WG_PUB["primaryhub"]}" /etc/wireguard/wg0.conf 2>/dev/null && \
+     docker exec "$container" grep -q "${WG_PUB["secondaryhub"]}" /etc/wireguard/wg0.conf 2>/dev/null && \
+     docker exec "$container" grep -q "${WG_PUB["spoke1"]}" /etc/wireguard/wg0.conf 2>/dev/null && \
+     docker exec "$container" grep -q "${WG_PUB["spoke2"]}" /etc/wireguard/wg0.conf 2>/dev/null; then
+    log_info "WireGuard wg0 already configured and active in $container ($wg_ip) – skipping."
+    return 0
+  fi
+
   log_info "Configuring WireGuard wg0 inside $container ($wg_ip)..."
 
   docker exec "$container" bash -c "
@@ -450,12 +461,17 @@ _do_phase_03_create_hub_clusters() {
   # PrimaryHub – this IS the Root CA source
   _create_kind_cluster "primaryhub" "10.244.0.0/16" "10.96.0.0/16" "$HUB1_TRANSIT_IP" "false"
 
-  # Extract shared Root CA + ServiceAccount keys from PrimaryHub
-  log_info "Extracting shared Root CA & ServiceAccount keys from primaryhub..."
-  docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt"
-  docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key"
-  docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
-  docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
+  # Extract shared Root CA + ServiceAccount keys from PrimaryHub only if missing
+  if [ -s "${PKI_DIR}/ca.crt" ] && [ -s "${PKI_DIR}/ca.key" ] && \
+     [ -s "${PKI_DIR}/sa.key" ] && [ -s "${PKI_DIR}/sa.pub" ] && [ "$FORCE_RECONFIGURE" != "true" ]; then
+    log_info "Shared Root CA and ServiceAccount keys already present in ${PKI_DIR} – skipping extraction."
+  else
+    log_info "Extracting shared Root CA & ServiceAccount keys from primaryhub..."
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt"
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key"
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
+  fi
 
   # SecondaryHub – mounted with PrimaryHub's shared Root CA
   _create_kind_cluster "secondaryhub" "10.245.0.0/16" "10.97.0.0/16" "$HUB2_TRANSIT_IP" "true"
@@ -511,8 +527,14 @@ _do_phase_08_ocm_init() {
   local auto_acceptor="${SANDBOX_REPO_DIR}/docs/multi-cluster/vm-level-ocm-multi-cluster/manifests/ocm-auto-acceptor-k8s.yaml"
   [ ! -f "$auto_acceptor" ] && auto_acceptor="${ROOT_DIR}/docs/multi-cluster/vm-level-ocm-multi-cluster/manifests/ocm-auto-acceptor-k8s.yaml"
   if [ -f "$auto_acceptor" ]; then
-    log_info "Deploying ocm-auto-acceptor on primaryhub..."
-    kubectl --context kind-primaryhub apply -f "$auto_acceptor" || true
+    if kubectl --context kind-primaryhub get deployment ocm-auto-acceptor -n default >/dev/null 2>&1 || \
+       kubectl --context kind-primaryhub get deployment ocm-auto-acceptor -n open-cluster-management >/dev/null 2>&1 || \
+       kubectl --context kind-primaryhub get deployment -A 2>/dev/null | grep -q "ocm-auto-acceptor"; then
+      log_info "ocm-auto-acceptor already deployed on primaryhub – skipping."
+    else
+      log_info "Deploying ocm-auto-acceptor on primaryhub..."
+      kubectl --context kind-primaryhub apply -f "$auto_acceptor" || true
+    fi
   fi
 
   for hub in primaryhub secondaryhub; do
@@ -541,8 +563,12 @@ _check_phase_09() {
 _do_phase_09_create_namespaces() {
   for hub in primaryhub secondaryhub; do
     for ns in opensandbox-system metallb-system agentgateway-system; do
-      kubectl --context "kind-${hub}" create namespace "$ns" \
-        --dry-run=client -o yaml | kubectl --context "kind-${hub}" apply -f -
+      if kubectl --context "kind-${hub}" get namespace "$ns" >/dev/null 2>&1; then
+        log_info "Namespace '$ns' already exists on $hub – skipping."
+      else
+        kubectl --context "kind-${hub}" create namespace "$ns" \
+          --dry-run=client -o yaml | kubectl --context "kind-${hub}" apply -f -
+      fi
     done
   done
 
@@ -621,13 +647,17 @@ _do_phase_13_create_spoke_clusters() {
   # Since there are no worker nodes on spokes, klusterlet (and all user workloads)
   # would be permanently stuck in Pending / FailedScheduling.
   # Remove the taint so pods can schedule on the sole control-plane node.
-  log_info "Removing control-plane NoSchedule taint from spoke nodes..."
+  log_info "Ensuring control-plane NoSchedule taint is absent from spoke nodes..."
   for spoke in spoke1 spoke2; do
-    kubectl --context "kind-${spoke}" taint node "${spoke}-control-plane" \
-      node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
-    kubectl --context "kind-${spoke}" taint node "${spoke}-control-plane" \
-      node-role.kubernetes.io/master:NoSchedule- 2>/dev/null || true
-    log_info "  ${spoke}: control-plane taint removed."
+    if ! kubectl --context "kind-${spoke}" get node "${spoke}-control-plane" -o jsonpath='{.spec.taints}' 2>/dev/null | grep -q 'NoSchedule'; then
+      log_info "  ${spoke}: control-plane NoSchedule taint already absent – skipping."
+    else
+      kubectl --context "kind-${spoke}" taint node "${spoke}-control-plane" \
+        node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+      kubectl --context "kind-${spoke}" taint node "${spoke}-control-plane" \
+        node-role.kubernetes.io/master:NoSchedule- 2>/dev/null || true
+      log_info "  ${spoke}: control-plane taint removed."
+    fi
   done
 
   # Verify both spoke containers exist before completing Phase 13
@@ -694,4 +724,32 @@ _do_phase_15_install_crds_on_spokes() {
 
 phase_15_install_crds_on_spokes() {
   run_phase "15" "Installing CRDs on Spoke Clusters" _check_phase_15 _do_phase_15_install_crds_on_spokes
+}
+
+_check_phase_15d() {
+  for c in spoke1 spoke2; do
+    for lang in python go java node k8s rust shell cpp ruby terraform; do
+      docker exec "${c}-control-plane" crictl images 2>/dev/null | grep -q "01sandbox-scanner-${lang}" || return 1
+    done
+  done
+  return 0
+}
+
+_do_phase_15d_load_scanner_images() {
+  if [ "$FORCE_RECONFIGURE" != "true" ] && _check_phase_15d; then
+    log_info "All language scanner images already loaded on spokes – skipping."
+    return 0
+  fi
+  log_info "Ensuring all language-specific scanner images are built and loaded on spokes..."
+  local build_script="${SANDBOX_REPO_DIR}/code-interpreter/scripts/build-and-load-scanners.sh"
+  [ ! -f "$build_script" ] && build_script="${ROOT_DIR}/code-interpreter/scripts/build-and-load-scanners.sh"
+  if [ -f "$build_script" ]; then
+    bash "$build_script" --clusters "spoke1,spoke2"
+  else
+    log_warn "build-and-load-scanners.sh not found at ${build_script}"
+  fi
+}
+
+phase_15d_load_scanner_images() {
+  run_phase "15d" "Building & Loading Language Scanner Images on Spokes" _check_phase_15d _do_phase_15d_load_scanner_images
 }

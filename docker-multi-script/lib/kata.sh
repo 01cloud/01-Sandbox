@@ -21,10 +21,10 @@ _check_phase_15b() {
   for spoke in spoke1 spoke2; do
     # Check RuntimeClass
     kubectl --context "kind-${spoke}" get runtimeclass kata-fc >/dev/null 2>&1 || return 1
-    # Check containerd devmapper plugin is active (ok)
-    docker exec "${spoke}-control-plane" ctr plugins ls 2>/dev/null | grep -E "devmapper\s+linux/amd64\s+ok" >/dev/null 2>&1 || return 1
     # Check kata shim is executable
-    docker exec "${spoke}-control-plane" test -x /usr/local/bin/containerd-shim-kata-v2 || return 1
+    docker exec "${spoke}-control-plane" test -x /usr/local/bin/containerd-shim-kata-v2 2>/dev/null || return 1
+    # Check containerd config has kata-fc configured
+    docker exec "${spoke}-control-plane" grep -q 'plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc' /etc/containerd/config.toml 2>/dev/null || return 1
   done
   return 0
 }
@@ -80,6 +80,15 @@ _configure_spoke_kata_fc() {
   local ctx="kind-${spoke}"
   local vg_name="containerd-vg-${spoke}"
   local pool_name="containerd--vg--${spoke}-containerd--pool"
+
+  # If Kata Firecracker is already fully configured on this spoke, skip
+  if [ "$FORCE_RECONFIGURE" != "true" ] && \
+     kubectl --context "$ctx" get runtimeclass kata-fc >/dev/null 2>&1 && \
+     docker exec "$cname" test -x /usr/local/bin/containerd-shim-kata-v2 2>/dev/null && \
+     docker exec "$cname" grep -q 'plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc' /etc/containerd/config.toml 2>/dev/null; then
+    log_info "${spoke}: Kata Firecracker is already fully configured – skipping."
+    return 0
+  fi
 
   log_info "── Configuring Kata Firecracker on ${spoke} (${cname}) ──"
 

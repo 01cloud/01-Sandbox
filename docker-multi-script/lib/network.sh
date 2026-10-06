@@ -67,6 +67,11 @@ _check_phase_05() {
 }
 
 _do_phase_05_wireguard_on_hubs() {
+  if [ "$FORCE_RECONFIGURE" != "true" ] && _check_phase_05; then
+    log_info "WireGuard overlay already active on hub clusters – skipping."
+    return 0
+  fi
+
   _setup_wireguard "primaryhub-control-plane"   "primaryhub"   "$WG_HUB1_IP"
   _setup_wireguard "secondaryhub-control-plane" "secondaryhub" "$WG_HUB2_IP"
 
@@ -117,9 +122,13 @@ _do_phase_07_verify_root_ca_and_vip() {
 
   log_info "Updating cluster-info to advertise Gateway VIP..."
   for ctx in kind-primaryhub kind-secondaryhub; do
-    kubectl --context "$ctx" get configmap cluster-info -n kube-public -o yaml 2>/dev/null | \
-      sed "s|server:.*|server: https://${WG_VIP}:6443|g" | \
-      kubectl --context "$ctx" apply -f - 2>/dev/null || true
+    if kubectl --context "$ctx" get configmap cluster-info -n kube-public -o jsonpath='{.data.kubeconfig}' 2>/dev/null | grep -q "$WG_VIP"; then
+      log_info "cluster-info on $ctx already advertises Gateway VIP (${WG_VIP}) – skipping."
+    else
+      kubectl --context "$ctx" get configmap cluster-info -n kube-public -o yaml 2>/dev/null | \
+        sed "s|server:.*|server: https://${WG_VIP}:6443|g" | \
+        kubectl --context "$ctx" apply -f - 2>/dev/null || true
+    fi
   done
 }
 
@@ -134,11 +143,15 @@ phase_07_verify_root_ca_and_vip() {
 
 _check_phase_06() {
   [ "$(docker inspect -f '{{.State.Running}}' envoy-gateway 2>/dev/null)" = "true" ] || return 1
-  docker exec primaryhub-control-plane ping -c 1 -W 1 "$WG_VIP" >/dev/null 2>&1 || return 1
+  docker exec primaryhub-control-plane curl -sk -m 2 "https://${WG_VIP}:6443/version" >/dev/null 2>&1 || return 1
   return 0
 }
 
 _do_phase_06_envoy_gateway() {
+  if [ "$FORCE_RECONFIGURE" != "true" ] && _check_phase_06; then
+    log_info "Envoy Gateway already running and VIP ${WG_VIP} reachable – skipping reconfiguration."
+    return 0
+  fi
   # ── Static Envoy config (no variable substitution) ─────────────────────────
   cat > "${ENVOY_DIR}/envoy.yaml" <<'ENVOY_EOF'
 admin:
@@ -323,7 +336,7 @@ EOF_ENVOY_DOCKER
   log_info "Verifying VIP ${WG_VIP} reachability from primaryhub..."
   local vip_ok=false
   for i in {1..20}; do
-    if docker exec primaryhub-control-plane ping -c 1 -W 1 "$WG_VIP" >/dev/null 2>&1; then
+    if docker exec primaryhub-control-plane curl -sk -m 2 "https://${WG_VIP}:6443/version" >/dev/null 2>&1; then
       log_success "VIP ${WG_VIP} reachable over WireGuard overlay!"
       vip_ok=true
       break
@@ -331,7 +344,7 @@ EOF_ENVOY_DOCKER
     sleep 1
   done
   if [ "$vip_ok" = false ]; then
-    log_warn "VIP ${WG_VIP} not immediately pingable from primaryhub – checking container logs..."
+    log_warn "VIP ${WG_VIP} not immediately reachable from primaryhub – checking container logs..."
     docker logs --tail 20 envoy-gateway || true
   fi
 }

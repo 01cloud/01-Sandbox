@@ -55,6 +55,16 @@ _install_gvisor_on_spoke() {
   local cname="${spoke}-control-plane"
   local ctx="kind-${spoke}"
 
+  # If gVisor is already fully configured on this spoke, skip
+  if [ "$FORCE_RECONFIGURE" != "true" ] && \
+     kubectl --context "$ctx" get runtimeclass gvisor >/dev/null 2>&1 && \
+     docker exec "$cname" test -x /usr/local/bin/runsc 2>/dev/null && \
+     docker exec "$cname" test -x /usr/local/bin/containerd-shim-runsc-v1 2>/dev/null && \
+     docker exec "$cname" grep -q "containerd.runtimes.runsc" /etc/containerd/config.toml 2>/dev/null; then
+    log_info "${spoke}: gVisor is already fully configured – skipping."
+    return 0
+  fi
+
   log_step "Installing gVisor (runsc) on ${spoke} (${cname})..."
 
   # 1. Copy binaries and sidecars into spoke node only if missing

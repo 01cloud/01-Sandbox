@@ -132,6 +132,7 @@ main() {
   phase_15_install_crds_on_spokes
   phase_15b_setup_kata_firecracker
   phase_15c_setup_gvisor
+  phase_15d_load_scanner_images
   phase_16_join_spokes_to_ocm
   phase_17_sync_spokes_to_secondaryhub
 

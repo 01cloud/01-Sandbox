@@ -26,6 +26,11 @@
 _write_hub_bootstrap_kubeconfig() {
   local out="$1" server="$2" token="$3" hub_node="$4" ca_b64=""
 
+  if [ -s "$out" ] && [ "$FORCE_RECONFIGURE" != "true" ]; then
+    log_info "Bootstrap kubeconfig '$out' already exists – preserving."
+    return 0
+  fi
+
   if [ -n "$hub_node" ] && docker exec "$hub_node" test -f /etc/kubernetes/pki/ca.crt >/dev/null 2>&1; then
     ca_b64=$(docker exec "$hub_node" cat /etc/kubernetes/pki/ca.crt | base64 -w0)
   elif [ -s "${PKI_DIR}/ca.crt" ]; then
@@ -395,6 +400,11 @@ _check_phase_17() {
 }
 
 _do_phase_17_sync_spokes_to_secondaryhub() {
+  if [ "$FORCE_RECONFIGURE" != "true" ] && _check_phase_17; then
+    log_info "Spoke registration and labels already synchronized to SecondaryHub – skipping."
+    return 0
+  fi
+
   log_info "Syncing spoke registration resources to secondaryhub..."
   for spoke in spoke1 spoke2; do
     kubectl --context kind-primaryhub get namespace "$spoke" -o yaml 2>/dev/null | \
