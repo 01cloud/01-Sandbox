@@ -1,3 +1,65 @@
+## Release v0.7.12 — 01-Sandbox
+**Release Date:** October 06, 2026
+
+---
+
+### Summary
+v0.7.12 introduces new features along with important stability improvements. Documentation has been updated for better clarity and onboarding. General chores and stylistic updates were applied to keep the codebase clean.
+
+### Highlights
+* **cli:** print detected machine IP and update env ([ec7c6e2](https://github.com/01cloud/01-Sandbox/commit/ec7c6e216c80e3d71903ed938358556ef04f1cf1))
+* **runtime:** add gvisor runtimeclass to spoke clusters ([9d9190b](https://github.com/01cloud/01-Sandbox/commit/9d9190b1df05047a03a66ff1ac1ba22e3d15f836))
+* **cli:** resolve repository path from script location dynamically ([e80802f](https://github.com/01cloud/01-Sandbox/commit/e80802fdf950f947bc13ffd0714bef4b06117afa))
+* creation of the table ([4428206](https://github.com/01cloud/01-Sandbox/commit/44282061e665d6412e6b50a07ca3ca437ad4d3e0))
+
+### Changes
+## [0.7.12](https://github.com/01cloud/01-Sandbox/compare/v0.7.11...v0.7.12) (2026-10-05)
+
+
+### 🚀 New Features
+
+* **cli:** print detected machine IP and update env ([ec7c6e2](https://github.com/01cloud/01-Sandbox/commit/ec7c6e216c80e3d71903ed938358556ef04f1cf1))
+* **runtime:** add gvisor runtimeclass to spoke clusters ([9d9190b](https://github.com/01cloud/01-Sandbox/commit/9d9190b1df05047a03a66ff1ac1ba22e3d15f836))
+
+
+### 🐛 Bug Fixes
+
+* **cli:** resolve repository path from script location dynamically ([e80802f](https://github.com/01cloud/01-Sandbox/commit/e80802fdf950f947bc13ffd0714bef4b06117afa))
+* creation of the table ([4428206](https://github.com/01cloud/01-Sandbox/commit/44282061e665d6412e6b50a07ca3ca437ad4d3e0))
+* **gateway:** switch envoy to l7 http proxy and handle failback ([2f898a3](https://github.com/01cloud/01-Sandbox/commit/2f898a31943ef24f4bb7c56676ddf186b1f9c77f))
+* issue with spoke clusters from being provisioned ([a34e9d9](https://github.com/01cloud/01-Sandbox/commit/a34e9d98fb7428f098cc220d6272227ae430f9b9))
+* multi script ([6df69a9](https://github.com/01cloud/01-Sandbox/commit/6df69a988325b05fc1f2f5dead9149b8326bb7cc))
+* multi script ([17d03be](https://github.com/01cloud/01-Sandbox/commit/17d03be2fa064a365f9e585a63680ee0ae0f924b))
+* **network:** publish port 80 for envoy-gateway and expand CORS origins ([f8c0a82](https://github.com/01cloud/01-Sandbox/commit/f8c0a82f56ddbee412bafa32a47e2bfea777336e))
+* **scripts:** remove legacy hardcoded paths in scripts ([6a8f22d](https://github.com/01cloud/01-Sandbox/commit/6a8f22d9b61c6f17ba4167f0d83051fcae3645c4))
+
+
+### 📖 Documentation
+
+* generate RELEASE.md for v0.7.11 [skip ci] ([97ccfb4](https://github.com/01cloud/01-Sandbox/commit/97ccfb4143bc1d853643b7eb0f5a0930948aa3b7))
+* updated the readme file ([0bedaaf](https://github.com/01cloud/01-Sandbox/commit/0bedaafbf3e13c6f2947238a09b23f11023bdc97))
+* updated the readme file ([15f328d](https://github.com/01cloud/01-Sandbox/commit/15f328db71c0ada34e2ec535796e7365acc8742f))
+* updated the script documentation ([548505a](https://github.com/01cloud/01-Sandbox/commit/548505a7231ba78d3d04578ed32214e2ebf4eb38))
+* updated the script documentation ([5babb2b](https://github.com/01cloud/01-Sandbox/commit/5babb2bc779286060227e426a257ba938b66800d))
+* updated the script documentation ([3b6fa9e](https://github.com/01cloud/01-Sandbox/commit/3b6fa9e0867fd6f49610ca3fbbc4f6acb2306f1b))
+* updated the script documentation ([b981321](https://github.com/01cloud/01-Sandbox/commit/b981321e803e83f1c9c1ffd2d4e80030c5919eb7))
+* updated the script documentation ([b5f2bac](https://github.com/01cloud/01-Sandbox/commit/b5f2bac9e1f25c198558218c0c6252366d7529ca))
+* updated the script documentation ([498bd77](https://github.com/01cloud/01-Sandbox/commit/498bd77324acea07a41b280158ad9900580ead9d))
+* updated the script documentation ([2d995e0](https://github.com/01cloud/01-Sandbox/commit/2d995e06d06b6d57daf6d391500bc51226d89d96))
+
+
+### 🧹 Miscellaneous
+
+* bump versions to v0.7.11 [skip ci] ([443b95c](https://github.com/01cloud/01-Sandbox/commit/443b95c8eae1e57807bbfa17c7cbdea832217860))
+
+### Links
+- 📦 [GitHub Repository](https://github.com/01cloud/01-Sandbox)
+- 📋 [Release Notes](https://github.com/01cloud/01-Sandbox/releases/tag/v0.7.12)
+- 📝 [Changelog](https://github.com/01cloud/01-Sandbox/blob/main/CHANGELOG.md)
+- 🐛 [Feedback & Issues](https://github.com/01cloud/01-Sandbox/issues)
+
+---
+
 ## Release v0.7.11 — 01-Sandbox
 **Release Date:** October 02, 2026
 
