@@ -612,7 +612,9 @@ _do_phase_10_load_custom_image() {
       log_info "$img already loaded in $hub – skipping kind load."
     else
       log_info "Loading $img into $hub..."
-      kind load docker-image "$img" --name "$hub"
+      if ! kind load docker-image "$img" --name "$hub" 2>/dev/null; then
+        docker save "$img" | docker exec -i "${hub}-control-plane" ctr -n k8s.io images import --local -
+      fi
       kubectl --context "kind-${hub}" rollout restart deployment/opensandbox-server -n opensandbox-system 2>/dev/null || true
     fi
   done
