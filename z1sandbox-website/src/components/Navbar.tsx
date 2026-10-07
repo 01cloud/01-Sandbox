@@ -18,6 +18,7 @@ const links = [
   { href: "/#security", label: "Security" },
   // { href: "/#architecture", label: "Architecture" },
   { href: "/#why", label: "Why 01 Sandbox" },
+  { href: "/changelog", label: "Changelog", isNew: true },
   { href: "/contact", label: "Contact" },
 ];
 
@@ -79,9 +80,12 @@ const Navbar = () => {
               <a
                 key={l.href}
                 href={l.href}
-                className="px-4 py-2 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-foreground/[0.03] transition-all relative group"
+                className="px-4 py-2 rounded-xl text-muted-foreground/80 hover:text-foreground hover:bg-foreground/[0.03] transition-all relative group flex items-center gap-1.5"
               >
                 {l.label}
+                {l.isNew && (
+                  <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                )}
                 <span className="absolute bottom-1.5 left-4 right-4 h-0.5 bg-primary/40 scale-x-0 group-hover:scale-x-100 transition-transform origin-left" />
               </a>
             ))}
@@ -184,8 +188,11 @@ const Navbar = () => {
             <div className="px-6 sm:px-8 pb-8 pt-2 flex flex-col gap-5">
               <div className="grid grid-cols-2 gap-x-4 gap-y-4">
                 {links.map((l) => (
-                  <a key={l.href} href={l.href} onClick={() => setOpen(false)} className="text-base font-semibold text-muted-foreground hover:text-foreground transition-colors p-3 rounded-2xl bg-secondary/30">
-                    {l.label}
+                  <a key={l.href} href={l.href} onClick={() => setOpen(false)} className="text-base font-semibold text-muted-foreground hover:text-foreground transition-colors p-3 rounded-2xl bg-secondary/30 flex items-center justify-between">
+                    <span>{l.label}</span>
+                    {l.isNew && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">NEW</span>
+                    )}
                   </a>
                 ))}
               </div>

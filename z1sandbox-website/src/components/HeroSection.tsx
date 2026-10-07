@@ -1,4 +1,6 @@
 import { motion } from "framer-motion";
+import { ArrowRight } from "lucide-react";
+
 const HeroSection = () => {
   return (
     <section className="relative min-h-screen flex items-center justify-center overflow-hidden pt-32 pb-20">
@@ -13,9 +15,19 @@ const HeroSection = () => {
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.6, ease: "easeOut" }}
         >
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full pill-badge mb-8 sm:mb-10">
-            <span className="text-xs sm:text-sm font-bold text-foreground/80 tracking-tight">Secure Code Execution, by Design</span>
-          </div>
+          <a
+            href="/changelog"
+            className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full pill-badge mb-8 sm:mb-10 hover:border-primary/40 hover:bg-foreground/[0.04] transition-all hover:scale-[1.02] group cursor-pointer shadow-sm"
+          >
+            <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-primary/10 text-primary text-[11px] sm:text-xs font-black uppercase tracking-wider">
+              <span className="flex h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse" />
+              v0.7.12
+            </span>
+            <span className="text-xs sm:text-sm font-bold text-foreground/85 tracking-tight group-hover:text-foreground transition-colors">
+              Kata Firecracker & Multi-Cluster OCM is live
+            </span>
+            <ArrowRight className="w-3.5 h-3.5 text-muted-foreground/70 group-hover:text-foreground group-hover:translate-x-0.5 transition-all" />
+          </a>
 
           <h1 className="font-display font-black text-4xl sm:text-6xl md:text-7xl lg:text-8xl leading-[1.05] tracking-tight max-w-5xl mx-auto">
             Execute Untrusted Code In

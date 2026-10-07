@@ -232,13 +232,20 @@ export default function Changelog() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${RAW_URL}?t=${Date.now()}`);
+      // 1. Try local bundled changelog first (works offline, in private repos, and instant)
+      let res = await fetch(`/CHANGELOG.md?t=${Date.now()}`);
+
+      // 2. Fall back to GitHub raw URL if local not available
+      if (!res.ok) {
+        res = await fetch(`${RAW_URL}?t=${Date.now()}`);
+      }
+
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const text = await res.text();
       setReleases(parseChangelog(text));
       setLastFetched(new Date());
-    } catch (e: any) {
-      setError(e.message || "Failed to load changelog");
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Failed to load changelog");
     } finally {
       setLoading(false);
     }
