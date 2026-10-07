@@ -174,7 +174,9 @@ if [ "$DO_LOAD" = true ]; then
           log_success "${cluster}: ${tag_dev} already loaded (skipping)"
         else
           log_info "${cluster}: loading ${tag_dev}..."
-          kind load docker-image "$tag_dev" --name "$cluster"
+          if ! kind load docker-image "$tag_dev" --name "$cluster" 2>/dev/null; then
+            docker save "$tag_dev" | docker exec -i "${cluster}-control-plane" ctr -n k8s.io images import --local -
+          fi
         fi
 
         # Check if release tag is already in cluster
@@ -182,7 +184,9 @@ if [ "$DO_LOAD" = true ]; then
           log_success "${cluster}: ${tag_release} already loaded (skipping)"
         else
           log_info "${cluster}: loading ${tag_release}..."
-          kind load docker-image "$tag_release" --name "$cluster"
+          if ! kind load docker-image "$tag_release" --name "$cluster" 2>/dev/null; then
+            docker save "$tag_release" | docker exec -i "${cluster}-control-plane" ctr -n k8s.io images import --local -
+          fi
         fi
       done
     done

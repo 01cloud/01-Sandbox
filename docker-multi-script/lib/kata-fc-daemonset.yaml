@@ -1,0 +1,249 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kata-fc-reconciler
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kata-fc-reconciler
+rules:
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["get", "patch", "update"]
+- apiGroups: ["node.k8s.io"]
+  resources: ["runtimeclasses"]
+  verbs: ["get", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kata-fc-reconciler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kata-fc-reconciler
+subjects:
+- kind: ServiceAccount
+  name: kata-fc-reconciler
+  namespace: kube-system
+---
+apiVersion: node.k8s.io/v1
+kind: RuntimeClass
+metadata:
+  name: kata-fc
+handler: kata-fc
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kata-fc-reconciler-script
+  namespace: kube-system
+data:
+  reconcile.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "=================================================="
+    echo "  Kata Firecracker Kubernetes Node Reconciler"
+    echo "  Node: ${NODE_NAME:-unknown}"
+    echo "=================================================="
+
+    run_host_bash() {
+      nsenter -t 1 -m -u -i -n -p -- /bin/bash -s
+    }
+
+    reconcile_node() {
+      local node="${NODE_NAME:-}"
+      local spoke=$(echo "$node" | sed 's/-control-plane$//')
+      local vg="containerd-vg-${spoke}"
+      local pool_name="containerd--vg--${spoke}-containerd--pool"
+
+      echo "[RECONCILE] Checking node environment on ${node} (spoke: ${spoke})..."
+
+      run_host_bash << HOST_EOF
+    set -e
+    # 1. Ensure LVM & thin provisioning tools exist on node
+    if ! which vgs >/dev/null 2>&1; then
+      echo "[RECONCILE] Installing lvm2 and thin-provisioning-tools on host node..."
+      dpkg --purge linux-image-rt-amd64 2>/dev/null || true
+      apt-get update -qq && apt-get install -y -qq lvm2 thin-provisioning-tools >/dev/null 2>&1 || true
+    fi
+
+    # 2. Configure LVM inside node to disable udev_sync & monitoring
+    if [ -f /etc/lvm/lvm.conf ]; then
+      sed -i 's/udev_sync = 1/udev_sync = 0/' /etc/lvm/lvm.conf 2>/dev/null || true
+      sed -i 's/udev_rules = 1/udev_rules = 0/' /etc/lvm/lvm.conf 2>/dev/null || true
+      if ! grep -q 'udev_sync = 0' /etc/lvm/lvm.conf 2>/dev/null; then
+    echo 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' >> /etc/lvm/lvm.conf
+      fi
+    fi
+    mkdir -p /opt/kata/bin /opt/kata/share/kata-containers /etc/kata-containers /var/lib/containerd/io.containerd.snapshotter.v1.devmapper
+
+    # 3. Ensure containerd has devmapper plugin support
+    if ! ctr plugins ls 2>/dev/null | grep -q 'snapshotter.v1.*devmapper'; then
+      if [ -f /usr/bin/containerd ]; then
+    cp /usr/bin/containerd /usr/local/bin/containerd
+      fi
+    fi
+
+    # 4. Ensure Kata configuration and symlinks
+    mkdir -p /etc/kata-containers
+    if [ ! -s /etc/kata-containers/configuration.toml ]; then
+      if [ -s /opt/kata/share/defaults/kata-containers/configuration-fc.toml ]; then
+    cp /opt/kata/share/defaults/kata-containers/configuration-fc.toml /etc/kata-containers/configuration.toml
+      elif [ -s /opt/kata/share/defaults/kata-containers/configuration.toml ]; then
+    cp /opt/kata/share/defaults/kata-containers/configuration.toml /etc/kata-containers/configuration.toml
+      fi
+      sed -i 's|^path = .*|path = "/usr/local/bin/firecracker"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
+      sed -i 's|^jailer_path = .*|jailer_path = "/usr/local/bin/jailer"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
+    fi
+
+    [ -s /opt/kata/bin/containerd-shim-kata-v2 ] && ln -sf /opt/kata/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-v2
+    [ -s /opt/kata/bin/firecracker ] && ln -sf /opt/kata/bin/firecracker /usr/local/bin/firecracker
+    [ -s /opt/kata/bin/jailer ] && ln -sf /opt/kata/bin/jailer /usr/local/bin/jailer 2>/dev/null || true
+    [ -s /opt/kata/bin/kata-runtime ] && ln -sf /opt/kata/bin/kata-runtime /usr/local/bin/kata-runtime 2>/dev/null || true
+    [ -s /opt/kata/bin/kata-ctl ] && ln -sf /opt/kata/bin/kata-ctl /usr/local/bin/kata-ctl 2>/dev/null || true
+
+    # 5. Provision loop device and LVM thin pool
+    IMG="/var/lib/containerd-pool-disk-${spoke}.img"
+    [ ! -f "\$IMG" ] && truncate -s 15G "\$IMG"
+
+    bname=\$(basename "\$IMG")
+    existing=\$(losetup -a 2>/dev/null | grep -F "\$bname" | cut -d: -f1 || true)
+    primary=\$(echo "\$existing" | head -n1)
+
+    if [ -n "\$primary" ]; then
+      echo "\$existing" | tail -n +2 | while read -r dup; do
+    [ -n "\$dup" ] && losetup -d "\$dup" 2>/dev/null || true
+      done
+    else
+      primary=\$(losetup -fP --show "\$IMG" 2>/dev/null || true)
+    fi
+
+    if ! vgs --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' '${vg}' >/dev/null 2>&1; then
+      pvcreate -y "\$primary" >/dev/null 2>&1 || true
+      vgcreate -y '${vg}' "\$primary" >/dev/null 2>&1 || true
+      lvcreate -y --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -W n -Z n --size 12G --thinpool containerd-pool '${vg}' >/dev/null 2>&1 || true
+    fi
+
+    vgchange -ay --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -K '${vg}' 2>/dev/null || true
+
+    mkdir -p /dev/mapper
+    DMSETUP="/usr/sbin/dmsetup.orig"
+    [ ! -x "\$DMSETUP" ] && DMSETUP="/usr/sbin/dmsetup"
+    if [ -x "\$DMSETUP" ]; then
+      \$DMSETUP mknodes 2>/dev/null || true
+      \$DMSETUP ls 2>/dev/null | while read -r name majmin; do
+    maj=\$(echo "\$majmin" | tr -d '()' | cut -d: -f1)
+    min=\$(echo "\$majmin" | tr -d '()' | cut -d: -f2)
+    if [ -n "\$maj" ] && [ -n "\$min" ]; then
+      [ ! -e "/dev/dm-\${min}" ] && mknod "/dev/dm-\${min}" b "\$maj" "\$min" 2>/dev/null || true
+      [ ! -e "/dev/mapper/\${name}" ] && ln -sf "/dev/dm-\${min}" "/dev/mapper/\${name}" 2>/dev/null || true
+    fi
+      done
+    fi
+
+    # 6. Configure containerd config.toml for kata-fc and devmapper
+    changed=0
+    sed -i 's/discard_unpacked_layers = true/discard_unpacked_layers = false/' /etc/containerd/config.toml 2>/dev/null || true
+
+    if ! grep -q 'use_local_image_pull' /etc/containerd/config.toml 2>/dev/null; then
+      printf '\n[plugins."io.containerd.cri.v1.images"]\n  use_local_image_pull = true\n' >> /etc/containerd/config.toml
+      changed=1
+    fi
+
+    if ! grep -q 'plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc' /etc/containerd/config.toml 2>/dev/null; then
+      printf '\n[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc]\n  runtime_type = "io.containerd.kata.v2"\n  snapshotter = "devmapper"\n\n[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc.options]\n  ConfigPath = "/etc/kata-containers/configuration.toml"\n\n[plugins."io.containerd.snapshotter.v1.devmapper"]\n  root_path = "/var/lib/containerd/io.containerd.snapshotter.v1.devmapper"\n  pool_name = "${pool_name}"\n  base_image_size = "4GB"\n  discard_blocks = false\n  fs_type = "ext4"\n' >> /etc/containerd/config.toml
+      changed=1
+    else
+      sed -i 's/pool_name = .*/pool_name = "${pool_name}"/' /etc/containerd/config.toml 2>/dev/null || true
+      sed -i 's/discard_blocks = true/discard_blocks = false/' /etc/containerd/config.toml 2>/dev/null || true
+    fi
+
+    if ! ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1; then
+      changed=1
+    fi
+
+    if [ "\$changed" -eq 1 ]; then
+      systemctl restart containerd 2>/dev/null || true
+    fi
+    HOST_EOF
+
+      # 7. Wait and verify devmapper status
+      for i in $(seq 1 15); do
+        if nsenter -t 1 -m -u -i -n -p -- ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1; then
+          echo "[RECONCILE] Kata Firecracker + devmapper is HEALTHY on ${node}!"
+          return 0
+        fi
+        sleep 2
+      done
+
+      echo "[WARN] Devmapper plugin not yet ok; will retry on next reconcile loop."
+      return 1
+    }
+
+    # Main Controller Loop
+    reconcile_node || true
+
+    while true; do
+      sleep 10
+      spoke=$(echo "${NODE_NAME:-}" | sed 's/-control-plane$//')
+      pool_dev="/dev/mapper/containerd--vg--${spoke}-containerd--pool"
+
+      if ! nsenter -t 1 -m -u -i -n -p -- ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1 || \
+         ! nsenter -t 1 -m -u -i -n -p -- test -b "$pool_dev" 2>/dev/null || \
+         ! nsenter -t 1 -m -u -i -n -p -- lvs -o lv_attr --noheadings "containerd-vg-${spoke}/containerd-pool" 2>/dev/null | grep -q 'twi-a'; then
+        echo "[HEAL] Node ${NODE_NAME:-} Kata devmapper degraded! Self-healing..."
+        reconcile_node || true
+      fi
+    done
+---
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: kata-fc-node-reconciler
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: kata-fc-node-reconciler
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: kata-fc-node-reconciler
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: kata-fc-node-reconciler
+    spec:
+      serviceAccountName: kata-fc-reconciler
+      hostPID: true
+      hostNetwork: true
+      tolerations:
+      - operator: Exists
+      containers:
+      - name: reconciler
+        image: debian:bookworm-slim
+        command: ["/bin/bash", "/scripts/reconcile.sh"]
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              fieldPath: spec.nodeName
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: script
+          mountPath: /scripts
+        resources:
+          requests:
+            cpu: 10m
+            memory: 32Mi
+          limits:
+            cpu: 200m
+            memory: 128Mi
+      volumes:
+      - name: script
+        configMap:
+          name: kata-fc-reconciler-script
+          defaultMode: 0755
