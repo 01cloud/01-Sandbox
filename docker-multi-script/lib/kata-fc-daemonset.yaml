@@ -135,6 +135,18 @@ data:
     [ ! -x "\$DMSETUP" ] && DMSETUP="/usr/sbin/dmsetup"
     if [ -x "\$DMSETUP" ]; then
       \$DMSETUP mknodes 2>/dev/null || true
+
+      # Prune orphaned dm thin snapshot devices that have open count == 0 and are not mounted
+      \$DMSETUP ls 2>/dev/null | awk '{print \$1}' | grep -E '^containerd--vg-.*-pool-snap-[0-9]+' | while read -r dname; do
+        oc=\$("\$DMSETUP" info -c --noheadings -o open "\$dname" 2>/dev/null | tr -d ' ' || echo "1")
+        if [ "\$oc" = "0" ]; then
+          if ! grep -q "\$dname" /proc/mounts 2>/dev/null; then
+            "\$DMSETUP" remove "\$dname" 2>/dev/null || true
+            rm -f "/dev/mapper/\${dname}" 2>/dev/null || true
+          fi
+        fi
+      done
+
       \$DMSETUP ls 2>/dev/null | while read -r name majmin; do
     maj=\$(echo "\$majmin" | tr -d '()' | cut -d: -f1)
     min=\$(echo "\$majmin" | tr -d '()' | cut -d: -f2)
@@ -191,6 +203,20 @@ data:
       sleep 10
       spoke=$(echo "${NODE_NAME:-}" | sed 's/-control-plane$//')
       pool_dev="/dev/mapper/containerd--vg--${spoke}-containerd--pool"
+
+      # Prune orphaned snapshot devices with open count 0
+      nsenter -t 1 -m -u -i -n -p -- bash -c '
+        DMSETUP="/usr/sbin/dmsetup.orig"; [ ! -x "$DMSETUP" ] && DMSETUP="/usr/sbin/dmsetup"
+        if [ -x "$DMSETUP" ]; then
+          $DMSETUP ls 2>/dev/null | awk "{print \$1}" | grep -E "^containerd--vg-.*-pool-snap-[0-9]+" | while read -r dname; do
+            oc=$($DMSETUP info -c --noheadings -o open "$dname" 2>/dev/null | tr -d " " || echo "1")
+            if [ "$oc" = "0" ] && ! grep -q "$dname" /proc/mounts 2>/dev/null; then
+              $DMSETUP remove "$dname" 2>/dev/null || true
+              rm -f "/dev/mapper/${dname}" 2>/dev/null || true
+            fi
+          done
+        fi
+      ' 2>/dev/null || true
 
       if ! nsenter -t 1 -m -u -i -n -p -- ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1 || \
          ! nsenter -t 1 -m -u -i -n -p -- test -b "$pool_dev" 2>/dev/null || \

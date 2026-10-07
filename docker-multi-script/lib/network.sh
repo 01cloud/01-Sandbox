@@ -102,8 +102,26 @@ _do_phase_07_verify_root_ca_and_vip() {
   secondary_ca=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt | awk '{print $1}')
 
   if [ "$primary_ca" != "$secondary_ca" ]; then
-    log_error "Root CA MISMATCH between primaryhub and secondaryhub!"
-    exit 1
+    log_warn "Root CA MISMATCH between primaryhub and secondaryhub ($primary_ca != $secondary_ca)!"
+    log_info "Auto-healing: Synchronizing secondaryhub with primaryhub's shared Root CA..."
+
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt"
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key"
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
+    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
+
+    kind delete cluster --name secondaryhub 2>/dev/null || docker rm -f secondaryhub-control-plane 2>/dev/null || true
+    _create_kind_cluster "secondaryhub" "10.245.0.0/16" "10.97.0.0/16" "$HUB2_TRANSIT_IP" "true"
+    _install_crds "kind-secondaryhub"
+    _setup_wireguard "secondaryhub-control-plane" "secondaryhub" "$WG_HUB2_IP"
+
+    primary_ca=$(docker exec primaryhub-control-plane   sha256sum /etc/kubernetes/pki/ca.crt | awk '{print $1}')
+    secondary_ca=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt | awk '{print $1}')
+
+    if [ "$primary_ca" != "$secondary_ca" ]; then
+      log_error "Root CA MISMATCH persists after auto-healing secondaryhub!"
+      exit 1
+    fi
   fi
   log_success "Root CA synchronized (${primary_ca})."
 

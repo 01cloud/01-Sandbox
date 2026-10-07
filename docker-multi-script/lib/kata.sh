@@ -446,7 +446,7 @@ spec:
   restartPolicy: Never
   containers:
   - name: test
-    image: busybox:musl
+    image: debian:bookworm-slim
     command: ["sh", "-c", "echo 'KATA_SUCCESS' && uname -a && sleep 60"]
 EOF
 

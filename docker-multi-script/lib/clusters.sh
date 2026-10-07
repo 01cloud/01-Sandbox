@@ -451,6 +451,12 @@ _check_phase_03() {
   kubectl --context kind-primaryhub   get node primaryhub-control-plane   >/dev/null 2>&1 || return 1
   kubectl --context kind-secondaryhub get node secondaryhub-control-plane >/dev/null 2>&1 || return 1
 
+  # Ensure Root CA matches between primaryhub and secondaryhub
+  local pca sca
+  pca=$(docker exec primaryhub-control-plane   sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
+  sca=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
+  [ -n "$pca" ] && [ "$pca" == "$sca" ] || return 1
+
   docker inspect primaryhub-control-plane   --format '{{json .NetworkSettings.Networks}}' 2>/dev/null | grep -q "$TRANSIT_NET_NAME" || return 1
   docker inspect secondaryhub-control-plane --format '{{json .NetworkSettings.Networks}}' 2>/dev/null | grep -q "$TRANSIT_NET_NAME" || return 1
 
@@ -461,16 +467,22 @@ _do_phase_03_create_hub_clusters() {
   # PrimaryHub – this IS the Root CA source
   _create_kind_cluster "primaryhub" "10.244.0.0/16" "10.96.0.0/16" "$HUB1_TRANSIT_IP" "false"
 
-  # Extract shared Root CA + ServiceAccount keys from PrimaryHub only if missing
-  if [ -s "${PKI_DIR}/ca.crt" ] && [ -s "${PKI_DIR}/ca.key" ] && \
-     [ -s "${PKI_DIR}/sa.key" ] && [ -s "${PKI_DIR}/sa.pub" ] && [ "$FORCE_RECONFIGURE" != "true" ]; then
-    log_info "Shared Root CA and ServiceAccount keys already present in ${PKI_DIR} – skipping extraction."
-  else
-    log_info "Extracting shared Root CA & ServiceAccount keys from primaryhub..."
-    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt"
-    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key"
-    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
-    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
+  # Always extract shared Root CA & ServiceAccount keys from primaryhub to ensure PKI_DIR is authoritative
+  log_info "Extracting shared Root CA & ServiceAccount keys from primaryhub..."
+  docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt"
+  docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key"
+  docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
+  docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
+
+  # If secondaryhub already exists, verify its Root CA matches primaryhub. If not, recreate it.
+  if kind get clusters 2>/dev/null | grep -q '^secondaryhub$'; then
+    local pca sca
+    pca=$(docker exec primaryhub-control-plane   sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
+    sca=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
+    if [ -n "$pca" ] && [ "$pca" != "$sca" ]; then
+      log_warn "secondaryhub has mismatched Root CA ($sca != $pca) – recreating secondaryhub to sync Root CA..."
+      kind delete cluster --name secondaryhub 2>/dev/null || docker rm -f secondaryhub-control-plane 2>/dev/null || true
+    fi
   fi
 
   # SecondaryHub – mounted with PrimaryHub's shared Root CA
