@@ -76,24 +76,74 @@ SECONDARYHUB_HOST="${SECONDARYHUB_HOST:-127.0.0.1}"
 SPOKE1_HOST="${SPOKE1_HOST:-127.0.0.1}"
 SPOKE2_HOST="${SPOKE2_HOST:-127.0.0.1}"
 
+# SSH / Keypair Configuration
 SSH_USER="${SSH_USER:-ubuntu}"
 SSH_KEY_PATH="${SSH_KEY_PATH:-${HOME}/.ssh/id_rsa}"
 SSH_PORT="${SSH_PORT:-22}"
 WG_PORT="${WG_PORT:-51820}"
 
-# Expand tilde in SSH_KEY_PATH
-eval SSH_KEY_PATH="$SSH_KEY_PATH"
+# Resolve SSH user for specific target host
+_get_ssh_user_for_host() {
+  local host="$1"
+  if [ "$host" == "$PRIMARYHUB_HOST" ] && [ -n "${PRIMARYHUB_SSH_USER:-}" ]; then
+    echo "$PRIMARYHUB_SSH_USER"
+  elif [ "$host" == "$SECONDARYHUB_HOST" ] && [ -n "${SECONDARYHUB_SSH_USER:-}" ]; then
+    echo "$SECONDARYHUB_SSH_USER"
+  elif [ "$host" == "$SPOKE1_HOST" ] && [ -n "${SPOKE1_SSH_USER:-}" ]; then
+    echo "$SPOKE1_SSH_USER"
+  elif [ "$host" == "$SPOKE2_HOST" ] && [ -n "${SPOKE2_SSH_USER:-}" ]; then
+    echo "$SPOKE2_SSH_USER"
+  else
+    echo "${SSH_USER:-ubuntu}"
+  fi
+}
 
-# SSH / Remote Helpers
-SSH_OPTS=(-p "$SSH_PORT" -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR)
-SCP_OPTS=(-P "$SSH_PORT" -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR)
+# Resolve SSH private key for specific target host (supports global key or per-host key)
+_get_ssh_key_for_host() {
+  local host="$1"
+  local key=""
+  if [ "$host" == "$PRIMARYHUB_HOST" ] && [ -n "${PRIMARYHUB_SSH_KEY:-}" ]; then
+    key="$PRIMARYHUB_SSH_KEY"
+  elif [ "$host" == "$SECONDARYHUB_HOST" ] && [ -n "${SECONDARYHUB_SSH_KEY:-}" ]; then
+    key="$SECONDARYHUB_SSH_KEY"
+  elif [ "$host" == "$SPOKE1_HOST" ] && [ -n "${SPOKE1_SSH_KEY:-}" ]; then
+    key="$SPOKE1_SSH_KEY"
+  elif [ "$host" == "$SPOKE2_HOST" ] && [ -n "${SPOKE2_SSH_KEY:-}" ]; then
+    key="$SPOKE2_SSH_KEY"
+  else
+    key="${SSH_KEY_PATH:-${HOME}/.ssh/id_rsa}"
+  fi
+  eval key="$key"
+  echo "$key"
+}
+
+# Dynamic SSH and SCP command-line options per host
+_get_ssh_opts_for_host() {
+  local host="$1"
+  local key
+  key=$(_get_ssh_key_for_host "$host")
+  echo "-p ${SSH_PORT} -i ${key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR"
+}
+
+_get_scp_opts_for_host() {
+  local host="$1"
+  local key
+  key=$(_get_ssh_key_for_host "$host")
+  echo "-P ${SSH_PORT} -i ${key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR"
+}
 
 remote_exec() {
   local host="$1"; shift
   if [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ]; then
     bash -c "$*"
   else
-    ssh "${SSH_OPTS[@]}" "${SSH_USER}@${host}" "$@"
+    local user key
+    user=$(_get_ssh_user_for_host "$host")
+    key=$(_get_ssh_key_for_host "$host")
+    ssh -p "$SSH_PORT" -i "$key" \
+      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
+      "${user}@${host}" "$@"
   fi
 }
 
@@ -102,7 +152,13 @@ remote_copy_to() {
   if [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ]; then
     cp -r "$local_path" "$remote_path"
   else
-    scp "${SCP_OPTS[@]}" -r "$local_path" "${SSH_USER}@${host}:${remote_path}"
+    local user key
+    user=$(_get_ssh_user_for_host "$host")
+    key=$(_get_ssh_key_for_host "$host")
+    scp -P "$SSH_PORT" -i "$key" \
+      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
+      -r "$local_path" "${user}@${host}:${remote_path}"
   fi
 }
 
@@ -111,14 +167,26 @@ remote_copy_from() {
   if [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ]; then
     cp -r "$remote_path" "$local_path"
   else
-    scp "${SCP_OPTS[@]}" -r "${SSH_USER}@${host}:${remote_path}" "$local_path"
+    local user key
+    user=$(_get_ssh_user_for_host "$host")
+    key=$(_get_ssh_key_for_host "$host")
+    scp -P "$SSH_PORT" -i "$key" \
+      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
+      -r "${user}@${host}:${remote_path}" "$local_path"
   fi
 }
 
 remote_test_ssh() {
   local host="$1"
   [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ] && return 0
-  ssh "${SSH_OPTS[@]}" "${SSH_USER}@${host}" "echo ok" >/dev/null 2>&1
+  local user key
+  user=$(_get_ssh_user_for_host "$host")
+  key=$(_get_ssh_key_for_host "$host")
+  ssh -p "$SSH_PORT" -i "$key" \
+    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
+    -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
+    "${user}@${host}" "echo ok" >/dev/null 2>&1
 }
 
 # ── 3. Network ────────────────────────────────────────────────────────────────

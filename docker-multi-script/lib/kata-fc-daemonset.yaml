@@ -203,6 +203,7 @@ data:
       primary=$(losetup -fP --show "$IMG" 2>/dev/null || true)
     fi
 
+    rm -rf "/dev/${vg}"
     if ! vgs --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' "${vg}" >/dev/null 2>&1; then
       pvcreate -y "$primary" >/dev/null 2>&1 || true
       vgcreate -y "${vg}" "$primary" >/dev/null 2>&1 || true
@@ -332,6 +333,12 @@ data:
     else
       sed -i 's/pool_name = .*/pool_name = "'"$pool_name"'"/' /etc/containerd/config.toml 2>/dev/null || true
       sed -i 's/discard_blocks = true/discard_blocks = false/' /etc/containerd/config.toml 2>/dev/null || true
+    fi
+
+    if ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+error' >/dev/null 2>&1; then
+      echo "[RECONCILE] Detected stale devmapper snapshot metadata, resetting metadata cache..."
+      rm -rf /var/lib/containerd/io.containerd.snapshotter.v1.devmapper/*
+      changed=1
     fi
 
     if ! ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1; then

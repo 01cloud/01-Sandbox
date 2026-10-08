@@ -32,13 +32,13 @@
 _sync_remote_kubeconfig() {
   local name="$1" target_host="$2" wg_ip="$3"
   log_info "Syncing remote kubeconfig for '$name' from $target_host..."
-  remote_exec "$target_host" "kind export kubeconfig --name '$name'" 2>/dev/null || true
+  remote_exec "$target_host" "kind export kubeconfig --name '$name' --kubeconfig /tmp/kubeconfig-${name}.export" 2>/dev/null || true
   local tmp_remote_kube="/tmp/kubeconfig-${name}"
-  remote_copy_from "$target_host" "/home/${SSH_USER}/.kube/config" "$tmp_remote_kube"
+  remote_copy_from "$target_host" "/tmp/kubeconfig-${name}.export" "$tmp_remote_kube"
 
-  # Rewrite server address: replace 127.0.0.1 with wg_ip or target_host
-  local server_ip="${wg_ip}"
-  [ -z "$server_ip" ] && server_ip="${target_host}"
+  # Rewrite server address: point to target_host:6443 so orchestrator can reach it directly
+  local server_ip="${target_host}"
+  [ "$server_ip" == "127.0.0.1" ] || [ "$server_ip" == "localhost" ] && [ -n "$wg_ip" ] && server_ip="${wg_ip}"
   sed -i -E "s|server: https://127.0.0.1:[0-9]+|server: https://${server_ip}:6443|g" "$tmp_remote_kube"
   sed -i -E "s|server: https://0.0.0.0:[0-9]+|server: https://${server_ip}:6443|g" "$tmp_remote_kube"
 
