@@ -227,6 +227,15 @@ _check_phase_01() {
   cur_instances=$(cat /proc/sys/fs/inotify/max_user_instances 2>/dev/null || echo 0)
   [ "${cur_watches:-0}" -ge 524288 ] && [ "${cur_instances:-0}" -ge 8192 ] || return 1
 
+  # Check all configured remote nodes for required dependencies
+  local remote_nodes=("$PRIMARYHUB_HOST" "$SECONDARYHUB_HOST" "$SPOKE1_HOST" "$SPOKE2_HOST")
+  for host in "${remote_nodes[@]}"; do
+    [ -z "$host" ] && continue
+    [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ] && continue
+    remote_test_ssh "$host" || return 1
+    remote_exec "$host" "command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && (command -v wg >/dev/null 2>&1 || command -v wg-quick >/dev/null 2>&1) && test -d ~/01-Sandbox/.git" || return 1
+  done
+
   return 0
 }
 
@@ -461,7 +470,7 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
 
   # Load WireGuard kernel module (non-fatal; may be built-in)
   local SUDO_WG=""
-  [ "$EUID" -ne 0 ] && command -v sudo >/dev/null 2>&1 && SUDO_WG="sudo"
+  [ "$EUID" -ne 0 ] && command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null && SUDO_WG="sudo -n"
   $SUDO_WG modprobe wireguard 2>/dev/null || modprobe wireguard 2>/dev/null || true
 
   ensure_kernel_inotify_limits
@@ -483,34 +492,191 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
       exit 1
     fi
 
-    log_info "Bootstrapping prerequisites on remote node '${n_name}' (${n_host})..."
+    log_info "Checking & bootstrapping prerequisites on remote node '${n_name}' (${n_host})..."
     remote_exec "$n_host" bash -s << 'REMOTE_BOOTSTRAP_EOF'
 set -e
-export DEBIAN_FRONTEND=noninteractive
-sudo apt-get update -qq && sudo apt-get install -y -qq \
-  docker.io wireguard wireguard-tools curl jq iproute2 iptables ca-certificates >/dev/null 2>&1 || true
+
+# ── 1. Detect Operating System and Distribution ──────────────────────────────
+OS_DISTRO="unknown"
+OS_FAMILY="unknown"
+OS_NAME="Linux"
+PKG_MGR="unknown"
+
+if [ -f /etc/os-release ]; then
+  . /etc/os-release
+  OS_DISTRO="${ID:-unknown}"
+  OS_FAMILY="${ID_LIKE:-$ID}"
+  OS_NAME="${PRETTY_NAME:-$NAME}"
+fi
+
+case "$OS_DISTRO" in
+  amzn|amazon)
+    if command -v dnf >/dev/null 2>&1; then
+      PKG_MGR="dnf"
+    elif command -v yum >/dev/null 2>&1; then
+      PKG_MGR="yum"
+    fi
+    ;;
+  ubuntu|debian)
+    PKG_MGR="apt"
+    ;;
+  rhel|centos|rocky|almalinux|fedora)
+    if command -v dnf >/dev/null 2>&1; then
+      PKG_MGR="dnf"
+    else
+      PKG_MGR="yum"
+    fi
+    ;;
+  *)
+    if echo "$OS_FAMILY" | grep -qi "debian"; then
+      PKG_MGR="apt"
+    elif echo "$OS_FAMILY" | grep -qiE "fedora|rhel"; then
+      command -v dnf >/dev/null 2>&1 && PKG_MGR="dnf" || PKG_MGR="yum"
+    elif command -v apt-get >/dev/null 2>&1; then
+      PKG_MGR="apt"
+    elif command -v dnf >/dev/null 2>&1; then
+      PKG_MGR="dnf"
+    elif command -v yum >/dev/null 2>&1; then
+      PKG_MGR="yum"
+    fi
+    ;;
+esac
+
+echo "[INFO] Detected OS: ${OS_NAME} (${OS_DISTRO}) | Package Manager: ${PKG_MGR}"
+
+# ── 2. Docker Installation & Service Setup ──────────────────────────────────
+if ! command -v docker >/dev/null 2>&1; then
+  echo "[INFO] Docker not detected. Installing Docker Engine..."
+  case "$PKG_MGR" in
+    dnf|yum)
+      sudo $PKG_MGR install -y docker
+      ;;
+    apt)
+      export DEBIAN_FRONTEND=noninteractive
+      sudo apt-get update -qq
+      sudo apt-get install -y -qq docker.io ca-certificates
+      ;;
+    *)
+      echo "[ERROR] Unsupported package manager (${PKG_MGR}) for automated Docker install." >&2
+      exit 1
+      ;;
+  esac
+  echo "[OK] Docker installed successfully."
+else
+  echo "[OK] Docker is already installed ($(docker --version 2>/dev/null | head -n1)). Skipping."
+fi
+
+# Ensure Docker service is enabled and started
 sudo systemctl enable --now docker 2>/dev/null || true
 sudo systemctl start docker 2>/dev/null || true
 sudo usermod -aG docker "$USER" 2>/dev/null || true
 sudo chmod 666 /var/run/docker.sock 2>/dev/null || true
-sudo sysctl -w fs.inotify.max_user_watches=524288 >/dev/null 2>&1 || true
-sudo sysctl -w fs.inotify.max_user_instances=8192 >/dev/null 2>&1 || true
-sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
-sudo modprobe wireguard 2>/dev/null || true
 
-# Install KinD if missing
-if ! command -v kind >/dev/null 2>&1; then
-  curl -fsSLo /tmp/kind https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64
-  chmod +x /tmp/kind
-  sudo mv /tmp/kind /usr/local/bin/kind
+# ── 3. Git Installation ─────────────────────────────────────────────────────
+if ! command -v git >/dev/null 2>&1; then
+  echo "[INFO] Git not detected. Installing Git..."
+  case "$PKG_MGR" in
+    dnf|yum)
+      sudo $PKG_MGR install -y git
+      ;;
+    apt)
+      export DEBIAN_FRONTEND=noninteractive
+      sudo apt-get install -y -qq git
+      ;;
+  esac
+  echo "[OK] Git installed successfully."
+else
+  echo "[OK] Git is already installed ($(git --version 2>/dev/null)). Skipping."
 fi
 
-# Install kubectl if missing
+# ── 4. WireGuard Tools & Kernel Module ───────────────────────────────────────
+if ! command -v wg >/dev/null 2>&1 && ! command -v wg-quick >/dev/null 2>&1; then
+  echo "[INFO] WireGuard tools not detected. Installing WireGuard..."
+  case "$PKG_MGR" in
+    dnf|yum)
+      sudo $PKG_MGR install -y wireguard-tools
+      ;;
+    apt)
+      export DEBIAN_FRONTEND=noninteractive
+      sudo apt-get install -y -qq wireguard wireguard-tools
+      ;;
+  esac
+  echo "[OK] WireGuard tools installed successfully."
+else
+  echo "[OK] WireGuard tools already installed. Skipping."
+fi
+sudo modprobe wireguard 2>/dev/null || true
+
+# ── 5. KinD (Kubernetes in Docker) ───────────────────────────────────────────
+if ! command -v kind >/dev/null 2>&1; then
+  echo "[INFO] KinD not detected. Installing KinD v0.27.0..."
+  curl -fsSLo /tmp/kind "https://kind.sigs.k8s.io/dl/v0.27.0/kind-linux-amd64"
+  chmod +x /tmp/kind
+  sudo mv /tmp/kind /usr/local/bin/kind
+  echo "[OK] KinD installed successfully ($(kind --version 2>/dev/null))."
+else
+  echo "[OK] KinD is already installed ($(kind --version 2>/dev/null)). Skipping."
+fi
+
+# ── 6. Kubectl CLI ──────────────────────────────────────────────────────────
 if ! command -v kubectl >/dev/null 2>&1; then
+  echo "[INFO] kubectl not detected. Installing kubectl v1.31.0..."
   curl -fsSLo /tmp/kubectl "https://dl.k8s.io/release/v1.31.0/bin/linux/amd64/kubectl"
   chmod +x /tmp/kubectl
   sudo mv /tmp/kubectl /usr/local/bin/kubectl
+  echo "[OK] kubectl installed successfully ($(kubectl version --client 2>/dev/null | head -n1))."
+else
+  echo "[OK] kubectl is already installed ($(kubectl version --client 2>/dev/null | head -n1)). Skipping."
 fi
+
+# ── 7. Base Utilities (jq, curl, iptables, iproute) ─────────────────────────
+if ! command -v jq >/dev/null 2>&1; then
+  case "$PKG_MGR" in
+    dnf|yum) sudo $PKG_MGR install -y jq ;;
+    apt)     sudo apt-get install -y -qq jq ;;
+  esac
+fi
+
+if ! command -v iptables >/dev/null 2>&1; then
+  case "$PKG_MGR" in
+    dnf|yum) sudo $PKG_MGR install -y iptables-nft 2>/dev/null || sudo $PKG_MGR install -y iptables 2>/dev/null || true ;;
+    apt)     sudo apt-get install -y -qq iptables 2>/dev/null || true ;;
+  esac
+fi
+
+if ! command -v ip >/dev/null 2>&1; then
+  case "$PKG_MGR" in
+    dnf|yum) sudo $PKG_MGR install -y iproute ;;
+    apt)     sudo apt-get install -y -qq iproute2 ;;
+  esac
+fi
+
+# ── 8. Clone / Sync 01-Sandbox Repository ───────────────────────────────────
+REPO_TARGET="${HOME}/01-Sandbox"
+REPO_URL="https://github.com/01cloud/01-Sandbox.git"
+REPO_BRANCH="feat/production"
+
+if [ -d "${REPO_TARGET}/.git" ]; then
+  echo "[OK] 01-Sandbox repository already cloned at ${REPO_TARGET}."
+  echo "[INFO] Fetching latest changes for branch '${REPO_BRANCH}'..."
+  git -C "${REPO_TARGET}" fetch --depth 1 origin "${REPO_BRANCH}" 2>/dev/null || true
+  git -C "${REPO_TARGET}" checkout -q "${REPO_BRANCH}" 2>/dev/null || true
+else
+  echo "[INFO] Cloning 01-Sandbox repository (${REPO_BRANCH}) into ${REPO_TARGET}..."
+  git clone --depth 1 -b "${REPO_BRANCH}" "${REPO_URL}" "${REPO_TARGET}"
+  echo "[OK] 01-Sandbox repository successfully cloned to ${REPO_TARGET}."
+fi
+
+# ── 9. Kernel Networking & Inotify Parameters ──────────────────────────────
+sudo sysctl -w fs.inotify.max_user_watches=524288 >/dev/null 2>&1 || true
+sudo sysctl -w fs.inotify.max_user_instances=8192 >/dev/null 2>&1 || true
+sudo sysctl -w net.ipv4.ip_forward=1 >/dev/null 2>&1 || true
+
+if [ -d /etc/sysctl.d ]; then
+  printf "fs.inotify.max_user_watches = 524288\nfs.inotify.max_user_instances = 8192\nnet.ipv4.ip_forward = 1\n" | \
+    sudo tee /etc/sysctl.d/99-kubernetes.conf >/dev/null 2>&1 || true
+fi
+
 REMOTE_BOOTSTRAP_EOF
 
     # Hardware Virtualization Check for Spokes

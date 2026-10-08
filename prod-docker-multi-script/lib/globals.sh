@@ -76,6 +76,18 @@ SECONDARYHUB_HOST="${SECONDARYHUB_HOST:-127.0.0.1}"
 SPOKE1_HOST="${SPOKE1_HOST:-127.0.0.1}"
 SPOKE2_HOST="${SPOKE2_HOST:-127.0.0.1}"
 
+# Strip any user@ prefix from HOST variables if present, extracting default user
+for _v in PRIMARYHUB SECONDARYHUB SPOKE1 SPOKE2; do
+  _h_var="${_v}_HOST"
+  _h_val="${!_h_var:-}"
+  if [[ "$_h_val" == *"@"* ]]; then
+    _u_val="${_h_val%%@*}"
+    _h_val="${_h_val##*@}"
+    eval "${_h_var}=\"$_h_val\""
+    eval ": \"\${${_v}_SSH_USER:=$_u_val}\""
+  fi
+done
+
 # SSH / Keypair Configuration
 SSH_USER="${SSH_USER:-ubuntu}"
 SSH_KEY_PATH="${SSH_KEY_PATH:-${HOME}/.ssh/id_rsa}"
@@ -122,14 +134,14 @@ _get_ssh_opts_for_host() {
   local host="$1"
   local key
   key=$(_get_ssh_key_for_host "$host")
-  echo "-p ${SSH_PORT} -i ${key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR"
+  echo "-p ${SSH_PORT} -i ${key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR"
 }
 
 _get_scp_opts_for_host() {
   local host="$1"
   local key
   key=$(_get_ssh_key_for_host "$host")
-  echo "-P ${SSH_PORT} -i ${key} -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR"
+  echo "-P ${SSH_PORT} -i ${key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR"
 }
 
 remote_exec() {
@@ -141,6 +153,7 @@ remote_exec() {
     user=$(_get_ssh_user_for_host "$host")
     key=$(_get_ssh_key_for_host "$host")
     ssh -p "$SSH_PORT" -i "$key" \
+      -o IdentitiesOnly=yes \
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
       "${user}@${host}" "$@"
@@ -156,6 +169,7 @@ remote_copy_to() {
     user=$(_get_ssh_user_for_host "$host")
     key=$(_get_ssh_key_for_host "$host")
     scp -P "$SSH_PORT" -i "$key" \
+      -o IdentitiesOnly=yes \
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
       -r "$local_path" "${user}@${host}:${remote_path}"
@@ -171,6 +185,7 @@ remote_copy_from() {
     user=$(_get_ssh_user_for_host "$host")
     key=$(_get_ssh_key_for_host "$host")
     scp -P "$SSH_PORT" -i "$key" \
+      -o IdentitiesOnly=yes \
       -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
       -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
       -r "${user}@${host}:${remote_path}" "$local_path"
@@ -184,9 +199,69 @@ remote_test_ssh() {
   user=$(_get_ssh_user_for_host "$host")
   key=$(_get_ssh_key_for_host "$host")
   ssh -p "$SSH_PORT" -i "$key" \
+    -o IdentitiesOnly=yes \
     -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
     -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
     "${user}@${host}" "echo ok" >/dev/null 2>&1
+}
+
+_get_tunnel_port_for_cluster() {
+  case "$1" in
+    primaryhub)   echo "16443" ;;
+    secondaryhub) echo "26443" ;;
+    spoke1)       echo "36443" ;;
+    spoke2)       echo "46443" ;;
+    *)            echo "16443" ;;
+  esac
+}
+
+ensure_cluster_ssh_tunnel() {
+  local cluster="$1" target_host="$2"
+  [ -z "$target_host" ] && return 0
+  [ "$target_host" == "127.0.0.1" ] || [ "$target_host" == "localhost" ] && return 0
+
+  local local_port
+  local_port=$(_get_tunnel_port_for_cluster "$cluster")
+
+  if curl -k -m 2 "https://127.0.0.1:${local_port}/version" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  local user key
+  user=$(_get_ssh_user_for_host "$target_host")
+  key=$(_get_ssh_key_for_host "$target_host")
+
+  fuser -k "${local_port}/tcp" 2>/dev/null || true
+
+  ssh -fN \
+    -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o ConnectTimeout=10 \
+    -o BatchMode=yes \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=15 \
+    -o ServerAliveCountMax=3 \
+    -p "$SSH_PORT" -i "$key" \
+    -L "${local_port}:127.0.0.1:6443" \
+    "${user}@${target_host}" 2>/dev/null || true
+
+  local _w=0
+  while ! nc -z 127.0.0.1 "$local_port" >/dev/null 2>&1 && [ $_w -lt 10 ]; do
+    sleep 0.5
+    _w=$((_w + 1))
+  done
+}
+
+ensure_all_cluster_tunnels() {
+  [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && \
+    ensure_cluster_ssh_tunnel "primaryhub" "$PRIMARYHUB_HOST"
+  [ "$SECONDARYHUB_HOST" != "127.0.0.1" ] && [ "$SECONDARYHUB_HOST" != "localhost" ] && \
+    ensure_cluster_ssh_tunnel "secondaryhub" "$SECONDARYHUB_HOST"
+  [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && \
+    ensure_cluster_ssh_tunnel "spoke1" "$SPOKE1_HOST"
+  [ "$SPOKE2_HOST" != "127.0.0.1" ] && [ "$SPOKE2_HOST" != "localhost" ] && \
+    ensure_cluster_ssh_tunnel "spoke2" "$SPOKE2_HOST"
 }
 
 # ── 3. Network ────────────────────────────────────────────────────────────────
@@ -281,6 +356,9 @@ log_step() {
 #   Otherwise runs <do_fn>.
 run_phase() {
   local num="$1" title="$2" check_fn="$3" do_fn="$4"
+  if [ "$num" != "01" ] && [ "$num" != "02" ]; then
+    ensure_all_cluster_tunnels
+  fi
   echo -e "\n${CYAN}${BOLD}[Phase ${num}]${NC} ${title}"
   echo -e "${CYAN}$(printf '─%.0s' {1..70})${NC}"
   if [ "$FORCE_RECONFIGURE" != "true" ] && $check_fn 2>/dev/null; then

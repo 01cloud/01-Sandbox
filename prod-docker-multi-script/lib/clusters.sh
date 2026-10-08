@@ -36,14 +36,20 @@ _sync_remote_kubeconfig() {
   local tmp_remote_kube="/tmp/kubeconfig-${name}"
   remote_copy_from "$target_host" "/tmp/kubeconfig-${name}.export" "$tmp_remote_kube"
 
-  # Rewrite server address: point to target_host:6443 so orchestrator can reach it directly
-  local server_ip="${target_host}"
-  [ "$server_ip" == "127.0.0.1" ] || [ "$server_ip" == "localhost" ] && [ -n "$wg_ip" ] && server_ip="${wg_ip}"
-  sed -i -E "s|server: https://127.0.0.1:[0-9]+|server: https://${server_ip}:6443|g" "$tmp_remote_kube"
-  sed -i -E "s|server: https://0.0.0.0:[0-9]+|server: https://${server_ip}:6443|g" "$tmp_remote_kube"
+  local local_port
+  local_port=$(_get_tunnel_port_for_cluster "$name")
+  ensure_cluster_ssh_tunnel "$name" "$target_host"
 
-  # Merge into local KUBECONFIG
-  KUBECONFIG="${KUBECONFIG}:${tmp_remote_kube}" kubectl config view --flatten > /tmp/kubeconfig-merged 2>/dev/null
+  # Rewrite server address to point through local SSH tunnel
+  sed -i -E "s|server: https://[^:]+:[0-9]+|server: https://127.0.0.1:${local_port}|g" "$tmp_remote_kube"
+
+  # Clean old stale context/cluster/user from KUBECONFIG first
+  kubectl --kubeconfig "${KUBECONFIG}" config delete-context "kind-${name}" 2>/dev/null || true
+  kubectl --kubeconfig "${KUBECONFIG}" config delete-cluster "kind-${name}" 2>/dev/null || true
+  kubectl --kubeconfig "${KUBECONFIG}" config delete-user "kind-${name}" 2>/dev/null || true
+
+  # Merge into local KUBECONFIG (fresh remote config first)
+  KUBECONFIG="${tmp_remote_kube}:${KUBECONFIG}" kubectl config view --flatten > /tmp/kubeconfig-merged 2>/dev/null
   if [ -s /tmp/kubeconfig-merged ]; then
     mv /tmp/kubeconfig-merged "${KUBECONFIG}"
   fi
@@ -154,6 +160,7 @@ EOF
   if $is_remote; then
     remote_copy_to "$target_host" "$config_file" "/tmp/kind-${name}.yaml"
     remote_exec "$target_host" "kind create cluster --name '$name' --config /tmp/kind-${name}.yaml"
+    remote_exec "$target_host" "mkdir -p ~/.kube && kind export kubeconfig --name '$name' --kubeconfig ~/.kube/config 2>/dev/null || true"
     _sync_remote_kubeconfig "$name" "$target_host" "$wg_ip"
   else
     kind create cluster --name "$name" --config "$config_file"
@@ -731,7 +738,7 @@ _do_phase_10_load_custom_image() {
         log_info "$img already loaded in $hub – skipping."
       else
         log_info "Streaming $img to remote $hub ($target_host)..."
-        docker save "$img" | ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no "${SSH_USER}@${target_host}" "docker exec -i ${hub}-control-plane ctr -n k8s.io images import --local -"
+        docker save "$img" | ssh -p "$SSH_PORT" -i "$SSH_KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no "${SSH_USER}@${target_host}" "docker exec -i ${hub}-control-plane ctr -n k8s.io images import --local -"
         kubectl --context "kind-${hub}" rollout restart deployment/opensandbox-server -n opensandbox-system 2>/dev/null || true
       fi
     else
@@ -935,7 +942,7 @@ _do_phase_15d_load_scanner_images() {
             continue
           fi
           log_info "Streaming ${tag_release} to ${spoke} on ${target_host}..."
-          docker save "$tag_release" | ssh -i "$SSH_KEY_PATH" -o StrictHostKeyChecking=no "${SSH_USER}@${target_host}" "docker exec -i ${spoke}-control-plane ctr -n k8s.io images import --local -" || true
+          docker save "$tag_release" | ssh -p "$SSH_PORT" -i "$SSH_KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no "${SSH_USER}@${target_host}" "docker exec -i ${spoke}-control-plane ctr -n k8s.io images import --local -" || true
         done
       done
     else
