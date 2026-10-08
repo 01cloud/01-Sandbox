@@ -36,6 +36,24 @@ metadata:
 handler: kata-fc
 ---
 apiVersion: v1
+kind: Namespace
+metadata:
+  name: opensandbox-workloads
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: klusterlet-work-cluster-admin
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+- kind: ServiceAccount
+  name: klusterlet-work-sa
+  namespace: open-cluster-management-agent
+---
+apiVersion: v1
 kind: ConfigMap
 metadata:
   name: kata-fc-reconciler-script
@@ -51,19 +69,23 @@ data:
     echo "=================================================="
 
     run_host_bash() {
-      nsenter -t 1 -m -u -i -n -p -- /bin/bash -s
+      NODE_NAME="${NODE_NAME:-}" nsenter -t 1 -m -u -i -n -p -- /bin/bash -s
     }
 
     reconcile_node() {
       local node="${NODE_NAME:-}"
       local spoke=$(echo "$node" | sed 's/-control-plane$//')
-      local vg="containerd-vg-${spoke}"
-      local pool_name="containerd--vg--${spoke}-containerd--pool"
 
       echo "[RECONCILE] Checking node environment on ${node} (spoke: ${spoke})..."
 
-      run_host_bash << HOST_EOF
+      run_host_bash << 'HOST_EOF'
     set -e
+    node="${NODE_NAME:-}"
+    [ -z "$node" ] && node=$(hostname)
+    spoke=$(echo "$node" | sed 's/-control-plane$//')
+    vg="containerd-vg-${spoke}"
+    pool_name="containerd--vg--${spoke}-containerd--pool"
+
     # 1. Ensure LVM & thin provisioning tools exist on node
     if ! which vgs >/dev/null 2>&1; then
       echo "[RECONCILE] Installing lvm2 and thin-provisioning-tools on host node..."
@@ -76,15 +98,36 @@ data:
       sed -i 's/udev_sync = 1/udev_sync = 0/' /etc/lvm/lvm.conf 2>/dev/null || true
       sed -i 's/udev_rules = 1/udev_rules = 0/' /etc/lvm/lvm.conf 2>/dev/null || true
       if ! grep -q 'udev_sync = 0' /etc/lvm/lvm.conf 2>/dev/null; then
-    echo 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' >> /etc/lvm/lvm.conf
+        echo 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' >> /etc/lvm/lvm.conf
       fi
     fi
     mkdir -p /opt/kata/bin /opt/kata/share/kata-containers /etc/kata-containers /var/lib/containerd/io.containerd.snapshotter.v1.devmapper
 
-    # 3. Ensure containerd has devmapper plugin support
-    if ! ctr plugins ls 2>/dev/null | grep -q 'snapshotter.v1.*devmapper'; then
-      if [ -f /usr/bin/containerd ]; then
-    cp /usr/bin/containerd /usr/local/bin/containerd
+    # 3. Ensure Kata Containers static release and Firecracker exist on node
+    KATA_VER="3.18.0"
+    FC_VER="v1.11.1"
+    if [ ! -s /opt/kata/bin/containerd-shim-kata-v2 ] || [ ! -s /opt/kata/share/kata-containers/vmlinux.container ]; then
+      echo "[RECONCILE] Downloading Kata Containers static release v${KATA_VER}..."
+      which xz >/dev/null 2>&1 || apt-get install -y -qq xz-utils curl >/dev/null 2>&1 || true
+      mkdir -p /tmp/kata-dl /opt/kata
+      curl -fSL "https://github.com/kata-containers/kata-containers/releases/download/${KATA_VER}/kata-static-${KATA_VER}-amd64.tar.xz" -o /tmp/kata-dl/kata.tar.xz 2>/dev/null || true
+      if [ -s /tmp/kata-dl/kata.tar.xz ]; then
+        tar -xJf /tmp/kata-dl/kata.tar.xz -C /tmp/kata-dl 2>/dev/null || true
+        cp -r /tmp/kata-dl/opt/kata/* /opt/kata/ 2>/dev/null || true
+        rm -rf /tmp/kata-dl
+      fi
+    fi
+
+    if [ ! -s /opt/kata/bin/firecracker ]; then
+      echo "[RECONCILE] Downloading Firecracker ${FC_VER}..."
+      mkdir -p /tmp/fc-dl /opt/kata/bin
+      curl -fSL "https://github.com/firecracker-microvm/firecracker/releases/download/${FC_VER}/firecracker-${FC_VER}-x86_64.tgz" -o /tmp/fc-dl/fc.tgz 2>/dev/null || true
+      if [ -s /tmp/fc-dl/fc.tgz ]; then
+        tar -xzf /tmp/fc-dl/fc.tgz -C /tmp/fc-dl 2>/dev/null || true
+        cp "/tmp/fc-dl/release-${FC_VER}-x86_64/firecracker-${FC_VER}-x86_64" /opt/kata/bin/firecracker 2>/dev/null || true
+        cp "/tmp/fc-dl/release-${FC_VER}-x86_64/jailer-${FC_VER}-x86_64" /opt/kata/bin/jailer 2>/dev/null || true
+        chmod +x /opt/kata/bin/firecracker /opt/kata/bin/jailer 2>/dev/null || true
+        rm -rf /tmp/fc-dl
       fi
     fi
 
@@ -92,9 +135,9 @@ data:
     mkdir -p /etc/kata-containers
     if [ ! -s /etc/kata-containers/configuration.toml ]; then
       if [ -s /opt/kata/share/defaults/kata-containers/configuration-fc.toml ]; then
-    cp /opt/kata/share/defaults/kata-containers/configuration-fc.toml /etc/kata-containers/configuration.toml
+        cp /opt/kata/share/defaults/kata-containers/configuration-fc.toml /etc/kata-containers/configuration.toml
       elif [ -s /opt/kata/share/defaults/kata-containers/configuration.toml ]; then
-    cp /opt/kata/share/defaults/kata-containers/configuration.toml /etc/kata-containers/configuration.toml
+        cp /opt/kata/share/defaults/kata-containers/configuration.toml /etc/kata-containers/configuration.toml
       fi
       sed -i 's|^path = .*|path = "/usr/local/bin/firecracker"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
       sed -i 's|^jailer_path = .*|jailer_path = "/usr/local/bin/jailer"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
@@ -106,71 +149,173 @@ data:
     [ -s /opt/kata/bin/kata-runtime ] && ln -sf /opt/kata/bin/kata-runtime /usr/local/bin/kata-runtime 2>/dev/null || true
     [ -s /opt/kata/bin/kata-ctl ] && ln -sf /opt/kata/bin/kata-ctl /usr/local/bin/kata-ctl 2>/dev/null || true
 
-    # 5. Provision loop device and LVM thin pool
+    # 5. Install robust dmsetup wrapper
+    if [ ! -f /usr/sbin/dmsetup.orig ] && [ -f /usr/sbin/dmsetup ]; then
+      mv /usr/sbin/dmsetup /usr/sbin/dmsetup.orig
+      cat << 'WRAPPER_EOF' > /usr/sbin/dmsetup
+    #!/bin/sh
+    /usr/sbin/dmsetup.orig "$@"
+    ret=$?
+    if [ $ret -eq 0 ]; then
+      /usr/sbin/dmsetup.orig mknodes >/dev/null 2>&1 || true
+      /usr/sbin/dmsetup.orig ls 2>/dev/null | while read -r name majmin; do
+        maj=$(echo "$majmin" | tr -d '()' | cut -d: -f1)
+        min=$(echo "$majmin" | tr -d '()' | cut -d: -f2)
+        if [ -n "$maj" ] && [ -n "$min" ]; then
+          [ ! -e "/dev/dm-${min}" ] && mknod "/dev/dm-${min}" b "$maj" "$min" 2>/dev/null || true
+          [ ! -e "/dev/mapper/${name}" ] && ln -sf "/dev/dm-${min}" "/dev/mapper/${name}" 2>/dev/null || true
+        fi
+      done
+    fi
+    exit $ret
+    WRAPPER_EOF
+      chmod +x /usr/sbin/dmsetup
+    fi
+
+    # 6. Provision loop device and LVM thin pool
     IMG="/var/lib/containerd-pool-disk-${spoke}.img"
-    [ ! -f "\$IMG" ] && truncate -s 15G "\$IMG"
+    [ ! -f "$IMG" ] && truncate -s 15G "$IMG"
 
-    bname=\$(basename "\$IMG")
-    existing=\$(losetup -a 2>/dev/null | grep -F "\$bname" | cut -d: -f1 || true)
-    primary=\$(echo "\$existing" | head -n1)
+    bname=$(basename "$IMG")
+    existing=$(losetup -a 2>/dev/null | grep -F "$bname" | cut -d: -f1 || true)
+    primary=$(echo "$existing" | head -n1)
 
-    if [ -n "\$primary" ]; then
-      echo "\$existing" | tail -n +2 | while read -r dup; do
-    [ -n "\$dup" ] && losetup -d "\$dup" 2>/dev/null || true
+    if [ -n "$primary" ]; then
+      echo "$existing" | tail -n +2 | while read -r dup; do
+        [ -n "$dup" ] && losetup -d "$dup" 2>/dev/null || true
       done
     else
-      primary=\$(losetup -fP --show "\$IMG" 2>/dev/null || true)
+      primary=$(losetup -fP --show "$IMG" 2>/dev/null || true)
     fi
 
-    if ! vgs --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' '${vg}' >/dev/null 2>&1; then
-      pvcreate -y "\$primary" >/dev/null 2>&1 || true
-      vgcreate -y '${vg}' "\$primary" >/dev/null 2>&1 || true
-      lvcreate -y --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -W n -Z n --size 12G --thinpool containerd-pool '${vg}' >/dev/null 2>&1 || true
+    if ! vgs --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' "${vg}" >/dev/null 2>&1; then
+      pvcreate -y "$primary" >/dev/null 2>&1 || true
+      vgcreate -y "${vg}" "$primary" >/dev/null 2>&1 || true
+      lvcreate -y --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -W n -Z n --size 12G --thinpool containerd-pool "${vg}" >/dev/null 2>&1 || true
     fi
 
-    vgchange -ay --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -K '${vg}' 2>/dev/null || true
+    vgchange -ay --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -K "${vg}" >/dev/null 2>&1 || true
 
     mkdir -p /dev/mapper
     DMSETUP="/usr/sbin/dmsetup.orig"
-    [ ! -x "\$DMSETUP" ] && DMSETUP="/usr/sbin/dmsetup"
-    if [ -x "\$DMSETUP" ]; then
-      \$DMSETUP mknodes 2>/dev/null || true
+    [ ! -x "$DMSETUP" ] && DMSETUP="/usr/sbin/dmsetup"
+    if [ -x "$DMSETUP" ]; then
+      $DMSETUP mknodes 2>/dev/null || true
 
       # Prune orphaned dm thin snapshot devices that have open count == 0 and are not mounted
-      \$DMSETUP ls 2>/dev/null | awk '{print \$1}' | grep -E '^containerd--vg-.*-pool-snap-[0-9]+' | while read -r dname; do
-        oc=\$("\$DMSETUP" info -c --noheadings -o open "\$dname" 2>/dev/null | tr -d ' ' || echo "1")
-        if [ "\$oc" = "0" ]; then
-          if ! grep -q "\$dname" /proc/mounts 2>/dev/null; then
-            "\$DMSETUP" remove "\$dname" 2>/dev/null || true
-            rm -f "/dev/mapper/\${dname}" 2>/dev/null || true
+      $DMSETUP ls 2>/dev/null | awk '{print $1}' | grep -E '^containerd--vg-.*-pool-snap-[0-9]+' | while read -r dname; do
+        oc=$([ -x "$DMSETUP" ] && "$DMSETUP" info -c --noheadings -o open "$dname" 2>/dev/null | tr -d ' ' || echo "1")
+        if [ "$oc" = "0" ]; then
+          if ! grep -q "$dname" /proc/mounts 2>/dev/null; then
+            "$DMSETUP" remove "$dname" 2>/dev/null || true
+            rm -f "/dev/mapper/${dname}" 2>/dev/null || true
           fi
         fi
       done
 
-      \$DMSETUP ls 2>/dev/null | while read -r name majmin; do
-    maj=\$(echo "\$majmin" | tr -d '()' | cut -d: -f1)
-    min=\$(echo "\$majmin" | tr -d '()' | cut -d: -f2)
-    if [ -n "\$maj" ] && [ -n "\$min" ]; then
-      [ ! -e "/dev/dm-\${min}" ] && mknod "/dev/dm-\${min}" b "\$maj" "\$min" 2>/dev/null || true
-      [ ! -e "/dev/mapper/\${name}" ] && ln -sf "/dev/dm-\${min}" "/dev/mapper/\${name}" 2>/dev/null || true
-    fi
+      $DMSETUP ls 2>/dev/null | while read -r name majmin; do
+        maj=$(echo "$majmin" | tr -d '()' | cut -d: -f1)
+        min=$(echo "$majmin" | tr -d '()' | cut -d: -f2)
+        if [ -n "$maj" ] && [ -n "$min" ]; then
+          [ ! -e "/dev/dm-${min}" ] && mknod "/dev/dm-${min}" b "$maj" "$min" 2>/dev/null || true
+          [ ! -e "/dev/mapper/${name}" ] && ln -sf "/dev/dm-${min}" "/dev/mapper/${name}" 2>/dev/null || true
+        fi
       done
     fi
 
-    # 6. Configure containerd config.toml for kata-fc and devmapper
+    # 7. Install node boot persistence script and systemd drop-in
+    cat << 'SCRIPTEOF' > /usr/local/bin/init-containerd-devmapper.sh
+    #!/bin/bash
+    set -e
+    if [ -f /etc/lvm/lvm.conf ] && ! grep -q 'udev_sync = 0' /etc/lvm/lvm.conf 2>/dev/null; then
+      echo 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' >> /etc/lvm/lvm.conf
+    fi
+    for img in /var/lib/containerd-pool-disk-*.img; do
+      [ -f "" ] || continue
+      bname=""
+      existing=
+      primary=""
+      if [ -n "" ]; then
+        echo "" | tail -n +2 | while read -r dup; do
+          [ -n "" ] && losetup -d "" 2>/dev/null || true
+        done
+      else
+        losetup -fP "" 2>/dev/null || true
+      fi
+    done
+    vgscan --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' 2>/dev/null || true
+    VGS=
+    for vg in ; do
+      vgchange -ay --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -K "" 2>/dev/null || true
+    done
+    mkdir -p /dev/mapper
+    DMSETUP="/usr/sbin/dmsetup.orig"
+    [ ! -x "" ] && DMSETUP="/usr/sbin/dmsetup"
+    [ -x "" ] &&  mknodes 2>/dev/null || true
+    exit 0
+    SCRIPTEOF
+    chmod +x /usr/local/bin/init-containerd-devmapper.sh 2>/dev/null || true
+
+    cat << 'UNITEOF' > /etc/systemd/system/containerd-devmapper.service
+    [Unit]
+    Description=Ensure Loop Devices and LVM Thin Pool for Containerd Devmapper
+    DefaultDependencies=no
+    Before=containerd.service
+    After=local-fs.target
+
+    [Service]
+    Type=oneshot
+    ExecStart=/usr/local/bin/init-containerd-devmapper.sh
+    RemainAfterExit=yes
+
+    [Install]
+    WantedBy=multi-user.target containerd.service
+    UNITEOF
+
+    mkdir -p /etc/systemd/system/containerd.service.d
+    cat << 'DROPINEOF' > /etc/systemd/system/containerd.service.d/10-devmapper.conf
+    [Unit]
+    Requires=containerd-devmapper.service
+    After=containerd-devmapper.service
+
+    [Service]
+    ExecStartPre=/usr/local/bin/init-containerd-devmapper.sh
+    DROPINEOF
+
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable containerd-devmapper.service 2>/dev/null || true
+
+    # 8. Configure containerd config.toml for kata-fc and devmapper
     changed=0
     sed -i 's/discard_unpacked_layers = true/discard_unpacked_layers = false/' /etc/containerd/config.toml 2>/dev/null || true
 
     if ! grep -q 'use_local_image_pull' /etc/containerd/config.toml 2>/dev/null; then
-      printf '\n[plugins."io.containerd.cri.v1.images"]\n  use_local_image_pull = true\n' >> /etc/containerd/config.toml
+      printf '
+    [plugins."io.containerd.cri.v1.images"]
+      use_local_image_pull = true
+    ' >> /etc/containerd/config.toml
       changed=1
     fi
 
     if ! grep -q 'plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc' /etc/containerd/config.toml 2>/dev/null; then
-      printf '\n[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc]\n  runtime_type = "io.containerd.kata.v2"\n  snapshotter = "devmapper"\n\n[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc.options]\n  ConfigPath = "/etc/kata-containers/configuration.toml"\n\n[plugins."io.containerd.snapshotter.v1.devmapper"]\n  root_path = "/var/lib/containerd/io.containerd.snapshotter.v1.devmapper"\n  pool_name = "${pool_name}"\n  base_image_size = "4GB"\n  discard_blocks = false\n  fs_type = "ext4"\n' >> /etc/containerd/config.toml
+      printf '
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc]
+      runtime_type = "io.containerd.kata.v2"
+      snapshotter = "devmapper"
+
+    [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.kata-fc.options]
+      ConfigPath = "/etc/kata-containers/configuration.toml"
+
+    [plugins."io.containerd.snapshotter.v1.devmapper"]
+      root_path = "/var/lib/containerd/io.containerd.snapshotter.v1.devmapper"
+      pool_name = "'"$pool_name"'"
+      base_image_size = "4GB"
+      discard_blocks = false
+      fs_type = "ext4"
+    ' >> /etc/containerd/config.toml
       changed=1
     else
-      sed -i 's/pool_name = .*/pool_name = "${pool_name}"/' /etc/containerd/config.toml 2>/dev/null || true
+      sed -i 's/pool_name = .*/pool_name = "'"$pool_name"'"/' /etc/containerd/config.toml 2>/dev/null || true
       sed -i 's/discard_blocks = true/discard_blocks = false/' /etc/containerd/config.toml 2>/dev/null || true
     fi
 
@@ -178,12 +323,12 @@ data:
       changed=1
     fi
 
-    if [ "\$changed" -eq 1 ]; then
+    if [ "$changed" -eq 1 ]; then
       systemctl restart containerd 2>/dev/null || true
     fi
     HOST_EOF
 
-      # 7. Wait and verify devmapper status
+      # 9. Wait and verify devmapper status
       for i in $(seq 1 15); do
         if nsenter -t 1 -m -u -i -n -p -- ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1; then
           echo "[RECONCILE] Kata Firecracker + devmapper is HEALTHY on ${node}!"
@@ -218,9 +363,7 @@ data:
         fi
       ' 2>/dev/null || true
 
-      if ! nsenter -t 1 -m -u -i -n -p -- ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1 || \
-         ! nsenter -t 1 -m -u -i -n -p -- test -b "$pool_dev" 2>/dev/null || \
-         ! nsenter -t 1 -m -u -i -n -p -- lvs -o lv_attr --noheadings "containerd-vg-${spoke}/containerd-pool" 2>/dev/null | grep -q 'twi-a'; then
+      if ! nsenter -t 1 -m -u -i -n -p -- ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1 ||      ! nsenter -t 1 -m -u -i -n -p -- test -b "$pool_dev" 2>/dev/null ||      ! nsenter -t 1 -m -u -i -n -p -- lvs -o lv_attr --noheadings "containerd-vg-${spoke}/containerd-pool" 2>/dev/null | grep -q 'twi-a'; then
         echo "[HEAL] Node ${NODE_NAME:-} Kata devmapper degraded! Self-healing..."
         reconcile_node || true
       fi
@@ -250,7 +393,7 @@ spec:
       containers:
       - name: reconciler
         image: debian:bookworm-slim
-        command: ["/bin/bash", "/scripts/reconcile.sh"]
+        command: [/bin/bash, /scripts/reconcile.sh]
         env:
         - name: NODE_NAME
           valueFrom:

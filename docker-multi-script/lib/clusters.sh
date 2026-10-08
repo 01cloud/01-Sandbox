@@ -53,7 +53,7 @@ _create_kind_cluster() {
     containerPath: /etc/kubernetes/pki/sa.pub"
     fi
 
-    # Mount KVM and TUN for spoke clusters to support Kata Firecracker microVMs
+    # Mount KVM, TUN, and /opt/kata for spoke clusters to support Kata Firecracker microVMs
     if [[ "$name" =~ ^spoke ]] && [ -e "/dev/kvm" ]; then
       if [ -z "$extra_mounts" ]; then
         extra_mounts="  extraMounts:"
@@ -63,6 +63,11 @@ _create_kind_cluster() {
     containerPath: /dev/kvm
   - hostPath: /dev/net/tun
     containerPath: /dev/net/tun"
+      if [ -d "/opt/kata" ]; then
+        extra_mounts="${extra_mounts}
+  - hostPath: /opt/kata
+    containerPath: /opt/kata"
+      fi
     fi
 
     cat > "/tmp/kind-${name}.yaml" <<EOF

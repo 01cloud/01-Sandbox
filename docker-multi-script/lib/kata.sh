@@ -19,12 +19,14 @@
 _check_phase_15b() {
   local spoke
   for spoke in spoke1 spoke2; do
-    # Check RuntimeClass
-    kubectl --context "kind-${spoke}" get runtimeclass kata-fc >/dev/null 2>&1 || return 1
-    # Check kata shim is executable
-    docker exec "${spoke}-control-plane" test -x /usr/local/bin/containerd-shim-kata-v2 2>/dev/null || return 1
-    # Check containerd devmapper plugin is active and ok
-    docker exec "${spoke}-control-plane" ctr plugins ls 2>/dev/null | grep -E "devmapper\s+linux/amd64\s+ok" >/dev/null 2>&1 || return 1
+    local ctx="kind-${spoke}"
+    # Verify RuntimeClass kata-fc exists in Kubernetes API
+    kubectl --context "$ctx" get runtimeclass kata-fc >/dev/null 2>&1 || return 1
+    # Verify DaemonSet exists and at least 1 pod is Ready
+    kubectl --context "$ctx" -n kube-system get daemonset kata-fc-node-reconciler >/dev/null 2>&1 || return 1
+    local ready
+    ready=$(kubectl --context "$ctx" -n kube-system get daemonset kata-fc-node-reconciler -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "0")
+    [ "$ready" -ge 1 ] || return 1
   done
   return 0
 }
@@ -76,356 +78,29 @@ _ensure_kata_host_assets() {
 
 _configure_spoke_kata_fc() {
   local spoke="$1"
-  local cname="${spoke}-control-plane"
   local ctx="kind-${spoke}"
-  local vg_name="containerd-vg-${spoke}"
-  local pool_name="containerd--vg--${spoke}-containerd--pool"
-
-  # If Kata Firecracker is already fully configured on this spoke, skip
-  if [ "$FORCE_RECONFIGURE" != "true" ] && \
-     kubectl --context "$ctx" get runtimeclass kata-fc >/dev/null 2>&1 && \
-     docker exec "$cname" test -s /usr/local/bin/containerd-shim-kata-v2 2>/dev/null && \
-     docker exec "$cname" test -s /etc/kata-containers/configuration.toml 2>/dev/null && \
-     docker exec "$cname" ctr plugins ls 2>/dev/null | grep -E "devmapper\s+linux/amd64\s+ok" >/dev/null 2>&1; then
-    log_info "${spoke}: Kata Firecracker is already fully configured – skipping."
-    return 0
-  fi
-
-  log_info "── Configuring Kata Firecracker on ${spoke} (${cname}) ──"
-
-  # 1. Install lvm2 + thin-provisioning-tools only if not already present
-  if ! docker exec "$cname" dpkg -s lvm2 >/dev/null 2>&1 || \
-     ! docker exec "$cname" dpkg -s thin-provisioning-tools >/dev/null 2>&1; then
-    log_info "${spoke}: installing lvm2 and thin-provisioning-tools..."
-    docker exec "$cname" bash -c "
-      dpkg --purge linux-image-rt-amd64 2>/dev/null || true
-      apt-get update -qq && apt-get install -y -qq -f >/dev/null 2>&1 || true
-      apt-get install -y -qq lvm2 thin-provisioning-tools >/dev/null 2>&1 || true
-    "
-  else
-    log_info "${spoke}: lvm2 and thin-provisioning-tools already installed – skipping apt."
-  fi
-
-  # Configure LVM inside container to disable udev synchronization and monitoring (containers lack systemd-udevd & dmeventd)
-  docker exec "$cname" bash -c "
-    if [ -f /etc/lvm/lvm.conf ]; then
-      sed -i 's/udev_sync = 1/udev_sync = 0/' /etc/lvm/lvm.conf 2>/dev/null || true
-      sed -i 's/udev_rules = 1/udev_rules = 0/' /etc/lvm/lvm.conf 2>/dev/null || true
-      if ! grep -q 'udev_sync = 0' /etc/lvm/lvm.conf; then
-        echo 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' >> /etc/lvm/lvm.conf
-      fi
-    fi
-    mkdir -p /opt/kata/bin /opt/kata/share/kata-containers /etc/kata-containers /var/lib/containerd/io.containerd.snapshotter.v1.devmapper
-  "
-
-  # 2. Inject containerd binary with devmapper enabled
-  # KinD node default containerd is built with no_devmapper; inject devmapper-capable containerd
-  if ! docker exec "$cname" ctr plugins ls 2>/dev/null | grep -q 'snapshotter.v1.*devmapper'; then
-    if [ -f "/usr/bin/containerd" ]; then
-      log_info "${spoke}: copying host containerd binary (devmapper-enabled)..."
-      docker cp /usr/bin/containerd "${cname}:/usr/local/bin/containerd"
-    fi
-  fi
-
-  # 3. Copy Kata binaries and assets (skip if shim already present and non-empty)
-  if ! docker exec "$cname" test -s /opt/kata/bin/containerd-shim-kata-v2 2>/dev/null; then
-    log_info "${spoke}: copying Kata binaries and assets..."
-    docker cp "${KATA_SOURCE_DIR}/bin/containerd-shim-kata-v2" "${cname}:/opt/kata/bin/"
-    docker cp "${KATA_SOURCE_DIR}/bin/firecracker" "${cname}:/opt/kata/bin/"
-    docker cp "${KATA_SOURCE_DIR}/bin/jailer" "${cname}:/opt/kata/bin/" 2>/dev/null || true
-    docker cp "${KATA_SOURCE_DIR}/bin/kata-runtime" "${cname}:/opt/kata/bin/" 2>/dev/null || true
-    docker cp "${KATA_SOURCE_DIR}/bin/kata-ctl" "${cname}:/opt/kata/bin/" 2>/dev/null || true
-    docker cp "${KATA_SOURCE_DIR}/share/kata-containers/." "${cname}:/opt/kata/share/kata-containers/"
-    if [ -d "${KATA_SOURCE_DIR}/share/defaults/kata-containers" ]; then
-      docker exec "$cname" mkdir -p /opt/kata/share/defaults
-      docker cp "${KATA_SOURCE_DIR}/share/defaults/kata-containers" "${cname}:/opt/kata/share/defaults/"
-    fi
-  else
-    log_info "${spoke}: Kata binaries already present – skipping copy."
-  fi
-
-  # 4. Copy or generate /etc/kata-containers/configuration.toml (Firecracker requires block device rootfs, no virtio-fs)
-  if ! docker exec "$cname" test -s /etc/kata-containers/configuration.toml 2>/dev/null; then
-    log_info "${spoke}: generating kata configuration.toml..."
-    docker exec "$cname" bash -c "
-      mkdir -p /etc/kata-containers
-      if [ -f /opt/kata/share/defaults/kata-containers/configuration-fc.toml ]; then
-        cp /opt/kata/share/defaults/kata-containers/configuration-fc.toml /etc/kata-containers/configuration.toml
-      elif [ -f /opt/kata/share/defaults/kata-containers/configuration.toml ]; then
-        cp /opt/kata/share/defaults/kata-containers/configuration.toml /etc/kata-containers/configuration.toml
-      fi
-      sed -i 's|^path = .*|path = \"/usr/local/bin/firecracker\"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
-      sed -i 's|^jailer_path = .*|jailer_path = \"/usr/local/bin/jailer\"|g' /etc/kata-containers/configuration.toml 2>/dev/null || true
-    "
-  else
-    log_info "${spoke}: kata configuration.toml already exists – skipping."
-  fi
-
-  # 5. Set symlinks inside the container (ln -sf is idempotent, always safe)
-  docker exec "$cname" bash -c "
-    chmod +x /opt/kata/bin/* 2>/dev/null || true
-    ln -sf /opt/kata/bin/containerd-shim-kata-v2 /usr/local/bin/containerd-shim-kata-v2
-    ln -sf /opt/kata/bin/firecracker /usr/local/bin/firecracker
-    ln -sf /opt/kata/bin/jailer /usr/local/bin/jailer 2>/dev/null || true
-    ln -sf /opt/kata/bin/kata-runtime /usr/local/bin/kata-runtime 2>/dev/null || true
-    ln -sf /opt/kata/bin/kata-ctl /usr/local/bin/kata-ctl 2>/dev/null || true
-  "
-
-  # 6. Install robust dmsetup wrapper to create device nodes automatically without udevd
-  docker exec "$cname" bash -c '
-    if [ ! -f /usr/sbin/dmsetup.orig ]; then
-      mv /usr/sbin/dmsetup /usr/sbin/dmsetup.orig
-    fi
-    cat << "EOF" > /usr/sbin/dmsetup
-#!/bin/sh
-/usr/sbin/dmsetup.orig "$@"
-ret=$?
-if [ $ret -eq 0 ]; then
-  /usr/sbin/dmsetup.orig mknodes >/dev/null 2>&1 || true
-  /usr/sbin/dmsetup.orig ls 2>/dev/null | while read -r name majmin; do
-    maj=$(echo "$majmin" | tr -d "()" | cut -d: -f1)
-    min=$(echo "$majmin" | tr -d "()" | cut -d: -f2)
-    if [ -n "$maj" ] && [ -n "$min" ]; then
-      [ ! -e "/dev/dm-${min}" ] && mknod "/dev/dm-${min}" b "$maj" "$min" 2>/dev/null || true
-      [ ! -e "/dev/mapper/${name}" ] && ln -sf "/dev/dm-${min}" "/dev/mapper/${name}" 2>/dev/null || true
-    fi
-  done
-fi
-exit $ret
-EOF
-    chmod +x /usr/sbin/dmsetup
-  '
-
-  # 7. Provision dedicated loopback disk & LVM thin-pool per spoke
-  docker exec -i "$cname" bash <<EOF
-    IMG="/var/lib/containerd-pool-disk-${spoke}.img"
-    VG="${vg_name}"
-    POOL="containerd-pool"
-
-    # Attach loop device cleanly if not attached
-    bname=\$(basename "\$IMG")
-    existing=\$(losetup -a 2>/dev/null | grep -F "\$bname" | cut -d: -f1 || true)
-    primary=\$(echo "\$existing" | head -n1)
-
-    if [ -z "\$primary" ]; then
-      [ ! -f "\$IMG" ] && truncate -s 15G "\$IMG"
-      primary=\$(losetup -fP --show "\$IMG")
-    else
-      echo "\$existing" | tail -n +2 | while read -r dup; do
-        [ -n "\$dup" ] && losetup -d "\$dup" 2>/dev/null || true
-      done
-    fi
-
-    if ! vgs --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' "\$VG" >/dev/null 2>&1; then
-      pvcreate -y "\$primary" >/dev/null 2>&1 || true
-      vgcreate -y "\$VG" "\$primary" >/dev/null 2>&1 || true
-      lvcreate -y --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -W n -Z n --size 12G --thinpool "\$POOL" "\$VG" >/dev/null 2>&1 || true
-    fi
-    vgchange -ay --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -K "\$VG" >/dev/null 2>&1 || true
-    /usr/sbin/dmsetup mknodes >/dev/null 2>&1 || true
-EOF
-
-  # Reboot persistent init script (attached before containerd.service starts)
-  docker exec -i "$cname" tee /usr/local/bin/init-containerd-devmapper.sh >/dev/null << 'SCRIPTEOF'
-#!/bin/bash
-set -e
-
-# 0. Ensure LVM config disables udev_sync and monitoring inside container
-if [ -f /etc/lvm/lvm.conf ]; then
-  if ! grep -q 'udev_sync = 0' /etc/lvm/lvm.conf 2>/dev/null; then
-    echo 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' >> /etc/lvm/lvm.conf
-  fi
-fi
-
-# 1. Cleanly attach loop devices for any containerd disk images in /var/lib without duplicates
-for img in /var/lib/containerd-pool-disk-*.img; do
-  [ -f "$img" ] || continue
-  bname=$(basename "$img")
-  existing=$(losetup -a 2>/dev/null | grep -F "$bname" | cut -d: -f1 || true)
-  primary=$(echo "$existing" | head -n1)
-
-  if [ -n "$primary" ]; then
-    echo "$existing" | tail -n +2 | while read -r dup; do
-      [ -n "$dup" ] && losetup -d "$dup" 2>/dev/null || true
-    done
-  else
-    losetup -fP "$img" 2>/dev/null || true
-  fi
-done
-
-# 2. Determine target pool and volume group from containerd config
-REQUIRED_POOL=""
-if [ -f /etc/containerd/config.toml ]; then
-  REQUIRED_POOL=$(grep -oP 'pool_name\s*=\s*"\K[^"]+' /etc/containerd/config.toml 2>/dev/null | head -n1 || true)
-fi
-
-# 3. Scan & activate Volume Groups using udev_sync=0 and monitoring=0
-vgscan --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' 2>/dev/null || true
-VGS=$(vgs --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' --noheadings -o vg_name 2>/dev/null | tr -d ' ' | grep '^containerd-vg' || true)
-
-for vg in $VGS; do
-  vgchange -ay --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -K "$vg" 2>/dev/null || true
-done
-
-# 4. Ensure device nodes exist in /dev and /dev/mapper
-mkdir -p /dev/mapper
-DMSETUP="/usr/sbin/dmsetup.orig"
-[ ! -x "$DMSETUP" ] && DMSETUP="/usr/sbin/dmsetup"
-if [ -x "$DMSETUP" ]; then
-  $DMSETUP mknodes 2>/dev/null || true
-  $DMSETUP ls 2>/dev/null | while read -r name majmin; do
-    maj=$(echo "$majmin" | tr -d '()' | cut -d: -f1)
-    min=$(echo "$majmin" | tr -d '()' | cut -d: -f2)
-    if [ -n "$maj" ] && [ -n "$min" ]; then
-      [ ! -e "/dev/dm-${min}" ] && mknod "/dev/dm-${min}" b "$maj" "$min" 2>/dev/null || true
-      [ ! -e "/dev/mapper/${name}" ] && ln -sf "/dev/dm-${min}" "/dev/mapper/${name}" 2>/dev/null || true
-    fi
-  done
-fi
-
-# 5. Verify required pool exists if specified
-if [ -n "$REQUIRED_POOL" ]; then
-  if [ ! -b "/dev/mapper/${REQUIRED_POOL}" ]; then
-    TARGET_VG=$(echo "$REQUIRED_POOL" | sed 's/-containerd--pool$//' | sed 's/--/-/g')
-    vgchange -ay --config 'activation { udev_sync = 0 udev_rules = 0 monitoring = 0 }' -K "$TARGET_VG" 2>/dev/null || true
-    [ -x "$DMSETUP" ] && $DMSETUP mknodes 2>/dev/null || true
-    if [ -x "$DMSETUP" ]; then
-      $DMSETUP ls 2>/dev/null | while read -r name majmin; do
-        maj=$(echo "$majmin" | tr -d '()' | cut -d: -f1)
-        min=$(echo "$majmin" | tr -d '()' | cut -d: -f2)
-        if [ -n "$maj" ] && [ -n "$min" ]; then
-          [ ! -e "/dev/dm-${min}" ] && mknod "/dev/dm-${min}" b "$maj" "$min" 2>/dev/null || true
-          [ ! -e "/dev/mapper/${name}" ] && ln -sf "/dev/dm-${min}" "/dev/mapper/${name}" 2>/dev/null || true
-        fi
-      done
-    fi
-  fi
-fi
-
-exit 0
-SCRIPTEOF
-
-  docker exec -i "$cname" tee /etc/systemd/system/containerd-devmapper.service >/dev/null << 'UNITEOF'
-[Unit]
-Description=Ensure Loop Devices and LVM Thin Pool for Containerd Devmapper
-DefaultDependencies=no
-Before=containerd.service
-After=local-fs.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/bin/init-containerd-devmapper.sh
-RemainAfterExit=yes
-
-[Install]
-WantedBy=multi-user.target containerd.service
-UNITEOF
-
-  docker exec "$cname" mkdir -p /etc/systemd/system/containerd.service.d
-  docker exec -i "$cname" tee /etc/systemd/system/containerd.service.d/10-devmapper.conf >/dev/null << 'DROPINEOF'
-[Unit]
-Requires=containerd-devmapper.service
-After=containerd-devmapper.service
-
-[Service]
-ExecStartPre=/usr/local/bin/init-containerd-devmapper.sh
-DROPINEOF
-
-  docker exec "$cname" bash -c "
-    chmod +x /usr/local/bin/init-containerd-devmapper.sh
-    systemctl daemon-reload
-    systemctl enable containerd-devmapper.service
-  "
-
-  # 8. Configure containerd with devmapper snapshotter, use_local_image_pull, and kata-fc runtime handler
-  docker exec "$cname" bash -c "
-    changed=0
-    sed -i 's/discard_unpacked_layers = true/discard_unpacked_layers = false/' /etc/containerd/config.toml 2>/dev/null || true
-
-    # Enable use_local_image_pull so CRI uses traditional unpacker compatible with devmapper
-    if ! grep -q 'use_local_image_pull' /etc/containerd/config.toml; then
-      cat <<'EOF' >> /etc/containerd/config.toml
-
-[plugins.\"io.containerd.cri.v1.images\"]
-  use_local_image_pull = true
-EOF
-      changed=1
-    fi
-
-    if ! grep -q 'plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc' /etc/containerd/config.toml; then
-      cat <<'EOF' >> /etc/containerd/config.toml
-
-# Kata Firecracker Runtime (kata-fc) using devmapper snapshotter
-[plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc]
-  runtime_type = \"io.containerd.kata.v2\"
-  snapshotter = \"devmapper\"
-
-[plugins.\"io.containerd.grpc.v1.cri\".containerd.runtimes.kata-fc.options]
-  ConfigPath = \"/etc/kata-containers/configuration.toml\"
-
-# Devmapper Snapshotter Plugin for Kata
-[plugins.\"io.containerd.snapshotter.v1.devmapper\"]
-  root_path = \"/var/lib/containerd/io.containerd.snapshotter.v1.devmapper\"
-  pool_name = \"${pool_name}\"
-  base_image_size = \"4GB\"
-  discard_blocks = false
-  fs_type = \"ext4\"
-EOF
-      changed=1
-    else
-      sed -i 's/pool_name = .*/pool_name = \"${pool_name}\"/' /etc/containerd/config.toml 2>/dev/null || true
-      sed -i 's/discard_blocks = true/discard_blocks = false/' /etc/containerd/config.toml 2>/dev/null || true
-    fi
-
-    # Only restart containerd if config was modified
-    if [ \"\$changed\" = 1 ]; then
-      systemctl restart containerd
-    else
-      echo '[INFO] containerd config unchanged.'
-    fi
-  "
-
-  # Wait for containerd to become active with devmapper
-  local ready=false
-  for i in $(seq 1 30); do
-    if docker exec "$cname" ctr plugins ls 2>/dev/null | grep -E "devmapper\s+linux/amd64\s+ok" >/dev/null 2>&1; then
-      ready=true
-      break
-    fi
-    sleep 1
-  done
-
-  if [ "$ready" = true ]; then
-    log_success "Containerd devmapper plugin successfully initialized on ${spoke}."
-  else
-    log_warn "Containerd devmapper plugin check did not report ok yet on ${spoke}."
-  fi
-
-  # 9. Apply Kubernetes-native Kata Firecracker Reconciler DaemonSet & RuntimeClass
   local my_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
   local daemonset_yaml="${my_dir}/kata-fc-daemonset.yaml"
-  if [ -f "$daemonset_yaml" ]; then
-    log_info "${spoke}: applying Kubernetes-native Kata Firecracker DaemonSet..."
-    kubectl --context "$ctx" apply -f "$daemonset_yaml" >/dev/null 2>&1 || true
-    kubectl --context "$ctx" rollout status daemonset/kata-fc-node-reconciler -n kube-system --timeout=60s >/dev/null 2>&1 || true
-  else
-    # Fallback standard RuntimeClass apply
-    cat << EOF | kubectl --context "$ctx" apply -f - >/dev/null
-apiVersion: node.k8s.io/v1
-kind: RuntimeClass
-metadata:
-  name: kata-fc
-handler: kata-fc
-EOF
-  fi
-  log_success "RuntimeClass kata-fc created and reconciler DaemonSet deployed on ${spoke}."
 
-  # 10. Ensure opensandbox-workloads namespace & klusterlet execution permissions exist
-  kubectl --context "$ctx" create namespace opensandbox-workloads --dry-run=client -o yaml | kubectl --context "$ctx" apply -f - >/dev/null 2>&1 || true
-  kubectl --context "$ctx" create clusterrolebinding klusterlet-work-cluster-admin \
-    --clusterrole=cluster-admin \
-    --serviceaccount=open-cluster-management-agent:klusterlet-work-sa \
-    --dry-run=client -o yaml | kubectl --context "$ctx" apply -f - >/dev/null 2>&1 || true
+  log_info "── Configuring Kata Firecracker on ${spoke} via Kubernetes-Native DaemonSet ──"
+
+  if [ ! -f "$daemonset_yaml" ]; then
+    log_error "DaemonSet manifest not found at ${daemonset_yaml}"
+    return 1
+  fi
+
+  # 1. Declaratively apply the Kubernetes-native Kata Firecracker resources
+  log_info "${spoke}: applying kata-fc DaemonSet, RuntimeClass, RBAC & reconciler..."
+  kubectl --context "$ctx" apply -f "$daemonset_yaml"
+
+  # 2. Wait for Kubernetes to roll out and reconcile the Kata Firecracker node reconciler
+  log_info "${spoke}: waiting for kata-fc-node-reconciler DaemonSet rollout..."
+  kubectl --context "$ctx" rollout status daemonset/kata-fc-node-reconciler -n kube-system --timeout=120s
+
+  # 3. Verify RuntimeClass is active
+  kubectl --context "$ctx" get runtimeclass kata-fc >/dev/null
+
+  log_success "${spoke}: Kata Firecracker successfully reconciled via Kubernetes native DaemonSet."
 }
 
 _smoke_test_kata_fc() {
@@ -485,16 +160,16 @@ _do_phase_15b_setup_kata_firecracker() {
   _ensure_kata_host_assets
 
   for spoke in spoke1 spoke2; do
-    # Per-spoke idempotency: skip configure+test if this spoke is already fully set up
+    # Per-spoke idempotency: check if RuntimeClass and DaemonSet are active
     local ctx="kind-${spoke}"
     local already_ok=true
-    kubectl --context "$ctx" get runtimeclass kata-fc >/dev/null 2>&1             || already_ok=false
-    docker exec "${spoke}-control-plane" test -x /usr/local/bin/containerd-shim-kata-v2 2>/dev/null || already_ok=false
-    docker exec "${spoke}-control-plane" ctr plugins ls 2>/dev/null \
-      | grep -E "devmapper\s+linux/amd64\s+ok" >/dev/null 2>&1                    || already_ok=false
+    kubectl --context "$ctx" get runtimeclass kata-fc >/dev/null 2>&1 || already_ok=false
+    local ready
+    ready=$(kubectl --context "$ctx" -n kube-system get daemonset kata-fc-node-reconciler -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "0")
+    [ "$ready" -ge 1 ] || already_ok=false
 
     if [ "$already_ok" = true ] && [ "$FORCE_RECONFIGURE" != "true" ]; then
-      log_success "${spoke}: Kata Firecracker already configured – skipping."
+      log_success "${spoke}: Kata Firecracker Kubernetes DaemonSet already active – skipping."
       continue
     fi
     _configure_spoke_kata_fc "$spoke"
