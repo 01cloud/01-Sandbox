@@ -112,9 +112,18 @@ _create_kind_cluster() {
     if [ -z "$extra_mounts" ]; then
       extra_mounts="  extraMounts:"
     fi
-    extra_mounts="${extra_mounts}
+    local has_kvm=false
+    if $is_remote; then
+      remote_exec "$target_host" "test -c /dev/kvm" 2>/dev/null && has_kvm=true || true
+    else
+      [ -c /dev/kvm ] && has_kvm=true || true
+    fi
+    if [ "$has_kvm" = "true" ]; then
+      extra_mounts="${extra_mounts}
   - hostPath: /dev/kvm
-    containerPath: /dev/kvm
+    containerPath: /dev/kvm"
+    fi
+    extra_mounts="${extra_mounts}
   - hostPath: /dev/net/tun
     containerPath: /dev/net/tun"
   fi
@@ -507,6 +516,10 @@ _check_phase_03() {
     [ -s "${PKI_DIR}/ca.crt" ] && [ -s "${PKI_DIR}/ca.key" ] && \
     [ -s "${PKI_DIR}/sa.key" ] && [ -s "${PKI_DIR}/sa.pub" ] || return 1
 
+    remote_exec "$PRIMARYHUB_HOST" "kind get clusters 2>/dev/null" | grep -q '^primaryhub$' || return 1
+    remote_exec "$SECONDARYHUB_HOST" "kind get clusters 2>/dev/null" | grep -q '^secondaryhub$' || return 1
+    ensure_cluster_ssh_tunnel "primaryhub" "$PRIMARYHUB_HOST"
+    ensure_cluster_ssh_tunnel "secondaryhub" "$SECONDARYHUB_HOST"
     kubectl --context kind-primaryhub   get node primaryhub-control-plane   >/dev/null 2>&1 || return 1
     kubectl --context kind-secondaryhub get node secondaryhub-control-plane >/dev/null 2>&1 || return 1
     return 0
@@ -765,7 +778,12 @@ _check_phase_13() {
   local is_remote=false
   [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
 
-  if ! $is_remote; then
+  if $is_remote; then
+    remote_exec "$SPOKE1_HOST" "kind get clusters 2>/dev/null" | grep -q '^spoke1$' || return 1
+    remote_exec "$SPOKE2_HOST" "kind get clusters 2>/dev/null" | grep -q '^spoke2$' || return 1
+    ensure_cluster_ssh_tunnel "spoke1" "$SPOKE1_HOST"
+    ensure_cluster_ssh_tunnel "spoke2" "$SPOKE2_HOST"
+  else
     kind get clusters 2>/dev/null | grep -q '^spoke1$' || return 1
     kind get clusters 2>/dev/null | grep -q '^spoke2$' || return 1
     kind export kubeconfig --name spoke1 2>/dev/null || true
@@ -838,7 +856,11 @@ _check_phase_14() {
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
 
   if $is_remote; then
-    # Full-mesh WireGuard was already deployed and verified directly on all EC2 instances in Phase 02
+    remote_exec "$PRIMARYHUB_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
+    remote_exec "$SECONDARYHUB_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
+    remote_exec "$SPOKE1_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
+    remote_exec "$SPOKE2_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
+    remote_exec "$PRIMARYHUB_HOST" "sudo grep -q '${SPOKE1_HOST}' /etc/wireguard/wg0.conf 2>/dev/null" || return 1
     return 0
   fi
 
@@ -859,7 +881,9 @@ _do_phase_14_wireguard_on_all_clusters() {
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
 
   if $is_remote; then
-    log_success "WireGuard mesh already active on all 4 EC2 instances."
+    log_info "Ensuring WireGuard mesh configuration is up to date on all 4 EC2 instances..."
+    _do_phase_02_transit_network_and_wg_keys
+    log_success "WireGuard mesh active and synchronized across all 4 EC2 instances."
     return 0
   fi
 

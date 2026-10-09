@@ -86,26 +86,22 @@ data:
     vg="containerd-vg-${spoke}"
     pool_name="containerd--vg--${spoke}-containerd--pool"
 
-    # 1. Ensure LVM & thin provisioning tools exist on node
-    if ! which vgs >/dev/null 2>&1 || ! which thin_check >/dev/null 2>&1; then
-      echo "[RECONCILE] Installing lvm2 and thin-provisioning-tools on host node..."
+    # 1. Ensure LVM, libdevmapper, & thin provisioning tools exist on node
+    if ! which vgs >/dev/null 2>&1 || ! which thin_check >/dev/null 2>&1 || ! dpkg -l libdevmapper1.02.1 >/dev/null 2>&1; then
+      echo "[RECONCILE] Installing lvm2, thin-provisioning-tools, and libdevmapper on host node..."
       rm -f /var/lib/dpkg/lock* /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null || true
       dpkg --configure -a 2>/dev/null || true
       dpkg --purge linux-image-rt-amd64 2>/dev/null || true
-      apt-get update -qq && apt-get install -y -qq lvm2 thin-provisioning-tools >/dev/null 2>&1 || true
+      apt-get update -qq && apt-get install -y -qq lvm2 thin-provisioning-tools libdevmapper1.02.1 >/dev/null 2>&1 || true
     fi
 
-    # 1b. Ensure containerd has devmapper snapshotter support
+    # Ensure CNI plugin directory symlink exists (/usr/lib/cni -> /opt/cni/bin)
+    [ ! -e /usr/lib/cni ] && ln -sf /opt/cni/bin /usr/lib/cni 2>/dev/null || true
+
+    # 1b. Verify containerd devmapper snapshotter support
     if ! ctr plugins ls 2>/dev/null | grep -q 'snapshotter.v1.*devmapper'; then
       echo "[RECONCILE] Ensuring devmapper support in containerd..."
-      if [ -f /usr/bin/containerd ] && /usr/bin/containerd --version >/dev/null 2>&1; then
-        cp /usr/bin/containerd /usr/local/bin/containerd 2>/dev/null || true
-      elif which apt-get >/dev/null 2>&1; then
-        rm -f /var/lib/dpkg/lock* /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null || true
-        dpkg --configure -a 2>/dev/null || true
-        apt-get update -qq && apt-get install -y -qq containerd >/dev/null 2>&1 || true
-        [ -f /usr/bin/containerd ] && cp /usr/bin/containerd /usr/local/bin/containerd 2>/dev/null || true
-      fi
+      ldconfig 2>/dev/null || true
     fi
 
     # 2. Configure LVM inside node to disable udev_sync & monitoring
@@ -218,16 +214,7 @@ data:
     if [ -x "$DMSETUP" ]; then
       $DMSETUP mknodes 2>/dev/null || true
 
-      # Prune orphaned dm thin snapshot devices that have open count == 0 and are not mounted
-      $DMSETUP ls 2>/dev/null | awk '{print $1}' | grep -E '^containerd--vg-.*-pool-snap-[0-9]+' | while read -r dname; do
-        oc=$([ -x "$DMSETUP" ] && "$DMSETUP" info -c --noheadings -o open "$dname" 2>/dev/null | tr -d ' ' || echo "1")
-        if [ "$oc" = "0" ]; then
-          if ! grep -q "$dname" /proc/mounts 2>/dev/null; then
-            "$DMSETUP" remove "$dname" 2>/dev/null || true
-            rm -f "/dev/mapper/${dname}" 2>/dev/null || true
-          fi
-        fi
-      done
+
 
       $DMSETUP ls 2>/dev/null | while read -r name majmin; do
         maj=$(echo "$majmin" | tr -d '()' | cut -d: -f1)
@@ -337,7 +324,11 @@ data:
 
     if ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+error' >/dev/null 2>&1; then
       echo "[RECONCILE] Detected stale devmapper snapshot metadata, resetting metadata cache..."
+      [ -x /usr/local/bin/reset-containerd-devmapper ] && /usr/local/bin/reset-containerd-devmapper 2>/dev/null || true
       rm -rf /var/lib/containerd/io.containerd.snapshotter.v1.devmapper/*
+      for DIGEST in $(ctr -n k8s.io content ls 2>/dev/null | awk '/snapshot.devmapper/ {print $1}'); do
+        ctr -n k8s.io content label "$DIGEST" "containerd.io/gc.ref.snapshot.devmapper=" 2>/dev/null || true
+      done
       changed=1
     fi
 
@@ -371,21 +362,9 @@ data:
       spoke=$(echo "${NODE_NAME:-}" | sed 's/-control-plane$//')
       pool_dev="/dev/mapper/containerd--vg--${spoke}-containerd--pool"
 
-      # Prune orphaned snapshot devices with open count 0
-      nsenter -t 1 -m -u -i -n -p -- bash -c '
-        DMSETUP="/usr/sbin/dmsetup.orig"; [ ! -x "$DMSETUP" ] && DMSETUP="/usr/sbin/dmsetup"
-        if [ -x "$DMSETUP" ]; then
-          $DMSETUP ls 2>/dev/null | awk "{print \$1}" | grep -E "^containerd--vg-.*-pool-snap-[0-9]+" | while read -r dname; do
-            oc=$($DMSETUP info -c --noheadings -o open "$dname" 2>/dev/null | tr -d " " || echo "1")
-            if [ "$oc" = "0" ] && ! grep -q "$dname" /proc/mounts 2>/dev/null; then
-              $DMSETUP remove "$dname" 2>/dev/null || true
-              rm -f "/dev/mapper/${dname}" 2>/dev/null || true
-            fi
-          done
-        fi
-      ' 2>/dev/null || true
-
-      if ! nsenter -t 1 -m -u -i -n -p -- ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1 ||      ! nsenter -t 1 -m -u -i -n -p -- test -b "$pool_dev" 2>/dev/null ||      ! nsenter -t 1 -m -u -i -n -p -- lvs -o lv_attr --noheadings "containerd-vg-${spoke}/containerd-pool" 2>/dev/null | grep -q 'twi-a'; then
+      if ! nsenter -t 1 -m -u -i -n -p -- ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1 || \
+         ! nsenter -t 1 -m -u -i -n -p -- test -b "$pool_dev" 2>/dev/null || \
+         ! nsenter -t 1 -m -u -i -n -p -- lvs -o lv_attr --noheadings "containerd-vg-${spoke}/containerd-pool" 2>/dev/null | grep -q 'twi-a'; then
         echo "[HEAL] Node ${NODE_NAME:-} Kata devmapper degraded! Self-healing..."
         reconcile_node || true
       fi

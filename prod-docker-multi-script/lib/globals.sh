@@ -52,8 +52,8 @@ KATA_CACHE_DIR="${STATE_DIR}/kata-assets"
 GVISOR_CACHE_DIR="${STATE_DIR}/gvisor-assets"
 mkdir -p "$PKI_DIR" "$WG_DIR" "$ENVOY_DIR" "$SEC_DIR" "$KATA_CACHE_DIR" "$GVISOR_CACHE_DIR"
 
-# Pin KUBECONFIG to a known-writable path
-export KUBECONFIG="${HOME}/.kube/config"
+# Pin KUBECONFIG to an isolated production state path
+export KUBECONFIG="${STATE_DIR}/kubeconfig"
 mkdir -p "$(dirname "$KUBECONFIG")"
 touch "$KUBECONFIG" 2>/dev/null || {
   echo -e "${RED}${BOLD}[ERROR]${NC}   Cannot write to \$KUBECONFIG (${KUBECONFIG})." >&2
@@ -254,14 +254,23 @@ ensure_cluster_ssh_tunnel() {
 }
 
 ensure_all_cluster_tunnels() {
+  local phase_num="${1:-}"
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && \
     ensure_cluster_ssh_tunnel "primaryhub" "$PRIMARYHUB_HOST"
   [ "$SECONDARYHUB_HOST" != "127.0.0.1" ] && [ "$SECONDARYHUB_HOST" != "localhost" ] && \
     ensure_cluster_ssh_tunnel "secondaryhub" "$SECONDARYHUB_HOST"
-  [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && \
-    ensure_cluster_ssh_tunnel "spoke1" "$SPOKE1_HOST"
-  [ "$SPOKE2_HOST" != "127.0.0.1" ] && [ "$SPOKE2_HOST" != "localhost" ] && \
-    ensure_cluster_ssh_tunnel "spoke2" "$SPOKE2_HOST"
+
+  # Only connect to spokes starting in phase 13 (when spoke clusters are created)
+  local phase_int=0
+  if [ -n "$phase_num" ]; then
+    phase_int=$(echo "$phase_num" | sed 's/[^0-9]//g')
+  fi
+  if [ -z "$phase_num" ] || [ "${phase_int:-0}" -ge 13 ]; then
+    [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && \
+      ensure_cluster_ssh_tunnel "spoke1" "$SPOKE1_HOST"
+    [ "$SPOKE2_HOST" != "127.0.0.1" ] && [ "$SPOKE2_HOST" != "localhost" ] && \
+      ensure_cluster_ssh_tunnel "spoke2" "$SPOKE2_HOST"
+  fi
 }
 
 # ── 3. Network ────────────────────────────────────────────────────────────────
@@ -357,7 +366,7 @@ log_step() {
 run_phase() {
   local num="$1" title="$2" check_fn="$3" do_fn="$4"
   if [ "$num" != "01" ] && [ "$num" != "02" ]; then
-    ensure_all_cluster_tunnels
+    ensure_all_cluster_tunnels "$num"
   fi
   echo -e "\n${CYAN}${BOLD}[Phase ${num}]${NC} ${title}"
   echo -e "${CYAN}$(printf '─%.0s' {1..70})${NC}"

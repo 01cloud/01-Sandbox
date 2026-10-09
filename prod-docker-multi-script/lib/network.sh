@@ -25,6 +25,10 @@ _check_phase_02() {
   if [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ]; then
     remote_exec "$PRIMARYHUB_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
     remote_exec "$SECONDARYHUB_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
+    remote_exec "$SPOKE1_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
+    remote_exec "$SPOKE2_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
+    # Ensure PrimaryHub peer endpoint matches currently configured SPOKE1_HOST
+    remote_exec "$PRIMARYHUB_HOST" "sudo grep -q '${SPOKE1_HOST}' /etc/wireguard/wg0.conf 2>/dev/null" || return 1
   fi
 
   return 0
@@ -393,16 +397,87 @@ ENVOY_EOF
 
   if $is_remote; then
     log_info "Deploying Envoy Gateway on PrimaryHub EC2 (${PRIMARYHUB_HOST})..."
+    cat > "${ENVOY_DIR}/envoy.yaml" <<'ENVOY_REMOTE_EOF'
+admin:
+  address:
+    socket_address:
+      protocol: TCP
+      address: 127.0.0.1
+      port_value: 9901
+static_resources:
+  listeners:
+  - name: ingress_http_listener
+    address:
+      socket_address:
+        protocol: TCP
+        address: 0.0.0.0
+        port_value: 80
+    filter_chains:
+    - filters:
+      - name: envoy.filters.network.http_connection_manager
+        typed_config:
+          "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+          stat_prefix: ingress_http
+          codec_type: AUTO
+          stream_idle_timeout: 15s
+          route_config:
+            name: ingress_http_route
+            virtual_hosts:
+            - name: backend
+              domains: ["*"]
+              routes:
+              - match:
+                  prefix: "/"
+                route:
+                  cluster: ingress_http_cluster
+                  timeout: 120s
+                  upgrade_configs:
+                  - upgrade_type: websocket
+          http_filters:
+          - name: envoy.filters.http.router
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+  clusters:
+  - name: ingress_http_cluster
+    connect_timeout: 0.5s
+    type: STATIC
+    lb_policy: ROUND_ROBIN
+    close_connections_on_host_health_failure: true
+    health_checks:
+    - timeout: 1s
+      interval: 1s
+      unhealthy_threshold: 2
+      healthy_threshold: 2
+      tcp_health_check: {}
+    load_assignment:
+      cluster_name: ingress_http_cluster
+      endpoints:
+      - priority: 0
+        lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: 10.99.0.1
+                port_value: 30432
+      - priority: 1
+        lb_endpoints:
+        - endpoint:
+            address:
+              socket_address:
+                address: 10.99.0.2
+                port_value: 30432
+ENVOY_REMOTE_EOF
     remote_copy_to "$PRIMARYHUB_HOST" "${ENVOY_DIR}/envoy.yaml" "/tmp/envoy.yaml"
     remote_exec "$PRIMARYHUB_HOST" bash -s << REMOTE_ENVOY_EOF
 docker rm -f envoy-gateway 2>/dev/null || true
 docker run -d --name envoy-gateway \
+  --user 0:0 \
   --restart unless-stopped \
   --net host \
   -v /tmp/envoy.yaml:/etc/envoy/envoy.yaml:ro \
   $envoy_image -c /etc/envoy/envoy.yaml
 REMOTE_ENVOY_EOF
-    log_success "Envoy Gateway deployed on PrimaryHub EC2 host (Ports 80, 443, 6443)."
+    log_success "Envoy Gateway deployed on PrimaryHub EC2 host (Port 80)."
   else
     cat > "${ENVOY_DIR}/wg0.conf" <<EOF
 [Interface]

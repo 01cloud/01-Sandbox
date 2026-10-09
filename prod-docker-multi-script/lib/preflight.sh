@@ -233,7 +233,7 @@ _check_phase_01() {
     [ -z "$host" ] && continue
     [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ] && continue
     remote_test_ssh "$host" || return 1
-    remote_exec "$host" "command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && (command -v wg >/dev/null 2>&1 || command -v wg-quick >/dev/null 2>&1) && test -d ~/01-Sandbox/.git" || return 1
+    remote_exec "$host" "command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 && command -v kind >/dev/null 2>&1 && command -v kubectl >/dev/null 2>&1 && command -v helm >/dev/null 2>&1 && command -v clusteradm >/dev/null 2>&1 && command -v git >/dev/null 2>&1 && (command -v wg >/dev/null 2>&1 || command -v wg-quick >/dev/null 2>&1) && test -d ~/01-Sandbox/.git" || return 1
   done
 
   return 0
@@ -629,7 +629,46 @@ else
   echo "[OK] kubectl is already installed ($(kubectl version --client 2>/dev/null | head -n1)). Skipping."
 fi
 
-# ── 7. Base Utilities (jq, curl, iptables, iproute) ─────────────────────────
+# ── 7. Helm CLI ─────────────────────────────────────────────────────────────
+if ! command -v helm >/dev/null 2>&1; then
+  echo "[INFO] Helm not detected. Installing Helm v3..."
+  curl -fsSL https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | sudo bash >/dev/null 2>&1 || {
+    curl -fsSL https://get.helm.sh/helm-v3.16.1-linux-amd64.tar.gz | tar -xz -C /tmp
+    sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+    rm -rf /tmp/linux-amd64
+  }
+  echo "[OK] Helm installed successfully ($(helm version --short 2>/dev/null || echo 'ok'))."
+else
+  echo "[OK] Helm is already installed ($(helm version --short 2>/dev/null || echo 'ok')). Skipping."
+fi
+
+# ── 8. clusteradm CLI (OCM) ─────────────────────────────────────────────────
+if ! command -v clusteradm >/dev/null 2>&1; then
+  echo "[INFO] clusteradm not detected. Installing clusteradm..."
+  curl -fsSL https://raw.githubusercontent.com/open-cluster-management-io/clusteradm/main/install.sh | sudo bash >/dev/null 2>&1 || true
+  if ! command -v clusteradm >/dev/null 2>&1 && [ ! -x /usr/local/bin/clusteradm ]; then
+    ARCH=$(uname -m); [ "$ARCH" = "x86_64" ] && ARCH="amd64" || ARCH="arm64"
+    curl -fsSL "https://github.com/open-cluster-management-io/clusteradm/releases/download/v0.8.0/clusteradm_linux_${ARCH}.tar.gz" | sudo tar -xz -C /usr/local/bin clusteradm
+    sudo chmod +x /usr/local/bin/clusteradm 2>/dev/null || true
+  fi
+  echo "[OK] clusteradm installed successfully."
+else
+  echo "[OK] clusteradm is already installed. Skipping."
+fi
+
+# ── 9. Ensure /usr/bin symlinks and system-wide PATH ─────────────────────────
+for tool_bin in kind kubectl helm clusteradm; do
+  if [ -x "/usr/local/bin/${tool_bin}" ] && [ ! -x "/usr/bin/${tool_bin}" ]; then
+    sudo ln -sf "/usr/local/bin/${tool_bin}" "/usr/bin/${tool_bin}"
+  fi
+done
+
+if [ -d /etc/profile.d ]; then
+  echo 'export PATH=/usr/local/bin:$PATH' | sudo tee /etc/profile.d/kubernetes.sh >/dev/null 2>&1 || true
+  sudo chmod +x /etc/profile.d/kubernetes.sh 2>/dev/null || true
+fi
+
+# ── 10. Base Utilities (jq, curl, iptables, iproute) ────────────────────────
 if ! command -v jq >/dev/null 2>&1; then
   case "$PKG_MGR" in
     dnf|yum) sudo $PKG_MGR install -y jq ;;
@@ -681,11 +720,10 @@ REMOTE_BOOTSTRAP_EOF
 
     # Hardware Virtualization Check for Spokes
     if [[ "$n_name" =~ ^spoke ]]; then
-      remote_exec "$n_host" "sudo modprobe kvm kvm_intel 2>/dev/null || true"
-      if remote_exec "$n_host" "test -e /dev/kvm"; then
+      if remote_exec "$n_host" "test -e /dev/kvm" 2>/dev/null; then
         log_success "${n_name} (${n_host}): /dev/kvm verified (Hardware Virtualization ACTIVE)."
       else
-        log_warn "${n_name} (${n_host}): /dev/kvm not found! Ensure EC2 instance was launched with '--cpu-options NestedVirtualization=enabled'."
+        log_warn "${n_name} (${n_host}): /dev/kvm not found! Nested virtualization is disabled on this instance."
       fi
     fi
 

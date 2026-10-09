@@ -26,11 +26,6 @@
 _write_hub_bootstrap_kubeconfig() {
   local out="$1" server="$2" token="$3" hub_node="$4" ca_b64=""
 
-  if [ -s "$out" ] && [ "$FORCE_RECONFIGURE" != "true" ]; then
-    log_info "Bootstrap kubeconfig '$out' already exists – preserving."
-    return 0
-  fi
-
   if [ -n "$hub_node" ] && docker exec "$hub_node" test -f /etc/kubernetes/pki/ca.crt >/dev/null 2>&1; then
     ca_b64=$(docker exec "$hub_node" cat /etc/kubernetes/pki/ca.crt | base64 -w0)
   elif [ -s "${PKI_DIR}/ca.crt" ]; then
@@ -373,6 +368,8 @@ _do_phase_16_join_spokes_to_ocm() {
 
     # 4. Restart registration agent so it picks up the new MultipleHubs config immediately
     log_info "Restarting klusterlet-registration-agent on ${spoke} to apply MultipleHubs config..."
+    kubectl --context "$ctx" -n open-cluster-management-agent delete lease \
+      registration-agent-lock --ignore-not-found=true 2>/dev/null || true
     kubectl --context "$ctx" -n open-cluster-management-agent delete pod \
       -l app=klusterlet-registration-agent --ignore-not-found=true 2>/dev/null || true
     # Wait briefly for the pod to be recreated before accepting
