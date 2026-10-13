@@ -26,6 +26,10 @@ _check_phase_15b() {
     local target_host="$SPOKE1_HOST"
     [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
 
+    if $is_remote; then
+      ensure_cluster_ssh_tunnel "$spoke" "$target_host"
+    fi
+
     # Verify RuntimeClass kata-fc exists in Kubernetes API
     kubectl --context "$ctx" get runtimeclass kata-fc >/dev/null 2>&1 || return 1
     # Verify DaemonSet exists and at least 1 pod is Ready
@@ -112,53 +116,74 @@ _configure_spoke_kata_fc() {
   local target_host="$SPOKE1_HOST"
   [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
 
-  # 1. Inject devmapper-enabled containerd toolchain into spoke node
-  log_info "${spoke}: injecting devmapper containerd binary and tools..."
   if $is_remote; then
-    remote_exec "$target_host" "mkdir -p /tmp/kata-assets"
-    for f in containerd-devmapper ctr containerd-shim-runc-v2 reset-containerd-devmapper; do
-      if [ -s "${KATA_CACHE_DIR}/$f" ]; then
-        remote_copy_to "$target_host" "${KATA_CACHE_DIR}/$f" "/tmp/kata-assets/$f"
-      fi
-    done
+    ensure_cluster_ssh_tunnel "$spoke" "$target_host"
+  fi
+
+  # 1. Ensure devmapper-enabled containerd toolchain on spoke node
+  log_info "${spoke}: ensuring devmapper containerd binary and tools..."
+  if $is_remote; then
     remote_exec "$target_host" "
-      if [ -s /tmp/kata-assets/containerd-devmapper ]; then
-        docker cp /tmp/kata-assets/containerd-devmapper ${node}:/usr/local/bin/containerd
-        docker cp /tmp/kata-assets/containerd-devmapper ${node}:/usr/bin/containerd
+      mkdir -p /tmp/kata-assets-v2
+      if [ ! -s /tmp/kata-assets-v2/containerd ] || [ ! -s /tmp/kata-assets-v2/ctr ]; then
+        echo 'Building containerd v2.0.2 with devmapper natively on host...'
+        docker run --rm -v /tmp/kata-assets-v2:/out golang:1.22-bookworm bash -c '
+          set -e
+          apt-get update -qq && apt-get install -y -qq libbtrfs-dev libdevmapper-dev >/dev/null
+          git clone --depth 1 -b v2.0.2 https://github.com/containerd/containerd.git /build >/dev/null 2>&1
+          cd /build
+          make binaries BUILDTAGS=\"no_btrfs devmapper\" >/dev/null 2>&1
+          cp bin/containerd bin/ctr bin/containerd-shim-runc-v2 /out/
+          chmod +x /out/*
+        '
       fi
-      if [ -s /tmp/kata-assets/ctr ]; then
-        docker cp /tmp/kata-assets/ctr ${node}:/usr/local/bin/ctr
-        docker cp /tmp/kata-assets/ctr ${node}:/usr/bin/ctr
-      fi
-      if [ -s /tmp/kata-assets/containerd-shim-runc-v2 ]; then
-        docker cp /tmp/kata-assets/containerd-shim-runc-v2 ${node}:/usr/local/bin/containerd-shim-runc-v2
-        docker cp /tmp/kata-assets/containerd-shim-runc-v2 ${node}:/usr/bin/containerd-shim-runc-v2
-      fi
-      if [ -s /tmp/kata-assets/reset-containerd-devmapper ]; then
-        docker cp /tmp/kata-assets/reset-containerd-devmapper ${node}:/usr/local/bin/reset-containerd-devmapper
+      docker cp /tmp/kata-assets-v2/containerd ${node}:/usr/local/bin/containerd
+      docker cp /tmp/kata-assets-v2/containerd ${node}:/usr/bin/containerd
+      docker cp /tmp/kata-assets-v2/ctr ${node}:/usr/local/bin/ctr
+      docker cp /tmp/kata-assets-v2/ctr ${node}:/usr/bin/ctr
+      if [ -s /tmp/kata-assets-v2/containerd-shim-runc-v2 ]; then
+        docker cp /tmp/kata-assets-v2/containerd-shim-runc-v2 ${node}:/usr/local/bin/containerd-shim-runc-v2
+        docker cp /tmp/kata-assets-v2/containerd-shim-runc-v2 ${node}:/usr/bin/containerd-shim-runc-v2
       fi
       docker exec ${node} bash -c '
         [ ! -e /usr/lib/cni ] && ln -sf /opt/cni/bin /usr/lib/cni 2>/dev/null || true
         which vgs >/dev/null 2>&1 && dpkg -l libdevmapper1.02.1 >/dev/null 2>&1 || {
           apt-get update -qq && apt-get install -y -qq lvm2 thin-provisioning-tools libdevmapper1.02.1 >/dev/null 2>&1 || true
         }
+        systemctl restart containerd 2>/dev/null || true
+        systemctl restart kubelet 2>/dev/null || true
       '
     "
   else
-    if [ -s "${KATA_CACHE_DIR}/containerd-devmapper" ]; then
-      docker cp "${KATA_CACHE_DIR}/containerd-devmapper" "${node}:/usr/local/bin/containerd"
-      docker cp "${KATA_CACHE_DIR}/containerd-devmapper" "${node}:/usr/bin/containerd"
+    mkdir -p /tmp/kata-assets-v2
+    if [ ! -s /tmp/kata-assets-v2/containerd ] || [ ! -s /tmp/kata-assets-v2/ctr ]; then
+      for p in "${ROOT_DIR}/bin/kata" "${SANDBOX_REPO_DIR}/bin/kata" "${SANDBOX_REPO_DIR}/docker-multi-script/.sandbox-state/kata-assets"; do
+        if [ -s "$p/containerd-devmapper" ]; then
+          cp -a "$p/containerd-devmapper" /tmp/kata-assets-v2/containerd 2>/dev/null || true
+          [ -s "$p/ctr" ] && cp -a "$p/ctr" /tmp/kata-assets-v2/ 2>/dev/null || true
+          [ -s "$p/containerd-shim-runc-v2" ] && cp -a "$p/containerd-shim-runc-v2" /tmp/kata-assets-v2/ 2>/dev/null || true
+          break
+        fi
+      done
+      if [ ! -s /tmp/kata-assets-v2/containerd ]; then
+        docker run --rm -v /tmp/kata-assets-v2:/out golang:1.22-bookworm bash -c '
+          set -e
+          apt-get update -qq && apt-get install -y -qq libbtrfs-dev libdevmapper-dev >/dev/null
+          git clone --depth 1 -b v2.0.2 https://github.com/containerd/containerd.git /build >/dev/null 2>&1
+          cd /build
+          make binaries BUILDTAGS=\"no_btrfs devmapper\" >/dev/null 2>&1
+          cp bin/containerd bin/ctr bin/containerd-shim-runc-v2 /out/
+          chmod +x /out/*
+        '
+      fi
     fi
-    if [ -s "${KATA_CACHE_DIR}/ctr" ]; then
-      docker cp "${KATA_CACHE_DIR}/ctr" "${node}:/usr/local/bin/ctr"
-      docker cp "${KATA_CACHE_DIR}/ctr" "${node}:/usr/bin/ctr"
-    fi
-    if [ -s "${KATA_CACHE_DIR}/containerd-shim-runc-v2" ]; then
-      docker cp "${KATA_CACHE_DIR}/containerd-shim-runc-v2" "${node}:/usr/local/bin/containerd-shim-runc-v2"
-      docker cp "${KATA_CACHE_DIR}/containerd-shim-runc-v2" "${node}:/usr/bin/containerd-shim-runc-v2"
-    fi
-    if [ -s "${KATA_CACHE_DIR}/reset-containerd-devmapper" ]; then
-      docker cp "${KATA_CACHE_DIR}/reset-containerd-devmapper" "${node}:/usr/local/bin/reset-containerd-devmapper"
+    docker cp /tmp/kata-assets-v2/containerd "${node}:/usr/local/bin/containerd"
+    docker cp /tmp/kata-assets-v2/containerd "${node}:/usr/bin/containerd"
+    docker cp /tmp/kata-assets-v2/ctr "${node}:/usr/local/bin/ctr"
+    docker cp /tmp/kata-assets-v2/ctr "${node}:/usr/bin/ctr"
+    if [ -s /tmp/kata-assets-v2/containerd-shim-runc-v2 ]; then
+      docker cp /tmp/kata-assets-v2/containerd-shim-runc-v2 "${node}:/usr/local/bin/containerd-shim-runc-v2"
+      docker cp /tmp/kata-assets-v2/containerd-shim-runc-v2 "${node}:/usr/bin/containerd-shim-runc-v2"
     fi
 
     # 2. Ensure CNI symlink and host dependencies
@@ -167,6 +192,8 @@ _configure_spoke_kata_fc() {
       which vgs >/dev/null 2>&1 && dpkg -l libdevmapper1.02.1 >/dev/null 2>&1 || {
         apt-get update -qq && apt-get install -y -qq lvm2 thin-provisioning-tools libdevmapper1.02.1 >/dev/null 2>&1 || true
       }
+      systemctl restart containerd 2>/dev/null || true
+      systemctl restart kubelet 2>/dev/null || true
     '
   fi
 
@@ -204,6 +231,15 @@ _smoke_test_kata_fc() {
   local spoke="$1"
   local ctx="kind-${spoke}"
   local pod_name="kata-fc-smoke-${spoke}"
+
+  local is_remote=false
+  [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
+  local target_host="$SPOKE1_HOST"
+  [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
+
+  if $is_remote; then
+    ensure_cluster_ssh_tunnel "$spoke" "$target_host"
+  fi
 
   log_info "Running Kata Firecracker smoke test on ${spoke}..."
 
@@ -262,12 +298,25 @@ _do_phase_15b_setup_kata_firecracker() {
   for spoke in spoke1 spoke2; do
     # Per-spoke idempotency: check if RuntimeClass and DaemonSet are active
     local ctx="kind-${spoke}"
+    local is_remote=false
+    [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
+    local target_host="$SPOKE1_HOST"
+    [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
+
+    if $is_remote; then
+      ensure_cluster_ssh_tunnel "$spoke" "$target_host"
+    fi
+
     local already_ok=true
     kubectl --context "$ctx" get runtimeclass kata-fc >/dev/null 2>&1 || already_ok=false
     local ready
     ready=$(kubectl --context "$ctx" -n kube-system get daemonset kata-fc-node-reconciler -o jsonpath='{.status.numberReady}' 2>/dev/null || echo "0")
     [ "$ready" -ge 1 ] || already_ok=false
-    docker exec "${spoke}-control-plane" ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1 || already_ok=false
+    if $is_remote; then
+      remote_exec "$target_host" "docker exec ${spoke}-control-plane ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok'" >/dev/null 2>&1 || already_ok=false
+    else
+      docker exec "${spoke}-control-plane" ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1 || already_ok=false
+    fi
 
     if [ "$already_ok" = true ] && [ "$FORCE_RECONFIGURE" != "true" ]; then
       log_success "${spoke}: Kata Firecracker Kubernetes DaemonSet already active – skipping."

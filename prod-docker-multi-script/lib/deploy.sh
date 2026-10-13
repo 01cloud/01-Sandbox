@@ -164,6 +164,17 @@ _do_phase_11_primaryhub_deploy() {
       -n opensandbox-system --timeout=120s || true
   fi
 
+  local is_remote=false
+  [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
+  if $is_remote; then
+    remote_exec "$PRIMARYHUB_HOST" bash -s << 'ROUTE_EOF'
+local_kind_ip=\$(docker inspect primaryhub-control-plane -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || true)
+if [ -n "\$local_kind_ip" ]; then
+  sudo ip route replace 172.30.0.200/32 via "\$local_kind_ip" 2>/dev/null || true
+fi
+ROUTE_EOF
+  fi
+
   log_success "PrimaryHub full stack deployed."
 }
 
@@ -190,7 +201,13 @@ _check_phase_12() {
     -o jsonpath='{.status.phase}' 2>/dev/null | grep -q "Running" || return 1
 
   [ -s "${SEC_DIR}/postgresql-secondary-cluster.yaml" ] || return 1
-  docker exec secondaryhub-control-plane test -f /root/postgresql-secondary-cluster.yaml || return 1
+  local is_remote=false
+  [ "$SECONDARYHUB_HOST" != "127.0.0.1" ] && [ "$SECONDARYHUB_HOST" != "localhost" ] && is_remote=true
+  if $is_remote; then
+    remote_exec "$SECONDARYHUB_HOST" "docker exec secondaryhub-control-plane test -f /root/postgresql-secondary-cluster.yaml" || return 1
+  else
+    docker exec secondaryhub-control-plane test -f /root/postgresql-secondary-cluster.yaml || return 1
+  fi
 
   return 0
 }
@@ -305,8 +322,18 @@ _do_phase_12_secondaryhub_deploy() {
 
   # Pre-render the CNPG re-clone manifest for use by the failover controller only if missing
   mkdir -p "$SEC_DIR"
+  local is_remote=false
+  [ "$SECONDARYHUB_HOST" != "127.0.0.1" ] && [ "$SECONDARYHUB_HOST" != "localhost" ] && is_remote=true
+
+  local manifest_present=false
+  if $is_remote; then
+    remote_exec "$SECONDARYHUB_HOST" "docker exec secondaryhub-control-plane test -f /root/postgresql-secondary-cluster.yaml" >/dev/null 2>&1 && manifest_present=true
+  else
+    docker exec secondaryhub-control-plane test -f /root/postgresql-secondary-cluster.yaml >/dev/null 2>&1 && manifest_present=true
+  fi
+
   if [ -s "${SEC_DIR}/postgresql-secondary-cluster.yaml" ] && \
-     docker exec secondaryhub-control-plane test -f /root/postgresql-secondary-cluster.yaml 2>/dev/null && \
+     [ "$manifest_present" = true ] && \
      [ "$FORCE_RECONFIGURE" != "true" ]; then
     log_info "CNPG re-clone manifest already generated and copied to secondaryhub – skipping."
   else
@@ -321,8 +348,22 @@ _do_phase_12_secondaryhub_deploy() {
       --set apiServer.failoverController.primaryHost="${WG_HUB1_IP}" \
       --set apiServer.failoverController.primaryPort=30432 \
       > "${SEC_DIR}/postgresql-secondary-cluster.yaml"
-    docker cp "${SEC_DIR}/postgresql-secondary-cluster.yaml" \
-      secondaryhub-control-plane:/root/postgresql-secondary-cluster.yaml 2>/dev/null || true
+    if $is_remote; then
+      remote_copy_to "$SECONDARYHUB_HOST" "${SEC_DIR}/postgresql-secondary-cluster.yaml" "/tmp/postgresql-secondary-cluster.yaml"
+      remote_exec "$SECONDARYHUB_HOST" "docker cp /tmp/postgresql-secondary-cluster.yaml secondaryhub-control-plane:/root/postgresql-secondary-cluster.yaml && rm -f /tmp/postgresql-secondary-cluster.yaml" 2>/dev/null || true
+    else
+      docker cp "${SEC_DIR}/postgresql-secondary-cluster.yaml" \
+        secondaryhub-control-plane:/root/postgresql-secondary-cluster.yaml 2>/dev/null || true
+    fi
+  fi
+
+  if $is_remote; then
+    remote_exec "$SECONDARYHUB_HOST" bash -s << 'ROUTE_EOF'
+local_kind_ip=\$(docker inspect secondaryhub-control-plane -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || true)
+if [ -n "\$local_kind_ip" ]; then
+  sudo ip route replace 172.30.0.201/32 via "\$local_kind_ip" 2>/dev/null || true
+fi
+ROUTE_EOF
   fi
 
   log_success "SecondaryHub full stack deployed."

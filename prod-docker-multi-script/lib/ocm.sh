@@ -25,10 +25,18 @@
 # Args: <out-file> <server-url> <token> <hub-node-name>
 _write_hub_bootstrap_kubeconfig() {
   local out="$1" server="$2" token="$3" hub_node="$4" ca_b64=""
+  local is_remote=false
+  [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
 
-  if [ -n "$hub_node" ] && docker exec "$hub_node" test -f /etc/kubernetes/pki/ca.crt >/dev/null 2>&1; then
+  if $is_remote; then
+    local hub_host="$PRIMARYHUB_HOST"
+    [ "$hub_node" == "secondaryhub-control-plane" ] && hub_host="$SECONDARYHUB_HOST"
+    ca_b64=$(remote_exec "$hub_host" "docker exec '$hub_node' cat /etc/kubernetes/pki/ca.crt 2>/dev/null" | base64 -w0)
+  elif [ -n "$hub_node" ] && docker exec "$hub_node" test -f /etc/kubernetes/pki/ca.crt >/dev/null 2>&1; then
     ca_b64=$(docker exec "$hub_node" cat /etc/kubernetes/pki/ca.crt | base64 -w0)
-  elif [ -s "${PKI_DIR}/ca.crt" ]; then
+  fi
+
+  if [ -z "$ca_b64" ] && [ -s "${PKI_DIR}/ca.crt" ]; then
     ca_b64=$(base64 -w0 < "${PKI_DIR}/ca.crt")
   fi
 
@@ -184,6 +192,12 @@ _ensure_hub_apiserver_sans() {
 }
 
 _check_phase_16() {
+  local is_remote=false
+  [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
+  if $is_remote; then
+    ensure_all_cluster_tunnels 16
+  fi
+
   local spoke avail joined
   for spoke in spoke1 spoke2; do
     avail=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
@@ -221,9 +235,15 @@ _do_phase_16_join_spokes_to_ocm() {
   fi
 
   # Ensure PKI_DIR ca.crt is backed up if present on primaryhub
-  if [ ! -s "${PKI_DIR}/ca.crt" ] && docker exec primaryhub-control-plane test -f /etc/kubernetes/pki/ca.crt >/dev/null 2>&1; then
-    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt" 2>/dev/null || true
-    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key" 2>/dev/null || true
+  if [ ! -s "${PKI_DIR}/ca.crt" ]; then
+    if $is_remote; then
+      remote_exec "$PRIMARYHUB_HOST" "docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt /tmp/ca.crt && docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key /tmp/ca.key" 2>/dev/null || true
+      remote_copy_from "$PRIMARYHUB_HOST" "/tmp/ca.crt" "${PKI_DIR}/ca.crt" 2>/dev/null || true
+      remote_copy_from "$PRIMARYHUB_HOST" "/tmp/ca.key" "${PKI_DIR}/ca.key" 2>/dev/null || true
+    elif docker exec primaryhub-control-plane test -f /etc/kubernetes/pki/ca.crt >/dev/null 2>&1; then
+      docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt" 2>/dev/null || true
+      docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key" 2>/dev/null || true
+    fi
   fi
 
   # Write bootstrap kubeconfigs (index 0 = primary priority), pulling live CA directly from each hub
@@ -231,7 +251,17 @@ _do_phase_16_join_spokes_to_ocm() {
   _write_hub_bootstrap_kubeconfig "${STATE_DIR}/secondaryhub-bootstrap.kubeconfig" "$hub2_url" "$hub2_token" "secondaryhub-control-plane"
 
   for spoke in spoke1 spoke2; do
-    kind export kubeconfig --name "$spoke" 2>/dev/null || true
+    local is_remote=false
+    [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
+    local target_spoke_host="$SPOKE1_HOST"
+    [ "$spoke" == "spoke2" ] && target_spoke_host="$SPOKE2_HOST"
+
+    if $is_remote; then
+      ensure_cluster_ssh_tunnel "$spoke" "$target_spoke_host"
+      _sync_remote_kubeconfig "$spoke" "$target_spoke_host"
+    else
+      kind export kubeconfig --name "$spoke" 2>/dev/null || true
+    fi
     local ctx="kind-${spoke}"
     log_info "── ${spoke} ──"
 
@@ -290,12 +320,15 @@ _do_phase_16_join_spokes_to_ocm() {
     if ! kubectl --context "$ctx" get klusterlet klusterlet >/dev/null 2>&1; then
       log_info "Running clusteradm join for ${spoke} (initial bootstrap via primaryhub)..."
       if $is_remote; then
-        clusteradm join \
-          --context "$ctx" \
-          --hub-token "${hub1_token}" \
-          --hub-apiserver "${hub1_url}" \
-          --cluster-name "${spoke}" \
-          --ca-file "${PKI_DIR}/ca.crt" || log_warn "clusteradm join returned non-zero; continuing to verify."
+        log_info "${spoke}: streaming authentic Root CA directly from primaryhub to ${spoke}..."
+        remote_exec "$PRIMARYHUB_HOST" "docker exec primaryhub-control-plane cat /etc/kubernetes/pki/ca.crt" | \
+          remote_exec "$target_spoke_host" "cat > /tmp/ca.crt && chmod 644 /tmp/ca.crt"
+
+        remote_exec "$target_spoke_host" "clusteradm join \
+          --hub-token '${hub1_token}' \
+          --hub-apiserver '${hub1_url}' \
+          --cluster-name '${spoke}' \
+          --ca-file '/tmp/ca.crt'" || log_warn "clusteradm join returned non-zero; continuing to verify."
       else
         if ! docker exec "${spoke}-control-plane" test -x /usr/local/bin/clusteradm; then
           docker cp "$(command -v clusteradm)" "${spoke}-control-plane:/usr/local/bin/clusteradm"
@@ -368,10 +401,10 @@ _do_phase_16_join_spokes_to_ocm() {
 
     # 4. Restart registration agent so it picks up the new MultipleHubs config immediately
     log_info "Restarting klusterlet-registration-agent on ${spoke} to apply MultipleHubs config..."
-    kubectl --context "$ctx" -n open-cluster-management-agent delete lease \
-      registration-agent-lock --ignore-not-found=true 2>/dev/null || true
+    kubectl --context "$ctx" -n open-cluster-management-agent rollout restart deployment \
+      klusterlet-registration-agent 2>/dev/null || true
     kubectl --context "$ctx" -n open-cluster-management-agent delete pod \
-      -l app=klusterlet-registration-agent --ignore-not-found=true 2>/dev/null || true
+      -l app=klusterlet-registration-agent --wait=false --request-timeout=5s --ignore-not-found=true 2>/dev/null || true
     # Wait briefly for the pod to be recreated before accepting
     sleep 5
 

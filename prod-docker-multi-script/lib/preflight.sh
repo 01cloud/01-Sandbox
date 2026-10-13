@@ -176,6 +176,53 @@ ensure_sandbox_repo() {
   fi
 }
 
+# Ensure 01-Sandbox repository is available on remote EC2 host for in-instance Docker image builds.
+# Args: <target-host>
+ensure_remote_sandbox_repo() {
+  local target_host="$1"
+  [ -z "$target_host" ] || [ "$target_host" == "127.0.0.1" ] || [ "$target_host" == "localhost" ] && return 0
+
+  local user
+  user=$(_get_ssh_user_for_host "$target_host")
+  local remote_repo_dir="/home/${user}/01-Sandbox"
+
+  # 1. Check if already present on target EC2 instance with valid Dockerfile
+  if remote_exec "$target_host" "test -d '${remote_repo_dir}/opensandbox-server/docker-build' -a -f '${remote_repo_dir}/opensandbox-server/docker-build/Dockerfile'"; then
+    log_info "01-Sandbox repository already present on $target_host at ${remote_repo_dir}."
+    return 0
+  fi
+
+  log_info "Ensuring 01-Sandbox repository is cloned on remote EC2 host $target_host (${remote_repo_dir})..."
+  ensure_sandbox_repo || log_warn "Local repository clone check deferred."
+
+  local repo_url="${REPO_URL:-git@github.com:01cloud/01-Sandbox.git}"
+  local repo_branch="${REPO_BRANCH:-feat/production}"
+
+  # 2. Try git clone directly on the remote EC2 instance
+  local clone_cmd="GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' git clone --depth 1 -b '${repo_branch}' '${repo_url}' '${remote_repo_dir}' 2>/dev/null || git clone --depth 1 -b '${repo_branch}' 'https://github.com/01cloud/01-Sandbox.git' '${remote_repo_dir}' 2>/dev/null"
+  if remote_exec "$target_host" "$clone_cmd"; then
+    if remote_exec "$target_host" "test -f '${remote_repo_dir}/opensandbox-server/docker-build/Dockerfile'"; then
+      log_success "01-Sandbox repository cloned successfully on $target_host."
+      return 0
+    fi
+  fi
+
+  # 3. Fallback: Fast stream from local SANDBOX_REPO_DIR (excluding large build caches, .git, and .venv)
+  log_info "Fast-syncing 01-Sandbox repository from orchestrator to $target_host..."
+  remote_exec "$target_host" "mkdir -p '${remote_repo_dir}'"
+  tar --exclude=".git" --exclude=".venv" --exclude="__pycache__" --exclude=".pytest_cache" \
+      -czf - -C "${SANDBOX_REPO_DIR}" . | \
+      remote_pipe_to "$target_host" "tar -xzf - -C '${remote_repo_dir}'"
+
+  if remote_exec "$target_host" "test -f '${remote_repo_dir}/opensandbox-server/docker-build/Dockerfile'"; then
+    log_success "01-Sandbox repository synchronized successfully on $target_host."
+    return 0
+  else
+    log_error "Failed to establish 01-Sandbox repository on $target_host!"
+    return 1
+  fi
+}
+
 # Set OCM and CNPG admission webhooks to failurePolicy=Ignore so that webhook
 # pods spinning up during bootstrap do not deadlock pending API requests.
 # Args: <context>
@@ -485,10 +532,30 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
       continue
     fi
 
-    log_info "Connecting to remote node '${n_name}' (${n_host}) via SSH..."
-    if ! remote_test_ssh "$n_host"; then
-      log_error "SSH connection to ${n_name} (${n_host}) failed!"
-      log_error "Verify SSH_KEY_PATH (${SSH_KEY_PATH}), SSH_USER (${SSH_USER}), and AWS Security Group Port 22."
+    if [ "${USE_SSM:-true}" == "true" ]; then
+      ensure_node_ssm_access "$n_host"
+    fi
+
+    local conn_label="SSH"
+    [ "${USE_SSM:-true}" == "true" ] && conn_label="AWS SSM Session Manager"
+    log_info "Connecting to remote node '${n_name}' (${n_host}) via ${conn_label}..."
+
+    local connected=false
+    for attempt in $(seq 1 6); do
+      if remote_test_ssh "$n_host"; then
+        connected=true
+        break
+      fi
+      sleep 2
+    done
+
+    if ! $connected; then
+      log_error "Connection to ${n_name} (${n_host}) failed!"
+      if [ "${USE_SSM:-true}" == "true" ]; then
+        log_error "Ensure AWS CLI credentials, session-manager-plugin, and SSM agent on the instance are active."
+      else
+        log_error "Verify SSH_KEY_PATH (${SSH_KEY_PATH}), SSH_USER (${SSH_USER}), and AWS Security Group Port 22."
+      fi
       exit 1
     fi
 

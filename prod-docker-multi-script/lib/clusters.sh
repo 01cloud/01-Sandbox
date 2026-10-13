@@ -55,6 +55,12 @@ _sync_remote_kubeconfig() {
   fi
 }
 
+_ensure_systemwide_kubeconfig() {
+  local name="$1" target_host="$2"
+  log_info "Configuring system-wide kubeconfig on '$target_host' for '$name'..."
+  remote_exec "$target_host" "sudo kind export kubeconfig --name '$name' --kubeconfig /etc/kubernetes/admin.conf 2>/dev/null || true; sudo chmod 644 /etc/kubernetes/admin.conf 2>/dev/null || true; echo 'export KUBECONFIG=/etc/kubernetes/admin.conf' | sudo tee /etc/profile.d/kubeconfig.sh >/dev/null; sudo chmod 644 /etc/profile.d/kubeconfig.sh; sudo mkdir -p /home/ssm-user/.kube /home/ec2-user/.kube /root/.kube; sudo cp /etc/kubernetes/admin.conf /home/ssm-user/.kube/config 2>/dev/null || true; sudo cp /etc/kubernetes/admin.conf /home/ec2-user/.kube/config 2>/dev/null || true; sudo cp /etc/kubernetes/admin.conf /root/.kube/config 2>/dev/null || true; sudo chown -R ssm-user:ssm-user /home/ssm-user/.kube 2>/dev/null || true; sudo chown -R ec2-user:ec2-user /home/ec2-user/.kube 2>/dev/null || true"
+}
+
 _create_kind_cluster() {
   local name="$1" pod_subnet="$2" svc_subnet="$3" transit_ip="$4"
   local use_shared_ca="${5:-false}"
@@ -70,9 +76,15 @@ _create_kind_cluster() {
 
   if $is_remote; then
     if remote_exec "$target_host" "kind get clusters 2>/dev/null" | grep -q "^${name}$"; then
-      log_info "Remote KinD cluster '$name' on '$target_host' already exists – syncing kubeconfig."
-      _sync_remote_kubeconfig "$name" "$target_host" "$wg_ip"
-      return 0
+      if remote_exec "$target_host" "docker ps --filter name=${name}-control-plane --format '{{.Names}}' 2>/dev/null" | grep -q "^${name}-control-plane$"; then
+        log_info "Remote KinD cluster '$name' on '$target_host' already exists and is running – syncing kubeconfig."
+        _sync_remote_kubeconfig "$name" "$target_host" "$wg_ip"
+        _ensure_systemwide_kubeconfig "$name" "$target_host"
+        return 0
+      else
+        log_warn "Remote KinD cluster '$name' on '$target_host' exists in metadata but control-plane container is down/missing – recreating..."
+        remote_exec "$target_host" "kind delete cluster --name '$name' 2>/dev/null || docker rm -f ${name}-control-plane 2>/dev/null || true"
+      fi
     fi
     log_info "Creating remote KinD cluster '$name' on $target_host (Pod:$pod_subnet  Svc:$svc_subnet)..."
   else
@@ -90,11 +102,25 @@ _create_kind_cluster() {
     local pki_remote_dir="${PKI_DIR}"
     if $is_remote; then
       pki_remote_dir="/tmp/pki"
-      remote_exec "$target_host" "mkdir -p /tmp/pki"
-      remote_copy_to "$target_host" "${PKI_DIR}/ca.crt" "/tmp/pki/ca.crt"
-      remote_copy_to "$target_host" "${PKI_DIR}/ca.key" "/tmp/pki/ca.key"
-      remote_copy_to "$target_host" "${PKI_DIR}/sa.key" "/tmp/pki/sa.key"
-      remote_copy_to "$target_host" "${PKI_DIR}/sa.pub" "/tmp/pki/sa.pub"
+      # Purge any stale root-owned directories from /tmp/pki created by previous Docker bind mounts
+      remote_exec "$target_host" "sudo rm -rf /tmp/pki && sudo mkdir -p /tmp/pki && sudo chown -R \$(id -u):\$(id -g) /tmp/pki && chmod 700 /tmp/pki"
+      for keyfile in ca.crt ca.key sa.key sa.pub; do
+        if [ -s "${PKI_DIR}/$keyfile" ]; then
+          remote_copy_to "$target_host" "${PKI_DIR}/$keyfile" "/tmp/pki/$keyfile"
+        else
+          remote_exec "$PRIMARYHUB_HOST" "docker exec primaryhub-control-plane cat /etc/kubernetes/pki/$keyfile 2>/dev/null" | \
+            remote_exec "$target_host" "cat > /tmp/pki/$keyfile"
+        fi
+      done
+      remote_exec "$target_host" "chmod 600 /tmp/pki/ca.key /tmp/pki/sa.key 2>/dev/null || true; chmod 644 /tmp/pki/ca.crt /tmp/pki/sa.pub 2>/dev/null || true"
+
+      # Strictly verify on target host that all PKI files are non-empty regular files (NOT directories!)
+      for keyfile in ca.crt ca.key sa.key sa.pub; do
+        if ! remote_exec "$target_host" "test -f /tmp/pki/$keyfile -a -s /tmp/pki/$keyfile"; then
+          log_error "Shared PKI file /tmp/pki/$keyfile is missing, empty, or a directory on $target_host!"
+          return 1
+        fi
+      done
     fi
     extra_mounts="  extraMounts:
   - hostPath: ${pki_remote_dir}/ca.crt
@@ -128,6 +154,11 @@ _create_kind_cluster() {
     containerPath: /dev/net/tun"
   fi
 
+  local target_private_ip=""
+  if $is_remote; then
+    target_private_ip=$(_resolve_node_private_ip "$target_host")
+  fi
+
   local config_file="/tmp/kind-${name}.yaml"
   cat > "$config_file" <<EOF
 kind: Cluster
@@ -143,6 +174,7 @@ kubeadmConfigPatches:
     certSANs:
     - "127.0.0.1"
     - "${target_host}"
+    - "${target_private_ip}"
     - "${wg_ip}"
     - "${WG_HUB1_IP}"
     - "${WG_HUB2_IP}"
@@ -167,12 +199,24 @@ ${extra_mounts}
 EOF
 
   if $is_remote; then
+    # Clean up lingering dead container or lock files
+    remote_exec "$target_host" "docker rm -f ${name}-control-plane 2>/dev/null || true; sudo rm -f /etc/kubernetes/admin.conf.lock 2>/dev/null || true"
     remote_copy_to "$target_host" "$config_file" "/tmp/kind-${name}.yaml"
-    remote_exec "$target_host" "kind create cluster --name '$name' --config /tmp/kind-${name}.yaml"
-    remote_exec "$target_host" "mkdir -p ~/.kube && kind export kubeconfig --name '$name' --kubeconfig ~/.kube/config 2>/dev/null || true"
+    if ! remote_exec "$target_host" "KUBECONFIG=/tmp/kubeconfig-${name}.export kind create cluster --name '$name' --config /tmp/kind-${name}.yaml --kubeconfig /tmp/kubeconfig-${name}.export"; then
+      log_error "Failed to create remote KinD cluster '$name' on '$target_host'!"
+      return 1
+    fi
+    if ! remote_exec "$target_host" "docker ps --filter name=${name}-control-plane --format '{{.Names}}' 2>/dev/null" | grep -q "^${name}-control-plane$"; then
+      log_error "KinD control-plane container '${name}-control-plane' is not running on '$target_host' after creation!"
+      return 1
+    fi
+    _ensure_systemwide_kubeconfig "$name" "$target_host"
     _sync_remote_kubeconfig "$name" "$target_host" "$wg_ip"
   else
-    kind create cluster --name "$name" --config "$config_file"
+    if ! kind create cluster --name "$name" --config "$config_file"; then
+      log_error "Failed to create KinD cluster '$name'!"
+      return 1
+    fi
     kind export kubeconfig --name "$name" 2>/dev/null || true
     local cname="${name}-control-plane"
     docker update --restart=always "$cname" 2>/dev/null || true
@@ -551,7 +595,10 @@ _do_phase_03_create_hub_clusters() {
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
 
   # PrimaryHub – this IS the Root CA source
-  _create_kind_cluster "primaryhub" "10.244.0.0/16" "10.96.0.0/16" "$HUB1_TRANSIT_IP" "false" "$PRIMARYHUB_HOST" "$WG_HUB1_IP"
+  _create_kind_cluster "primaryhub" "10.244.0.0/16" "10.96.0.0/16" "$HUB1_TRANSIT_IP" "false" "$PRIMARYHUB_HOST" "$WG_HUB1_IP" || {
+    log_error "Failed to create or verify primaryhub cluster."
+    return 1
+  }
 
   # Always extract shared Root CA & ServiceAccount keys from primaryhub to ensure PKI_DIR is authoritative
   log_info "Extracting shared Root CA & ServiceAccount keys from primaryhub..."
@@ -570,6 +617,13 @@ _do_phase_03_create_hub_clusters() {
     docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
     docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
   fi
+
+  for keyfile in ca.crt ca.key sa.key sa.pub; do
+    if [ ! -s "${PKI_DIR}/$keyfile" ]; then
+      log_error "Authoritative PKI file ${PKI_DIR}/$keyfile is missing or empty!"
+      return 1
+    fi
+  done
 
   # If secondaryhub already exists, verify its Root CA matches primaryhub. If not, recreate it.
   if $is_remote; then
@@ -595,7 +649,10 @@ _do_phase_03_create_hub_clusters() {
   fi
 
   # SecondaryHub – mounted with PrimaryHub's shared Root CA
-  _create_kind_cluster "secondaryhub" "10.245.0.0/16" "10.97.0.0/16" "$HUB2_TRANSIT_IP" "true" "$SECONDARYHUB_HOST" "$WG_HUB2_IP"
+  _create_kind_cluster "secondaryhub" "10.245.0.0/16" "10.97.0.0/16" "$HUB2_TRANSIT_IP" "true" "$SECONDARYHUB_HOST" "$WG_HUB2_IP" || {
+    log_error "Failed to create or verify secondaryhub cluster."
+    return 1
+  }
 
   log_success "Hub clusters created."
 }
@@ -615,6 +672,10 @@ _do_phase_04_install_crds_on_hubs() {
 
   for hub in primaryhub secondaryhub; do
     _install_crds "kind-${hub}"
+    if ! _check_hub_crds_established "kind-${hub}"; then
+      log_error "CRDs failed to establish on kind-${hub}!"
+      return 1
+    fi
   done
   log_success "CRDs installed on all hub clusters."
 }
@@ -721,22 +782,7 @@ _check_phase_10() {
 }
 
 _do_phase_10_load_custom_image() {
-  ensure_sandbox_repo
-
   local img="01community/01sandbox-opensandbox-server:v0.7.10-ocm"
-  if docker image inspect "$img" >/dev/null 2>&1 && [ "$FORCE_RECONFIGURE" != "true" ]; then
-    log_info "Image $img already built locally – skipping build."
-  else
-    if [ ! -d "${OPENSANDBOX_BUILD_DIR}" ] || [ ! -f "${OPENSANDBOX_BUILD_DIR}/Dockerfile" ]; then
-      log_error "Dockerfile not found at detected build path: ${OPENSANDBOX_BUILD_DIR}"
-      log_error "Failed to locate opensandbox-server/docker-build context."
-      exit 1
-    fi
-    log_info "Building $img from: ${OPENSANDBOX_BUILD_DIR}..."
-    docker build -t "$img" "${OPENSANDBOX_BUILD_DIR}"
-    log_success "Built $img successfully with OCM workload provider support."
-  fi
-
   local is_remote=false
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
 
@@ -748,16 +794,44 @@ _do_phase_10_load_custom_image() {
 
     if $is_remote; then
       if remote_exec "$target_host" "docker exec ${hub}-control-plane crictl images 2>/dev/null" | grep -q "01sandbox-opensandbox-server" && [ "$FORCE_RECONFIGURE" != "true" ]; then
-        log_info "$img already loaded in $hub – skipping."
+        log_info "$img already loaded in $hub on $target_host – skipping."
       else
-        log_info "Streaming $img to remote $hub ($target_host)..."
-        docker save "$img" | ssh -p "$SSH_PORT" -i "$SSH_KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no "${SSH_USER}@${target_host}" "docker exec -i ${hub}-control-plane ctr -n k8s.io images import --local -"
+        ensure_remote_sandbox_repo "$target_host"
+        local user
+        user=$(_get_ssh_user_for_host "$target_host")
+        local remote_build_dir="/home/${user}/01-Sandbox/opensandbox-server/docker-build"
+
+        if ! remote_exec "$target_host" "test -f '${remote_build_dir}/Dockerfile'"; then
+          log_error "Dockerfile not found on $target_host at ${remote_build_dir}"
+          return 1
+        fi
+
+        log_info "Building $img inside remote EC2 instance $target_host ($hub)..."
+        remote_exec "$target_host" "docker build -t '$img' '$remote_build_dir'"
+        log_success "Built $img successfully on $target_host."
+
+        log_info "Loading $img into KinD cluster $hub on $target_host..."
+        if ! remote_exec "$target_host" "kind load docker-image '$img' --name '$hub' 2>/dev/null"; then
+          remote_exec "$target_host" "docker save '$img' | docker exec -i ${hub}-control-plane ctr -n k8s.io images import --local -"
+        fi
+        log_success "Loaded $img into $hub."
+
         kubectl --context "kind-${hub}" rollout restart deployment/opensandbox-server -n opensandbox-system 2>/dev/null || true
       fi
     else
       if docker exec "${hub}-control-plane" crictl images 2>/dev/null | grep -q "01sandbox-opensandbox-server" && [ "$FORCE_RECONFIGURE" != "true" ]; then
         log_info "$img already loaded in $hub – skipping kind load."
       else
+        ensure_sandbox_repo
+        if ! docker image inspect "$img" >/dev/null 2>&1 || [ "$FORCE_RECONFIGURE" == "true" ]; then
+          if [ ! -d "${OPENSANDBOX_BUILD_DIR}" ] || [ ! -f "${OPENSANDBOX_BUILD_DIR}/Dockerfile" ]; then
+            log_error "Dockerfile not found at detected build path: ${OPENSANDBOX_BUILD_DIR}"
+            return 1
+          fi
+          log_info "Building $img from: ${OPENSANDBOX_BUILD_DIR}..."
+          docker build -t "$img" "${OPENSANDBOX_BUILD_DIR}"
+          log_success "Built $img successfully."
+        fi
         log_info "Loading $img into $hub..."
         if ! kind load docker-image "$img" --name "$hub" 2>/dev/null; then
           docker save "$img" | docker exec -i "${hub}-control-plane" ctr -n k8s.io images import --local -
@@ -804,8 +878,8 @@ _do_phase_13_create_spoke_clusters() {
   local is_remote=false
   [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
 
-  _create_kind_cluster "spoke1" "10.246.0.0/16" "10.98.0.0/16"  "$SPOKE1_TRANSIT_IP" "false" "$SPOKE1_HOST" "$WG_SPOKE1_IP"
-  _create_kind_cluster "spoke2" "10.247.0.0/16" "10.100.0.0/16" "$SPOKE2_TRANSIT_IP" "false" "$SPOKE2_HOST" "$WG_SPOKE2_IP"
+  _create_kind_cluster "spoke1" "10.246.0.0/16" "10.98.0.0/16"  "$SPOKE1_TRANSIT_IP" "false" "$SPOKE1_HOST" "$WG_SPOKE1_IP" || return 1
+  _create_kind_cluster "spoke2" "10.247.0.0/16" "10.100.0.0/16" "$SPOKE2_TRANSIT_IP" "false" "$SPOKE2_HOST" "$WG_SPOKE2_IP" || return 1
 
   # KinD single-node clusters taint the control-plane node with NoSchedule by default.
   # Since there are no worker nodes on spokes, klusterlet (and all user workloads)
@@ -856,11 +930,12 @@ _check_phase_14() {
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
 
   if $is_remote; then
+    init_node_private_ips
     remote_exec "$PRIMARYHUB_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
     remote_exec "$SECONDARYHUB_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
     remote_exec "$SPOKE1_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
     remote_exec "$SPOKE2_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
-    remote_exec "$PRIMARYHUB_HOST" "sudo grep -q '${SPOKE1_HOST}' /etc/wireguard/wg0.conf 2>/dev/null" || return 1
+    remote_exec "$PRIMARYHUB_HOST" "sudo grep -q '${SPOKE1_PRIVATE_IP}' /etc/wireguard/wg0.conf 2>/dev/null" || return 1
     return 0
   fi
 
@@ -946,34 +1021,37 @@ _do_phase_15d_load_scanner_images() {
     return 0
   fi
   log_info "Ensuring all language-specific scanner images are built and loaded on spokes..."
-  local build_script="${SANDBOX_REPO_DIR}/code-interpreter/scripts/build-and-load-scanners.sh"
-  [ ! -f "$build_script" ] && build_script="${ROOT_DIR}/code-interpreter/scripts/build-and-load-scanners.sh"
 
   local is_remote=false
   [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
 
-  if [ -f "$build_script" ]; then
-    if $is_remote; then
-      log_info "Building scanner images locally on orchestrator..."
-      bash "$build_script" --build-only
-      local langs=(python go java node k8s rust shell cpp ruby terraform)
-      for spoke in spoke1 spoke2; do
-        local target_host="$SPOKE1_HOST"
-        [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
-        for lang in "${langs[@]}"; do
-          local tag_release="01community/01sandbox-scanner-${lang}:1.0.0"
-          if remote_exec "$target_host" "docker exec ${spoke}-control-plane crictl images 2>/dev/null" | grep -q "01sandbox-scanner-${lang}"; then
-            continue
-          fi
-          log_info "Streaming ${tag_release} to ${spoke} on ${target_host}..."
-          docker save "$tag_release" | ssh -p "$SSH_PORT" -i "$SSH_KEY_PATH" -o IdentitiesOnly=yes -o StrictHostKeyChecking=no "${SSH_USER}@${target_host}" "docker exec -i ${spoke}-control-plane ctr -n k8s.io images import --local -" || true
-        done
-      done
-    else
-      bash "$build_script" --clusters "spoke1,spoke2"
-    fi
+  if $is_remote; then
+    for spoke in spoke1 spoke2; do
+      local target_host="$SPOKE1_HOST"
+      [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
+
+      ensure_remote_sandbox_repo "$target_host"
+      local user
+      user=$(_get_ssh_user_for_host "$target_host")
+      local remote_build_script="/home/${user}/01-Sandbox/code-interpreter/scripts/build-and-load-scanners.sh"
+
+      if remote_exec "$target_host" "test -f '${remote_build_script}'"; then
+        log_info "Building and loading language scanner images directly on remote EC2 instance $target_host (${spoke})..."
+        remote_exec "$target_host" "bash '${remote_build_script}' --clusters '${spoke}'"
+        log_success "Scanner images built and loaded on ${spoke} ($target_host)."
+      else
+        log_error "build-and-load-scanners.sh not found on $target_host at ${remote_build_script}!"
+        return 1
+      fi
+    done
   else
-    log_warn "build-and-load-scanners.sh not found at ${build_script}"
+    local build_script="${SANDBOX_REPO_DIR}/code-interpreter/scripts/build-and-load-scanners.sh"
+    [ ! -f "$build_script" ] && build_script="${ROOT_DIR}/code-interpreter/scripts/build-and-load-scanners.sh"
+    if [ -f "$build_script" ]; then
+      bash "$build_script" --clusters "spoke1,spoke2"
+    else
+      log_warn "build-and-load-scanners.sh not found at ${build_script}"
+    fi
   fi
 }
 

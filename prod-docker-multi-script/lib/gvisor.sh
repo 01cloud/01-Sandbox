@@ -76,13 +76,15 @@ _install_gvisor_on_spoke() {
   log_step "Installing gVisor (runsc) on ${spoke} (${cname})..."
 
   if $is_remote; then
-    # Copy cached binaries to remote host, then copy into container
-    remote_copy_to "$target_host" "${GVISOR_CACHE_DIR}/runsc" "/tmp/runsc"
-    remote_copy_to "$target_host" "${GVISOR_CACHE_DIR}/containerd-shim-runsc-v1" "/tmp/containerd-shim-runsc-v1"
     remote_exec "$target_host" bash -s << REMOTE_GVISOR_EOF
-docker cp /tmp/runsc "${cname}:/usr/local/bin/runsc"
-docker cp /tmp/containerd-shim-runsc-v1 "${cname}:/usr/local/bin/containerd-shim-runsc-v1"
-docker exec "${cname}" chmod a+rx /usr/local/bin/runsc /usr/local/bin/containerd-shim-runsc-v1
+which zstd >/dev/null 2>&1 || sudo dnf install -y zstd 2>/dev/null || sudo yum install -y zstd 2>/dev/null || sudo apt-get install -y zstd 2>/dev/null || true
+curl -fsSL "https://storage.googleapis.com/gvisor/releases/release/latest/x86_64/gvisor.tar.zstd" -o /tmp/gvisor.tar.zstd
+cd /tmp && tar --zstd -xf gvisor.tar.zstd
+docker cp runsc "${cname}:/usr/local/bin/runsc"
+docker cp containerd-shim-runsc-v1 "${cname}:/usr/local/bin/containerd-shim-runsc-v1"
+docker cp gvisor-bin "${cname}:/usr/local/bin/gvisor-bin"
+docker exec "${cname}" chmod -R a+rx /usr/local/bin/runsc /usr/local/bin/containerd-shim-runsc-v1 /usr/local/bin/gvisor-bin
+rm -rf /tmp/gvisor* /tmp/checkpointgofer /tmp/runsc*
 docker exec "${cname}" bash -c "
   if ! grep -q 'containerd.runtimes.runsc' /etc/containerd/config.toml; then
     cat << 'EOF' >> /etc/containerd/config.toml

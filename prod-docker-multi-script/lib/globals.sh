@@ -76,6 +76,27 @@ SECONDARYHUB_HOST="${SECONDARYHUB_HOST:-127.0.0.1}"
 SPOKE1_HOST="${SPOKE1_HOST:-127.0.0.1}"
 SPOKE2_HOST="${SPOKE2_HOST:-127.0.0.1}"
 
+# Connection Mode (default: true)
+USE_SSM="${USE_SSM:-true}"
+
+# Regional AWS Configuration
+PRIMARYHUB_REGION="${PRIMARYHUB_REGION:-us-east-1}"
+SECONDARYHUB_REGION="${SECONDARYHUB_REGION:-eu-west-1}"
+SPOKE1_REGION="${SPOKE1_REGION:-eu-central-1}"
+SPOKE2_REGION="${SPOKE2_REGION:-ap-south-1}"
+
+# Targets (can be EC2 Instance ID, ASG name, or Public IP)
+PRIMARYHUB_TARGET="${PRIMARYHUB_TARGET:-$PRIMARYHUB_HOST}"
+SECONDARYHUB_TARGET="${SECONDARYHUB_TARGET:-$SECONDARYHUB_HOST}"
+SPOKE1_TARGET="${SPOKE1_TARGET:-$SPOKE1_HOST}"
+SPOKE2_TARGET="${SPOKE2_TARGET:-$SPOKE2_HOST}"
+
+# Private IPv4 addresses for WireGuard mesh over Inter-Region VPC Peering
+PRIMARYHUB_PRIVATE_IP="${PRIMARYHUB_PRIVATE_IP:-}"
+SECONDARYHUB_PRIVATE_IP="${SECONDARYHUB_PRIVATE_IP:-}"
+SPOKE1_PRIVATE_IP="${SPOKE1_PRIVATE_IP:-}"
+SPOKE2_PRIVATE_IP="${SPOKE2_PRIVATE_IP:-}"
+
 # Strip any user@ prefix from HOST variables if present, extracting default user
 for _v in PRIMARYHUB SECONDARYHUB SPOKE1 SPOKE2; do
   _h_var="${_v}_HOST"
@@ -88,13 +109,234 @@ for _v in PRIMARYHUB SECONDARYHUB SPOKE1 SPOKE2; do
   fi
 done
 
-# SSH / Keypair Configuration
-SSH_USER="${SSH_USER:-ubuntu}"
-SSH_KEY_PATH="${SSH_KEY_PATH:-${HOME}/.ssh/id_rsa}"
+# Remote User & Fleet Key Configuration
+REMOTE_USER="${REMOTE_USER:-ec2-user}"
+SSH_USER="${SSH_USER:-${REMOTE_USER}}"
+SSH_KEY_PATH="${SSH_KEY_PATH:-${HOME}/.ssh/bb-sandbox-fleet}"
 SSH_PORT="${SSH_PORT:-22}"
 WG_PORT="${WG_PORT:-51820}"
 
-# Resolve SSH user for specific target host
+# ── SSM & Target Resolution Helpers ───────────────────────────────────────────
+_get_target_for_node() {
+  local host="$1"
+  case "$host" in
+    "$PRIMARYHUB_HOST"|"primaryhub")
+      echo "${PRIMARYHUB_TARGET:-$PRIMARYHUB_HOST}" ;;
+    "$SECONDARYHUB_HOST"|"secondaryhub")
+      echo "${SECONDARYHUB_TARGET:-$SECONDARYHUB_HOST}" ;;
+    "$SPOKE1_HOST"|"spoke1")
+      echo "${SPOKE1_TARGET:-$SPOKE1_HOST}" ;;
+    "$SPOKE2_HOST"|"spoke2")
+      echo "${SPOKE2_TARGET:-$SPOKE2_HOST}" ;;
+    *)
+      echo "$host" ;;
+  esac
+}
+
+_get_region_for_host() {
+  local host="$1"
+  case "$host" in
+    "$PRIMARYHUB_HOST"|"primaryhub"|"${PRIMARYHUB_TARGET:-}")
+      echo "${PRIMARYHUB_REGION:-us-east-1}" ;;
+    "$SECONDARYHUB_HOST"|"secondaryhub"|"${SECONDARYHUB_TARGET:-}")
+      echo "${SECONDARYHUB_REGION:-eu-west-1}" ;;
+    "$SPOKE1_HOST"|"spoke1"|"${SPOKE1_TARGET:-}")
+      echo "${SPOKE1_REGION:-eu-central-1}" ;;
+    "$SPOKE2_HOST"|"spoke2"|"${SPOKE2_TARGET:-}")
+      echo "${SPOKE2_REGION:-ap-south-1}" ;;
+    *)
+      echo "${AWS_REGION:-us-east-1}" ;;
+  esac
+}
+
+_resolve_node_instance_id() {
+  local host="$1"
+  local target
+  target=$(_get_target_for_node "$host")
+  local region
+  region=$(_get_region_for_host "$host")
+
+  local cluster_role=""
+  case "$host" in
+    "$PRIMARYHUB_HOST"|"primaryhub") cluster_role="primaryhub" ;;
+    "$SECONDARYHUB_HOST"|"secondaryhub") cluster_role="secondaryhub" ;;
+    "$SPOKE1_HOST"|"spoke1") cluster_role="spoke1" ;;
+    "$SPOKE2_HOST"|"spoke2") cluster_role="spoke2" ;;
+    *) cluster_role="" ;;
+  esac
+
+  if [[ "$target" =~ ^i-[0-9a-f]+$ ]]; then
+    local state
+    state=$(aws ec2 describe-instances --region "$region" --instance-ids "$target" \
+      --query "Reservations[0].Instances[0].State.Name" --output text 2>/dev/null || true)
+    if [ "$state" == "running" ]; then
+      echo "$target"
+      return 0
+    fi
+    # If the configured instance ID is terminated/stopped, fall through to tag resolution
+  fi
+
+  local cache_dir="/tmp/01sandbox-ssm-cache"
+  mkdir -p "$cache_dir" 2>/dev/null || true
+  local safe_target
+  safe_target=$(echo "$target" | tr -c 'a-zA-Z0-9' '_')
+  local cache_file="${cache_dir}/inst_${region}_${safe_target}"
+  if [ -s "$cache_file" ]; then
+    local cached_id
+    cached_id=$(cat "$cache_file")
+    local cstate
+    cstate=$(aws ec2 describe-instances --region "$region" --instance-ids "$cached_id" \
+      --query "Reservations[0].Instances[0].State.Name" --output text 2>/dev/null || true)
+    if [ "$cstate" == "running" ]; then
+      echo "$cached_id"
+      return 0
+    fi
+    rm -f "$cache_file"
+  fi
+
+  # 1. Try finding running instance by Name tag (cluster role or target name)
+  local lookup_names=()
+  [ -n "$cluster_role" ] && lookup_names+=("$cluster_role")
+  [[ ! "$target" =~ ^i-[0-9a-f]+$ ]] && lookup_names+=("$target")
+
+  for name in "${lookup_names[@]}"; do
+    local tag_inst
+    tag_inst=$(aws ec2 describe-instances --region "$region" \
+      --filters "Name=tag:Name,Values=$name" "Name=instance-state-name,Values=running" \
+      --query "Reservations[0].Instances[0].InstanceId" --output text 2>/dev/null || true)
+    if [ -n "$tag_inst" ] && [ "$tag_inst" != "None" ]; then
+      echo "$tag_inst" > "$cache_file"
+      echo "$tag_inst"
+      return 0
+    fi
+  done
+
+  # 2. Try finding running instance by Public or Private IP via AWS EC2 API
+  if [[ "$target" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    local inst
+    inst=$(aws ec2 describe-instances --region "$region" \
+      --filters "Name=ip-address,Values=$target" "Name=instance-state-name,Values=running" \
+      --query "Reservations[0].Instances[0].InstanceId" --output text 2>/dev/null || true)
+    if [ -n "$inst" ] && [ "$inst" != "None" ]; then
+      echo "$inst" > "$cache_file"
+      echo "$inst"
+      return 0
+    fi
+  fi
+
+  # 3. Try finding running instance in Auto Scaling Group
+  local asg_inst
+  asg_inst=$(aws autoscaling describe-auto-scaling-groups --auto-scaling-group-names "$target" --region "$region" \
+    --query "AutoScalingGroups[0].Instances[?LifecycleState=='InService'].InstanceId | [0]" --output text 2>/dev/null || true)
+  if [ -n "$asg_inst" ] && [ "$asg_inst" != "None" ]; then
+    echo "$asg_inst" > "$cache_file"
+    echo "$asg_inst"
+    return 0
+  fi
+
+  echo "$target"
+}
+
+_resolve_node_private_ip() {
+  local host="$1"
+  [ -z "$host" ] && echo "" && return 0
+  [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ] && echo "127.0.0.1" && return 0
+
+  # 1. Check if explicitly configured in environment / prod.env
+  case "$host" in
+    "$PRIMARYHUB_HOST"|"primaryhub"|"${PRIMARYHUB_TARGET:-}")
+      if [[ "${PRIMARYHUB_PRIVATE_IP:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$PRIMARYHUB_PRIVATE_IP"
+        return 0
+      fi
+      ;;
+    "$SECONDARYHUB_HOST"|"secondaryhub"|"${SECONDARYHUB_TARGET:-}")
+      if [[ "${SECONDARYHUB_PRIVATE_IP:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$SECONDARYHUB_PRIVATE_IP"
+        return 0
+      fi
+      ;;
+    "$SPOKE1_HOST"|"spoke1"|"${SPOKE1_TARGET:-}")
+      if [[ "${SPOKE1_PRIVATE_IP:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$SPOKE1_PRIVATE_IP"
+        return 0
+      fi
+      ;;
+    "$SPOKE2_HOST"|"spoke2"|"${SPOKE2_TARGET:-}")
+      if [[ "${SPOKE2_PRIVATE_IP:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$SPOKE2_PRIVATE_IP"
+        return 0
+      fi
+      ;;
+  esac
+
+  # If $host itself is already an IPv4 address, return it
+  if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "$host"
+    return 0
+  fi
+
+  local region inst_id
+  region=$(_get_region_for_host "$host")
+  inst_id=$(_resolve_node_instance_id "$host")
+
+  # 2. Check local disk cache
+  local cache_dir="/tmp/01sandbox-ssm-cache"
+  mkdir -p "$cache_dir" 2>/dev/null || true
+  local cache_file="${cache_dir}/privip_${region}_${inst_id}"
+  if [ -s "$cache_file" ]; then
+    local cached_ip
+    cached_ip=$(cat "$cache_file" | tr -d '[:space:]')
+    if [[ "$cached_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "$cached_ip"
+      return 0
+    fi
+    rm -f "$cache_file"
+  fi
+
+  # 3. Try AWS EC2 describe-instances via AWS CLI
+  if [[ "$inst_id" =~ ^i-[0-9a-f]+$ ]]; then
+    local aws_ip
+    aws_ip=$(aws ec2 describe-instances --region "$region" --instance-ids "$inst_id" \
+      --query "Reservations[0].Instances[0].PrivateIpAddress" --output text 2>/dev/null || true)
+    if [[ "$aws_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "$aws_ip" > "$cache_file"
+      echo "$aws_ip"
+      return 0
+    fi
+  fi
+
+  # 4. Fallback: Query directly from the EC2 instance via remote_exec (over SSM / SSH)
+  local remote_ip
+  remote_ip=$(remote_exec "$host" "hostname -I 2>/dev/null | awk '{print \$1}'" 2>/dev/null | tr -d '\r\n[:space:]' || true)
+  if [[ "$remote_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "$remote_ip" > "$cache_file"
+    echo "$remote_ip"
+    return 0
+  fi
+
+  # Fallback to host if unable to resolve
+  echo "$host"
+}
+
+init_node_private_ips() {
+  if [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ]; then
+    log_info "Resolving EC2 private IPv4 addresses for WireGuard mesh over VPC Peering..."
+    PRIMARYHUB_PRIVATE_IP=$(_resolve_node_private_ip "$PRIMARYHUB_HOST")
+    SECONDARYHUB_PRIVATE_IP=$(_resolve_node_private_ip "$SECONDARYHUB_HOST")
+    SPOKE1_PRIVATE_IP=$(_resolve_node_private_ip "$SPOKE1_HOST")
+    SPOKE2_PRIVATE_IP=$(_resolve_node_private_ip "$SPOKE2_HOST")
+
+    log_info "Private IPs: PrimaryHub=${PRIMARYHUB_PRIVATE_IP}, SecondaryHub=${SECONDARYHUB_PRIVATE_IP}, Spoke1=${SPOKE1_PRIVATE_IP}, Spoke2=${SPOKE2_PRIVATE_IP}"
+    if [[ ! "$PRIMARYHUB_PRIVATE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+       [[ ! "$SECONDARYHUB_PRIVATE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+       [[ ! "$SPOKE1_PRIVATE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || \
+       [[ ! "$SPOKE2_PRIVATE_IP" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      log_warn "One or more node private IPv4 addresses could not be resolved automatically. You can explicitly set PRIMARYHUB_PRIVATE_IP, etc. in prod.env."
+    fi
+  fi
+}
+
 _get_ssh_user_for_host() {
   local host="$1"
   if [ "$host" == "$PRIMARYHUB_HOST" ] && [ -n "${PRIMARYHUB_SSH_USER:-}" ]; then
@@ -106,11 +348,10 @@ _get_ssh_user_for_host() {
   elif [ "$host" == "$SPOKE2_HOST" ] && [ -n "${SPOKE2_SSH_USER:-}" ]; then
     echo "$SPOKE2_SSH_USER"
   else
-    echo "${SSH_USER:-ubuntu}"
+    echo "${SSH_USER:-${REMOTE_USER:-ec2-user}}"
   fi
 }
 
-# Resolve SSH private key for specific target host (supports global key or per-host key)
 _get_ssh_key_for_host() {
   local host="$1"
   local key=""
@@ -123,25 +364,66 @@ _get_ssh_key_for_host() {
   elif [ "$host" == "$SPOKE2_HOST" ] && [ -n "${SPOKE2_SSH_KEY:-}" ]; then
     key="$SPOKE2_SSH_KEY"
   else
-    key="${SSH_KEY_PATH:-${HOME}/.ssh/id_rsa}"
+    key="${SSH_KEY_PATH:-${HOME}/.ssh/bb-sandbox-fleet}"
   fi
   eval key="$key"
   echo "$key"
 }
 
-# Dynamic SSH and SCP command-line options per host
-_get_ssh_opts_for_host() {
+ensure_node_ssm_access() {
   local host="$1"
-  local key
-  key=$(_get_ssh_key_for_host "$host")
-  echo "-p ${SSH_PORT} -i ${key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR"
-}
+  [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ] && return 0
+  [ "${USE_SSM:-true}" != "true" ] && return 0
 
-_get_scp_opts_for_host() {
-  local host="$1"
-  local key
+  local inst_id region user key
+  inst_id=$(_resolve_node_instance_id "$host")
+  region=$(_get_region_for_host "$host")
+  user=$(_get_ssh_user_for_host "$host")
   key=$(_get_ssh_key_for_host "$host")
-  echo "-P ${SSH_PORT} -i ${key} -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR"
+
+  [[ ! "$inst_id" =~ ^i-[0-9a-f]+$ ]] && return 0
+
+  local key_dir
+  key_dir=$(dirname "$key")
+  mkdir -p "$key_dir" 2>/dev/null || true
+  if [ ! -f "$key" ]; then
+    log_info "Generating local fleet key for SSM access at ${key}..."
+    ssh-keygen -t rsa -b 2048 -f "$key" -N "" -C "ssm-fleet-access" >/dev/null 2>&1 || true
+    chmod 600 "$key" 2>/dev/null || true
+  fi
+
+  local pub_key=""
+  if [ -f "${key}.pub" ]; then
+    pub_key=$(cat "${key}.pub")
+  elif [ -f "$key" ]; then
+    pub_key=$(ssh-keygen -y -f "$key" 2>/dev/null || true)
+  fi
+
+  [ -z "$pub_key" ] && return 0
+
+  # Check if SSM SSH already connects
+  if ssh -i "$key" \
+    -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p' --region ${region}" \
+    -o IdentitiesOnly=yes \
+    -o StrictHostKeyChecking=no \
+    -o UserKnownHostsFile=/dev/null \
+    -o ConnectTimeout=5 \
+    -o BatchMode=yes \
+    -o LogLevel=ERROR \
+    "${user}@${inst_id}" "true" >/dev/null 2>&1; then
+    return 0
+  fi
+
+  log_info "Authorizing SSH key on ${inst_id} (${region}) via AWS SSM RunCommand..."
+  local cmd="mkdir -p /home/${user}/.ssh && grep -qF '${pub_key}' /home/${user}/.ssh/authorized_keys 2>/dev/null || echo '${pub_key}' >> /home/${user}/.ssh/authorized_keys; chmod 700 /home/${user}/.ssh && chmod 600 /home/${user}/.ssh/authorized_keys && chown -R ${user}:${user} /home/${user}/.ssh"
+  aws ssm send-command \
+    --instance-ids "$inst_id" \
+    --region "$region" \
+    --document-name "AWS-RunShellScript" \
+    --parameters "commands=[\"$cmd\"]" \
+    --comment "Authorize fleet key for SSM access" \
+    --output text --query "Command.CommandId" >/dev/null 2>&1 || true
+  sleep 2
 }
 
 remote_exec() {
@@ -149,14 +431,66 @@ remote_exec() {
   if [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ]; then
     bash -c "$*"
   else
-    local user key
+    local user key region inst_id
     user=$(_get_ssh_user_for_host "$host")
     key=$(_get_ssh_key_for_host "$host")
-    ssh -p "$SSH_PORT" -i "$key" \
-      -o IdentitiesOnly=yes \
-      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
-      "${user}@${host}" "$@"
+    region=$(_get_region_for_host "$host")
+    inst_id=$(_resolve_node_instance_id "$host")
+
+    if [ "${USE_SSM:-true}" == "true" ] && [[ "$inst_id" =~ ^i-[0-9a-f]+$ ]]; then
+      ssh -i "$key" \
+        -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p' --region ${region}" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=15 \
+        -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        "${user}@${inst_id}" "$@"
+    else
+      ssh -p "${SSH_PORT:-22}" -i "$key" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=10 \
+        -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        "${user}@${host}" "$@"
+    fi
+  fi
+}
+
+remote_pipe_to() {
+  local host="$1"; shift
+  if [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ]; then
+    bash -c "$*"
+  else
+    local user key region inst_id
+    user=$(_get_ssh_user_for_host "$host")
+    key=$(_get_ssh_key_for_host "$host")
+    region=$(_get_region_for_host "$host")
+    inst_id=$(_resolve_node_instance_id "$host")
+
+    if [ "${USE_SSM:-true}" == "true" ] && [[ "$inst_id" =~ ^i-[0-9a-f]+$ ]]; then
+      ssh -i "$key" \
+        -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p' --region ${region}" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=15 \
+        -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        "${user}@${inst_id}" "$@"
+    else
+      ssh -p "${SSH_PORT:-22}" -i "$key" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=10 \
+        -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        "${user}@${host}" "$@"
+    fi
   fi
 }
 
@@ -165,14 +499,32 @@ remote_copy_to() {
   if [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ]; then
     cp -r "$local_path" "$remote_path"
   else
-    local user key
+    local user key region inst_id
     user=$(_get_ssh_user_for_host "$host")
     key=$(_get_ssh_key_for_host "$host")
-    scp -P "$SSH_PORT" -i "$key" \
-      -o IdentitiesOnly=yes \
-      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
-      -r "$local_path" "${user}@${host}:${remote_path}"
+    region=$(_get_region_for_host "$host")
+    inst_id=$(_resolve_node_instance_id "$host")
+
+    if [ "${USE_SSM:-true}" == "true" ] && [[ "$inst_id" =~ ^i-[0-9a-f]+$ ]]; then
+      scp -i "$key" \
+        -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p' --region ${region}" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=15 \
+        -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        -r "$local_path" "${user}@${inst_id}:${remote_path}"
+    else
+      scp -P "${SSH_PORT:-22}" -i "$key" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=10 \
+        -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        -r "$local_path" "${user}@${host}:${remote_path}"
+    fi
   fi
 }
 
@@ -181,28 +533,64 @@ remote_copy_from() {
   if [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ]; then
     cp -r "$remote_path" "$local_path"
   else
-    local user key
+    local user key region inst_id
     user=$(_get_ssh_user_for_host "$host")
     key=$(_get_ssh_key_for_host "$host")
-    scp -P "$SSH_PORT" -i "$key" \
-      -o IdentitiesOnly=yes \
-      -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-      -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
-      -r "${user}@${host}:${remote_path}" "$local_path"
+    region=$(_get_region_for_host "$host")
+    inst_id=$(_resolve_node_instance_id "$host")
+
+    if [ "${USE_SSM:-true}" == "true" ] && [[ "$inst_id" =~ ^i-[0-9a-f]+$ ]]; then
+      scp -i "$key" \
+        -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p' --region ${region}" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=15 \
+        -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        -r "${user}@${inst_id}:${remote_path}" "$local_path"
+    else
+      scp -P "${SSH_PORT:-22}" -i "$key" \
+        -o IdentitiesOnly=yes \
+        -o StrictHostKeyChecking=no \
+        -o UserKnownHostsFile=/dev/null \
+        -o ConnectTimeout=10 \
+        -o BatchMode=yes \
+        -o LogLevel=ERROR \
+        -r "${user}@${host}:${remote_path}" "$local_path"
+    fi
   fi
 }
 
 remote_test_ssh() {
   local host="$1"
   [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ] && return 0
-  local user key
+  local user key region inst_id
   user=$(_get_ssh_user_for_host "$host")
   key=$(_get_ssh_key_for_host "$host")
-  ssh -p "$SSH_PORT" -i "$key" \
-    -o IdentitiesOnly=yes \
-    -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null \
-    -o ConnectTimeout=10 -o BatchMode=yes -o LogLevel=ERROR \
-    "${user}@${host}" "echo ok" >/dev/null 2>&1
+  region=$(_get_region_for_host "$host")
+  inst_id=$(_resolve_node_instance_id "$host")
+
+  if [ "${USE_SSM:-true}" == "true" ] && [[ "$inst_id" =~ ^i-[0-9a-f]+$ ]]; then
+    ssh -i "$key" \
+      -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p' --region ${region}" \
+      -o IdentitiesOnly=yes \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=15 \
+      -o BatchMode=yes \
+      -o LogLevel=ERROR \
+      "${user}@${inst_id}" "echo ok" >/dev/null 2>&1
+  else
+    ssh -p "${SSH_PORT:-22}" -i "$key" \
+      -o IdentitiesOnly=yes \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 \
+      -o BatchMode=yes \
+      -o LogLevel=ERROR \
+      "${user}@${host}" "echo ok" >/dev/null 2>&1
+  fi
 }
 
 _get_tunnel_port_for_cluster() {
@@ -227,24 +615,42 @@ ensure_cluster_ssh_tunnel() {
     return 0
   fi
 
-  local user key
+  local user key region inst_id
   user=$(_get_ssh_user_for_host "$target_host")
   key=$(_get_ssh_key_for_host "$target_host")
+  region=$(_get_region_for_host "$target_host")
+  inst_id=$(_resolve_node_instance_id "$target_host")
 
   fuser -k "${local_port}/tcp" 2>/dev/null || true
 
-  ssh -fN \
-    -o IdentitiesOnly=yes \
-    -o StrictHostKeyChecking=no \
-    -o UserKnownHostsFile=/dev/null \
-    -o ConnectTimeout=10 \
-    -o BatchMode=yes \
-    -o ExitOnForwardFailure=yes \
-    -o ServerAliveInterval=15 \
-    -o ServerAliveCountMax=3 \
-    -p "$SSH_PORT" -i "$key" \
-    -L "${local_port}:127.0.0.1:6443" \
-    "${user}@${target_host}" 2>/dev/null || true
+  if [ "${USE_SSM:-true}" == "true" ] && [[ "$inst_id" =~ ^i-[0-9a-f]+$ ]]; then
+    ssh -fN \
+      -i "$key" \
+      -o ProxyCommand="aws ssm start-session --target %h --document-name AWS-StartSSHSession --parameters 'portNumber=%p' --region ${region}" \
+      -o IdentitiesOnly=yes \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=15 \
+      -o BatchMode=yes \
+      -o ExitOnForwardFailure=yes \
+      -o ServerAliveInterval=15 \
+      -o ServerAliveCountMax=3 \
+      -L "${local_port}:127.0.0.1:6443" \
+      "${user}@${inst_id}" 2>/dev/null || true
+  else
+    ssh -fN \
+      -o IdentitiesOnly=yes \
+      -o StrictHostKeyChecking=no \
+      -o UserKnownHostsFile=/dev/null \
+      -o ConnectTimeout=10 \
+      -o BatchMode=yes \
+      -o ExitOnForwardFailure=yes \
+      -o ServerAliveInterval=15 \
+      -o ServerAliveCountMax=3 \
+      -p "${SSH_PORT:-22}" -i "$key" \
+      -L "${local_port}:127.0.0.1:6443" \
+      "${user}@${target_host}" 2>/dev/null || true
+  fi
 
   local _w=0
   while ! nc -z 127.0.0.1 "$local_port" >/dev/null 2>&1 && [ $_w -lt 10 ]; do
@@ -353,6 +759,7 @@ log_info()    { echo -e "${BLUE}${BOLD}[INFO]${NC}    $*"; }
 log_success() { echo -e "${GREEN}${BOLD}[OK]${NC}      $*"; }
 log_warn()    { echo -e "${YELLOW}${BOLD}[WARN]${NC}    $*" >&2; }
 log_error()   { echo -e "${RED}${BOLD}[ERROR]${NC}   $*" >&2; }
+log_fatal()   { echo -e "${RED}${BOLD}[FATAL]${NC}   $*" >&2; exit 1; }
 log_step() {
   echo -e "\n${CYAN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
   echo -e "${CYAN}${BOLD}  $*${NC}"

@@ -23,12 +23,13 @@ _check_phase_02() {
 
   # Verify WireGuard is active on remote nodes if configured
   if [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ]; then
+    init_node_private_ips
     remote_exec "$PRIMARYHUB_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
     remote_exec "$SECONDARYHUB_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
     remote_exec "$SPOKE1_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
     remote_exec "$SPOKE2_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
-    # Ensure PrimaryHub peer endpoint matches currently configured SPOKE1_HOST
-    remote_exec "$PRIMARYHUB_HOST" "sudo grep -q '${SPOKE1_HOST}' /etc/wireguard/wg0.conf 2>/dev/null" || return 1
+    # Ensure PrimaryHub peer endpoint matches currently configured SPOKE1_PRIVATE_IP
+    remote_exec "$PRIMARYHUB_HOST" "sudo grep -q '${SPOKE1_PRIVATE_IP}' /etc/wireguard/wg0.conf 2>/dev/null" || return 1
   fi
 
   return 0
@@ -74,7 +75,8 @@ print(f'{base64.b64encode(k.private_bytes_raw()).decode()} {base64.b64encode(k.p
 
   # 2. In remote mode, generate and deploy wg0.conf to each EC2 instance
   if $is_remote; then
-    log_info "Configuring cross-region WireGuard mesh on all 4 EC2 instances..."
+    init_node_private_ips
+    log_info "Configuring cross-region WireGuard mesh on all 4 EC2 instances over VPC Peering (Private IPs)..."
 
     # Config for PrimaryHub (includes VIP 10.99.0.100)
     cat > "${WG_DIR}/wg0-primaryhub.conf" <<EOF
@@ -87,21 +89,21 @@ PrivateKey = ${WG_PRIV["primaryhub"]}
 # SecondaryHub
 PublicKey = ${WG_PUB["secondaryhub"]}
 AllowedIPs = ${WG_HUB2_IP}/32
-Endpoint = ${SECONDARYHUB_HOST}:${WG_PORT}
+Endpoint = ${SECONDARYHUB_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 
 [Peer]
 # Spoke1
 PublicKey = ${WG_PUB["spoke1"]}
 AllowedIPs = ${WG_SPOKE1_IP}/32
-Endpoint = ${SPOKE1_HOST}:${WG_PORT}
+Endpoint = ${SPOKE1_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 
 [Peer]
 # Spoke2
 PublicKey = ${WG_PUB["spoke2"]}
 AllowedIPs = ${WG_SPOKE2_IP}/32
-Endpoint = ${SPOKE2_HOST}:${WG_PORT}
+Endpoint = ${SPOKE2_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 EOF
 
@@ -116,21 +118,21 @@ PrivateKey = ${WG_PRIV["secondaryhub"]}
 # PrimaryHub + VIP
 PublicKey = ${WG_PUB["primaryhub"]}
 AllowedIPs = ${WG_HUB1_IP}/32, ${WG_VIP}/32
-Endpoint = ${PRIMARYHUB_HOST}:${WG_PORT}
+Endpoint = ${PRIMARYHUB_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 
 [Peer]
 # Spoke1
 PublicKey = ${WG_PUB["spoke1"]}
 AllowedIPs = ${WG_SPOKE1_IP}/32
-Endpoint = ${SPOKE1_HOST}:${WG_PORT}
+Endpoint = ${SPOKE1_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 
 [Peer]
 # Spoke2
 PublicKey = ${WG_PUB["spoke2"]}
 AllowedIPs = ${WG_SPOKE2_IP}/32
-Endpoint = ${SPOKE2_HOST}:${WG_PORT}
+Endpoint = ${SPOKE2_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 EOF
 
@@ -145,21 +147,21 @@ PrivateKey = ${WG_PRIV["spoke1"]}
 # PrimaryHub + VIP
 PublicKey = ${WG_PUB["primaryhub"]}
 AllowedIPs = ${WG_HUB1_IP}/32, ${WG_VIP}/32
-Endpoint = ${PRIMARYHUB_HOST}:${WG_PORT}
+Endpoint = ${PRIMARYHUB_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 
 [Peer]
 # SecondaryHub
 PublicKey = ${WG_PUB["secondaryhub"]}
 AllowedIPs = ${WG_HUB2_IP}/32
-Endpoint = ${SECONDARYHUB_HOST}:${WG_PORT}
+Endpoint = ${SECONDARYHUB_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 
 [Peer]
 # Spoke2
 PublicKey = ${WG_PUB["spoke2"]}
 AllowedIPs = ${WG_SPOKE2_IP}/32
-Endpoint = ${SPOKE2_HOST}:${WG_PORT}
+Endpoint = ${SPOKE2_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 EOF
 
@@ -174,21 +176,21 @@ PrivateKey = ${WG_PRIV["spoke2"]}
 # PrimaryHub + VIP
 PublicKey = ${WG_PUB["primaryhub"]}
 AllowedIPs = ${WG_HUB1_IP}/32, ${WG_VIP}/32
-Endpoint = ${PRIMARYHUB_HOST}:${WG_PORT}
+Endpoint = ${PRIMARYHUB_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 
 [Peer]
 # SecondaryHub
 PublicKey = ${WG_PUB["secondaryhub"]}
 AllowedIPs = ${WG_HUB2_IP}/32
-Endpoint = ${SECONDARYHUB_HOST}:${WG_PORT}
+Endpoint = ${SECONDARYHUB_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 
 [Peer]
 # Spoke1
 PublicKey = ${WG_PUB["spoke1"]}
 AllowedIPs = ${WG_SPOKE1_IP}/32
-Endpoint = ${SPOKE1_HOST}:${WG_PORT}
+Endpoint = ${SPOKE1_PRIVATE_IP}:${WG_PORT}
 PersistentKeepalive = 25
 EOF
 
@@ -260,7 +262,7 @@ _check_phase_06() {
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
 
   if $is_remote; then
-    remote_exec "$PRIMARYHUB_HOST" "docker inspect -f '{{.State.Running}}' envoy-gateway 2>/dev/null" | grep -q "true" || return 1
+    remote_exec "$PRIMARYHUB_HOST" "docker inspect -f '{{.State.Running}}' envoy-gateway 2>/dev/null | grep -q true && sudo ss -tulpn | grep -q ':80 ' && ip route | grep -q '172.30.0.200'" || return 1
     return 0
   fi
 
@@ -355,14 +357,14 @@ static_resources:
             address:
               socket_address:
                 address: 10.99.0.1
-                port_value: 30432
+                port_value: 80
       - priority: 1
         lb_endpoints:
         - endpoint:
             address:
               socket_address:
                 address: 10.99.0.2
-                port_value: 30432
+                port_value: 80
   - name: ingress_kube_api_cluster
     connect_timeout: 0.5s
     type: STATIC
@@ -457,21 +459,26 @@ static_resources:
         - endpoint:
             address:
               socket_address:
-                address: 10.99.0.1
-                port_value: 30432
+                address: 172.30.0.200
+                port_value: 80
       - priority: 1
         lb_endpoints:
         - endpoint:
             address:
               socket_address:
                 address: 10.99.0.2
-                port_value: 30432
+                port_value: 80
 ENVOY_REMOTE_EOF
     remote_copy_to "$PRIMARYHUB_HOST" "${ENVOY_DIR}/envoy.yaml" "/tmp/envoy.yaml"
     remote_exec "$PRIMARYHUB_HOST" bash -s << REMOTE_ENVOY_EOF
+local_kind_ip=\$(docker inspect primaryhub-control-plane -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || true)
+if [ -n "\$local_kind_ip" ]; then
+  sudo ip route replace 172.30.0.200/32 via "\$local_kind_ip" 2>/dev/null || true
+fi
 docker rm -f envoy-gateway 2>/dev/null || true
 docker run -d --name envoy-gateway \
   --user 0:0 \
+  -e ENVOY_UID=0 \
   --restart unless-stopped \
   --net host \
   -v /tmp/envoy.yaml:/etc/envoy/envoy.yaml:ro \
