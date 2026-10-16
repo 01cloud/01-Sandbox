@@ -304,9 +304,50 @@ Instead of static hardcoded IP tables that break when instances scale, the clust
      "{cluster_name: \$cn, role: \$r, region: \$reg, wg_ip: \$wg, priority: \$p, ebs_volume: \$vol}")
    aws ssm put-parameter --name "/sandbox/clusters/$CLUSTER_NAME" --value "$REG_PAYLOAD" --type "String" --overwrite --region "us-east-1"
    ```
-2. **Keypair Generation**:
-   Generates local WireGuard private/public keys and publishes the public key to:
-   `/sandbox/wireguard/spoke4/public-key` in `us-east-1`.
+2. **Cryptographic Keypair Generation & Storage Persistence**:
+   - **The Pipeline**: Local private and public keys are generated simultaneously using a single atomic Unix pipeline:
+     ```bash
+     wg genkey | tee /etc/wireguard/private.key | wg pubkey > /etc/wireguard/public.key
+     chmod 600 /etc/wireguard/private.key /etc/wireguard/public.key
+     ```
+   - **How it Works Cryptographically**:
+     1. **`wg genkey`**: Pulls 32 bytes (256 bits) of cryptographically secure random entropy from `/dev/urandom`. It clamps the scalar bits according to **RFC 7748** (Curve25519 specification: clears the lowest 3 bits and sets the highest bit), outputting a 44-character Base64-encoded private key.
+     2. **`tee /etc/wireguard/private.key`**: Writes the private key directly to disk while simultaneously passing the stream down the pipe.
+     3. **`wg pubkey`**: Derives the 32-byte public key coordinate via elliptic curve scalar multiplication:
+        $$\text{PublicKey} = X25519(\text{PrivateKey}, G)$$
+        *(where $G$ is the standard Curve25519 generator base point)*, producing a 44-character Base64 public key.
+   - **Persistent EBS Binding Across Spot Reboots**:
+     To ensure the keypair survives EC2 spot interruptions and node reboots, `/etc/wireguard` is symlinked directly to the attached persistent EBS volume:
+     ```bash
+     mkdir -p "$MOUNT_POINT/wireguard"
+     if [ ! -L /etc/wireguard ]; then
+       [ -d /etc/wireguard ] && cp -rn /etc/wireguard/* "$MOUNT_POINT/wireguard/" 2>/dev/null || true
+       rm -rf /etc/wireguard
+       ln -sf "$MOUNT_POINT/wireguard" /etc/wireguard
+     fi
+     ```
+     If an instance is interrupted and replaced, cloud-init detects that `/etc/wireguard/private.key` already exists on the mounted EBS volume and skips regeneration, preserving node identity across spot interruptions.
+   - **Local Interface Configuration (`wg0.conf`)**:
+     The private key is injected into `/etc/wireguard/wg0.conf`:
+     ```ini
+     [Interface]
+     Address = 10.99.0.9/24
+     ListenPort = 51820
+     PrivateKey = <MY_PRIVKEY>
+     ```
+     Permissions are locked down with `chmod 600 /etc/wireguard/wg0.conf`.
+   - **Fleet Registry Publishing via AWS SSM**:
+     Only the **public key** is shared across the fleet. The private key never leaves the instance:
+     ```bash
+     MY_PUBKEY=$(cat /etc/wireguard/public.key 2>/dev/null || wg show wg0 public-key 2>/dev/null)
+     aws ssm put-parameter \
+       --name "/sandbox/wireguard/$CLUSTER_NAME/public-key" \
+       --value "$MY_PUBKEY" \
+       --type "String" \
+       --overwrite \
+       --region "us-east-1"
+     ```
+
 3. **Continuous Mesh Discovery Daemon (`sync-wireguard-peers.sh`)**:
    Runs via `wireguard-peers-sync.timer` every **20 seconds** on **every node in all 4 regions**:
    - Reads all entries in `/sandbox/clusters`.
