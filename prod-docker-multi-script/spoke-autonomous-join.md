@@ -152,6 +152,100 @@ sequenceDiagram
 
 ---
 
+### Sequence Diagram Working Flow & Component Interaction Narrative
+
+The sequence diagram above illustrates the choreography between 9 distributed components across AWS regions and Kubernetes control planes. The workflow transitions through 7 distinct stages, ensuring complete zero-touch autonomous provisioning without human intervention:
+
+#### 1. Stage 1: Declarative Provisioning & Physical Infrastructure (Steps 1–3)
+- **Actor Interaction**: `Admin` $\rightarrow$ `AWS EC2 & ASG` $\rightarrow$ `Cloud-Init`.
+- **Protocol / Channel**: Terraform AWS Provider over AWS HTTPS API (`ec2:RunInstances`, `autoscaling:CreateAutoScalingGroup`).
+- **Working Flow**:
+  1. The administrator or CI/CD pipeline adds `spoke4` to `terraform.tfvars` and runs `terraform apply`.
+  2. The Auto Scaling Group launches a spot instance (`m7i-flex.large`) in `eu-central-1b`. Hardware nested virtualization (`/dev/kvm`) is enabled via EC2 CPU options.
+  3. The instance boots Amazon Linux 2023 and initiates the unified `user_data.sh.tftpl` cloud-init script with exported cluster parameters (`CLUSTER_NAME=spoke4`, `WG_IP=10.99.0.9`, `ROLE=spoke`).
+
+#### 2. Stage 2: Persistent Storage Attachment & Fleet Self-Registration (Steps 4–6)
+- **Actor Interaction**: `Cloud-Init` $\rightarrow$ `AWS EC2 API` $\rightarrow$ `AWS SSM Parameter Store`.
+- **Protocol / Channel**: AWS CLI / IAM Instance Profile over HTTPS.
+- **Working Flow**:
+  1. **EBS Attachment Handshake**: Cloud-init queries AWS EC2 API, detaches any stale EBS attachment from previously terminated spot nodes, and attaches the dedicated 100 GiB encrypted EBS volume (`aws_ebs_volume.persistent["spoke4"]`) to `/dev/sdf`.
+  2. **Mount & Preservation**: Formats disk as `ext4` (or reuses existing filesystem if recovering from spot interruption), mounts to `/mnt/k8s-disks`, and symlinks `/var/lib/docker` and `/var/lib/containerd` so cached container images survive reboots.
+  3. **Fleet Self-Registration**: Publishes JSON metadata to `/sandbox/clusters/spoke4` in `us-east-1` containing cluster name, role, region, assigned WireGuard IP (`10.99.0.9`), and EBS volume ID.
+  4. **Keypair Generation**: Generates local WireGuard private/public keypair and publishes the public key to `/sandbox/wireguard/spoke4/public-key`.
+
+#### 3. Stage 3: Dynamic WireGuard Mesh Convergence & Key Rotation (Steps 7–9)
+- **Actor Interaction**: `WireGuard Mesh Daemons` $\leftrightarrow$ `AWS SSM` $\leftrightarrow$ `Cloud-Init`.
+- **Protocol / Channel**: UDP port 51820 over AWS inter-region VPC peering; SSM polling via systemd timer.
+- **Working Flow**:
+  1. On all hubs and existing spoke nodes, `wireguard-peers-sync.timer` triggers `/usr/local/bin/sync-wireguard-peers.sh` every 20 seconds.
+  2. The daemons discover the new `/sandbox/clusters/spoke4` record and fetch `spoke4`'s public key and AWS private IP (`10.23.x.x`).
+  3. **Zero-Downtime Kernel Sync**: The daemons update `/etc/wireguard/wg0.conf` and inject `spoke4` into the live kernel using `wg set wg0 peer <pubkey> allowed-ips 10.99.0.9/32 endpoint 10.23.x.x:51820 persistent-keepalive 25`.
+  4. **Key Rotation Guard**: If `spoke4` was re-provisioned after a termination, the daemon detects the public key mismatch (`configured_pubkey != peer_pubkey`), purges the obsolete peer from kernel `wg0`, and rebinds the new key.
+  5. Simultaneously, `spoke4`'s cloud-init resolves endpoints for `primaryhub` (`10.99.0.1`), `secondaryhub` (`10.99.0.2`), and peers, enabling immediate full-mesh ping connectivity across `10.99.0.0/16`.
+
+#### 4. Stage 4: MicroVM KinD Cluster Launch & PKI Restoration (Steps 10–12)
+- **Actor Interaction**: `Cloud-Init` $\rightarrow$ `AWS SSM` $\rightarrow$ `KinD MicroVM Cluster`.
+- **Protocol / Channel**: Docker CLI / Kubeadm Unix Socket / Containerd.
+- **Working Flow**:
+  1. **PKI Restoration**: Cloud-init pulls the centralized Kubernetes Root CA (`/sandbox/pki/ca.crt` & `ca.key`) from SSM into `/mnt/k8s-disks/pki`.
+  2. **KinD Initialization**: Launches the local single-node KinD cluster using `kindest/node:v1.32.2`. Kubeadm is configured with Subject Alternative Names (SANs) for `127.0.0.1`, `spoke4`, `spoke4-control-plane`, `10.99.0.9`, and hub WireGuard IPs (`10.99.0.1`, `10.99.0.2`).
+  3. **MicroVM Security Hardening**: Binds `/dev/kvm` and `/dev/net/tun` into the KinD node container, verifies hardware virtualization support for Kata Containers / Firecracker runtimes, and strips the `node-role.kubernetes.io/control-plane:NoSchedule` taint so workloads schedule immediately.
+
+#### 5. Stage 5: Multi-Hub Klusterlet Bootstrap & CSR Dispatch (Steps 13–17)
+- **Actor Interaction**: `Cloud-Init` $\rightarrow$ `Spoke KinD Cluster` $\rightarrow$ `PrimaryHub & SecondaryHub`.
+- **Protocol / Channel**: Kubernetes API over WireGuard overlay (`https://10.99.0.1:6443` & `https://10.99.0.2:6443`).
+- **Working Flow**:
+  1. **Token Retrieval**: Cloud-init fetches the 10-year cluster bootstrap token from `/sandbox/ocm/bootstrap-token` and the hub API endpoint (`https://10.99.0.1:6443`).
+  2. **Dual-Hub Secret Creation**: Pre-creates bootstrap kubeconfig secrets inside the spoke cluster:
+     - `open-cluster-management-agent/primaryhub-kubeconfig` (pointing to `10.99.0.1:6443`)
+     - `open-cluster-management-agent/secondaryhub-kubeconfig` (pointing to `10.99.0.2:6443`)
+  3. **MultipleHubs Klusterlet Configuration**: Patches the `Klusterlet` custom resource with `featureGates: MultipleHubs=Enable` and `type: LocalSecrets` with a 60-second connection timeout.
+  4. **Parallel Registration Dispatch**: The Klusterlet agent connects to `https://10.99.0.1:6443` and submits a `CertificateSigningRequest` (CSR) under bootstrap credentials for Priority 0 (`primaryhub`), while simultaneously submitting registration credentials to `https://10.99.0.2:6443` for Priority 1 (`secondaryhub`).
+
+#### 6. Stage 6: PrimaryHub Autonomous Acceptance & Active Scheduling (Steps 18–19)
+- **Actor Interaction**: `PrimaryHub (us-east-1)` $\leftrightarrow$ `Spoke KinD Cluster`.
+- **Protocol / Channel**: OCM Registration Controller & `ocm-auto-accept.timer` (15s cadence).
+- **Working Flow**:
+  1. **CSR Auto-Approval**: The systemd timer on `primaryhub` executes `/usr/local/bin/ocm-auto-accept.sh`. It detects the pending CSR (`spoke4-xxxxx`) and executes `kubectl certificate approve`.
+  2. **Cluster Acceptance**: The script executes `clusteradm accept --clusters spoke4`, setting `spec.hubAcceptsClient: true` and configuring lease duration to 60s.
+  3. **Certificate Issuance & Active State**: PrimaryHub signs and issues the client certificate. The spoke's registration agent receives the certificate and begins sending heartbeat leases (`managed-cluster-lease`).
+  4. **Active Promotion**: Status on `primaryhub` updates to:
+     ```text
+     NAME     HUB ACCEPTED   MANAGED CLUSTER URLS                JOINED   AVAILABLE   AGE
+     spoke4   true           https://spoke4-control-plane:6443   True     True        90s
+     ```
+     Workload schedulers, Sandbox controllers, and CodeInspector runners now immediately place container tasks on `spoke4`.
+
+#### 7. Stage 7: SecondaryHub Hot Standby Registration & Split-Brain Invariant (Steps 20–22)
+- **Actor Interaction**: `PrimaryHub` $\rightarrow$ `SecondaryHub` $\leftrightarrow$ `ocm-failover-controller`.
+- **Protocol / Channel**: Insecure-skip-tls-verify REST API over WireGuard `10.99.0.2:6443` & in-cluster controller loop.
+- **Working Flow**:
+  1. **Standby Mirroring**: PrimaryHub replicates the spoke's namespace, RBAC roles, and `ManagedCluster` CR to `SecondaryHub` (`10.99.0.2:6443`), explicitly setting `spec.hubAcceptsClient: false`.
+  2. **CSR Approval**: `ocm-auto-accept.timer` on `secondaryhub` approves the registration CSR so the spoke is authenticated (`JOINED: True`).
+  3. **Standby Invariant Enforcement**: In-cluster `ocm-failover-controller` detects `spoke4` on `secondaryhub`. While `primaryhub` is healthy, it enforces:
+     - `spec.hubAcceptsClient: false` (prevents SecondaryHub from sending commands)
+     - `taints: [{key: "cluster.open-cluster-management.io/unreachable", effect: "NoSelect"}]` (locks out schedulers)
+     - Purges local heartbeat leases (`AVAILABLE: Unknown`, Reason: `Released by SecondaryHub on standby`).
+  4. **Split-Brain Immunity & Instant Promotion**: SecondaryHub is now fully aware of `spoke4` with valid cryptographic credentials. If PrimaryHub fails, the failover controller promotes `spoke4` to `hubAcceptsClient: true` in **under 3 seconds**.
+
+---
+
+### Sequence Diagram Interaction Matrix
+
+| Step # | Source Component | Target Component | Transport / Protocol | Payload / Operation | Expected Result | Fail-Safe / Retry Mechanism |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **1–2** | Admin / CI | AWS EC2 & ASG | AWS HTTPS API | `terraform apply` / ASG launch instance | `m7i-flex.large` VM booted in target AZ | Mixed-instance spot fallback to `m7i.large` |
+| **3–4** | EC2 Hypervisor | Cloud-Init (`user_data`) | OS Cloud-Init / Bash | Volume detach & attach to `/dev/sdf` | EBS mounted to `/mnt/k8s-disks` | Detach retry loop with forced detach on 120s timeout |
+| **5–6** | Cloud-Init | AWS SSM Parameter Store | AWS CLI (HTTPS) | Put `/sandbox/clusters` & `/sandbox/wireguard` | Spoke metadata & pubkey registered | SSM `--overwrite` flag handles spot reboots |
+| **7–9** | WireGuard Daemons | AWS SSM / Linux Kernel | Systemd Timer / Netlink | Sync peers & update `/etc/wireguard/wg0.conf` | `10.99.0.9` pingable across all nodes | Periodic timer (20s) auto-recovers network partitions |
+| **10–12** | Cloud-Init | KinD MicroVM Cluster | Docker / Kubeadm | Pull CA certs & `kind create cluster` | KinD control plane up with certSANs | CA pre-fetched from SSM ensures common root trust |
+| **13–15** | Cloud-Init | Spoke KinD Cluster | Kubectl / REST API | Inject bootstrap secrets & patch Klusterlet | `MultipleHubs` enabled with LocalSecrets | Non-expiring (10-yr) bootstrap token prevents expiry |
+| **16–17** | Klusterlet Agent | PrimaryHub & SecondaryHub | HTTPS over WireGuard (`:6443`) | Submit Registration CSRs | CSRs appear in `Pending` state on both Hubs | Klusterlet exponential backoff retry loop |
+| **18–19** | PrimaryHub | Spoke KinD Cluster | OCM Registration Controller | Approve CSR & `clusteradm accept` | Spoke is `HUB ACCEPTED: true, AVAILABLE: True` | `ocm-auto-accept.timer` (15s) auto-approves all CSRs |
+| **20–22** | PrimaryHub / Failover | SecondaryHub | HTTPS over WireGuard (`:6443`) | Mirror CR & enforce Standby Invariant | Spoke is `HUB ACCEPTED: false, AVAILABLE: Unknown` | `ocm-failover-controller` reconciles every 1 second |
+
+---
+
 ### Detailed Stage Breakdown
 
 ### Stage 1: Terraform Declarative Layer
