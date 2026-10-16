@@ -7,6 +7,26 @@
 
 ---
 
+## Table of Contents
+1. [Executive Summary](#1-executive-summary)
+2. [Multi-Region Architectural Topology & Fleet Network Matrix](#2-multi-region-architectural-topology)
+3. [AWS Systems Manager (SSM) Parameter Store Fleet Architecture](#3-aws-systems-manager-ssm-parameter-store-fleet-architecture)
+4. [The 7-Stage Autonomous Provisioning Lifecycle (Day 1: Scale-Up)](#4-the-7-stage-autonomous-lifecycle-when-provisioning-a-new-spoke-eg-spoke4)
+   - [4.1 End-to-End Sequence Diagram](#4-the-7-stage-autonomous-lifecycle-when-provisioning-a-new-spoke-eg-spoke4)
+   - [4.2 Sequence Diagram Working Flow & Narrative](#sequence-diagram-working-flow--component-interaction-narrative)
+   - [4.3 Sequence Diagram Interaction Matrix](#sequence-diagram-interaction-matrix)
+   - [4.4 Detailed Stage Breakdown (Stages 1 to 7)](#detailed-stage-breakdown)
+5. [Spot Self-Healing & Fast-Path Recovery (< 45s) (Day 2: Spot Interruption)](#5-spot-self-healing--fast-path-recovery--45s)
+6. [Instant Dual-Hub Failover & Failback Mechanics (Day 2: PrimaryHub Disaster)](#6-instant-dual-hub-failover--failback-mechanics)
+7. [Autonomous Spoke Deregistration & Lifecycle Reaper (Day 2: Scale-Down / Teardown)](#7-autonomous-spoke-deregistration--lifecycle-reaper)
+   - [7.1 The Deletion Problem: Why OCM Retains Terminated Instances](#71-the-deletion-problem-why-ocm-retains-terminated-instances-by-default)
+   - [7.2 Autonomous Garbage Collection & Multi-Hub Deregistration](#72-autonomous-garbage-collection--deregistration-architecture)
+   - [7.3 Dynamic WireGuard Public Key Rotation](#73-automatic-wireguard-public-key-rotation-on-re-provisioning)
+8. [Complete Production Configuration Listings & Daemons](#8-complete-production-configuration-listings--daemons)
+9. [Operational Verification & Troubleshooting Cheatsheet](#9-operational-verification-cheatsheet)
+
+---
+
 ## 1. Executive Summary
 
 ### Will newly provisioned EC2 spoke clusters automatically join both Hubs?
@@ -27,6 +47,8 @@ Whenever an administrator or pipeline adds a new spoke cluster (e.g. `spoke4`) i
      ```
 3. **Split-Brain Immunity**: SecondaryHub intentionally maintains `HUB ACCEPTED: false` and `AVAILABLE: Unknown` under the active governance of `ocm-failover-controller`. This guarantees that 100% of workload scheduling and sandbox dispatches are anchored exclusively to PrimaryHub while PrimaryHub is operational.
 4. **Sub-3s Failover Readiness**: If PrimaryHub fails, SecondaryHub automatically promotes all spokes (including `spoke4`) to `HUB ACCEPTED: true` and `AVAILABLE: True` in **under 3 seconds**.
+
+---
 
 ---
 
@@ -93,7 +115,140 @@ The 01-Sandbox fleet spans four AWS regions interconnected through an encrypted,
 
 ---
 
-## 3. The 7-Stage Autonomous Lifecycle when Provisioning a New Spoke (e.g. `spoke4`)
+---
+
+## 3. AWS Systems Manager (SSM) Parameter Store Fleet Architecture
+
+In the **01-Sandbox / CodeInspector** multi-region architecture, **AWS Systems Manager (SSM) Parameter Store** (anchored in `us-east-1`) serves as the **centralized, highly-available control plane discovery registry**.
+
+Instead of requiring external discovery daemons (like Consul or etcd clusters running across cloud regions), SSM provides an AWS-managed, serverless, highly-available key-value store accessible via IAM instance profiles across all nodes in all 4 AWS regions.
+
+### 3.1 Parameter Store Hierarchy & Data Domains
+
+The parameter hierarchy is partitioned under `/sandbox/*` across 4 core domains:
+
+```
+/sandbox/
+├── clusters/
+│   ├── primaryhub              --> JSON: Network metadata, priority, EBS volume ID
+│   ├── secondaryhub            --> JSON: Network metadata, priority, EBS volume ID
+│   ├── spoke1                  --> JSON: Network metadata, priority, EBS volume ID
+│   ├── spoke2                  --> JSON: Network metadata, priority, EBS volume ID
+│   └── spoke4                  --> JSON: Network metadata, priority, EBS volume ID
+│
+├── wireguard/
+│   ├── primaryhub/public-key   --> Base64 Curve25519 Public Key
+│   ├── secondaryhub/public-key --> Base64 Curve25519 Public Key
+│   ├── spoke1/public-key       --> Base64 Curve25519 Public Key
+│   ├── spoke2/public-key       --> Base64 Curve25519 Public Key
+│   └── spoke4/public-key       --> Base64 Curve25519 Public Key
+│
+├── pki/
+│   ├── ca.crt                  --> Central Kubernetes Root CA Public Certificate
+│   ├── ca.key                  --> Central Kubernetes Root CA Private Key
+│   ├── sa.pub                  --> Service Account Public Verification Key
+│   └── sa.key                  --> Service Account Private Signing Key
+│
+└── ocm/
+    ├── bootstrap-token         --> 10-year cluster join token (agent-registration-bootstrap)
+    ├── hub-apiserver           --> Active Hub API server endpoint (https://10.99.0.1:6443)
+    └── secondaryhub-ready      --> Hub initialization readiness flag (true)
+```
+
+---
+
+### 3.2 Domain Breakdown & Technical Specifications
+
+#### 1. Fleet Cluster Registry (`/sandbox/clusters/*`)
+Every node (Hub or Spoke) publishes its identity during Stage 2 of cloud-init bootstrap:
+
+| Parameter Path | Producer | Consumers | Value Description |
+| :--- | :--- | :--- | :--- |
+| `/sandbox/clusters/<cluster_name>` | Each node on boot | All Hubs & Spokes | Node metadata payload formatted in JSON. |
+
+*Production Payload Example (`/sandbox/clusters/spoke4`):*
+```json
+{
+  "cluster_name": "spoke4",
+  "role": "spoke",
+  "region": "eu-central-1",
+  "wg_ip": "10.99.0.9",
+  "priority": "0",
+  "ebs_volume": "vol-09e995da20cae2011"
+}
+```
+
+*Production Payload Example (`/sandbox/clusters/primaryhub`):*
+```json
+{
+  "cluster_name": "primaryhub",
+  "role": "hub",
+  "region": "us-east-1",
+  "wg_ip": "10.99.0.1",
+  "priority": "1",
+  "ebs_volume": "vol-0e3fa8a6bc740b2db"
+}
+```
+
+- **How It Is Used**:
+  - The WireGuard discovery daemon (`sync-wireguard-peers.sh`) scans this path every 20 seconds to identify active nodes and resolve their private AWS endpoints via `ec2:DescribeInstances`.
+  - Spoke nodes scan this path to identify all active Hubs (`role == "hub"`) sorted by priority to configure multi-hub failover.
+
+#### 2. Dynamic WireGuard Overlay Mesh (`/sandbox/wireguard/*`)
+Holds cryptographic public keys used to assemble the point-to-point overlay network (`10.99.0.0/16`) across VPC peering.
+
+| Parameter Path | Producer | Consumers | Value Description |
+| :--- | :--- | :--- | :--- |
+| `/sandbox/wireguard/<cluster_name>/public-key` | Each node on boot | All Hubs & Spokes | 44-character Base64 **Curve25519 public key**. |
+
+*Production Example (`/sandbox/wireguard/spoke4/public-key`):*
+```text
+dvGZhjYQkf9xnAwNBsfdvBOamNw5rnizkIDtMgPGGTQ=
+```
+
+- **Security Invariant**: Only the **public key** is stored in SSM. The **private key never leaves the local instance**.
+- **Dynamic Key Rotation**: When a node is terminated and re-provisioned, publishing its new public key here triggers all peers to immediately purge the obsolete peer and bind the new key without restarting interfaces.
+
+#### 3. Central Kubernetes Shared PKI (`/sandbox/pki/*`)
+Maintains unified cryptographic identity across all clusters so multi-hub client certificates, tokens, and admission webhooks remain mutually valid during failovers.
+
+| Parameter Path | Producer | Consumers | Value Description |
+| :--- | :--- | :--- | :--- |
+| `/sandbox/pki/ca.crt` | PrimaryHub on setup | SecondaryHub & Spokes | Kubernetes Root Certificate Authority public cert. |
+| `/sandbox/pki/ca.key` | PrimaryHub on setup | SecondaryHub & Spokes | Kubernetes Root CA private signing key. |
+| `/sandbox/pki/sa.pub` | PrimaryHub on setup | SecondaryHub & Spokes | Service Account public verification key. |
+| `/sandbox/pki/sa.key` | PrimaryHub on setup | SecondaryHub & Spokes | Service Account private signing key. |
+
+- **How It Is Used**:
+  - When `SecondaryHub` or any spoke boots, it restores these certificates into `/mnt/k8s-disks/pki`.
+  - Guarantees that client certificates issued by PrimaryHub are cryptographically accepted by SecondaryHub if PrimaryHub suffers an outage.
+
+#### 4. Open Cluster Management (OCM) Discovery (`/sandbox/ocm/*`)
+Stores cluster registration credentials and discovery endpoints.
+
+| Parameter Path | Producer | Consumers | Value Description |
+| :--- | :--- | :--- | :--- |
+| `/sandbox/ocm/bootstrap-token` | PrimaryHub | All Spokes | 10-year cluster join token (`agent-registration-bootstrap`). |
+| `/sandbox/ocm/hub-apiserver` | PrimaryHub | All Spokes | Active Hub endpoint URL (`https://10.99.0.1:6443`). |
+| `/sandbox/ocm/<cluster_name>-ready` | Hubs | Systemd / Scripts | Health flag (`true`) signaling that the Hub is fully initialized. |
+
+- **How It Is Used**:
+  - Spoke nodes fetch `/sandbox/ocm/bootstrap-token` and `/sandbox/ocm/hub-apiserver` to build their `bootstrap-hub-kubeconfig` and execute `clusteradm join`.
+
+---
+
+### 3.3 Security Invariants & IAM Access Control
+
+1. **Least-Privilege IAM Roles**:
+   - Spoke instances are restricted to `ssm:GetParameter`, `ssm:GetParametersByPath`, and write permissions restricted strictly to their own path `/sandbox/clusters/<name>` and `/sandbox/wireguard/<name>/*`.
+2. **Private Key Isolation**:
+   - Node WireGuard private keys (`/etc/wireguard/private.key`) and KinD node keys are never uploaded to SSM or transmitted over the network.
+3. **Automated Lifecycle Reaper**:
+   - When an instance is terminated in AWS, PrimaryHub's `ocm-auto-accept.sh` reaper daemon automatically purges `/sandbox/clusters/<cluster_name>` and `/sandbox/wireguard/<cluster_name>/public-key`, ensuring zero stale ghost parameters persist in SSM.
+
+---
+
+## 4. The 7-Stage Autonomous Lifecycle when Provisioning a New Spoke (e.g. `spoke4`)
 
 When a new instance is declared in `terraform.tfvars`, the entire infrastructure, networking, certificate negotiation, and cluster join sequence executes end-to-end without manual intervention.
 
@@ -472,7 +627,9 @@ On `secondaryhub`, the spoke's registration CSR is approved so credentials are a
 
 ---
 
-## 4. Spot Self-Healing & Fast-Path Recovery (< 45s)
+---
+
+## 5. Spot Self-Healing & Fast-Path Recovery (< 45s)
 
 All spoke clusters run on **AWS EC2 Spot Instances** with `use_spot = true` to optimize cost ($0.0514/hr vs $0.0958/hr). When AWS reclaims a spot instance:
 
@@ -496,7 +653,9 @@ flowchart TD
 
 ---
 
-## 5. Instant Dual-Hub Failover & Failback Mechanics
+---
+
+## 6. Instant Dual-Hub Failover & Failback Mechanics
 
 If PrimaryHub (`us-east-1`) suffers an outage (power loss, host crash, or network partition):
 
@@ -520,9 +679,68 @@ flowchart TD
 
 ---
 
-## 6. Complete Production Configuration Listings
+---
 
-### 1. Dynamic WireGuard Peer Sync Script (`/usr/local/bin/sync-wireguard-peers.sh`)
+## 7. Autonomous Spoke Deregistration & Lifecycle Reaper
+
+### 7.1 The Deletion Problem: Why OCM Retains Terminated Instances by Default
+In Kubernetes and Open Cluster Management (OCM), a `ManagedCluster` custom resource is stored in `etcd` on the Hub cluster.
+- When an EC2 instance hosting a spoke cluster is terminated or destroyed in AWS, its registration agent (`klusterlet`) abruptly ceases sending heartbeats.
+- By design, OCM does **not** delete the `ManagedCluster` CR. It merely transitions its condition to `AVAILABLE: Unknown` with reason `ManagedClusterLeaseUpdateStopped`. This standard Kubernetes behavior prevents accidental deletion during temporary network blips or reboots.
+- However, for dynamic cloud infrastructure where spoke nodes scale up and down or are destroyed via Terraform, this leaves "ghost" clusters and stale WireGuard public keys in the fleet.
+- If a spoke cluster with the same name (e.g. `spoke4`) is later re-provisioned, the new instance generates a **new** WireGuard public key and **new** agent certificates. If the Hub still retains the old WireGuard peer and old cluster lease, network packets are dropped, preventing the new cluster from becoming available.
+
+### 7.2 Autonomous Garbage Collection & Deregistration Architecture
+To solve this, `PrimaryHub` runs an autonomous reaper cycle inside `/usr/local/bin/ocm-auto-accept.sh` (triggered every 15 seconds by `ocm-auto-accept.timer`):
+
+```
++----------------------------------------------------------------------------------------------------+
+|                             AUTONOMOUS SPOKE LIFECYCLE REAPER                                     |
++----------------------------------------------------------------------------------------------------+
+
+1. EC2 Instance Terminated in AWS / Terraform destroyed
+      │
+2. ocm-auto-accept.timer (Runs every 15s on PrimaryHub)
+      │
+3. Enumerate all registered `managedclusters` on PrimaryHub
+      │
+4. Probe AWS EC2 across all regions (us-east-1, eu-west-1, eu-central-1, ap-south-1):
+   aws ec2 describe-instances --filters Name=tag:ClusterName,Values=$mc Name=instance-state-name,Values=running
+      │
+   ┌──┴────────────────────────────────────────────────┐
+   │                                                   │
+[Instance Running]                              [Instance Terminated / Absent]
+   │                                                   │
+   ▼                                                   ▼
+Normal Operation / Active Sync                  AUTONOMOUS DEREGISTRATION TRIGGERED:
+                                                1. Patch & delete ManagedCluster CR on PrimaryHub
+                                                2. Delete cluster Namespace & RBAC on PrimaryHub
+                                                3. Delete stale CSRs on PrimaryHub
+                                                4. Connect to SecondaryHub (10.99.0.2:6443) and
+                                                   delete ManagedCluster, Namespace, & RBAC
+                                                5. Evict stale WireGuard peer from wg0 & wg0.conf
+                                                6. Purge SSM parameter /sandbox/clusters/$mc
+                                                7. Purge SSM parameter /sandbox/wireguard/$mc/public-key
+```
+
+### 7.3 Automatic WireGuard Public Key Rotation on Re-provisioning
+When a spoke cluster is destroyed and re-provisioned with the same name (e.g. `spoke4`):
+1. **SSM Registration**: The new EC2 instance publishes its newly generated WireGuard public key to `/sandbox/wireguard/spoke4/public-key`.
+2. **Dynamic Peer Rotation**: On every hub and peer node, `wireguard-peers-sync.timer` inspects the active public key in SSM against the configured public key in `wg0.conf`.
+3. If a key rotation is detected (`configured_pubkey != peer_pubkey`):
+   - The obsolete WireGuard peer is immediately purged from kernel `wg0` via `wg set wg0 peer <old_key> remove`.
+   - The new peer is added with its new public key and private IP endpoint.
+4. **Instant Handshake**: The new spoke cluster establishes immediate bidirectional WireGuard connectivity, joins the Hub, and achieves `AVAILABLE: True` on `PrimaryHub` within 90 seconds.
+
+---
+
+---
+
+## 8. Complete Production Configuration Listings & Daemons
+
+### 1. Dynamic WireGuard Peer Sync & Key Rotation Script (`/usr/local/bin/sync-wireguard-peers.sh`)
+Runs every 20 seconds on all nodes via `wireguard-peers-sync.timer`. Automatically detects newly registered spokes, rotates changed WireGuard public keys, and updates active endpoints:
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
@@ -541,24 +759,28 @@ while IFS= read -r entry; do
   peer_wg_ip=$(echo "$entry" | jq -r ".wg_ip // empty" 2>/dev/null || true)
   [ -z "$peer_cluster" ] || [ "$peer_cluster" == "$SELF_NAME" ] && continue
 
-  if grep -B 2 -A 5 "$peer_wg_ip" "$CONF" 2>/dev/null | grep -q "PublicKey"; then
-    pubkey=$(grep -B 2 -A 5 "$peer_wg_ip" "$CONF" 2>/dev/null | awk "/PublicKey/ {print \$3}" | head -n 1)
-    if [ -n "$pubkey" ]; then
-      current_ip=$(aws ec2 describe-instances --region "$peer_region" --filters "Name=tag:ClusterName,Values=${peer_cluster}" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PrivateIpAddress" --output text 2>/dev/null || true)
-      if [[ "$current_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        configured_ip=$(grep -A 5 "$pubkey" "$CONF" 2>/dev/null | awk -F"[: ]+" "/Endpoint/ {print \$3}" | head -n 1)
-        if [ "$configured_ip" != "$current_ip" ]; then
-          sed -i -E "/${pubkey}/,/PersistentKeepalive/ s|Endpoint = [0-9.]+:51820|Endpoint = ${current_ip}:51820|" "$CONF" 2>/dev/null || true
-          ip link show wg0 >/dev/null 2>&1 && wg set wg0 peer "$pubkey" endpoint "${current_ip}:51820" persistent-keepalive 25 2>/dev/null || true
-        fi
+  peer_pubkey=$(aws ssm get-parameter --name "/sandbox/wireguard/${peer_cluster}/public-key" --region "us-east-1" --query "Parameter.Value" --output text 2>/dev/null || true)
+  [ -z "$peer_pubkey" ] || [ "$peer_pubkey" = "None" ] && continue
+
+  configured_pubkey=$(grep -B 2 -A 5 "$peer_wg_ip" "$CONF" 2>/dev/null | awk "/PublicKey/ {print \$3}" | head -n 1)
+
+  # Dynamic Key Rotation: Detect if peer was re-provisioned with a new key
+  if [ -n "$configured_pubkey" ] && [ "$configured_pubkey" != "$peer_pubkey" ]; then
+    ip link show wg0 >/dev/null 2>&1 && wg set wg0 peer "$configured_pubkey" remove 2>/dev/null || true
+    sed -i "/# ${peer_cluster}/,+6d" "$CONF" 2>/dev/null || true
+    configured_pubkey=""
+  fi
+
+  current_ip=$(aws ec2 describe-instances --region "$peer_region" --filters "Name=tag:ClusterName,Values=${peer_cluster}" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PrivateIpAddress" --output text 2>/dev/null || true)
+  if [[ "$current_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    if [ -n "$configured_pubkey" ]; then
+      configured_ip=$(grep -A 5 "$configured_pubkey" "$CONF" 2>/dev/null | awk -F"[: ]+" "/Endpoint/ {print \$3}" | head -n 1)
+      if [ "$configured_ip" != "$current_ip" ]; then
+        sed -i -E "/${configured_pubkey}/,/PersistentKeepalive/ s|Endpoint = [0-9.]+:51820|Endpoint = ${current_ip}:51820|" "$CONF" 2>/dev/null || true
+        ip link show wg0 >/dev/null 2>&1 && wg set wg0 peer "$configured_pubkey" endpoint "${current_ip}:51820" persistent-keepalive 25 2>/dev/null || true
       fi
-    fi
-  else
-    peer_pubkey=$(aws ssm get-parameter --name "/sandbox/wireguard/${peer_cluster}/public-key" --region "us-east-1" --query "Parameter.Value" --output text 2>/dev/null || true)
-    if [ -n "$peer_pubkey" ] && [ "$peer_pubkey" != "None" ]; then
-      current_ip=$(aws ec2 describe-instances --region "$peer_region" --filters "Name=tag:ClusterName,Values=${peer_cluster}" "Name=instance-state-name,Values=running" --query "Reservations[0].Instances[0].PrivateIpAddress" --output text 2>/dev/null || true)
-      if [[ "$current_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-        cat >> "$CONF" <<EOF_PEER
+    else
+      cat >> "$CONF" <<EOF_PEER
 
 [Peer]
 # ${peer_cluster}
@@ -567,8 +789,7 @@ AllowedIPs = ${peer_wg_ip}/32
 Endpoint = ${current_ip}:51820
 PersistentKeepalive = 25
 EOF_PEER
-        ip link show wg0 >/dev/null 2>&1 && wg set wg0 peer "$peer_pubkey" allowed-ips "${peer_wg_ip}/32" endpoint "${current_ip}:51820" persistent-keepalive 25 2>/dev/null || true
-      fi
+      ip link show wg0 >/dev/null 2>&1 && wg set wg0 peer "$peer_pubkey" allowed-ips "${peer_wg_ip}/32" endpoint "${current_ip}:51820" persistent-keepalive 25 2>/dev/null || true
     fi
   fi
 done < <(echo "$cluster_params" | jq -c ".[] | (if type==\"string\" then fromjson else . end)" 2>/dev/null || true)
@@ -578,13 +799,103 @@ ip link show wg0 >/dev/null 2>&1 || { systemctl enable --now wg-quick@wg0 2>/dev
 
 ---
 
-### 2. Multi-Hub Dynamic Klusterlet Reshuffle Script (`/usr/local/bin/sync-cluster-registry.sh`)
+### 2. Hub Auto-Acceptor & Autonomous Reaper Script (`/usr/local/bin/ocm-auto-accept.sh`)
+Runs every 15 seconds on Hubs via `ocm-auto-accept.timer`. Approves pending CSRs, accepts new clusters on PrimaryHub, syncs active clusters to SecondaryHub, and automatically reaps terminated EC2 spoke clusters:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+export KUBECONFIG=/etc/kubernetes/admin.conf
+[ -f "$KUBECONFIG" ] && command -v clusteradm >/dev/null 2>&1 || exit 0
+
+ROLE="${role}"
+HUB_PRIORITY="${hub_priority}"
+
+# 1. Auto-accept pending managed clusters
+for mc in $(kubectl get managedclusters -o jsonpath="{range .items[?(@.status.conditions[?(@.type==\"HubAcceptedManagedCluster\")].status!=\"True\")]}{.metadata.name}{\"\n\"}{end}" 2>/dev/null || true); do
+  [ -n "$mc" ] && clusteradm accept --clusters "$mc" 2>/dev/null || true
+done
+
+# 2. Auto-approve pending CSRs
+for csr in $(kubectl get csr --no-headers 2>/dev/null | awk "\$5==\"Pending\" {print \$1}"); do
+  [ -n "$csr" ] && kubectl certificate approve "$csr" 2>/dev/null || true
+done
+
+# 3. Synchronize active clusters to standby hubs
+if [ "$ROLE" = "hub" ] && [ "$HUB_PRIORITY" = "1" ]; then
+  for mc in $(kubectl get managedclusters -o jsonpath='{.items[?(@.status.conditions[?(@.type=="HubAcceptedManagedCluster")].status=="True")].metadata.name}' 2>/dev/null || true); do
+    [ -z "$mc" ] && continue
+    for standby_wg in 10.99.0.2; do
+      if curl -sk -m 2 "https://${standby_wg}:6443/livez" >/dev/null 2>&1; then
+        if ! kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify get managedcluster "$mc" >/dev/null 2>&1; then
+          kubectl get namespace "$mc" -o yaml 2>/dev/null | kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify apply -f - 2>/dev/null || true
+          kubectl get clusterrole "open-cluster-management:managedcluster:$mc" -o yaml 2>/dev/null | kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify apply -f - 2>/dev/null || true
+          kubectl get clusterrolebinding "open-cluster-management:managedcluster:$mc" -o yaml 2>/dev/null | kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify apply -f - 2>/dev/null || true
+          kubectl get rolebinding -n "$mc" -o yaml 2>/dev/null | kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify apply -f - 2>/dev/null || true
+          kubectl get managedcluster "$mc" -o json 2>/dev/null | jq 'del(.metadata.uid, .metadata.resourceVersion, .metadata.creationTimestamp, .metadata.ownerReferences, .metadata.managedFields, .metadata.annotations, .metadata.finalizers, .status) | .spec.hubAcceptsClient = false' | kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify apply -f - 2>/dev/null || true
+          NOW=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify patch managedcluster "$mc" --subresource=status --type=merge -p "{\"status\":{\"conditions\":[{\"lastTransitionTime\":\"$NOW\",\"message\":\"Denied by hub cluster admin\",\"reason\":\"HubClusterAdminDenied\",\"status\":\"False\",\"type\":\"HubAcceptedManagedCluster\"},{\"lastTransitionTime\":\"$NOW\",\"message\":\"Managed cluster joined\",\"reason\":\"ManagedClusterJoined\",\"status\":\"True\",\"type\":\"ManagedClusterJoined\"},{\"lastTransitionTime\":\"$NOW\",\"message\":\"Released by SecondaryHub on standby\",\"reason\":\"ManagedClusterLeaseUpdateStopped\",\"status\":\"Unknown\",\"type\":\"ManagedClusterConditionAvailable\"}]}}" 2>/dev/null || true
+        fi
+      fi
+    done
+  done
+
+  # 4. Autonomous Spoke Deregistration / Garbage Collection (Reaper)
+  REGIONS="us-east-1 eu-west-1 eu-central-1 ap-south-1"
+  for mc in $(kubectl get managedclusters -o jsonpath='{.items[*].metadata.name}' 2>/dev/null || true); do
+    [ -z "$mc" ] && continue
+    IS_RUNNING=false
+    for r in $REGIONS; do
+      inst_state=$(aws ec2 describe-instances --region "$r" --filters "Name=tag:ClusterName,Values=$mc" "Name=instance-state-name,Values=running" --query "Reservations[*].Instances[*].InstanceId" --output text 2>/dev/null || true)
+      if [ -n "$inst_state" ]; then
+        IS_RUNNING=true
+        break
+      fi
+    done
+
+    if [ "$IS_RUNNING" = false ]; then
+      echo "Spoke cluster $mc is no longer running in EC2. Initiating autonomous deregistration..."
+      kubectl patch managedcluster "$mc" -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
+      kubectl delete managedcluster "$mc" --ignore-not-found=true 2>/dev/null || true
+      kubectl delete ns "$mc" --ignore-not-found=true 2>/dev/null || true
+      kubectl delete clusterrole "open-cluster-management:managedcluster:$mc" --ignore-not-found=true 2>/dev/null || true
+      kubectl delete clusterrolebinding "open-cluster-management:managedcluster:$mc" --ignore-not-found=true 2>/dev/null || true
+      kubectl get csr -o name 2>/dev/null | grep "$mc" | xargs -r kubectl delete 2>/dev/null || true
+
+      for standby_wg in 10.99.0.2; do
+        if curl -sk -m 2 "https://${standby_wg}:6443/livez" >/dev/null 2>&1; then
+          kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify patch managedcluster "$mc" -p '{"metadata":{"finalizers":[]}}' --type=merge 2>/dev/null || true
+          kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify delete managedcluster "$mc" --ignore-not-found=true 2>/dev/null || true
+          kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify delete ns "$mc" --ignore-not-found=true 2>/dev/null || true
+          kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify delete clusterrole "open-cluster-management:managedcluster:$mc" --ignore-not-found=true 2>/dev/null || true
+          kubectl --server="https://${standby_wg}:6443" --insecure-skip-tls-verify delete clusterrolebinding "open-cluster-management:managedcluster:$mc" --ignore-not-found=true 2>/dev/null || true
+        fi
+      done
+
+      stale_pubkey=$(aws ssm get-parameter --name "/sandbox/wireguard/$mc/public-key" --region "us-east-1" --query "Parameter.Value" --output text 2>/dev/null || true)
+      if [ -n "$stale_pubkey" ] && [ "$stale_pubkey" != "None" ]; then
+        ip link show wg0 >/dev/null 2>&1 && wg set wg0 peer "$stale_pubkey" remove 2>/dev/null || true
+        sed -i "/# $mc/,+6d" /etc/wireguard/wg0.conf 2>/dev/null || true
+      fi
+
+      aws ssm delete-parameter --name "/sandbox/clusters/$mc" --region "us-east-1" 2>/dev/null || true
+      aws ssm delete-parameter --name "/sandbox/wireguard/$mc/public-key" --region "us-east-1" 2>/dev/null || true
+    fi
+  done
+fi
+```
+
+---
+
+### 3. Multi-Hub Dynamic Klusterlet Reshuffle Script (`/usr/local/bin/sync-cluster-registry.sh`)
+Runs every 60 seconds on all Spoke nodes via `sync-cluster-registry.timer`. Discovers all active Hubs in SSM, creates their bootstrap kubeconfig secrets, and patches the `Klusterlet` custom resource with `featureGates: MultipleHubs=Enable`:
+
 ```bash
 #!/usr/bin/env bash
 set -euo pipefail
 
 hubs_json=$(aws ssm get-parameters-by-path --path "/sandbox/clusters" --region "us-east-1" --query "Parameters[*].Value" --output json 2>/dev/null || echo "[]")
-hubs=$(echo "$hubs_json" | jq -r "[.[] | (if type==\"string\" then fromjson else . end) | select(.role==\"hub\")] | sort_by(.priority|tonumber) | .[].cluster_name" 2>/dev/null || true)
+hubs=$(echo "$hubs_json" | jq -r "[.[] | (if type==\"string\" then fromjson else . end) | select(.role=="hub")] | sort_by(.priority|tonumber) | .[].cluster_name" 2>/dev/null || true)
 [ -z "$hubs" ] && exit 0
 
 ca_b64=$(aws ssm get-parameter --name "/sandbox/pki/ca.crt" --region "us-east-1" --query "Parameter.Value" --output text 2>/dev/null | base64 -w0 || true)
@@ -625,21 +936,21 @@ stringData:
         token: ${token}
 EOF_SEC
     fi
-  done < <(echo "$hubs_json" | jq -c ".[] | (if type==\"string\" then fromjson else . end) | select(.role==\"hub\")" 2>/dev/null || true)
+  done < <(echo "$hubs_json" | jq -c ".[] | (if type==\"string\" then fromjson else . end) | select(.role=="hub")" 2>/dev/null || true)
 
   # Live-patch Klusterlet MultipleHubs Priority Chain
-  hub_secrets=$(echo "$hubs_json" | jq -c "[[.[] | (if type==\"string\" then fromjson else . end) | select(.role==\"hub\")] | sort_by(.priority|tonumber) | .[].cluster_name | {name: (. + \"-kubeconfig\")}]" 2>/dev/null || echo "[]")
+  hub_secrets=$(echo "$hubs_json" | jq -c "[[.[] | (if type==\"string\" then fromjson else . end) | select(.role=="hub")] | sort_by(.priority|tonumber) | .[].cluster_name | {name: (. + "-kubeconfig")}]" 2>/dev/null || echo "[]")
   if [ "$hub_secrets" != "[]" ]; then
-    kubectl patch klusterlet klusterlet --type=merge -p "{\"spec\":{\"registrationConfiguration\":{\"featureGates\":[{\"feature\":\"MultipleHubs\",\"mode\":\"Enable\"}],\"bootstrapKubeConfigs\":{\"type\":\"LocalSecrets\",\"localSecretsConfig\":{\"hubConnectionTimeoutSeconds\":60,\"kubeConfigSecrets\":$hub_secrets}}}}}" 2>/dev/null || true
+    kubectl patch klusterlet klusterlet --type=merge -p "{"spec":{"registrationConfiguration":{"featureGates":[{"feature":"MultipleHubs","mode":"Enable"}],"bootstrapKubeConfigs":{"type":"LocalSecrets","localSecretsConfig":{"hubConnectionTimeoutSeconds":60,"kubeConfigSecrets":$hub_secrets}}}}}" 2>/dev/null || true
   fi
 fi
 ```
 
 ---
 
-## 7. Operational Verification Cheatsheet
+## 9. Operational Verification Cheatsheet
 
-### 1. View All Clusters on PrimaryHub
+### 9.1 View All Clusters on PrimaryHub
 ```bash
 kubectl --context kind-primaryhub get managedclusters
 ```
@@ -652,7 +963,7 @@ spoke3   true           https://spoke3-control-plane:6443   True     True       
 spoke4   true           https://spoke4-control-plane:6443   True     True        2m
 ```
 
-### 2. View All Clusters on SecondaryHub (Standby Invariant)
+### 9.2 View All Clusters on SecondaryHub (Standby Invariant)
 ```bash
 kubectl --context kind-secondaryhub get managedclusters
 ```
@@ -665,13 +976,13 @@ spoke3   false          https://spoke3-control-plane:6443   True     Unknown    
 spoke4   false          https://spoke4-control-plane:6443   True     Unknown     2m
 ```
 
-### 3. Check Dynamic WireGuard Peer Mesh on Any Instance
+### 9.3 Check Dynamic WireGuard Peer Mesh on Any Instance
 ```bash
 sudo wg show wg0
 ```
 *Expected Output: Direct point-to-point entries with active handshakes to all other clusters on `10.99.0.x`.*
 
-### 4. Check Systemd Timers Running on Nodes
+### 9.4 Check Systemd Timers Running on Nodes
 ```bash
 systemctl list-timers | grep -E "wireguard|ocm|registry"
 ```
@@ -680,185 +991,3 @@ systemctl list-timers | grep -E "wireguard|ocm|registry"
 - `sync-cluster-registry.timer`: Runs every 60s (on Spokes).
 
 ---
-
-## 8. Autonomous Spoke Deregistration & Lifecycle Reaper
-
-### 8.1 The Deletion Problem: Why OCM Retains Terminated Instances by Default
-In Kubernetes and Open Cluster Management (OCM), a `ManagedCluster` custom resource is stored in `etcd` on the Hub cluster.
-- When an EC2 instance hosting a spoke cluster is terminated or destroyed in AWS, its registration agent (`klusterlet`) abruptly ceases sending heartbeats.
-- By design, OCM does **not** delete the `ManagedCluster` CR. It merely transitions its condition to `AVAILABLE: Unknown` with reason `ManagedClusterLeaseUpdateStopped`. This standard Kubernetes behavior prevents accidental deletion during temporary network blips or reboots.
-- However, for dynamic cloud infrastructure where spoke nodes scale up and down or are destroyed via Terraform, this leaves "ghost" clusters and stale WireGuard public keys in the fleet.
-- If a spoke cluster with the same name (e.g. `spoke4`) is later re-provisioned, the new instance generates a **new** WireGuard public key and **new** agent certificates. If the Hub still retains the old WireGuard peer and old cluster lease, network packets are dropped, preventing the new cluster from becoming available.
-
-### 8.2 Autonomous Garbage Collection & Deregistration Architecture
-To solve this, `PrimaryHub` runs an autonomous reaper cycle inside `/usr/local/bin/ocm-auto-accept.sh` (triggered every 15 seconds by `ocm-auto-accept.timer`):
-
-```
-+----------------------------------------------------------------------------------------------------+
-|                             AUTONOMOUS SPOKE LIFECYCLE REAPER                                     |
-+----------------------------------------------------------------------------------------------------+
-
-1. EC2 Instance Terminated in AWS / Terraform destroyed
-      │
-2. ocm-auto-accept.timer (Runs every 15s on PrimaryHub)
-      │
-3. Enumerate all registered `managedclusters` on PrimaryHub
-      │
-4. Probe AWS EC2 across all regions (us-east-1, eu-west-1, eu-central-1, ap-south-1):
-   aws ec2 describe-instances --filters Name=tag:ClusterName,Values=$mc Name=instance-state-name,Values=running
-      │
-   ┌──┴────────────────────────────────────────────────┐
-   │                                                   │
-[Instance Running]                              [Instance Terminated / Absent]
-   │                                                   │
-   ▼                                                   ▼
-Normal Operation / Active Sync                  AUTONOMOUS DEREGISTRATION TRIGGERED:
-                                                1. Patch & delete ManagedCluster CR on PrimaryHub
-                                                2. Delete cluster Namespace & RBAC on PrimaryHub
-                                                3. Delete stale CSRs on PrimaryHub
-                                                4. Connect to SecondaryHub (10.99.0.2:6443) and
-                                                   delete ManagedCluster, Namespace, & RBAC
-                                                5. Evict stale WireGuard peer from wg0 & wg0.conf
-                                                6. Purge SSM parameter /sandbox/clusters/$mc
-                                                7. Purge SSM parameter /sandbox/wireguard/$mc/public-key
-```
-
-### 8.3 Automatic WireGuard Public Key Rotation on Re-provisioning
-When a spoke cluster is destroyed and re-provisioned with the same name (e.g. `spoke4`):
-1. **SSM Registration**: The new EC2 instance publishes its newly generated WireGuard public key to `/sandbox/wireguard/spoke4/public-key`.
-2. **Dynamic Peer Rotation**: On every hub and peer node, `wireguard-peers-sync.timer` inspects the active public key in SSM against the configured public key in `wg0.conf`.
-3. If a key rotation is detected (`configured_pubkey != peer_pubkey`):
-   - The obsolete WireGuard peer is immediately purged from kernel `wg0` via `wg set wg0 peer <old_key> remove`.
-   - The new peer is added with its new public key and private IP endpoint.
-4. **Instant Handshake**: The new spoke cluster establishes immediate bidirectional WireGuard connectivity, joins the Hub, and achieves `AVAILABLE: True` on `PrimaryHub` within 90 seconds.
-
----
-
-## 9. AWS Systems Manager (SSM) Parameter Store Fleet Architecture
-
-In the **01-Sandbox / CodeInspector** multi-region architecture, **AWS Systems Manager (SSM) Parameter Store** (anchored in `us-east-1`) serves as the **centralized, highly-available control plane discovery registry**.
-
-Instead of requiring external discovery daemons (like Consul or etcd clusters running across cloud regions), SSM provides an AWS-managed, serverless, highly-available key-value store accessible via IAM instance profiles across all nodes in all 4 AWS regions.
-
-### 9.1 Parameter Store Hierarchy & Data Domains
-
-The parameter hierarchy is partitioned under `/sandbox/*` across 4 core domains:
-
-```
-/sandbox/
-├── clusters/
-│   ├── primaryhub              --> JSON: Network metadata, priority, EBS volume ID
-│   ├── secondaryhub            --> JSON: Network metadata, priority, EBS volume ID
-│   ├── spoke1                  --> JSON: Network metadata, priority, EBS volume ID
-│   ├── spoke2                  --> JSON: Network metadata, priority, EBS volume ID
-│   └── spoke4                  --> JSON: Network metadata, priority, EBS volume ID
-│
-├── wireguard/
-│   ├── primaryhub/public-key   --> Base64 Curve25519 Public Key
-│   ├── secondaryhub/public-key --> Base64 Curve25519 Public Key
-│   ├── spoke1/public-key       --> Base64 Curve25519 Public Key
-│   ├── spoke2/public-key       --> Base64 Curve25519 Public Key
-│   └── spoke4/public-key       --> Base64 Curve25519 Public Key
-│
-├── pki/
-│   ├── ca.crt                  --> Central Kubernetes Root CA Public Certificate
-│   ├── ca.key                  --> Central Kubernetes Root CA Private Key
-│   ├── sa.pub                  --> Service Account Public Verification Key
-│   └── sa.key                  --> Service Account Private Signing Key
-│
-└── ocm/
-    ├── bootstrap-token         --> 10-year cluster join token (agent-registration-bootstrap)
-    ├── hub-apiserver           --> Active Hub API server endpoint (https://10.99.0.1:6443)
-    └── secondaryhub-ready      --> Hub initialization readiness flag (true)
-```
-
----
-
-### 9.2 Domain Breakdown & Technical Specifications
-
-#### 1. Fleet Cluster Registry (`/sandbox/clusters/*`)
-Every node (Hub or Spoke) publishes its identity during Stage 2 of cloud-init bootstrap:
-
-| Parameter Path | Producer | Consumers | Value Description |
-| :--- | :--- | :--- | :--- |
-| `/sandbox/clusters/<cluster_name>` | Each node on boot | All Hubs & Spokes | Node metadata payload formatted in JSON. |
-
-*Production Payload Example (`/sandbox/clusters/spoke4`):*
-```json
-{
-  "cluster_name": "spoke4",
-  "role": "spoke",
-  "region": "eu-central-1",
-  "wg_ip": "10.99.0.9",
-  "priority": "0",
-  "ebs_volume": "vol-09e995da20cae2011"
-}
-```
-
-*Production Payload Example (`/sandbox/clusters/primaryhub`):*
-```json
-{
-  "cluster_name": "primaryhub",
-  "role": "hub",
-  "region": "us-east-1",
-  "wg_ip": "10.99.0.1",
-  "priority": "1",
-  "ebs_volume": "vol-0e3fa8a6bc740b2db"
-}
-```
-
-- **How It Is Used**:
-  - The WireGuard discovery daemon (`sync-wireguard-peers.sh`) scans this path every 20 seconds to identify active nodes and resolve their private AWS endpoints via `ec2:DescribeInstances`.
-  - Spoke nodes scan this path to identify all active Hubs (`role == "hub"`) sorted by priority to configure multi-hub failover.
-
-#### 2. Dynamic WireGuard Overlay Mesh (`/sandbox/wireguard/*`)
-Holds cryptographic public keys used to assemble the point-to-point overlay network (`10.99.0.0/16`) across VPC peering.
-
-| Parameter Path | Producer | Consumers | Value Description |
-| :--- | :--- | :--- | :--- |
-| `/sandbox/wireguard/<cluster_name>/public-key` | Each node on boot | All Hubs & Spokes | 44-character Base64 **Curve25519 public key**. |
-
-*Production Example (`/sandbox/wireguard/spoke4/public-key`):*
-```text
-dvGZhjYQkf9xnAwNBsfdvBOamNw5rnizkIDtMgPGGTQ=
-```
-
-- **Security Invariant**: Only the **public key** is stored in SSM. The **private key never leaves the local instance**.
-- **Dynamic Key Rotation**: When a node is terminated and re-provisioned, publishing its new public key here triggers all peers to immediately purge the obsolete peer and bind the new key without restarting interfaces.
-
-#### 3. Central Kubernetes Shared PKI (`/sandbox/pki/*`)
-Maintains unified cryptographic identity across all clusters so multi-hub client certificates, tokens, and admission webhooks remain mutually valid during failovers.
-
-| Parameter Path | Producer | Consumers | Value Description |
-| :--- | :--- | :--- | :--- |
-| `/sandbox/pki/ca.crt` | PrimaryHub on setup | SecondaryHub & Spokes | Kubernetes Root Certificate Authority public cert. |
-| `/sandbox/pki/ca.key` | PrimaryHub on setup | SecondaryHub & Spokes | Kubernetes Root CA private signing key. |
-| `/sandbox/pki/sa.pub` | PrimaryHub on setup | SecondaryHub & Spokes | Service Account public verification key. |
-| `/sandbox/pki/sa.key` | PrimaryHub on setup | SecondaryHub & Spokes | Service Account private signing key. |
-
-- **How It Is Used**:
-  - When `SecondaryHub` or any spoke boots, it restores these certificates into `/mnt/k8s-disks/pki`.
-  - Guarantees that client certificates issued by PrimaryHub are cryptographically accepted by SecondaryHub if PrimaryHub suffers an outage.
-
-#### 4. Open Cluster Management (OCM) Discovery (`/sandbox/ocm/*`)
-Stores cluster registration credentials and discovery endpoints.
-
-| Parameter Path | Producer | Consumers | Value Description |
-| :--- | :--- | :--- | :--- |
-| `/sandbox/ocm/bootstrap-token` | PrimaryHub | All Spokes | 10-year cluster join token (`agent-registration-bootstrap`). |
-| `/sandbox/ocm/hub-apiserver` | PrimaryHub | All Spokes | Active Hub endpoint URL (`https://10.99.0.1:6443`). |
-| `/sandbox/ocm/<cluster_name>-ready` | Hubs | Systemd / Scripts | Health flag (`true`) signaling that the Hub is fully initialized. |
-
-- **How It Is Used**:
-  - Spoke nodes fetch `/sandbox/ocm/bootstrap-token` and `/sandbox/ocm/hub-apiserver` to build their `bootstrap-hub-kubeconfig` and execute `clusteradm join`.
-
----
-
-### 9.3 Security Invariants & IAM Access Control
-
-1. **Least-Privilege IAM Roles**:
-   - Spoke instances are restricted to `ssm:GetParameter`, `ssm:GetParametersByPath`, and write permissions restricted strictly to their own path `/sandbox/clusters/<name>` and `/sandbox/wireguard/<name>/*`.
-2. **Private Key Isolation**:
-   - Node WireGuard private keys (`/etc/wireguard/private.key`) and KinD node keys are never uploaded to SSM or transmitted over the network.
-3. **Automated Lifecycle Reaper**:
-   - When an instance is terminated in AWS, PrimaryHub's `ocm-auto-accept.sh` reaper daemon automatically purges `/sandbox/clusters/<cluster_name>` and `/sandbox/wireguard/<cluster_name>/public-key`, ensuring zero stale ghost parameters persist in SSM.
