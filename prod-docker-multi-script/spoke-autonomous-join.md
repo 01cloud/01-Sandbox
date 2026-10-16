@@ -731,3 +731,134 @@ When a spoke cluster is destroyed and re-provisioned with the same name (e.g. `s
    - The obsolete WireGuard peer is immediately purged from kernel `wg0` via `wg set wg0 peer <old_key> remove`.
    - The new peer is added with its new public key and private IP endpoint.
 4. **Instant Handshake**: The new spoke cluster establishes immediate bidirectional WireGuard connectivity, joins the Hub, and achieves `AVAILABLE: True` on `PrimaryHub` within 90 seconds.
+
+---
+
+## 9. AWS Systems Manager (SSM) Parameter Store Fleet Architecture
+
+In the **01-Sandbox / CodeInspector** multi-region architecture, **AWS Systems Manager (SSM) Parameter Store** (anchored in `us-east-1`) serves as the **centralized, highly-available control plane discovery registry**.
+
+Instead of requiring external discovery daemons (like Consul or etcd clusters running across cloud regions), SSM provides an AWS-managed, serverless, highly-available key-value store accessible via IAM instance profiles across all nodes in all 4 AWS regions.
+
+### 9.1 Parameter Store Hierarchy & Data Domains
+
+The parameter hierarchy is partitioned under `/sandbox/*` across 4 core domains:
+
+```
+/sandbox/
+├── clusters/
+│   ├── primaryhub              --> JSON: Network metadata, priority, EBS volume ID
+│   ├── secondaryhub            --> JSON: Network metadata, priority, EBS volume ID
+│   ├── spoke1                  --> JSON: Network metadata, priority, EBS volume ID
+│   ├── spoke2                  --> JSON: Network metadata, priority, EBS volume ID
+│   └── spoke4                  --> JSON: Network metadata, priority, EBS volume ID
+│
+├── wireguard/
+│   ├── primaryhub/public-key   --> Base64 Curve25519 Public Key
+│   ├── secondaryhub/public-key --> Base64 Curve25519 Public Key
+│   ├── spoke1/public-key       --> Base64 Curve25519 Public Key
+│   ├── spoke2/public-key       --> Base64 Curve25519 Public Key
+│   └── spoke4/public-key       --> Base64 Curve25519 Public Key
+│
+├── pki/
+│   ├── ca.crt                  --> Central Kubernetes Root CA Public Certificate
+│   ├── ca.key                  --> Central Kubernetes Root CA Private Key
+│   ├── sa.pub                  --> Service Account Public Verification Key
+│   └── sa.key                  --> Service Account Private Signing Key
+│
+└── ocm/
+    ├── bootstrap-token         --> 10-year cluster join token (agent-registration-bootstrap)
+    ├── hub-apiserver           --> Active Hub API server endpoint (https://10.99.0.1:6443)
+    └── secondaryhub-ready      --> Hub initialization readiness flag (true)
+```
+
+---
+
+### 9.2 Domain Breakdown & Technical Specifications
+
+#### 1. Fleet Cluster Registry (`/sandbox/clusters/*`)
+Every node (Hub or Spoke) publishes its identity during Stage 2 of cloud-init bootstrap:
+
+| Parameter Path | Producer | Consumers | Value Description |
+| :--- | :--- | :--- | :--- |
+| `/sandbox/clusters/<cluster_name>` | Each node on boot | All Hubs & Spokes | Node metadata payload formatted in JSON. |
+
+*Production Payload Example (`/sandbox/clusters/spoke4`):*
+```json
+{
+  "cluster_name": "spoke4",
+  "role": "spoke",
+  "region": "eu-central-1",
+  "wg_ip": "10.99.0.9",
+  "priority": "0",
+  "ebs_volume": "vol-09e995da20cae2011"
+}
+```
+
+*Production Payload Example (`/sandbox/clusters/primaryhub`):*
+```json
+{
+  "cluster_name": "primaryhub",
+  "role": "hub",
+  "region": "us-east-1",
+  "wg_ip": "10.99.0.1",
+  "priority": "1",
+  "ebs_volume": "vol-0e3fa8a6bc740b2db"
+}
+```
+
+- **How It Is Used**:
+  - The WireGuard discovery daemon (`sync-wireguard-peers.sh`) scans this path every 20 seconds to identify active nodes and resolve their private AWS endpoints via `ec2:DescribeInstances`.
+  - Spoke nodes scan this path to identify all active Hubs (`role == "hub"`) sorted by priority to configure multi-hub failover.
+
+#### 2. Dynamic WireGuard Overlay Mesh (`/sandbox/wireguard/*`)
+Holds cryptographic public keys used to assemble the point-to-point overlay network (`10.99.0.0/16`) across VPC peering.
+
+| Parameter Path | Producer | Consumers | Value Description |
+| :--- | :--- | :--- | :--- |
+| `/sandbox/wireguard/<cluster_name>/public-key` | Each node on boot | All Hubs & Spokes | 44-character Base64 **Curve25519 public key**. |
+
+*Production Example (`/sandbox/wireguard/spoke4/public-key`):*
+```text
+dvGZhjYQkf9xnAwNBsfdvBOamNw5rnizkIDtMgPGGTQ=
+```
+
+- **Security Invariant**: Only the **public key** is stored in SSM. The **private key never leaves the local instance**.
+- **Dynamic Key Rotation**: When a node is terminated and re-provisioned, publishing its new public key here triggers all peers to immediately purge the obsolete peer and bind the new key without restarting interfaces.
+
+#### 3. Central Kubernetes Shared PKI (`/sandbox/pki/*`)
+Maintains unified cryptographic identity across all clusters so multi-hub client certificates, tokens, and admission webhooks remain mutually valid during failovers.
+
+| Parameter Path | Producer | Consumers | Value Description |
+| :--- | :--- | :--- | :--- |
+| `/sandbox/pki/ca.crt` | PrimaryHub on setup | SecondaryHub & Spokes | Kubernetes Root Certificate Authority public cert. |
+| `/sandbox/pki/ca.key` | PrimaryHub on setup | SecondaryHub & Spokes | Kubernetes Root CA private signing key. |
+| `/sandbox/pki/sa.pub` | PrimaryHub on setup | SecondaryHub & Spokes | Service Account public verification key. |
+| `/sandbox/pki/sa.key` | PrimaryHub on setup | SecondaryHub & Spokes | Service Account private signing key. |
+
+- **How It Is Used**:
+  - When `SecondaryHub` or any spoke boots, it restores these certificates into `/mnt/k8s-disks/pki`.
+  - Guarantees that client certificates issued by PrimaryHub are cryptographically accepted by SecondaryHub if PrimaryHub suffers an outage.
+
+#### 4. Open Cluster Management (OCM) Discovery (`/sandbox/ocm/*`)
+Stores cluster registration credentials and discovery endpoints.
+
+| Parameter Path | Producer | Consumers | Value Description |
+| :--- | :--- | :--- | :--- |
+| `/sandbox/ocm/bootstrap-token` | PrimaryHub | All Spokes | 10-year cluster join token (`agent-registration-bootstrap`). |
+| `/sandbox/ocm/hub-apiserver` | PrimaryHub | All Spokes | Active Hub endpoint URL (`https://10.99.0.1:6443`). |
+| `/sandbox/ocm/<cluster_name>-ready` | Hubs | Systemd / Scripts | Health flag (`true`) signaling that the Hub is fully initialized. |
+
+- **How It Is Used**:
+  - Spoke nodes fetch `/sandbox/ocm/bootstrap-token` and `/sandbox/ocm/hub-apiserver` to build their `bootstrap-hub-kubeconfig` and execute `clusteradm join`.
+
+---
+
+### 9.3 Security Invariants & IAM Access Control
+
+1. **Least-Privilege IAM Roles**:
+   - Spoke instances are restricted to `ssm:GetParameter`, `ssm:GetParametersByPath`, and write permissions restricted strictly to their own path `/sandbox/clusters/<name>` and `/sandbox/wireguard/<name>/*`.
+2. **Private Key Isolation**:
+   - Node WireGuard private keys (`/etc/wireguard/private.key`) and KinD node keys are never uploaded to SSM or transmitted over the network.
+3. **Automated Lifecycle Reaper**:
+   - When an instance is terminated in AWS, PrimaryHub's `ocm-auto-accept.sh` reaper daemon automatically purges `/sandbox/clusters/<cluster_name>` and `/sandbox/wireguard/<cluster_name>/public-key`, ensuring zero stale ghost parameters persist in SSM.
