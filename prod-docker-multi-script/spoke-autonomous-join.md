@@ -523,6 +523,89 @@ Instead of static hardcoded IP tables that break when instances scale, the clust
        ```
    - Result: In less than 30 seconds from boot, **all hubs and all spokes can ping `10.99.0.9` directly**.
 
+4. **Bidirectional Full-Mesh Convergence & Symmetrical Configuration**:
+   The mesh synchronization is completely symmetrical and bidirectional. Because the exact same daemon runs on every single node, two parallel synchronization paths complete within 20 seconds of instance launch:
+
+   #### Direction A: Existing Clusters $\rightarrow$ Learn About the New Spoke (`spoke4`)
+   The daemons running on `primaryhub`, `secondaryhub`, `spoke1`, and `spoke2` detect `spoke4` in SSM `/sandbox/clusters/spoke4` and `/sandbox/wireguard/spoke4/public-key`.
+   - Each existing node automatically appends the `[Peer]` block for `spoke4` to its `/etc/wireguard/wg0.conf`:
+     ```ini
+     [Peer]
+     # spoke4
+     PublicKey = <spoke4-public-key>
+     AllowedIPs = 10.99.0.9/32
+     Endpoint = 10.23.144.204:51820
+     PersistentKeepalive = 25
+     ```
+   - Each node runs `wg set wg0 peer <spoke4_pubkey> ...` to activate the route in kernel memory immediately without bouncing the interface.
+
+   #### Direction B: The New Spoke (`spoke4`) $\rightarrow$ Learns About All Existing Clusters
+   Simultaneously, `sync-wireguard-peers.sh` executes locally on `spoke4` with `$SELF_NAME="spoke4"`. It reads all fleet records in `/sandbox/clusters`, resolves the private AWS IP for each peer via EC2 APIs, and writes every single peer into its local `/etc/wireguard/wg0.conf`:
+   ```ini
+   [Interface]
+   Address = 10.99.0.9/24
+   ListenPort = 51820
+   PrivateKey = <spoke4-local-private-key>
+
+   [Peer]
+   # primaryhub (us-east-1)
+   PublicKey = <primaryhub-public-key>
+   AllowedIPs = 10.99.0.1/32
+   Endpoint = 10.20.140.204:51820
+   PersistentKeepalive = 25
+
+   [Peer]
+   # secondaryhub (eu-west-1)
+   PublicKey = <secondaryhub-public-key>
+   AllowedIPs = 10.99.0.2/32
+   Endpoint = 10.22.139.252:51820
+   PersistentKeepalive = 25
+
+   [Peer]
+   # spoke1 (eu-central-1)
+   PublicKey = <spoke1-public-key>
+   AllowedIPs = 10.99.0.3/32
+   Endpoint = 10.23.135.138:51820
+   PersistentKeepalive = 25
+
+   [Peer]
+   # spoke2 (ap-south-1)
+   PublicKey = <spoke2-public-key>
+   AllowedIPs = 10.99.0.4/32
+   Endpoint = 10.21.130.150:51820
+   PersistentKeepalive = 25
+   ```
+
+   #### Full-Mesh Topology & Any-to-Any Overlay
+   ```
+                          [ PrimaryHub (10.99.0.1) ]
+                                us-east-1
+                              ▲           ▲
+                             ╱             ╲
+                            ╱   Encrypted   ╲
+                           ╱    WireGuard    ╲
+                          ▼       Mesh        ▼
+    [ Spoke1 (10.99.0.3) ] ◄═════════════════► [ Spoke4 (10.99.0.9) ]
+        eu-central-1                               eu-central-1
+              ▲                                          ▲
+              │                                          │
+              │         Encrypted WireGuard Mesh         │
+              ▼                                          ▼
+    [ Spoke2 (10.99.0.4) ] ◄═════════════════► [ SecondaryHub (10.99.0.2) ]
+        ap-south-1                                 eu-west-1
+   ```
+
+   #### Security & Cryptographic Privacy Guarantees
+   1. **Noise Protocol Framework (Curve25519 + ChaCha20-Poly1305)**:
+      All inter-cluster data plane traffic (Kubernetes API calls, OCM heartbeats, workload manifests, database replication) is encrypted and authenticated in the Linux kernel before transmission.
+   2. **Cryptographic Routing via `AllowedIPs`**:
+      The Linux kernel strictly enforces that only packets with an authentic cryptographic signature matching `AllowedIPs = 10.99.0.9/32` are routed. Any packet tampering or spoofed source IP is silently dropped by the kernel.
+   3. **Zero Public Internet Exposure**:
+      All WireGuard endpoints resolve to internal AWS VPC private IPs (`10.20.x.x`, `10.21.x.x`, `10.22.x.x`, `10.23.x.x`) across inter-region VPC peering. No WireGuard UDP ports or Kubernetes API ports are exposed to the public internet.
+   4. **Direct Point-to-Point Paths**:
+      Traffic between `spoke4` and `spoke1` (both in `eu-central-1`) travels directly within the local VPC without leaving the region or hair-pinning through a Hub in `us-east-1`, maximizing throughput and eliminating unnecessary inter-region data transfer latency.
+
+
 ---
 
 ### Stage 4: KinD MicroVM Cluster Launch
