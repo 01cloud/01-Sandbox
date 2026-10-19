@@ -403,6 +403,10 @@ cloudnative-pg:
   enabled: true
   crds:
     create: false
+  podAnnotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
   webhook:
     mutating:
       failurePolicy: Ignore

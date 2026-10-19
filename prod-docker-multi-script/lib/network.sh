@@ -11,12 +11,13 @@
 
 _check_phase_02() {
   local entity
-  for entity in gateway primaryhub secondaryhub spoke1 spoke2; do
+  local all_entities=("gateway" "${ALL_NODES[@]}")
+  for entity in "${all_entities[@]}"; do
     [ -s "${WG_DIR}/${entity}.key" ] && [ -s "${WG_DIR}/${entity}.pub" ] || return 1
   done
 
   # Load keypairs into memory
-  for entity in gateway primaryhub secondaryhub spoke1 spoke2; do
+  for entity in "${all_entities[@]}"; do
     WG_PRIV[$entity]=$(tr -d '\r\n' < "${WG_DIR}/${entity}.key")
     WG_PUB[$entity]=$(tr -d '\r\n'  < "${WG_DIR}/${entity}.pub")
   done
@@ -24,18 +25,138 @@ _check_phase_02() {
   # Verify WireGuard is active on remote nodes if configured
   if [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ]; then
     init_node_private_ips
-    remote_exec "$PRIMARYHUB_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
-    remote_exec "$SECONDARYHUB_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
-    remote_exec "$SPOKE1_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
-    remote_exec "$SPOKE2_HOST" "sudo wg show wg0 >/dev/null 2>&1" || return 1
-    # Ensure PrimaryHub peer endpoint matches currently configured SPOKE1_PRIVATE_IP
-    remote_exec "$PRIMARYHUB_HOST" "sudo grep -q '${SPOKE1_PRIVATE_IP}' /etc/wireguard/wg0.conf 2>/dev/null" || return 1
+    for node in "${ALL_NODES[@]}"; do
+      local r_host="${NODE_HOSTS[$node]:-$node}"
+      [ "$r_host" != "127.0.0.1" ] && [ "$r_host" != "localhost" ] && \
+        remote_exec "$r_host" "sudo wg show wg0 >/dev/null 2>&1" || return 1
+    done
   fi
 
   return 0
 }
 
 _do_phase_02_transit_network_and_wg_keys() {
+  local is_remote=false
+  if [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ]; then
+    is_remote=true
+  fi
+
+  if ! $is_remote; then
+    if ! docker network ls --format '{{.Name}}' | grep -q "^${TRANSIT_NET_NAME}$"; then
+      log_info "Creating local Docker transit network ($TRANSIT_SUBNET)..."
+      docker network create \
+        --driver bridge \
+        --subnet "$TRANSIT_SUBNET" \
+        --opt "com.docker.network.bridge.name"="br-01transit" \
+        "$TRANSIT_NET_NAME"
+    fi
+  else
+    log_info "Operating in remote multi-region mode across EC2 nodes: ${PRIMARYHUB_HOST}, ${SECONDARYHUB_HOST}, ${SPOKE1_HOST}, ${SPOKE2_HOST}."
+  fi
+
+  # 1. Generate WireGuard keypairs for gateway and all fleet nodes
+  local all_entities=("gateway" "${ALL_NODES[@]}")
+  for entity in "${all_entities[@]}"; do
+    if [ ! -s "${WG_DIR}/${entity}.key" ] || [ ! -s "${WG_DIR}/${entity}.pub" ]; then
+      log_info "Generating WireGuard keypair for $entity..."
+      read -r priv pub < <(python3 -c "
+from cryptography.hazmat.primitives.asymmetric import x25519
+import base64
+k = x25519.X25519PrivateKey.generate()
+print(f'{base64.b64encode(k.private_bytes_raw()).decode()} {base64.b64encode(k.public_key().public_bytes_raw()).decode()}')
+")
+      echo "$priv" > "${WG_DIR}/${entity}.key"
+      echo "$pub"  > "${WG_DIR}/${entity}.pub"
+    fi
+    WG_PRIV[$entity]=$(tr -d '\r\n' < "${WG_DIR}/${entity}.key")
+    WG_PUB[$entity]=$(tr -d '\r\n'  < "${WG_DIR}/${entity}.pub")
+  done
+
+  log_success "WireGuard keypairs ready for all ${#all_entities[@]} entities."
+
+  # 2. In remote mode, generate and deploy full-mesh wg0.conf for each EC2 instance
+  if $is_remote; then
+    init_node_private_ips
+    log_info "Configuring cross-region WireGuard mesh across all ${#ALL_NODES[@]} EC2 instances over VPC Peering..."
+
+    local primary_hub="${HUB_LIST[0]:-primaryhub}"
+
+    for node in "${ALL_NODES[@]}"; do
+      local node_wg_ip
+      node_wg_ip=$(_get_wg_ip_for_node "$node")
+      local conf_file="${WG_DIR}/wg0-${node}.conf"
+
+      # Interface section (PrimaryHub also hosts the VIP 10.99.0.100)
+      if [ "$node" == "$primary_hub" ]; then
+        cat > "$conf_file" <<CONF_HEAD
+[Interface]
+Address = ${node_wg_ip}/24, ${WG_VIP}/32
+ListenPort = ${WG_PORT}
+PrivateKey = ${WG_PRIV["$node"]}
+CONF_HEAD
+      else
+        cat > "$conf_file" <<CONF_HEAD
+[Interface]
+Address = ${node_wg_ip}/24
+ListenPort = ${WG_PORT}
+PrivateKey = ${WG_PRIV["$node"]}
+CONF_HEAD
+      fi
+
+      # Peer sections: every other node in ALL_NODES
+      for peer in "${ALL_NODES[@]}"; do
+        [ "$peer" == "$node" ] && continue
+        local peer_wg_ip peer_endpoint
+        peer_wg_ip=$(_get_wg_ip_for_node "$peer")
+        peer_endpoint="${NODE_PRIVATE_IPS[$peer]:-127.0.0.1}:${WG_PORT}"
+
+        local allowed_ips="${peer_wg_ip}/32"
+        [ "$peer" == "$primary_hub" ] && allowed_ips="${peer_wg_ip}/32, ${WG_VIP}/32"
+
+        cat >> "$conf_file" <<CONF_PEER
+
+[Peer]
+# ${peer}
+PublicKey = ${WG_PUB["$peer"]}
+AllowedIPs = ${allowed_ips}
+Endpoint = ${peer_endpoint}
+PersistentKeepalive = 25
+CONF_PEER
+      done
+    done
+
+    # Push and activate wg0 on each remote EC2 node
+    for node in "${ALL_NODES[@]}"; do
+      local r_host="${NODE_HOSTS[$node]:-$node}"
+      log_info "Deploying WireGuard wg0 on ${node} (${r_host})..."
+
+      remote_copy_to "$r_host" "${WG_DIR}/wg0-${node}.conf" "/tmp/wg0.conf"
+      remote_exec "$r_host" bash -s << 'APPLY_WG_EOF'
+set -e
+sudo mkdir -p /etc/wireguard
+sudo cp /tmp/wg0.conf /etc/wireguard/wg0.conf
+sudo chmod 600 /etc/wireguard/wg0.conf
+sudo systemctl enable wg-quick@wg0 2>/dev/null || true
+sudo systemctl restart wg-quick@wg0 2>/dev/null || sudo wg-quick up wg0 2>/dev/null || true
+APPLY_WG_EOF
+    done
+
+    # Verify cross-region overlay ping connectivity from PrimaryHub to other nodes
+    log_info "Testing cross-region WireGuard mesh connectivity from ${primary_hub}..."
+    sleep 3
+    local primary_host="${NODE_HOSTS[$primary_hub]:-$PRIMARYHUB_HOST}"
+    for peer in "${ALL_NODES[@]}"; do
+      [ "$peer" == "$primary_hub" ] && continue
+      local p_wg_ip
+      p_wg_ip=$(_get_wg_ip_for_node "$peer")
+      remote_exec "$primary_host" "ping -c 2 -W 2 ${p_wg_ip} >/dev/null 2>&1" && \
+        log_success "Mesh: ${primary_hub} <-> ${peer} reachable over ${p_wg_ip}!" || \
+        log_warn "${primary_hub} <-> ${peer} ping pending..."
+    done
+  fi
+}
+
+phase_02_transit_network_and_wg_keys() {
   local is_remote=false
   if [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ]; then
     is_remote=true
@@ -227,12 +348,19 @@ phase_02_transit_network_and_wg_keys() {
 
 _check_phase_05() {
   if [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ]; then
-    remote_exec "$PRIMARYHUB_HOST" "ip a show wg0 | grep -q '10.99.0.1'" || return 1
-    remote_exec "$SECONDARYHUB_HOST" "ip a show wg0 | grep -q '10.99.0.2'" || return 1
+    for hub in "${HUB_LIST[@]}"; do
+      local h_host="${NODE_HOSTS[$hub]:-$hub}"
+      local h_wg_ip
+      h_wg_ip=$(_get_wg_ip_for_node "$hub")
+      remote_exec "$h_host" "ip a show wg0 | grep -q '${h_wg_ip}'" || return 1
+    done
     return 0
   fi
-  _check_wg_active primaryhub-control-plane   "$WG_HUB1_IP" || return 1
-  _check_wg_active secondaryhub-control-plane "$WG_HUB2_IP" || return 1
+  for hub in "${HUB_LIST[@]}"; do
+    local h_wg_ip
+    h_wg_ip=$(_get_wg_ip_for_node "$hub")
+    _check_wg_active "${hub}-control-plane" "$h_wg_ip" || return 1
+  done
   return 0
 }
 
@@ -247,8 +375,11 @@ _do_phase_05_wireguard_on_hubs() {
     return 0
   fi
 
-  _setup_wireguard "primaryhub-control-plane"   "primaryhub"   "$WG_HUB1_IP"
-  _setup_wireguard "secondaryhub-control-plane" "secondaryhub" "$WG_HUB2_IP"
+  for hub in "${HUB_LIST[@]}"; do
+    local h_wg_ip
+    h_wg_ip=$(_get_wg_ip_for_node "$hub")
+    _setup_wireguard "${hub}-control-plane" "$hub" "$h_wg_ip"
+  done
 
   log_success "WireGuard overlay active on hub clusters."
 }

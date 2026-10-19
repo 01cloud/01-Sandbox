@@ -60,7 +60,7 @@ touch "$KUBECONFIG" 2>/dev/null || {
   exit 1
 }
 
-# ── 2b. Remote Node Configuration ─────────────────────────────────────────────
+# ── 2b. Remote Node Configuration & Dynamic Fleet Registry ───────────────────
 PROD_ENV_FILE="${ROOT_DIR}/prod.env"
 if [ -f "$PROD_ENV_FILE" ]; then
   # Source environment variables while ignoring comments
@@ -71,43 +71,160 @@ elif [ -f "${ROOT_DIR}/prod.env.example" ]; then
   log_warn "prod.env not found! Falling back to defaults. To configure remote EC2 instances, copy prod.env.example to prod.env."
 fi
 
-PRIMARYHUB_HOST="${PRIMARYHUB_HOST:-127.0.0.1}"
-SECONDARYHUB_HOST="${SECONDARYHUB_HOST:-127.0.0.1}"
-SPOKE1_HOST="${SPOKE1_HOST:-127.0.0.1}"
-SPOKE2_HOST="${SPOKE2_HOST:-127.0.0.1}"
-
 # Connection Mode (default: true)
 USE_SSM="${USE_SSM:-true}"
 
-# Regional AWS Configuration
-PRIMARYHUB_REGION="${PRIMARYHUB_REGION:-us-east-1}"
-SECONDARYHUB_REGION="${SECONDARYHUB_REGION:-eu-west-1}"
-SPOKE1_REGION="${SPOKE1_REGION:-eu-central-1}"
-SPOKE2_REGION="${SPOKE2_REGION:-ap-south-1}"
+# Global Fleet Registries (Dynamically populated from AWS SSM or prod.env)
+declare -a ALL_NODES=()
+declare -a HUB_LIST=()
+declare -a SPOKE_LIST=()
+declare -A NODE_ROLES=()
+declare -A NODE_REGIONS=()
+declare -A NODE_TARGETS=()
+declare -A NODE_HOSTS=()
+declare -A NODE_PRIVATE_IPS=()
+declare -A WG_IPS=()
+declare -A HUB_PRIORITIES=()
+declare -A NODE_SSH_USERS=()
+declare -A NODE_SSH_KEYS=()
 
-# Targets (can be EC2 Instance ID, ASG name, or Public IP)
-PRIMARYHUB_TARGET="${PRIMARYHUB_TARGET:-$PRIMARYHUB_HOST}"
-SECONDARYHUB_TARGET="${SECONDARYHUB_TARGET:-$SECONDARYHUB_HOST}"
-SPOKE1_TARGET="${SPOKE1_TARGET:-$SPOKE1_HOST}"
-SPOKE2_TARGET="${SPOKE2_TARGET:-$SPOKE2_HOST}"
+_load_cluster_registry() {
+  local ssm_path="/sandbox/clusters"
+  local ssm_region="${AWS_DEFAULT_REGION:-us-east-1}"
+  local ssm_loaded=false
 
-# Private IPv4 addresses for WireGuard mesh over Inter-Region VPC Peering
-PRIMARYHUB_PRIVATE_IP="${PRIMARYHUB_PRIVATE_IP:-}"
-SECONDARYHUB_PRIVATE_IP="${SECONDARYHUB_PRIVATE_IP:-}"
-SPOKE1_PRIVATE_IP="${SPOKE1_PRIVATE_IP:-}"
-SPOKE2_PRIVATE_IP="${SPOKE2_PRIVATE_IP:-}"
+  # 1. Attempt AWS Systems Manager Parameter Store fleet discovery
+  if command -v aws >/dev/null 2>&1 && [ "${USE_SSM:-true}" != "false" ]; then
+    local cluster_params
+    cluster_params=$(aws ssm get-parameters-by-path       --path "$ssm_path"       --region "$ssm_region"       --query "Parameters[*].Value"       --output json 2>/dev/null || echo "[]")
 
-# Strip any user@ prefix from HOST variables if present, extracting default user
-for _v in PRIMARYHUB SECONDARYHUB SPOKE1 SPOKE2; do
-  _h_var="${_v}_HOST"
-  _h_val="${!_h_var:-}"
-  if [[ "$_h_val" == *"@"* ]]; then
-    _u_val="${_h_val%%@*}"
-    _h_val="${_h_val##*@}"
-    eval "${_h_var}=\"$_h_val\""
-    eval ": \"\${${_v}_SSH_USER:=$_u_val}\""
+    if [ -n "$cluster_params" ] && [ "$cluster_params" != "[]" ] && [ "$cluster_params" != "null" ]; then
+      local raw_hubs=()
+      while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        local c_name c_role c_region c_wg_ip c_prio
+        c_name=$(echo "$entry" | jq -r '.cluster_name // empty' 2>/dev/null || true)
+        [ -z "$c_name" ] && continue
+
+        c_role=$(echo "$entry" | jq -r '.role // "spoke"' 2>/dev/null || echo "spoke")
+        c_region=$(echo "$entry" | jq -r '.region // "us-east-1"' 2>/dev/null || echo "us-east-1")
+        c_wg_ip=$(echo "$entry" | jq -r '.wg_ip // empty' 2>/dev/null || true)
+        c_prio=$(echo "$entry" | jq -r '.priority // "0"' 2>/dev/null || echo "0")
+
+        ALL_NODES+=("$c_name")
+        NODE_ROLES["$c_name"]="$c_role"
+        NODE_REGIONS["$c_name"]="$c_region"
+        NODE_TARGETS["$c_name"]="$c_name"
+        NODE_HOSTS["$c_name"]="$c_name"
+        [ -n "$c_wg_ip" ] && WG_IPS["$c_name"]="$c_wg_ip"
+
+        if [ "$c_role" == "hub" ]; then
+          HUB_PRIORITIES["$c_name"]="${c_prio:-0}"
+          raw_hubs+=("${c_prio}:${c_name}")
+        else
+          SPOKE_LIST+=("$c_name")
+        fi
+      done < <(echo "$cluster_params" | jq -c '.[]' 2>/dev/null || true)
+
+      if [ "${#ALL_NODES[@]}" -gt 0 ]; then
+        ssm_loaded=true
+        # Sort hubs by priority ascending (1, 2, 3...)
+        if [ "${#raw_hubs[@]}" -gt 0 ]; then
+          while IFS= read -r item; do
+            [ -n "$item" ] && HUB_LIST+=("${item#*:}")
+          done < <(printf '%s
+' "${raw_hubs[@]}" | sort -n -t: -k1)
+        fi
+      fi
+    fi
   fi
-done
+
+  # 2. Fallback to prod.env / environment / static defaults
+  if [ "$ssm_loaded" = false ]; then
+    ALL_NODES=("primaryhub" "secondaryhub" "spoke1" "spoke2")
+    HUB_LIST=("primaryhub" "secondaryhub")
+    SPOKE_LIST=("spoke1" "spoke2")
+
+    NODE_ROLES["primaryhub"]="hub"; HUB_PRIORITIES["primaryhub"]="1"
+    NODE_ROLES["secondaryhub"]="hub"; HUB_PRIORITIES["secondaryhub"]="2"
+    NODE_ROLES["spoke1"]="spoke"
+    NODE_ROLES["spoke2"]="spoke"
+
+    NODE_REGIONS["primaryhub"]="${PRIMARYHUB_REGION:-us-east-1}"
+    NODE_REGIONS["secondaryhub"]="${SECONDARYHUB_REGION:-eu-west-1}"
+    NODE_REGIONS["spoke1"]="${SPOKE1_REGION:-eu-central-1}"
+    NODE_REGIONS["spoke2"]="${SPOKE2_REGION:-ap-south-1}"
+
+    NODE_TARGETS["primaryhub"]="${PRIMARYHUB_TARGET:-${PRIMARYHUB_HOST:-127.0.0.1}}"
+    NODE_TARGETS["secondaryhub"]="${SECONDARYHUB_TARGET:-${SECONDARYHUB_HOST:-127.0.0.1}}"
+    NODE_TARGETS["spoke1"]="${SPOKE1_TARGET:-${SPOKE1_HOST:-127.0.0.1}}"
+    NODE_TARGETS["spoke2"]="${SPOKE2_TARGET:-${SPOKE2_HOST:-127.0.0.1}}"
+
+    NODE_HOSTS["primaryhub"]="${PRIMARYHUB_HOST:-127.0.0.1}"
+    NODE_HOSTS["secondaryhub"]="${SECONDARYHUB_HOST:-127.0.0.1}"
+    NODE_HOSTS["spoke1"]="${SPOKE1_HOST:-127.0.0.1}"
+    NODE_HOSTS["spoke2"]="${SPOKE2_HOST:-127.0.0.1}"
+
+    WG_IPS["primaryhub"]="${WG_HUB1_IP:-10.99.0.1}"
+    WG_IPS["secondaryhub"]="${WG_HUB2_IP:-10.99.0.2}"
+    WG_IPS["spoke1"]="${WG_SPOKE1_IP:-10.99.0.3}"
+    WG_IPS["spoke2"]="${WG_SPOKE2_IP:-10.99.0.4}"
+  fi
+
+  # 3. Synchronize legacy single-variable bindings for backward compatibility
+  PRIMARYHUB_HOST="${NODE_HOSTS[${HUB_LIST[0]:-primaryhub}]:-${PRIMARYHUB_HOST:-127.0.0.1}}"
+  PRIMARYHUB_REGION="${NODE_REGIONS[${HUB_LIST[0]:-primaryhub}]:-${PRIMARYHUB_REGION:-us-east-1}}"
+  PRIMARYHUB_TARGET="${NODE_TARGETS[${HUB_LIST[0]:-primaryhub}]:-${PRIMARYHUB_TARGET:-$PRIMARYHUB_HOST}}"
+  WG_HUB1_IP="${WG_IPS[${HUB_LIST[0]:-primaryhub}]:-10.99.0.1}"
+
+  if [ "${#HUB_LIST[@]}" -gt 1 ]; then
+    SECONDARYHUB_HOST="${NODE_HOSTS[${HUB_LIST[1]}]:-${SECONDARYHUB_HOST:-127.0.0.1}}"
+    SECONDARYHUB_REGION="${NODE_REGIONS[${HUB_LIST[1]}]:-${SECONDARYHUB_REGION:-eu-west-1}}"
+    SECONDARYHUB_TARGET="${NODE_TARGETS[${HUB_LIST[1]}]:-${SECONDARYHUB_TARGET:-$SECONDARYHUB_HOST}}"
+    WG_HUB2_IP="${WG_IPS[${HUB_LIST[1]}]:-10.99.0.2}"
+  else
+    SECONDARYHUB_HOST="${SECONDARYHUB_HOST:-127.0.0.1}"
+    SECONDARYHUB_REGION="${SECONDARYHUB_REGION:-eu-west-1}"
+    SECONDARYHUB_TARGET="${SECONDARYHUB_TARGET:-$SECONDARYHUB_HOST}"
+    WG_HUB2_IP="${WG_HUB2_IP:-10.99.0.2}"
+  fi
+
+  if [ "${#SPOKE_LIST[@]}" -gt 0 ]; then
+    SPOKE1_HOST="${NODE_HOSTS[${SPOKE_LIST[0]}]:-${SPOKE1_HOST:-127.0.0.1}}"
+    SPOKE1_REGION="${NODE_REGIONS[${SPOKE_LIST[0]}]:-${SPOKE1_REGION:-eu-central-1}}"
+    SPOKE1_TARGET="${NODE_TARGETS[${SPOKE_LIST[0]}]:-${SPOKE1_TARGET:-$SPOKE1_HOST}}"
+    WG_SPOKE1_IP="${WG_IPS[${SPOKE_LIST[0]}]:-10.99.0.3}"
+  else
+    SPOKE1_HOST="${SPOKE1_HOST:-127.0.0.1}"
+    SPOKE1_REGION="${SPOKE1_REGION:-eu-central-1}"
+    SPOKE1_TARGET="${SPOKE1_TARGET:-$SPOKE1_HOST}"
+    WG_SPOKE1_IP="${WG_SPOKE1_IP:-10.99.0.3}"
+  fi
+
+  if [ "${#SPOKE_LIST[@]}" -gt 1 ]; then
+    SPOKE2_HOST="${NODE_HOSTS[${SPOKE_LIST[1]}]:-${SPOKE2_HOST:-127.0.0.1}}"
+    SPOKE2_REGION="${NODE_REGIONS[${SPOKE_LIST[1]}]:-${SPOKE2_REGION:-ap-south-1}}"
+    SPOKE2_TARGET="${NODE_TARGETS[${SPOKE_LIST[1]}]:-${SPOKE2_TARGET:-$SPOKE2_HOST}}"
+    WG_SPOKE2_IP="${WG_IPS[${SPOKE_LIST[1]}]:-10.99.0.4}"
+  else
+    SPOKE2_HOST="${SPOKE2_HOST:-127.0.0.1}"
+    SPOKE2_REGION="${SPOKE2_REGION:-ap-south-1}"
+    SPOKE2_TARGET="${SPOKE2_TARGET:-$SPOKE2_HOST}"
+    WG_SPOKE2_IP="${WG_SPOKE2_IP:-10.99.0.4}"
+  fi
+
+  # Strip user@ prefixes if any
+  for _node in "${ALL_NODES[@]}"; do
+    local _h_val="${NODE_HOSTS[$_node]:-}"
+    if [[ "$_h_val" == *"@"* ]]; then
+      NODE_SSH_USERS["$_node"]="${_h_val%%@*}"
+      NODE_HOSTS["$_node"]="${_h_val##*@}"
+    fi
+  done
+}
+
+# Initialize the cluster fleet registry
+_load_cluster_registry
 
 # Remote User & Fleet Key Configuration
 REMOTE_USER="${REMOTE_USER:-ec2-user}"
@@ -661,21 +778,24 @@ ensure_cluster_ssh_tunnel() {
 
 ensure_all_cluster_tunnels() {
   local phase_num="${1:-}"
-  [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && \
-    ensure_cluster_ssh_tunnel "primaryhub" "$PRIMARYHUB_HOST"
-  [ "$SECONDARYHUB_HOST" != "127.0.0.1" ] && [ "$SECONDARYHUB_HOST" != "localhost" ] && \
-    ensure_cluster_ssh_tunnel "secondaryhub" "$SECONDARYHUB_HOST"
-
-  # Only connect to spokes starting in phase 13 (when spoke clusters are created)
   local phase_int=0
   if [ -n "$phase_num" ]; then
     phase_int=$(echo "$phase_num" | sed 's/[^0-9]//g')
   fi
+
+  for hub in "${HUB_LIST[@]}"; do
+    local hub_host="${NODE_HOSTS[$hub]:-$hub}"
+    [ "$hub_host" != "127.0.0.1" ] && [ "$hub_host" != "localhost" ] && \
+      ensure_cluster_ssh_tunnel "$hub" "$hub_host"
+  done
+
+  # Only connect to spokes starting in phase 13 (when spoke clusters are created)
   if [ -z "$phase_num" ] || [ "${phase_int:-0}" -ge 13 ]; then
-    [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && \
-      ensure_cluster_ssh_tunnel "spoke1" "$SPOKE1_HOST"
-    [ "$SPOKE2_HOST" != "127.0.0.1" ] && [ "$SPOKE2_HOST" != "localhost" ] && \
-      ensure_cluster_ssh_tunnel "spoke2" "$SPOKE2_HOST"
+    for spoke in "${SPOKE_LIST[@]}"; do
+      local spoke_host="${NODE_HOSTS[$spoke]:-$spoke}"
+      [ "$spoke_host" != "127.0.0.1" ] && [ "$spoke_host" != "localhost" ] && \
+        ensure_cluster_ssh_tunnel "$spoke" "$spoke_host"
+    done
   fi
 }
 
@@ -691,10 +811,10 @@ SPOKE2_TRANSIT_IP="172.30.0.31"
 WG_SUBNET_PREFIX="10.99.0"
 WG_GATEWAY_IP="10.99.0.254"
 WG_VIP="10.99.0.100"
-WG_HUB1_IP="10.99.0.1"
-WG_HUB2_IP="10.99.0.2"
-WG_SPOKE1_IP="10.99.0.3"
-WG_SPOKE2_IP="10.99.0.4"
+WG_HUB1_IP="${WG_IPS[${HUB_LIST[0]:-primaryhub}]:-10.99.0.1}"
+WG_HUB2_IP="${WG_IPS[${HUB_LIST[1]:-secondaryhub}]:-10.99.0.2}"
+WG_SPOKE1_IP="${WG_IPS[${SPOKE_LIST[0]:-spoke1}]:-10.99.0.3}"
+WG_SPOKE2_IP="${WG_IPS[${SPOKE_LIST[1]:-spoke2}]:-10.99.0.4}"
 
 # External endpoints for WireGuard across regions
 GW_ENDPOINT="${PRIMARYHUB_HOST}:${WG_PORT}"
@@ -706,6 +826,21 @@ SPOKE2_ENDPOINT="${SPOKE2_HOST}:${WG_PORT}"
 # WireGuard keypairs – populated by setup_transit_network_and_wg_keys
 declare -A WG_PRIV=()
 declare -A WG_PUB=()
+
+_get_wg_ip_for_node() {
+  local node="$1"
+  if [ -n "${WG_IPS[$node]:-}" ]; then
+    echo "${WG_IPS[$node]}"
+    return 0
+  fi
+  case "$node" in
+    primaryhub)   echo "${WG_HUB1_IP:-10.99.0.1}" ;;
+    secondaryhub) echo "${WG_HUB2_IP:-10.99.0.2}" ;;
+    spoke1)       echo "${WG_SPOKE1_IP:-10.99.0.3}" ;;
+    spoke2)       echo "${WG_SPOKE2_IP:-10.99.0.4}" ;;
+    *) echo "" ;;
+  esac
+}
 
 # ── 4. CRD metadata ───────────────────────────────────────────────────────────
 declare -A CRD_NAMES=(

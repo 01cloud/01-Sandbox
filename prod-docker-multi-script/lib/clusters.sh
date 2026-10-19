@@ -560,32 +560,33 @@ _check_phase_03() {
     [ -s "${PKI_DIR}/ca.crt" ] && [ -s "${PKI_DIR}/ca.key" ] && \
     [ -s "${PKI_DIR}/sa.key" ] && [ -s "${PKI_DIR}/sa.pub" ] || return 1
 
-    remote_exec "$PRIMARYHUB_HOST" "kind get clusters 2>/dev/null" | grep -q '^primaryhub$' || return 1
-    remote_exec "$SECONDARYHUB_HOST" "kind get clusters 2>/dev/null" | grep -q '^secondaryhub$' || return 1
-    ensure_cluster_ssh_tunnel "primaryhub" "$PRIMARYHUB_HOST"
-    ensure_cluster_ssh_tunnel "secondaryhub" "$SECONDARYHUB_HOST"
-    kubectl --context kind-primaryhub   get node primaryhub-control-plane   >/dev/null 2>&1 || return 1
-    kubectl --context kind-secondaryhub get node secondaryhub-control-plane >/dev/null 2>&1 || return 1
+    for hub in "${HUB_LIST[@]}"; do
+      local h_host="${NODE_HOSTS[$hub]:-$hub}"
+      remote_exec "$h_host" "kind get clusters 2>/dev/null" | grep -q "^${hub}$" || return 1
+      ensure_cluster_ssh_tunnel "$hub" "$h_host"
+      kubectl --context "kind-${hub}" get node "${hub}-control-plane" >/dev/null 2>&1 || return 1
+    done
     return 0
   fi
 
-  kind get clusters 2>/dev/null | grep -q '^primaryhub$'   || return 1
-  kind get clusters 2>/dev/null | grep -q '^secondaryhub$' || return 1
+  for hub in "${HUB_LIST[@]}"; do
+    kind get clusters 2>/dev/null | grep -q "^${hub}$" || return 1
+    kubectl --context "kind-${hub}" get node "${hub}-control-plane" >/dev/null 2>&1 || return 1
+  done
 
   [ -s "${PKI_DIR}/ca.crt" ] && [ -s "${PKI_DIR}/ca.key" ] && \
   [ -s "${PKI_DIR}/sa.key" ] && [ -s "${PKI_DIR}/sa.pub" ] || return 1
 
-  kubectl --context kind-primaryhub   get node primaryhub-control-plane   >/dev/null 2>&1 || return 1
-  kubectl --context kind-secondaryhub get node secondaryhub-control-plane >/dev/null 2>&1 || return 1
+  # Ensure Root CA matches between primaryhub and all standby hubs
+  local primary_hub="${HUB_LIST[0]:-primaryhub}"
+  local pca
+  pca=$(docker exec "${primary_hub}-control-plane" sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
 
-  # Ensure Root CA matches between primaryhub and secondaryhub
-  local pca sca
-  pca=$(docker exec primaryhub-control-plane   sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
-  sca=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
-  [ -n "$pca" ] && [ "$pca" == "$sca" ] || return 1
-
-  docker inspect primaryhub-control-plane   --format '{{json .NetworkSettings.Networks}}' 2>/dev/null | grep -q "$TRANSIT_NET_NAME" || return 1
-  docker inspect secondaryhub-control-plane --format '{{json .NetworkSettings.Networks}}' 2>/dev/null | grep -q "$TRANSIT_NET_NAME" || return 1
+  for standby_hub in "${HUB_LIST[@]:1}"; do
+    local sca
+    sca=$(docker exec "${standby_hub}-control-plane" sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
+    [ -n "$pca" ] && [ "$pca" == "$sca" ] || return 1
+  done
 
   return 0
 }
@@ -594,28 +595,33 @@ _do_phase_03_create_hub_clusters() {
   local is_remote=false
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
 
+  local primary_hub="${HUB_LIST[0]:-primaryhub}"
+  local primary_host="${NODE_HOSTS[$primary_hub]:-$PRIMARYHUB_HOST}"
+  local primary_wg_ip
+  primary_wg_ip=$(_get_wg_ip_for_node "$primary_hub")
+
   # PrimaryHub – this IS the Root CA source
-  _create_kind_cluster "primaryhub" "10.244.0.0/16" "10.96.0.0/16" "$HUB1_TRANSIT_IP" "false" "$PRIMARYHUB_HOST" "$WG_HUB1_IP" || {
-    log_error "Failed to create or verify primaryhub cluster."
+  _create_kind_cluster "$primary_hub" "10.244.0.0/16" "10.96.0.0/16" "$HUB1_TRANSIT_IP" "false" "$primary_host" "$primary_wg_ip" || {
+    log_error "Failed to create or verify ${primary_hub} cluster."
     return 1
   }
 
   # Always extract shared Root CA & ServiceAccount keys from primaryhub to ensure PKI_DIR is authoritative
-  log_info "Extracting shared Root CA & ServiceAccount keys from primaryhub..."
+  log_info "Extracting shared Root CA & ServiceAccount keys from ${primary_hub}..."
   if $is_remote; then
-    remote_exec "$PRIMARYHUB_HOST" "docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt /tmp/ca.crt && \
-                                   docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key /tmp/ca.key && \
-                                   docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key /tmp/sa.key && \
-                                   docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub /tmp/sa.pub"
-    remote_copy_from "$PRIMARYHUB_HOST" "/tmp/ca.crt" "${PKI_DIR}/ca.crt"
-    remote_copy_from "$PRIMARYHUB_HOST" "/tmp/ca.key" "${PKI_DIR}/ca.key"
-    remote_copy_from "$PRIMARYHUB_HOST" "/tmp/sa.key" "${PKI_DIR}/sa.key"
-    remote_copy_from "$PRIMARYHUB_HOST" "/tmp/sa.pub" "${PKI_DIR}/sa.pub"
+    remote_exec "$primary_host" "docker cp ${primary_hub}-control-plane:/etc/kubernetes/pki/ca.crt /tmp/ca.crt && \
+                                 docker cp ${primary_hub}-control-plane:/etc/kubernetes/pki/ca.key /tmp/ca.key && \
+                                 docker cp ${primary_hub}-control-plane:/etc/kubernetes/pki/sa.key /tmp/sa.key && \
+                                 docker cp ${primary_hub}-control-plane:/etc/kubernetes/pki/sa.pub /tmp/sa.pub"
+    remote_copy_from "$primary_host" "/tmp/ca.crt" "${PKI_DIR}/ca.crt"
+    remote_copy_from "$primary_host" "/tmp/ca.key" "${PKI_DIR}/ca.key"
+    remote_copy_from "$primary_host" "/tmp/sa.key" "${PKI_DIR}/sa.key"
+    remote_copy_from "$primary_host" "/tmp/sa.pub" "${PKI_DIR}/sa.pub"
   else
-    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.crt "${PKI_DIR}/ca.crt"
-    docker cp primaryhub-control-plane:/etc/kubernetes/pki/ca.key "${PKI_DIR}/ca.key"
-    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.key "${PKI_DIR}/sa.key"
-    docker cp primaryhub-control-plane:/etc/kubernetes/pki/sa.pub "${PKI_DIR}/sa.pub"
+    docker cp "${primary_hub}-control-plane:/etc/kubernetes/pki/ca.crt" "${PKI_DIR}/ca.crt"
+    docker cp "${primary_hub}-control-plane:/etc/kubernetes/pki/ca.key" "${PKI_DIR}/ca.key"
+    docker cp "${primary_hub}-control-plane:/etc/kubernetes/pki/sa.key" "${PKI_DIR}/sa.key"
+    docker cp "${primary_hub}-control-plane:/etc/kubernetes/pki/sa.pub" "${PKI_DIR}/sa.pub"
   fi
 
   for keyfile in ca.crt ca.key sa.key sa.pub; do
@@ -625,52 +631,65 @@ _do_phase_03_create_hub_clusters() {
     fi
   done
 
-  # If secondaryhub already exists, verify its Root CA matches primaryhub. If not, recreate it.
-  if $is_remote; then
-    if remote_exec "$SECONDARYHUB_HOST" "kind get clusters 2>/dev/null" | grep -q '^secondaryhub$'; then
-      local pca sca
-      pca=$(remote_exec "$PRIMARYHUB_HOST" "docker exec primaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt" 2>/dev/null | awk '{print $1}')
-      sca=$(remote_exec "$SECONDARYHUB_HOST" "docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt" 2>/dev/null | awk '{print $1}')
-      if [ -n "$pca" ] && [ "$pca" != "$sca" ]; then
-        log_warn "secondaryhub has mismatched Root CA ($sca != $pca) – recreating secondaryhub to sync Root CA..."
-        remote_exec "$SECONDARYHUB_HOST" "kind delete cluster --name secondaryhub 2>/dev/null || docker rm -f secondaryhub-control-plane 2>/dev/null || true"
+  # Create all standby hubs with shared Root CA mounted
+  local hub_idx=1
+  for standby_hub in "${HUB_LIST[@]:1}"; do
+    local standby_host="${NODE_HOSTS[$standby_hub]:-$standby_hub}"
+    local standby_wg_ip
+    standby_wg_ip=$(_get_wg_ip_for_node "$standby_hub")
+    local pod_cidr="10.$((244 + hub_idx)).0.0/16"
+    local svc_cidr="10.$((96 + hub_idx)).0.0/16"
+    local transit_ip="172.30.0.$((20 + hub_idx))"
+
+    # If standby hub already exists, verify its Root CA matches primaryhub. If not, recreate it.
+    if $is_remote; then
+      if remote_exec "$standby_host" "kind get clusters 2>/dev/null" | grep -q "^${standby_hub}$"; then
+        local pca sca
+        pca=$(remote_exec "$primary_host" "docker exec ${primary_hub}-control-plane sha256sum /etc/kubernetes/pki/ca.crt" 2>/dev/null | awk '{print $1}')
+        sca=$(remote_exec "$standby_host" "docker exec ${standby_hub}-control-plane sha256sum /etc/kubernetes/pki/ca.crt" 2>/dev/null | awk '{print $1}')
+        if [ -n "$pca" ] && [ "$pca" != "$sca" ]; then
+          log_warn "${standby_hub} has mismatched Root CA ($sca != $pca) – recreating to sync Root CA..."
+          remote_exec "$standby_host" "kind delete cluster --name ${standby_hub} 2>/dev/null || docker rm -f ${standby_hub}-control-plane 2>/dev/null || true"
+        fi
+      fi
+    else
+      if kind get clusters 2>/dev/null | grep -q "^${standby_hub}$"; then
+        local pca sca
+        pca=$(docker exec "${primary_hub}-control-plane" sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
+        sca=$(docker exec "${standby_hub}-control-plane" sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
+        if [ -n "$pca" ] && [ "$pca" != "$sca" ]; then
+          log_warn "${standby_hub} has mismatched Root CA ($sca != $pca) – recreating to sync Root CA..."
+          kind delete cluster --name "${standby_hub}" 2>/dev/null || docker rm -f "${standby_hub}-control-plane" 2>/dev/null || true
+        fi
       fi
     fi
-  else
-    if kind get clusters 2>/dev/null | grep -q '^secondaryhub$'; then
-      local pca sca
-      pca=$(docker exec primaryhub-control-plane   sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
-      sca=$(docker exec secondaryhub-control-plane sha256sum /etc/kubernetes/pki/ca.crt 2>/dev/null | awk '{print $1}')
-      if [ -n "$pca" ] && [ "$pca" != "$sca" ]; then
-        log_warn "secondaryhub has mismatched Root CA ($sca != $pca) – recreating secondaryhub to sync Root CA..."
-        kind delete cluster --name secondaryhub 2>/dev/null || docker rm -f secondaryhub-control-plane 2>/dev/null || true
-      fi
-    fi
-  fi
 
-  # SecondaryHub – mounted with PrimaryHub's shared Root CA
-  _create_kind_cluster "secondaryhub" "10.245.0.0/16" "10.97.0.0/16" "$HUB2_TRANSIT_IP" "true" "$SECONDARYHUB_HOST" "$WG_HUB2_IP" || {
-    log_error "Failed to create or verify secondaryhub cluster."
-    return 1
-  }
+    log_info "Creating standby hub: ${standby_hub} on ${standby_host} (WG: ${standby_wg_ip})..."
+    _create_kind_cluster "$standby_hub" "$pod_cidr" "$svc_cidr" "$transit_ip" "true" "$standby_host" "$standby_wg_ip" || {
+      log_error "Failed to create or verify ${standby_hub} cluster."
+      return 1
+    }
+    ((hub_idx++))
+  done
 
-  log_success "Hub clusters created."
+  log_success "All ${#HUB_LIST[@]} hub cluster(s) created successfully."
 }
 
 phase_03_create_hub_clusters() {
-  run_phase "03" "Creating Hub Clusters (PrimaryHub + SecondaryHub)" _check_phase_03 _do_phase_03_create_hub_clusters
+  run_phase "03" "Creating Hub Clusters (${HUB_LIST[*]})" _check_phase_03 _do_phase_03_create_hub_clusters
 }
 
 _check_phase_04() {
-  _check_hub_crds_established kind-primaryhub   || return 1
-  _check_hub_crds_established kind-secondaryhub || return 1
+  for hub in "${HUB_LIST[@]}"; do
+    _check_hub_crds_established "kind-${hub}" || return 1
+  done
   return 0
 }
 
 _do_phase_04_install_crds_on_hubs() {
   ensure_sandbox_repo || log_warn "Repository clone pending; local CRDs may be deferred."
 
-  for hub in primaryhub secondaryhub; do
+  for hub in "${HUB_LIST[@]}"; do
     _install_crds "kind-${hub}"
     if ! _check_hub_crds_established "kind-${hub}"; then
       log_error "CRDs failed to establish on kind-${hub}!"
@@ -686,7 +705,8 @@ phase_04_install_crds_on_hubs() {
 
 _check_phase_08() {
   local ctx avail
-  for ctx in kind-primaryhub kind-secondaryhub; do
+  for hub in "${HUB_LIST[@]}"; do
+    ctx="kind-${hub}"
     kubectl --context "$ctx" get crd managedclusters.cluster.open-cluster-management.io >/dev/null 2>&1 || return 1
     avail=$(kubectl --context "$ctx" -n open-cluster-management-hub get deployment \
       cluster-manager-registration-webhook -o jsonpath='{.status.availableReplicas}' 2>/dev/null || echo 0)
@@ -696,7 +716,8 @@ _check_phase_08() {
 }
 
 _do_phase_08_ocm_init() {
-  for hub in primaryhub secondaryhub; do
+  local primary_hub="${HUB_LIST[0]:-primaryhub}"
+  for hub in "${HUB_LIST[@]}"; do
     log_info "Checking OCM on $hub..."
     if ! kubectl --context "kind-${hub}" get crd \
          managedclusters.cluster.open-cluster-management.io >/dev/null 2>&1; then
@@ -709,17 +730,17 @@ _do_phase_08_ocm_init() {
   local auto_acceptor="${SANDBOX_REPO_DIR}/docs/multi-cluster/vm-level-ocm-multi-cluster/manifests/ocm-auto-acceptor-k8s.yaml"
   [ ! -f "$auto_acceptor" ] && auto_acceptor="${ROOT_DIR}/docs/multi-cluster/vm-level-ocm-multi-cluster/manifests/ocm-auto-acceptor-k8s.yaml"
   if [ -f "$auto_acceptor" ]; then
-    if kubectl --context kind-primaryhub get deployment ocm-auto-acceptor -n default >/dev/null 2>&1 || \
-       kubectl --context kind-primaryhub get deployment ocm-auto-acceptor -n open-cluster-management >/dev/null 2>&1 || \
-       kubectl --context kind-primaryhub get deployment -A 2>/dev/null | grep -q "ocm-auto-acceptor"; then
-      log_info "ocm-auto-acceptor already deployed on primaryhub – skipping."
+    if kubectl --context "kind-${primary_hub}" get deployment ocm-auto-acceptor -n default >/dev/null 2>&1 || \
+       kubectl --context "kind-${primary_hub}" get deployment ocm-auto-acceptor -n open-cluster-management >/dev/null 2>&1 || \
+       kubectl --context "kind-${primary_hub}" get deployment -A 2>/dev/null | grep -q "ocm-auto-acceptor"; then
+      log_info "ocm-auto-acceptor already deployed on ${primary_hub} – skipping."
     else
-      log_info "Deploying ocm-auto-acceptor on primaryhub..."
-      kubectl --context kind-primaryhub apply -f "$auto_acceptor" || true
+      log_info "Deploying ocm-auto-acceptor on ${primary_hub}..."
+      kubectl --context "kind-${primary_hub}" apply -f "$auto_acceptor" || true
     fi
   fi
 
-  for hub in primaryhub secondaryhub; do
+  for hub in "${HUB_LIST[@]}"; do
     log_info "Waiting for OCM registration webhook on $hub..."
     kubectl --context "kind-${hub}" -n open-cluster-management-hub wait \
       --for=condition=Available deployment/cluster-manager-registration-webhook \
@@ -729,12 +750,12 @@ _do_phase_08_ocm_init() {
 }
 
 phase_08_ocm_init() {
-  run_phase "08" "Initializing OCM on PrimaryHub & SecondaryHub" _check_phase_08 _do_phase_08_ocm_init
+  run_phase "08" "Initializing OCM on Hubs (${HUB_LIST[*]})" _check_phase_08 _do_phase_08_ocm_init
 }
 
 _check_phase_09() {
   local hub ns
-  for hub in primaryhub secondaryhub; do
+  for hub in "${HUB_LIST[@]}"; do
     for ns in opensandbox-system metallb-system agentgateway-system; do
       kubectl --context "kind-${hub}" get namespace "$ns" >/dev/null 2>&1 || return 1
     done
@@ -743,7 +764,7 @@ _check_phase_09() {
 }
 
 _do_phase_09_create_namespaces() {
-  for hub in primaryhub secondaryhub; do
+  for hub in "${HUB_LIST[@]}"; do
     for ns in opensandbox-system metallb-system agentgateway-system; do
       if kubectl --context "kind-${hub}" get namespace "$ns" >/dev/null 2>&1; then
         log_info "Namespace '$ns' already exists on $hub – skipping."
@@ -754,7 +775,7 @@ _do_phase_09_create_namespaces() {
     done
   done
 
-  log_success "Namespaces ready on both hubs."
+  log_success "Namespaces ready on all hub clusters."
 }
 
 phase_09_create_namespaces() {
@@ -852,29 +873,65 @@ _check_phase_13() {
   local is_remote=false
   [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
 
-  if $is_remote; then
-    remote_exec "$SPOKE1_HOST" "kind get clusters 2>/dev/null" | grep -q '^spoke1$' || return 1
-    remote_exec "$SPOKE2_HOST" "kind get clusters 2>/dev/null" | grep -q '^spoke2$' || return 1
-    ensure_cluster_ssh_tunnel "spoke1" "$SPOKE1_HOST"
-    ensure_cluster_ssh_tunnel "spoke2" "$SPOKE2_HOST"
-  else
-    kind get clusters 2>/dev/null | grep -q '^spoke1$' || return 1
-    kind get clusters 2>/dev/null | grep -q '^spoke2$' || return 1
-    kind export kubeconfig --name spoke1 2>/dev/null || true
-    kind export kubeconfig --name spoke2 2>/dev/null || true
-  fi
+  for spoke in "${SPOKE_LIST[@]}"; do
+    local target_host="${NODE_HOSTS[$spoke]:-$spoke}"
+    if $is_remote; then
+      remote_exec "$target_host" "kind get clusters 2>/dev/null" | grep -q "^${spoke}$" || return 1
+      ensure_cluster_ssh_tunnel "$spoke" "$target_host"
+    else
+      kind get clusters 2>/dev/null | grep -q "^${spoke}$" || return 1
+      kind export kubeconfig --name "$spoke" 2>/dev/null || true
+    fi
 
-  kubectl --context kind-spoke1 get node spoke1-control-plane -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True" || return 1
-  kubectl --context kind-spoke2 get node spoke2-control-plane -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True" || return 1
-  # Ensure the control-plane NoSchedule taint is absent on both spokes
-  kubectl --context kind-spoke1 get node spoke1-control-plane \
-    -o jsonpath='{.spec.taints}' 2>/dev/null | grep -q 'NoSchedule' && return 1 || true
-  kubectl --context kind-spoke2 get node spoke2-control-plane \
-    -o jsonpath='{.spec.taints}' 2>/dev/null | grep -q 'NoSchedule' && return 1 || true
+    kubectl --context "kind-${spoke}" get node "${spoke}-control-plane" -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null | grep -q "True" || return 1
+    kubectl --context "kind-${spoke}" get node "${spoke}-control-plane" -o jsonpath='{.spec.taints}' 2>/dev/null | grep -q 'NoSchedule' && return 1 || true
+  done
+
   return 0
 }
 
 _do_phase_13_create_spoke_clusters() {
+  local is_remote=false
+  [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
+
+  local idx=0
+  for spoke in "${SPOKE_LIST[@]}"; do
+    local target_host="${NODE_HOSTS[$spoke]:-$spoke}"
+    local spoke_wg_ip
+    spoke_wg_ip=$(_get_wg_ip_for_node "$spoke")
+    local pod_cidr="10.$((246 + idx)).0.0/16"
+    local svc_cidr="10.$((98 + idx * 2)).0.0/16"
+    local transit_ip="172.30.0.$((30 + idx))"
+
+    log_info "Creating spoke cluster: ${spoke} on ${target_host} (WG: ${spoke_wg_ip})..."
+    _create_kind_cluster "$spoke" "$pod_cidr" "$svc_cidr" "$transit_ip" "false" "$target_host" "$spoke_wg_ip" || return 1
+
+    # Remove NoSchedule taint on single-node spoke cluster
+    kubectl --context "kind-${spoke}" taint node "${spoke}-control-plane" \
+      node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+    kubectl --context "kind-${spoke}" taint node "${spoke}-control-plane" \
+      node-role.kubernetes.io/master:NoSchedule- 2>/dev/null || true
+
+    # Verify container existence
+    if $is_remote; then
+      if ! remote_exec "$target_host" "docker inspect ${spoke}-control-plane" >/dev/null 2>&1; then
+        log_error "Critical: ${spoke}-control-plane container does not exist on ${target_host} after Phase 13!"
+        return 1
+      fi
+    else
+      if ! docker inspect "${spoke}-control-plane" >/dev/null 2>&1; then
+        log_error "Critical: ${spoke}-control-plane container does not exist after Phase 13!"
+        return 1
+      fi
+    fi
+
+    ((idx++))
+  done
+
+  log_success "All ${#SPOKE_LIST[@]} spoke cluster(s) created."
+}
+
+phase_13_create_spoke_clusters() {
   local is_remote=false
   [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
 
@@ -978,15 +1035,16 @@ phase_14_wireguard_on_all_clusters() {
 }
 
 _check_phase_15() {
-  _check_hub_crds_established kind-spoke1 || return 1
-  _check_hub_crds_established kind-spoke2 || return 1
+  for spoke in "${SPOKE_LIST[@]}"; do
+    _check_hub_crds_established "kind-${spoke}" || return 1
+  done
   return 0
 }
 
 _do_phase_15_install_crds_on_spokes() {
   ensure_sandbox_repo || log_warn "Repository clone pending; local CRDs may be deferred."
 
-  for spoke in spoke1 spoke2; do
+  for spoke in "${SPOKE_LIST[@]}"; do
     _install_crds "kind-${spoke}"
   done
   log_success "CRDs installed on all spoke clusters."
@@ -1000,9 +1058,8 @@ _check_phase_15d() {
   local is_remote=false
   [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
 
-  for c in spoke1 spoke2; do
-    local target_host="$SPOKE1_HOST"
-    [ "$c" == "spoke2" ] && target_host="$SPOKE2_HOST"
+  for c in "${SPOKE_LIST[@]}"; do
+    local target_host="${NODE_HOSTS[$c]:-$c}"
 
     for lang in python go java node k8s rust shell cpp ruby terraform; do
       if $is_remote; then
@@ -1026,9 +1083,8 @@ _do_phase_15d_load_scanner_images() {
   [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
 
   if $is_remote; then
-    for spoke in spoke1 spoke2; do
-      local target_host="$SPOKE1_HOST"
-      [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
+    for spoke in "${SPOKE_LIST[@]}"; do
+      local target_host="${NODE_HOSTS[$spoke]:-$spoke}"
 
       ensure_remote_sandbox_repo "$target_host"
       local user

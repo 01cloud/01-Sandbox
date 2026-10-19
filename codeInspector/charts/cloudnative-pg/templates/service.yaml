@@ -40,5 +40,9 @@ spec:
   - port: {{ .Values.service.port }}
     targetPort: webhook-server
     name: webhook-server
+  - port: 8080
+    targetPort: metrics
+    name: metrics
+    protocol: TCP
   selector:
     {{- include "cloudnative-pg.selectorLabels" . | nindent 4 }}

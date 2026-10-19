@@ -275,7 +275,11 @@ _check_phase_01() {
   [ "${cur_watches:-0}" -ge 524288 ] && [ "${cur_instances:-0}" -ge 8192 ] || return 1
 
   # Check all configured remote nodes for required dependencies
-  local remote_nodes=("$PRIMARYHUB_HOST" "$SECONDARYHUB_HOST" "$SPOKE1_HOST" "$SPOKE2_HOST")
+  local remote_nodes=()
+  for node in "${ALL_NODES[@]}"; do
+    local r_host="${NODE_HOSTS[$node]:-$node}"
+    [ "$r_host" != "127.0.0.1" ] && [ "$r_host" != "localhost" ] && remote_nodes+=("$r_host")
+  done
   for host in "${remote_nodes[@]}"; do
     [ -z "$host" ] && continue
     [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ] && continue
@@ -523,7 +527,11 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
   ensure_kernel_inotify_limits
 
   # ── Remote EC2 Node Preflight & Bootstrap ───────────────────────────────────
-  local nodes=("primaryhub:$PRIMARYHUB_HOST" "secondaryhub:$SECONDARYHUB_HOST" "spoke1:$SPOKE1_HOST" "spoke2:$SPOKE2_HOST")
+  local nodes=()
+  for node in "${ALL_NODES[@]}"; do
+    local r_host="${NODE_HOSTS[$node]:-$node}"
+    nodes+=("${node}:${r_host}")
+  done
   for entry in "${nodes[@]}"; do
     local n_name="${entry%%:*}"
     local n_host="${entry##*:}"
