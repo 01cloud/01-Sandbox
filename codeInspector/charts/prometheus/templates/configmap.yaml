@@ -7,11 +7,15 @@ data:
   prometheus.yml: |
     global:
       scrape_interval: 15s
+      scrape_timeout: 10s
       evaluation_interval: 15s
+
+    rule_files:
+      - /etc/prometheus/ocm-slo-rules.yml
 
     scrape_configs:
       - job_name: 'prometheus'
-        metrics_path: '/prometheus/metrics'
+        metrics_path: '{{ if and .Values.ingressRoute .Values.ingressRoute.enabled }}/prometheus/metrics{{ else }}/metrics{{ end }}'
         static_configs:
           - targets: ['localhost:9090']
 
@@ -20,6 +24,7 @@ data:
           - targets: ['{{ .Values.apiServerServiceName }}.{{ .Values.apiServerNamespace }}.svc.cluster.local:{{ .Values.apiServerPort }}']
         metrics_path: '/metrics'
 
+      # CloudNativePG Database Instances (PostgreSQL HA & WAL Replication Metrics on Port 9187)
       - job_name: 'cloudnative-pg-instances'
         kubernetes_sd_configs:
           - role: pod
@@ -27,9 +32,11 @@ data:
           - source_labels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
             action: keep
             regex: .+
-          - source_labels: [__meta_kubernetes_pod_container_port_name]
-            action: keep
-            regex: metrics
+          - source_labels: [__address__]
+            action: replace
+            regex: ([^:]+)(?::\d+)?
+            replacement: $1:9187
+            target_label: __address__
           - action: labelmap
             regex: __meta_kubernetes_pod_label_(.+)
           - source_labels: [__meta_kubernetes_namespace]
@@ -37,6 +44,7 @@ data:
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: kubernetes_pod_name
 
+      # CloudNativePG Operator Manager Metrics (Port 8080)
       - job_name: 'cloudnative-pg-operator'
         kubernetes_sd_configs:
           - role: pod
@@ -44,9 +52,11 @@ data:
           - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
             action: keep
             regex: cloudnative-pg
-          - source_labels: [__meta_kubernetes_pod_container_port_name]
-            action: keep
-            regex: metrics
+          - source_labels: [__address__]
+            action: replace
+            regex: ([^:]+)(?::\d+)?
+            replacement: $1:8080
+            target_label: __address__
           - action: labelmap
             regex: __meta_kubernetes_pod_label_(.+)
           - source_labels: [__meta_kubernetes_namespace]
@@ -54,6 +64,7 @@ data:
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: kubernetes_pod_name
 
+      # Open Cluster Management (OCM) Hub Controllers for SLO/SLI Monitoring (Port 8080)
       - job_name: 'open-cluster-management-hub'
         kubernetes_sd_configs:
           - role: pod
@@ -62,6 +73,9 @@ data:
                 - open-cluster-management-hub
                 - open-cluster-management
         relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: (cluster-manager-.+|registration-.+)
           - source_labels: [__address__]
             action: replace
             regex: ([^:]+)(?::\d+)?
@@ -74,6 +88,7 @@ data:
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: kubernetes_pod_name
 
+      # Open Cluster Management (OCM) Spoke Klusterlet Agents (Port 8080)
       - job_name: 'open-cluster-management-agent'
         kubernetes_sd_configs:
           - role: pod
@@ -81,6 +96,9 @@ data:
               names:
                 - open-cluster-management-agent
         relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_label_app]
+            action: keep
+            regex: klusterlet-.+
           - source_labels: [__address__]
             action: replace
             regex: ([^:]+)(?::\d+)?
@@ -93,6 +111,7 @@ data:
           - source_labels: [__meta_kubernetes_pod_name]
             target_label: kubernetes_pod_name
 
+      # Scrape services annotated with prometheus.io/scrape: "true"
       - job_name: 'kubernetes-services'
         kubernetes_sd_configs:
           - role: service
@@ -116,6 +135,7 @@ data:
           - source_labels: [__meta_kubernetes_service_name]
             target_label: kubernetes_name
 
+      # Scrape pods annotated with prometheus.io/scrape: "true"
       - job_name: 'kubernetes-pods'
         kubernetes_sd_configs:
           - role: pod
@@ -140,3 +160,60 @@ data:
           - source_labels: [__meta_kubernetes_pod_name]
             action: replace
             target_label: kubernetes_pod_name
+
+  ocm-slo-rules.yml: |
+    groups:
+      - name: ocm-slo-sli
+        rules:
+          # OCM SLI 1: ManagedCluster Webhook Admission Success Rate (SLO Target: >= 99.9%)
+          - record: ocm:admission_success_rate:ratio_rate5m
+            expr: |
+              (
+                sum(rate(controller_runtime_webhook_requests_total{job="open-cluster-management-hub",code="200"}[5m]))
+                /
+                clamp_min(sum(rate(controller_runtime_webhook_requests_total{job="open-cluster-management-hub"}[5m])), 0.0001)
+              )
+
+          # OCM SLI 2: Total ManagedCluster Validations & Mutations Accepted
+          - record: ocm:managedcluster_admissions_total
+            expr: sum(controller_runtime_webhook_requests_total{job="open-cluster-management-hub",code="200"})
+
+          # OCM SLI 3: Total ManagedCluster Admission Errors (SLO Target: 0)
+          - record: ocm:managedcluster_admission_errors_total
+            expr: sum(controller_runtime_webhook_requests_total{job="open-cluster-management-hub",code=~"5.*"}) or vector(0)
+
+          # OCM SLI 4: P99 Admission Webhook Latency (SLO Target: < 0.2s)
+          - record: ocm:webhook_latency_seconds:p99
+            expr: |
+              histogram_quantile(0.99, sum(rate(controller_runtime_webhook_latency_seconds_bucket{job="open-cluster-management-hub"}[5m])) by (le, webhook))
+
+          # Operator Reconcile Success Rate (SLO Target: >= 99.9%)
+          - record: controller:reconcile_success_rate:ratio_rate5m
+            expr: |
+              (
+                sum(rate(controller_runtime_reconcile_total{result="success"}[5m]))
+                /
+                clamp_min(sum(rate(controller_runtime_reconcile_total[5m])), 0.0001)
+              )
+
+          # Operator Workqueue Depth (SLO Target: < 10)
+          - record: controller:workqueue_depth:sum
+            expr: sum(workqueue_depth) by (name)
+
+            - name: postgresql-ha-replication
+        rules:
+          # HA SLI: Replication Lag in Seconds (SLO Target: 0s)
+          - record: postgresql:replication_lag_seconds
+            expr: cnpg_pg_replication_lag
+
+          # HA SLI: WAL Streaming Lag in Bytes (SLO Target: < 10MB)
+          - record: postgresql:wal_streaming_replay_lag_bytes
+            expr: cnpg_pg_stat_replication_stream_replay_lag_bytes
+
+          # HA SLI: Streaming Replicas Count (SLO Target: >= 1 on Primary)
+          - record: postgresql:streaming_replicas_count
+            expr: cnpg_pg_replication_streaming_replicas
+
+          # HA SLI: WAL Archival Failure Rate
+          - record: postgresql:wal_archival_failed_total
+            expr: cnpg_pg_stat_archiver_failed_count

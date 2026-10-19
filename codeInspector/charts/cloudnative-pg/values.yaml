@@ -339,6 +339,62 @@ monitoringQueriesConfigMap:
             usage: "GAUGE"
             description: "Number of streaming replicas connected to the instance"
 
+    pg_stat_replication_stream:
+      query: |
+        SELECT
+          application_name,
+          client_addr::text AS client_addr,
+          state,
+          sync_state,
+          sync_priority,
+          pg_catalog.pg_wal_lsn_diff(pg_catalog.pg_current_wal_lsn(), sent_lsn) AS sent_lag_bytes,
+          pg_catalog.pg_wal_lsn_diff(sent_lsn, write_lsn) AS write_lag_bytes,
+          pg_catalog.pg_wal_lsn_diff(write_lsn, flush_lsn) AS flush_lag_bytes,
+          pg_catalog.pg_wal_lsn_diff(flush_lsn, replay_lsn) AS replay_lag_bytes,
+          COALESCE(EXTRACT(EPOCH FROM write_lag), 0) AS write_lag_seconds,
+          COALESCE(EXTRACT(EPOCH FROM flush_lag), 0) AS flush_lag_seconds,
+          COALESCE(EXTRACT(EPOCH FROM replay_lag), 0) AS replay_lag_seconds
+        FROM pg_catalog.pg_stat_replication
+      predicate_query: |
+        SELECT NOT pg_catalog.pg_is_in_recovery()
+      metrics:
+        - application_name:
+            usage: "LABEL"
+            description: "Name of the replication client/application"
+        - client_addr:
+            usage: "LABEL"
+            description: "IP address of the streaming replica client"
+        - state:
+            usage: "LABEL"
+            description: "WAL sender state: startup, catchup, streaming, backup, stopping"
+        - sync_state:
+            usage: "LABEL"
+            description: "Synchronous state of standby: async, sync, potential, quorum"
+        - sync_priority:
+            usage: "GAUGE"
+            description: "Priority of standby in synchronous replication"
+        - sent_lag_bytes:
+            usage: "GAUGE"
+            description: "Lag in bytes between current WAL and sent WAL"
+        - write_lag_bytes:
+            usage: "GAUGE"
+            description: "Lag in bytes between sent WAL and written WAL on standby"
+        - flush_lag_bytes:
+            usage: "GAUGE"
+            description: "Lag in bytes between written WAL and flushed WAL on standby"
+        - replay_lag_bytes:
+            usage: "GAUGE"
+            description: "Lag in bytes between flushed WAL and replayed WAL on standby"
+        - write_lag_seconds:
+            usage: "GAUGE"
+            description: "Time spent waiting for standby to write WAL"
+        - flush_lag_seconds:
+            usage: "GAUGE"
+            description: "Time spent waiting for standby to flush WAL"
+        - replay_lag_seconds:
+            usage: "GAUGE"
+            description: "Time spent waiting for standby to replay WAL"
+
     pg_replication_slots:
       query: |
         SELECT slot_name,

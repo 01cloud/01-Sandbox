@@ -1,0 +1,66 @@
+# Dedicated ClusterIP Services exposing OCM Hub & Agent Metrics on port 8080
+apiVersion: v1
+kind: Service
+metadata:
+  name: ocm-registration-controller-metrics
+  namespace: open-cluster-management-hub
+  labels:
+    app.kubernetes.io/name: ocm-registration-controller-metrics
+    app.kubernetes.io/component: ocm-hub-controller
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: cluster-manager-registration-controller
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ocm-work-controller-metrics
+  namespace: open-cluster-management-hub
+  labels:
+    app.kubernetes.io/name: ocm-work-controller-metrics
+    app.kubernetes.io/component: ocm-hub-controller
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: cluster-manager-work-controller
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ocm-placement-controller-metrics
+  namespace: open-cluster-management-hub
+  labels:
+    app.kubernetes.io/name: ocm-placement-controller-metrics
+    app.kubernetes.io/component: ocm-hub-controller
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: cluster-manager-placement-controller
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+    protocol: TCP

@@ -323,8 +323,8 @@ opensandboxResourcePool:
 # Prometheus component values
 ###############################################################
 prometheus:
-  enabled: false
-  namespace: monitoring
+  enabled: true
+  namespace: opensandbox-system
   apiServerNamespace: opensandbox-system
   apiServerServiceName: sandbox-api-service
   apiServerPort: 80
@@ -333,7 +333,7 @@ prometheus:
   agentgatewayPort: 80
   replicaCount: 1
   ingressRoute:
-    enabled: true
+    enabled: false
   ingressHostnames:
     - api-sandbox.01security.com
     - 10.0.10.9

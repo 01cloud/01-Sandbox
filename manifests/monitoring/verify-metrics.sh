@@ -82,7 +82,7 @@ test_pod_metrics "open-cluster-management-agent" "app=klusterlet-registration-ag
 
 # 6. Prometheus Scraper Target Status (Port 9090)
 echo -e "${BOLD}[Testing Prometheus Scraper Target Status]${NC}"
-prom_pod=$(kubectl --context "$CTX" -n monitoring get pods -l "app=prometheus-scraper" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+prom_pod=$(kubectl --context "$CTX" -n monitoring get pods -l "app in (prometheus, prometheus-scraper)" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
 if [ -n "$prom_pod" ]; then
   local local_prom_port=$((29000 + RANDOM % 1000))
   kubectl --context "$CTX" -n monitoring port-forward "pod/${prom_pod}" "${local_prom_port}:9090" >/dev/null 2>&1 &

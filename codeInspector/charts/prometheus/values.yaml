@@ -1,5 +1,5 @@
 # Default values for prometheus
-namespace: monitoring
+namespace: opensandbox-system
 
 apiServerNamespace: opensandbox-system
 apiServerServiceName: sandbox-api-service

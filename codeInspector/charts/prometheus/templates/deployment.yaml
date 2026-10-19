@@ -24,7 +24,9 @@ spec:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.path=/prometheus"
             - "--web.enable-lifecycle"
+            {{- if and .Values.ingressRoute .Values.ingressRoute.enabled }}
             - '--web.external-url={{ .Values.ingressPath | default "/prometheus" }}'
+            {{- end }}
           ports:
             - containerPort: 9090
               name: web

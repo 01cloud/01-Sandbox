@@ -56,6 +56,12 @@ spec:
     labels:
       cnpg.io/cluster: postgresql-primary
 
+  monitoring:
+    enablePodMonitor: false
+    customQueriesConfigMap:
+      - name: {{ if and .Values.cnpg.monitoring .Values.cnpg.monitoring.customQueriesConfigMap }}{{ .Values.cnpg.monitoring.customQueriesConfigMap.name | default "cnpg-default-monitoring" }}{{ else }}"cnpg-default-monitoring"{{ end }}
+        key: {{ if and .Values.cnpg.monitoring .Values.cnpg.monitoring.customQueriesConfigMap }}{{ .Values.cnpg.monitoring.customQueriesConfigMap.key | default "queries" }}{{ else }}"queries"{{ end }}
+
   storage:
     size: {{ .Values.cnpg.storage | default "5Gi" }}
     storageClass: {{ .Values.cnpg.storageClassName | default "standard" }}
@@ -164,6 +170,12 @@ spec:
       prometheus.io/path: "/metrics"
     labels:
       cnpg.io/cluster: postgresql-secondary
+
+  monitoring:
+    enablePodMonitor: false
+    customQueriesConfigMap:
+      - name: {{ if and .Values.cnpg.monitoring .Values.cnpg.monitoring.customQueriesConfigMap }}{{ .Values.cnpg.monitoring.customQueriesConfigMap.name | default "cnpg-default-monitoring" }}{{ else }}"cnpg-default-monitoring"{{ end }}
+        key: {{ if and .Values.cnpg.monitoring .Values.cnpg.monitoring.customQueriesConfigMap }}{{ .Values.cnpg.monitoring.customQueriesConfigMap.key | default "queries" }}{{ else }}"queries"{{ end }}
 
   storage:
     size: {{ .Values.cnpg.storage | default "5Gi" }}
