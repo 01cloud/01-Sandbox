@@ -237,14 +237,14 @@ WG_PORT="${WG_PORT:-51820}"
 _get_target_for_node() {
   local host="$1"
   case "$host" in
-    "$PRIMARYHUB_HOST"|"primaryhub")
-      echo "${PRIMARYHUB_TARGET:-$PRIMARYHUB_HOST}" ;;
-    "$SECONDARYHUB_HOST"|"secondaryhub")
-      echo "${SECONDARYHUB_TARGET:-$SECONDARYHUB_HOST}" ;;
-    "$SPOKE1_HOST"|"spoke1")
-      echo "${SPOKE1_TARGET:-$SPOKE1_HOST}" ;;
-    "$SPOKE2_HOST"|"spoke2")
-      echo "${SPOKE2_TARGET:-$SPOKE2_HOST}" ;;
+    "$PRIMARYHUB_HOST"|"primaryhub"|"${PRIMARYHUB_INSTANCE_ID:-}")
+      echo "${PRIMARYHUB_TARGET:-${PRIMARYHUB_INSTANCE_ID:-$PRIMARYHUB_HOST}}" ;;
+    "$SECONDARYHUB_HOST"|"secondaryhub"|"${SECONDARYHUB_INSTANCE_ID:-}")
+      echo "${SECONDARYHUB_TARGET:-${SECONDARYHUB_INSTANCE_ID:-$SECONDARYHUB_HOST}}" ;;
+    "$SPOKE1_HOST"|"spoke1"|"${SPOKE1_INSTANCE_ID:-}")
+      echo "${SPOKE1_TARGET:-${SPOKE1_INSTANCE_ID:-$SPOKE1_HOST}}" ;;
+    "$SPOKE2_HOST"|"spoke2"|"${SPOKE2_INSTANCE_ID:-}")
+      echo "${SPOKE2_TARGET:-${SPOKE2_INSTANCE_ID:-$SPOKE2_HOST}}" ;;
     *)
       echo "$host" ;;
   esac
@@ -253,16 +253,27 @@ _get_target_for_node() {
 _get_region_for_host() {
   local host="$1"
   case "$host" in
-    "$PRIMARYHUB_HOST"|"primaryhub"|"${PRIMARYHUB_TARGET:-}")
+    "$PRIMARYHUB_HOST"|"primaryhub"|"${PRIMARYHUB_TARGET:-}"|"${PRIMARYHUB_INSTANCE_ID:-}")
       echo "${PRIMARYHUB_REGION:-us-east-1}" ;;
-    "$SECONDARYHUB_HOST"|"secondaryhub"|"${SECONDARYHUB_TARGET:-}")
+    "$SECONDARYHUB_HOST"|"secondaryhub"|"${SECONDARYHUB_TARGET:-}"|"${SECONDARYHUB_INSTANCE_ID:-}")
       echo "${SECONDARYHUB_REGION:-eu-west-1}" ;;
-    "$SPOKE1_HOST"|"spoke1"|"${SPOKE1_TARGET:-}")
+    "$SPOKE1_HOST"|"spoke1"|"${SPOKE1_TARGET:-}"|"${SPOKE1_INSTANCE_ID:-}")
       echo "${SPOKE1_REGION:-eu-central-1}" ;;
-    "$SPOKE2_HOST"|"spoke2"|"${SPOKE2_TARGET:-}")
+    "$SPOKE2_HOST"|"spoke2"|"${SPOKE2_TARGET:-}"|"${SPOKE2_INSTANCE_ID:-}")
       echo "${SPOKE2_REGION:-ap-south-1}" ;;
     *)
-      echo "${AWS_REGION:-us-east-1}" ;;
+      if [ -f "${STATE_DIR}/primaryhub.instance_id" ] && [ "$host" == "$(cat "${STATE_DIR}/primaryhub.instance_id" 2>/dev/null)" ]; then
+        echo "${PRIMARYHUB_REGION:-us-east-1}"
+      elif [ -f "${STATE_DIR}/secondaryhub.instance_id" ] && [ "$host" == "$(cat "${STATE_DIR}/secondaryhub.instance_id" 2>/dev/null)" ]; then
+        echo "${SECONDARYHUB_REGION:-eu-west-1}"
+      elif [ -f "${STATE_DIR}/spoke1.instance_id" ] && [ "$host" == "$(cat "${STATE_DIR}/spoke1.instance_id" 2>/dev/null)" ]; then
+        echo "${SPOKE1_REGION:-eu-central-1}"
+      elif [ -f "${STATE_DIR}/spoke2.instance_id" ] && [ "$host" == "$(cat "${STATE_DIR}/spoke2.instance_id" 2>/dev/null)" ]; then
+        echo "${SPOKE2_REGION:-ap-south-1}"
+      else
+        echo "${AWS_REGION:-us-east-1}"
+      fi
+      ;;
   esac
 }
 
@@ -311,13 +322,21 @@ _resolve_node_instance_id() {
     rm -f "$cache_file"
   fi
 
-  # 1. Try finding running instance by Name tag (cluster role or target name)
+  # 1. Try finding running instance by ClusterName or Name tag (cluster role or target name)
   local lookup_names=()
   [ -n "$cluster_role" ] && lookup_names+=("$cluster_role")
   [[ ! "$target" =~ ^i-[0-9a-f]+$ ]] && lookup_names+=("$target")
 
   for name in "${lookup_names[@]}"; do
     local tag_inst
+    tag_inst=$(aws ec2 describe-instances --region "$region" \
+      --filters "Name=tag:ClusterName,Values=$name" "Name=instance-state-name,Values=running" \
+      --query "Reservations[0].Instances[0].InstanceId" --output text 2>/dev/null || true)
+    if [ -n "$tag_inst" ] && [ "$tag_inst" != "None" ]; then
+      echo "$tag_inst" > "$cache_file"
+      echo "$tag_inst"
+      return 0
+    fi
     tag_inst=$(aws ec2 describe-instances --region "$region" \
       --filters "Name=tag:Name,Values=$name" "Name=instance-state-name,Values=running" \
       --query "Reservations[0].Instances[0].InstanceId" --output text 2>/dev/null || true)
@@ -359,7 +378,42 @@ _resolve_node_private_ip() {
   [ -z "$host" ] && echo "" && return 0
   [ "$host" == "127.0.0.1" ] || [ "$host" == "localhost" ] && echo "127.0.0.1" && return 0
 
-  # 1. Check if explicitly configured in environment / prod.env
+  # If $host itself is already an IPv4 address, return it
+  if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "$host"
+    return 0
+  fi
+
+  local region inst_id
+  region=$(_get_region_for_host "$host")
+  inst_id=$(_resolve_node_instance_id "$host")
+
+  # 1. Query live Private IP from AWS EC2 API if instance ID is resolved
+  if [[ "$inst_id" =~ ^i-[0-9a-f]+$ ]]; then
+    local aws_ip
+    aws_ip=$(aws ec2 describe-instances --region "$region" --instance-ids "$inst_id" \
+      --query "Reservations[0].Instances[0].PrivateIpAddress" --output text 2>/dev/null || true)
+    if [[ "$aws_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "$aws_ip"
+      return 0
+    fi
+  fi
+
+  # 2. Check local disk cache
+  local cache_dir="/tmp/01sandbox-ssm-cache"
+  mkdir -p "$cache_dir" 2>/dev/null || true
+  local cache_file="${cache_dir}/privip_${region}_${inst_id}"
+  if [ -s "$cache_file" ]; then
+    local cached_ip
+    cached_ip=$(cat "$cache_file" | tr -d '[:space:]')
+    if [[ "$cached_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+      echo "$cached_ip"
+      return 0
+    fi
+    rm -f "$cache_file"
+  fi
+
+  # 3. Check if explicitly configured in environment / prod.env
   case "$host" in
     "$PRIMARYHUB_HOST"|"primaryhub"|"${PRIMARYHUB_TARGET:-}")
       if [[ "${PRIMARYHUB_PRIVATE_IP:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
@@ -386,42 +440,6 @@ _resolve_node_private_ip() {
       fi
       ;;
   esac
-
-  # If $host itself is already an IPv4 address, return it
-  if [[ "$host" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "$host"
-    return 0
-  fi
-
-  local region inst_id
-  region=$(_get_region_for_host "$host")
-  inst_id=$(_resolve_node_instance_id "$host")
-
-  # 2. Check local disk cache
-  local cache_dir="/tmp/01sandbox-ssm-cache"
-  mkdir -p "$cache_dir" 2>/dev/null || true
-  local cache_file="${cache_dir}/privip_${region}_${inst_id}"
-  if [ -s "$cache_file" ]; then
-    local cached_ip
-    cached_ip=$(cat "$cache_file" | tr -d '[:space:]')
-    if [[ "$cached_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      echo "$cached_ip"
-      return 0
-    fi
-    rm -f "$cache_file"
-  fi
-
-  # 3. Try AWS EC2 describe-instances via AWS CLI
-  if [[ "$inst_id" =~ ^i-[0-9a-f]+$ ]]; then
-    local aws_ip
-    aws_ip=$(aws ec2 describe-instances --region "$region" --instance-ids "$inst_id" \
-      --query "Reservations[0].Instances[0].PrivateIpAddress" --output text 2>/dev/null || true)
-    if [[ "$aws_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      echo "$aws_ip" > "$cache_file"
-      echo "$aws_ip"
-      return 0
-    fi
-  fi
 
   # 4. Fallback: Query directly from the EC2 instance via remote_exec (over SSM / SSH)
   local remote_ip

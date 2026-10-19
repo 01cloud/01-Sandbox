@@ -36,14 +36,18 @@ ensure_kernel_inotify_limits() {
     log_info "Tuning host inotify limits for multi-cluster KinD (watches: $cur_watches -> $need_watches, instances: $cur_instances -> $need_instances)..."
     local SUDO=""
     if [ "$EUID" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
-      SUDO="sudo"
+      if sudo -n true 2>/dev/null; then
+        SUDO="sudo -n"
+      fi
     fi
-    $SUDO sysctl -w fs.inotify.max_user_watches=$need_watches >/dev/null 2>&1 || sysctl -w fs.inotify.max_user_watches=$need_watches >/dev/null 2>&1 || true
-    $SUDO sysctl -w fs.inotify.max_user_instances=$need_instances >/dev/null 2>&1 || sysctl -w fs.inotify.max_user_instances=$need_instances >/dev/null 2>&1 || true
+    if [ -n "$SUDO" ] || [ "$EUID" -eq 0 ]; then
+      $SUDO sysctl -w fs.inotify.max_user_watches=$need_watches >/dev/null 2>&1 || true
+      $SUDO sysctl -w fs.inotify.max_user_instances=$need_instances >/dev/null 2>&1 || true
 
-    if [ -d /etc/sysctl.d ]; then
-      printf "fs.inotify.max_user_watches = %d\nfs.inotify.max_user_instances = %d\n" "$need_watches" "$need_instances" | \
-        $SUDO tee /etc/sysctl.d/99-kind-inotify.conf >/dev/null 2>&1 || true
+      if [ -d /etc/sysctl.d ]; then
+        printf "fs.inotify.max_user_watches = %d\nfs.inotify.max_user_instances = %d\n" "$need_watches" "$need_instances" | \
+          $SUDO tee /etc/sysctl.d/99-kind-inotify.conf >/dev/null 2>&1 || true
+      fi
     fi
   fi
 }
@@ -54,8 +58,10 @@ ensure_docker_access() {
 
   if ! docker info >/dev/null 2>&1; then
     local SUDO=""
-    if [ "$EUID" -ne 0 ]; then
-      command -v sudo >/dev/null 2>&1 && SUDO="sudo"
+    if [ "$EUID" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+      if sudo -n true 2>/dev/null; then
+        SUDO="sudo -n"
+      fi
     fi
 
     if [ -n "$SUDO" ] || [ "$EUID" -eq 0 ]; then

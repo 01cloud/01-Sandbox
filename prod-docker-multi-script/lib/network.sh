@@ -77,9 +77,25 @@ print(f'{base64.b64encode(k.private_bytes_raw()).decode()} {base64.b64encode(k.p
   # 2. In remote mode, generate and deploy full-mesh wg0.conf for each EC2 instance
   if $is_remote; then
     init_node_private_ips
-    log_info "Configuring cross-region WireGuard mesh across all ${#ALL_NODES[@]} EC2 instances over VPC Peering..."
-
     local primary_hub="${HUB_LIST[0]:-primaryhub}"
+    local primary_host="${NODE_HOSTS[$primary_hub]:-$PRIMARYHUB_HOST}"
+
+    # Check if WireGuard is already active and healthy on all EC2 nodes (provisioned via launch template)
+    local all_wg_alive=true
+    for node in "${ALL_NODES[@]}"; do
+      local r_host="${NODE_HOSTS[$node]:-$node}"
+      if ! remote_exec "$r_host" "sudo wg show wg0 >/dev/null 2>&1"; then
+        all_wg_alive=false
+        break
+      fi
+    done
+
+    if [ "$all_wg_alive" = "true" ] && [ "$FORCE_RECONFIGURE" != "true" ]; then
+      log_info "Remote WireGuard mesh is already active and healthy on all EC2 instances – preserving launch-template WireGuard configuration."
+      return 0
+    fi
+
+    log_info "Configuring cross-region WireGuard mesh across all ${#ALL_NODES[@]} EC2 instances over VPC Peering..."
 
     for node in "${ALL_NODES[@]}"; do
       local node_wg_ip

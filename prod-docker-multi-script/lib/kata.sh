@@ -204,6 +204,26 @@ _configure_spoke_kata_fc() {
   log_info "${spoke}: waiting for kata-fc-node-reconciler DaemonSet rollout..."
   kubectl --context "$ctx" rollout status daemonset/kata-fc-node-reconciler -n kube-system --timeout=300s
 
+  log_info "${spoke}: waiting for reconciler to complete Kata & devmapper initialization..."
+  local reconciled=false
+  for _i in $(seq 1 60); do
+    if $is_remote; then
+      if remote_exec "$target_host" "docker exec ${node} ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1 && docker exec ${node} crictl info 2>/dev/null | grep -q 'kata-fc'"; then
+        reconciled=true
+        break
+      fi
+    else
+      if docker exec "${node}" ctr plugins ls 2>/dev/null | grep -E 'devmapper\s+linux/amd64\s+ok' >/dev/null 2>&1 && docker exec "${node}" crictl info 2>/dev/null | grep -q 'kata-fc'; then
+        reconciled=true
+        break
+      fi
+    fi
+    sleep 3
+  done
+  if ! $reconciled; then
+    log_warn "${spoke}: Kata Firecracker reconciler did not report healthy within 180s, continuing anyway..."
+  fi
+
   # 5. Pre-unpack pause image with devmapper snapshotter
   log_info "${spoke}: preparing pause and base images for devmapper snapshotter..."
   if $is_remote; then
@@ -248,6 +268,7 @@ kind: Pod
 metadata:
   name: ${pod_name}
   namespace: default
+.
 spec:
   runtimeClassName: kata-fc
   restartPolicy: Never

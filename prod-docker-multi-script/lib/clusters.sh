@@ -557,6 +557,13 @@ _check_phase_03() {
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
 
   if $is_remote; then
+    # If PKI files are missing locally, sync from AWS SSM Parameter Store (/sandbox/pki/*)
+    if [ ! -s "${PKI_DIR}/ca.crt" ] || [ ! -s "${PKI_DIR}/ca.key" ]; then
+      for kf in ca.crt ca.key sa.key sa.pub; do
+        aws ssm get-parameter --name "/sandbox/pki/$kf" --region "us-east-1" --query "Parameter.Value" --output text > "${PKI_DIR}/$kf" 2>/dev/null || true
+      done
+    fi
+
     [ -s "${PKI_DIR}/ca.crt" ] && [ -s "${PKI_DIR}/ca.key" ] && \
     [ -s "${PKI_DIR}/sa.key" ] && [ -s "${PKI_DIR}/sa.pub" ] || return 1
 

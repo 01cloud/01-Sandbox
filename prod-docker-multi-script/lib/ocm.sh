@@ -78,13 +78,31 @@ _get_hub_token() {
   kubectl --context "$ctx" -n open-cluster-management-hub wait \
     --for=condition=Available deployment --all --timeout=120s >/dev/null 2>&1 || true
 
+  local hub_name="${ctx#kind-}"
+  local hub_host="${NODE_HOSTS[$hub_name]:-$hub_name}"
+
   for i in $(seq 1 20); do
-    # Generate long-lived (10-year) token for agent-registration-bootstrap so bootstrap secrets never expire
-    tok=$(kubectl --context "$ctx" -n open-cluster-management create token agent-registration-bootstrap --duration=87600h 2>/dev/null || true)
-    if [ -n "$tok" ]; then
-      rm -f "$err_file"
-      echo "$tok"
-      return 0
+    # 1. Try cluster-bootstrap and agent-registration-bootstrap via local context
+    for sa in "cluster-bootstrap" "agent-registration-bootstrap"; do
+      tok=$(kubectl --context "$ctx" -n open-cluster-management create token "$sa" --duration=87600h 2>/dev/null || true)
+      if [ -n "$tok" ]; then
+        rm -f "$err_file"
+        echo "$tok"
+        return 0
+      fi
+    done
+
+    # 2. Try remote execution on hub host container directly
+    if [ -n "$hub_host" ] && [ "$hub_host" != "127.0.0.1" ] && [ "$hub_host" != "localhost" ]; then
+      for sa in "cluster-bootstrap" "agent-registration-bootstrap"; do
+        tok=$(remote_exec "$hub_host" "docker exec '${hub_name}-control-plane' kubectl -n open-cluster-management create token '$sa' --duration=87600h 2>/dev/null" || true)
+        tok=$(echo "$tok" | tr -d '\r\n ' || true)
+        if [ -n "$tok" ] && [[ "$tok" =~ ^ey[A-Za-z0-9_-]+ ]]; then
+          rm -f "$err_file"
+          echo "$tok"
+          return 0
+        fi
+      done
     fi
 
     out=$(clusteradm get token --context "$ctx" 2>"$err_file" || true)
@@ -229,8 +247,13 @@ _check_phase_16() {
 }
 
 _do_phase_16_join_spokes_to_ocm() {
-  # Ensure all hub apiserver certs cover the WG overlay IPs
+  # Ensure all hub ssh tunnels and apiserver certs cover the WG overlay IPs
   for hub in "${HUB_LIST[@]}"; do
+    local hub_host="${NODE_HOSTS[$hub]:-$hub}"
+    if [ "$hub_host" != "127.0.0.1" ] && [ "$hub_host" != "localhost" ]; then
+      ensure_cluster_ssh_tunnel "$hub" "$hub_host"
+      _sync_remote_kubeconfig "$hub" "$hub_host"
+    fi
     _ensure_hub_apiserver_sans "$hub" "10.96.0.0/16"
   done
 
@@ -316,16 +339,16 @@ _do_phase_16_join_spokes_to_ocm() {
     hub_secrets=$(_build_hub_kubeconfig_secrets)
 
     kubectl --context "$ctx" patch klusterlet klusterlet --type=merge -p "{
-      "spec": {
-        "registrationConfiguration": {
-          "featureGates": [
-            { "feature": "MultipleHubs", "mode": "Enable" }
+      \"spec\": {
+        \"registrationConfiguration\": {
+          \"featureGates\": [
+            { \"feature\": \"MultipleHubs\", \"mode\": \"Enable\" }
           ],
-          "bootstrapKubeConfigs": {
-            "type": "LocalSecrets",
-            "localSecretsConfig": {
-              "hubConnectionTimeoutSeconds": 60,
-              "kubeConfigSecrets": ${hub_secrets}
+          \"bootstrapKubeConfigs\": {
+            \"type\": \"LocalSecrets\",
+            \"localSecretsConfig\": {
+              \"hubConnectionTimeoutSeconds\": 60,
+              \"kubeConfigSecrets\": ${hub_secrets}
             }
           }
         }
@@ -374,6 +397,16 @@ _do_phase_16_join_spokes_to_ocm() {
 }
 
 phase_16_join_spokes_to_ocm() {
+  local is_remote=false
+  [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
+
+  if $is_remote; then
+    ensure_cluster_ssh_tunnel "primaryhub" "$PRIMARYHUB_HOST"
+    _sync_remote_kubeconfig "primaryhub" "$PRIMARYHUB_HOST"
+    ensure_cluster_ssh_tunnel "secondaryhub" "$SECONDARYHUB_HOST"
+    _sync_remote_kubeconfig "secondaryhub" "$SECONDARYHUB_HOST"
+  fi
+
   # Ensure hub apiserver certs cover the WG overlay IPs
   _ensure_hub_apiserver_sans "primaryhub"   "10.96.0.0/16"
   _ensure_hub_apiserver_sans "secondaryhub" "10.97.0.0/16"

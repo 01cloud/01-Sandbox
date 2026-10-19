@@ -168,9 +168,9 @@ _do_phase_11_primaryhub_deploy() {
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
   if $is_remote; then
     remote_exec "$PRIMARYHUB_HOST" bash -s << 'ROUTE_EOF'
-local_kind_ip=\$(docker inspect primaryhub-control-plane -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || true)
-if [ -n "\$local_kind_ip" ]; then
-  sudo ip route replace 172.30.0.200/32 via "\$local_kind_ip" 2>/dev/null || true
+local_kind_ip=$(docker inspect primaryhub-control-plane -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || true)
+if [ -n "$local_kind_ip" ]; then
+  sudo ip route replace 172.30.0.200/32 via "$local_kind_ip" 2>/dev/null || true
 fi
 ROUTE_EOF
   fi
@@ -359,9 +359,9 @@ _do_phase_12_secondaryhub_deploy() {
 
   if $is_remote; then
     remote_exec "$SECONDARYHUB_HOST" bash -s << 'ROUTE_EOF'
-local_kind_ip=\$(docker inspect secondaryhub-control-plane -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || true)
-if [ -n "\$local_kind_ip" ]; then
-  sudo ip route replace 172.30.0.201/32 via "\$local_kind_ip" 2>/dev/null || true
+local_kind_ip=$(docker inspect secondaryhub-control-plane -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || true)
+if [ -n "$local_kind_ip" ]; then
+  sudo ip route replace 172.30.0.201/32 via "$local_kind_ip" 2>/dev/null || true
 fi
 ROUTE_EOF
   fi
