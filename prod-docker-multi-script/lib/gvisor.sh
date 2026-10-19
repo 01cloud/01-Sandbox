@@ -18,9 +18,8 @@ _check_phase_15c() {
   local is_remote=false
   [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
 
-  for spoke in spoke1 spoke2; do
-    local target_host="$SPOKE1_HOST"
-    [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
+  for spoke in "${SPOKE_LIST[@]}"; do
+    local target_host="${NODE_HOSTS[$spoke]:-$spoke}"
 
     # Check RuntimeClass
     kubectl --context "kind-${spoke}" get runtimeclass gvisor >/dev/null 2>&1 || return 1
@@ -200,11 +199,10 @@ _do_phase_15c_setup_gvisor() {
   [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
 
   local spoke
-  for spoke in spoke1 spoke2; do
+  for spoke in "${SPOKE_LIST[@]}"; do
     local ctx="kind-${spoke}"
     local cname="${spoke}-control-plane"
-    local target_host="$SPOKE1_HOST"
-    [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
+    local target_host="${NODE_HOSTS[$spoke]:-$spoke}"
     local already_ok=true
 
     kubectl --context "$ctx" get runtimeclass gvisor >/dev/null 2>&1 || already_ok=false

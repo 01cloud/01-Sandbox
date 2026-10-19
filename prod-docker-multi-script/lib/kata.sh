@@ -21,10 +21,9 @@ _check_phase_15b() {
   local is_remote=false
   [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
 
-  for spoke in spoke1 spoke2; do
+  for spoke in "${SPOKE_LIST[@]}"; do
     local ctx="kind-${spoke}"
-    local target_host="$SPOKE1_HOST"
-    [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
+    local target_host="${NODE_HOSTS[$spoke]:-$spoke}"
 
     if $is_remote; then
       ensure_cluster_ssh_tunnel "$spoke" "$target_host"
@@ -295,13 +294,12 @@ _do_phase_15b_setup_kata_firecracker() {
 
   _ensure_kata_host_assets
 
-  for spoke in spoke1 spoke2; do
+  for spoke in "${SPOKE_LIST[@]}"; do
     # Per-spoke idempotency: check if RuntimeClass and DaemonSet are active
     local ctx="kind-${spoke}"
     local is_remote=false
-    [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
-    local target_host="$SPOKE1_HOST"
-    [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
+    local target_host="${NODE_HOSTS[$spoke]:-$spoke}"
+    [ "$target_host" != "127.0.0.1" ] && [ "$target_host" != "localhost" ] && is_remote=true
 
     if $is_remote; then
       ensure_cluster_ssh_tunnel "$spoke" "$target_host"

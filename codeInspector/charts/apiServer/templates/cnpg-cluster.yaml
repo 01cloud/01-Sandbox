@@ -48,9 +48,40 @@ spec:
       postInitSQL:
         - "CREATE ROLE app WITH LOGIN SUPERUSER PASSWORD '{{ .Values.cnpg.password | default "password123" }}';"
 
+  inheritedMetadata:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9187"
+      prometheus.io/path: "/metrics"
+    labels:
+      cnpg.io/cluster: postgresql-primary
+
   storage:
     size: {{ .Values.cnpg.storage | default "5Gi" }}
     storageClass: {{ .Values.cnpg.storageClassName | default "standard" }}
+---
+# Dedicated Prometheus metrics service for primary cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-primary-metrics
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: postgresql-primary-metrics
+    cnpg.io/cluster: postgresql-primary
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    cnpg.io/cluster: postgresql-primary
+  ports:
+  - port: 9187
+    targetPort: 9187
+    name: metrics
+    protocol: TCP
 ---
 # Expose primary replication service via NodePort directly in Kubernetes (replaces host-level socat)
 apiVersion: v1
@@ -126,9 +157,40 @@ spec:
       name: postgresql-primary-credentials
       key: password
 
+  inheritedMetadata:
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "9187"
+      prometheus.io/path: "/metrics"
+    labels:
+      cnpg.io/cluster: postgresql-secondary
+
   storage:
     size: {{ .Values.cnpg.storage | default "5Gi" }}
     storageClass: {{ .Values.cnpg.storageClassName | default "standard" }}
+---
+# Dedicated Prometheus metrics service for secondary cluster
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-secondary-metrics
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: postgresql-secondary-metrics
+    cnpg.io/cluster: postgresql-secondary
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    cnpg.io/cluster: postgresql-secondary
+  ports:
+  - port: 9187
+    targetPort: 9187
+    name: metrics
+    protocol: TCP
 ---
 # Compatibility service alias on secondaryhub
 apiVersion: v1

@@ -116,8 +116,10 @@ rbac:
 
 # -- Annotations to be added to all other resources.
 commonAnnotations: {}
-# -- Annotations to be added to the pod.
-podAnnotations: {}
+podAnnotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "8080"
+  prometheus.io/path: "/metrics"
 # -- Labels to be added to the pod.
 podLabels: {}
 

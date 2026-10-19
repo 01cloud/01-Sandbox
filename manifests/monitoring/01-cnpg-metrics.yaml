@@ -1,0 +1,80 @@
+---
+# =====================================================================
+# Cloud Native PostgreSQL (CNPG) Prometheus Metrics Services & Config
+# =====================================================================
+# CNPG instances natively expose Prometheus metrics on port 9187 at /metrics.
+# CNPG operator manager exposes Prometheus metrics on port 8080 at /metrics.
+# This manifest creates dedicated ClusterIP services to ensure scrape targets
+# are accessible via stable DNS and endpoints within the cluster.
+# =====================================================================
+
+# 1. Primary PostgreSQL Instance Metrics Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-primary-metrics
+  namespace: opensandbox-system
+  labels:
+    app.kubernetes.io/name: postgresql-primary-metrics
+    app.kubernetes.io/component: database-metrics
+    cnpg.io/cluster: postgresql-primary
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    cnpg.io/cluster: postgresql-primary
+  ports:
+  - name: metrics
+    port: 9187
+    targetPort: 9187
+    protocol: TCP
+---
+# 2. Secondary (Standby Replica) PostgreSQL Instance Metrics Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-secondary-metrics
+  namespace: opensandbox-system
+  labels:
+    app.kubernetes.io/name: postgresql-secondary-metrics
+    app.kubernetes.io/component: database-metrics
+    cnpg.io/cluster: postgresql-secondary
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    cnpg.io/cluster: postgresql-secondary
+  ports:
+  - name: metrics
+    port: 9187
+    targetPort: 9187
+    protocol: TCP
+---
+# 3. CloudNativePG Operator Manager Metrics Service
+apiVersion: v1
+kind: Service
+metadata:
+  name: cnpg-operator-metrics
+  namespace: opensandbox-system
+  labels:
+    app.kubernetes.io/name: cnpg-operator-metrics
+    app.kubernetes.io/component: controller-metrics
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: cloudnative-pg
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: metrics
+    protocol: TCP

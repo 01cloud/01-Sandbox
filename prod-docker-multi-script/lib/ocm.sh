@@ -29,8 +29,8 @@ _write_hub_bootstrap_kubeconfig() {
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
 
   if $is_remote; then
-    local hub_host="$PRIMARYHUB_HOST"
-    [ "$hub_node" == "secondaryhub-control-plane" ] && hub_host="$SECONDARYHUB_HOST"
+    local hub_name="${hub_node%-control-plane}"
+    local hub_host="${NODE_HOSTS[$hub_name]:-$PRIMARYHUB_HOST}"
     ca_b64=$(remote_exec "$hub_host" "docker exec '$hub_node' cat /etc/kubernetes/pki/ca.crt 2>/dev/null" | base64 -w0)
   elif [ -n "$hub_node" ] && docker exec "$hub_node" test -f /etc/kubernetes/pki/ca.crt >/dev/null 2>&1; then
     ca_b64=$(docker exec "$hub_node" cat /etc/kubernetes/pki/ca.crt | base64 -w0)
@@ -191,6 +191,18 @@ _ensure_hub_apiserver_sans() {
   fi
 }
 
+_build_hub_kubeconfig_secrets() {
+  local secrets_json="["
+  local first=true
+  for hub in "${HUB_LIST[@]}"; do
+    $first || secrets_json+=","
+    secrets_json+="{ \"name\": \"${hub}-kubeconfig\" }"
+    first=false
+  done
+  secrets_json+="]"
+  echo "$secrets_json"
+}
+
 _check_phase_16() {
   local is_remote=false
   [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ] && is_remote=true
@@ -198,13 +210,14 @@ _check_phase_16() {
     ensure_all_cluster_tunnels 16
   fi
 
+  local primary_hub="${HUB_LIST[0]:-primaryhub}"
   local spoke avail joined
-  for spoke in spoke1 spoke2; do
-    avail=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
+  for spoke in "${SPOKE_LIST[@]}"; do
+    avail=$(kubectl --context "kind-${primary_hub}" get managedcluster "$spoke" \
       -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}' 2>/dev/null || echo "")
     [ "$avail" == "True" ] || return 1
 
-    joined=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
+    joined=$(kubectl --context "kind-${primary_hub}" get managedcluster "$spoke" \
       -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterJoined")].status}' 2>/dev/null || echo "")
     [ "$joined" == "True" ] || return 1
 
@@ -216,6 +229,151 @@ _check_phase_16() {
 }
 
 _do_phase_16_join_spokes_to_ocm() {
+  # Ensure all hub apiserver certs cover the WG overlay IPs
+  for hub in "${HUB_LIST[@]}"; do
+    _ensure_hub_apiserver_sans "$hub" "10.96.0.0/16"
+  done
+
+  local agent_ns="open-cluster-management-agent"
+  local primary_hub="${HUB_LIST[0]:-primaryhub}"
+  local primary_wg_ip
+  primary_wg_ip=$(_get_wg_ip_for_node "$primary_hub")
+  local primary_hub_url="https://${primary_wg_ip}:6443"
+
+  # Obtain bootstrap tokens and write bootstrap kubeconfigs for all registered hubs
+  declare -A HUB_TOKENS=()
+  for hub in "${HUB_LIST[@]}"; do
+    local tok
+    tok=$(_get_hub_token "kind-${hub}")
+    if [ -z "$tok" ]; then
+      log_error "Could not obtain join token for hub: ${hub}"
+      log_error "Is OCM initialised on all hubs? (phase 8)"
+      exit 1
+    fi
+    HUB_TOKENS["$hub"]="$tok"
+
+    local h_wg_ip
+    h_wg_ip=$(_get_wg_ip_for_node "$hub")
+    local h_url="https://${h_wg_ip}:6443"
+    _write_hub_bootstrap_kubeconfig "${STATE_DIR}/${hub}-bootstrap.kubeconfig" "$h_url" "$tok" "${hub}-control-plane"
+  done
+
+  # Backward compatibility: write secondaryhub config if secondaryhub is present
+  if [ "${#HUB_LIST[@]}" -gt 1 ]; then
+    cp -f "${STATE_DIR}/${HUB_LIST[1]}-bootstrap.kubeconfig" "${STATE_DIR}/secondaryhub-bootstrap.kubeconfig" 2>/dev/null || true
+  fi
+
+  for spoke in "${SPOKE_LIST[@]}"; do
+    local is_remote=false
+    local target_spoke_host="${NODE_HOSTS[$spoke]:-$spoke}"
+    [ "$target_spoke_host" != "127.0.0.1" ] && [ "$target_spoke_host" != "localhost" ] && is_remote=true
+
+    if $is_remote; then
+      ensure_cluster_ssh_tunnel "$spoke" "$target_spoke_host"
+      _sync_remote_kubeconfig "$spoke" "$target_spoke_host"
+    else
+      kind export kubeconfig --name "$spoke" 2>/dev/null || true
+    fi
+    local ctx="kind-${spoke}"
+    log_info "── ${spoke} ──"
+
+    # Ensure control-plane NoSchedule taint is removed on single-node spoke clusters.
+    kubectl --context "$ctx" taint nodes "${spoke}-control-plane"       node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
+
+    # 1. Run clusteradm join pointing at primaryhub
+    log_info "Running clusteradm join for ${spoke} -> ${primary_hub} (${primary_hub_url})..."
+    local join_ok=false
+    for i in $(seq 1 15); do
+      local join_err
+      join_err=$(clusteradm --context "$ctx" join         --hub-token "${HUB_TOKENS[$primary_hub]}"         --hub-apiserver "$primary_hub_url"         --cluster-name "$spoke"         --force-internal-endpoint-lookup         --wait 2>&1 || true)
+      if echo "$join_err" | grep -q "Please log in to the hub"; then
+        join_ok=true
+        log_info "clusteradm join succeeded for ${spoke}."
+        break
+      fi
+      if kubectl --context "$ctx" get klusterlet klusterlet >/dev/null 2>&1; then
+        join_ok=true
+        log_info "Klusterlet CR already present on ${spoke} – join accepted."
+        break
+      fi
+      log_warn "clusteradm join attempt $i failed for ${spoke}: $(echo "$join_err" | tail -1) – retrying in 4s..."
+      sleep 4
+    done
+    [ "$join_ok" = false ] && log_warn "clusteradm join did not complete cleanly for ${spoke}; proceeding with patch."
+
+    # 2. Populate bootstrap secrets for ALL hubs in HUB_LIST
+    kubectl --context "$ctx" create namespace "$agent_ns" 2>/dev/null || true
+    for hub in "${HUB_LIST[@]}"; do
+      kubectl --context "$ctx" -n "$agent_ns" create secret generic "${hub}-kubeconfig"         --from-file=kubeconfig="${STATE_DIR}/${hub}-bootstrap.kubeconfig"         --dry-run=client -o yaml | kubectl --context "$ctx" apply -f -
+    done
+    kubectl --context "$ctx" -n "$agent_ns" create secret generic bootstrap-hub-kubeconfig       --from-file=kubeconfig="${STATE_DIR}/${primary_hub}-bootstrap.kubeconfig"       --dry-run=client -o yaml | kubectl --context "$ctx" apply -f -
+
+    # 3. Patch klusterlet for MultipleHubs with 60s failover timeout
+    log_info "Patching CRD schema and klusterlet on ${spoke}: MultipleHubs + LocalSecrets (60s failover)..."
+    kubectl --context "$ctx" patch crd klusterlets.operator.open-cluster-management.io --type json -p '[{"op":"replace","path":"/spec/versions/0/schema/openAPIV3Schema/properties/spec/properties/registrationConfiguration/properties/bootstrapKubeConfigs/properties/localSecretsConfig/properties/hubConnectionTimeoutSeconds/minimum","value":10}]' 2>/dev/null || true
+
+    local hub_secrets
+    hub_secrets=$(_build_hub_kubeconfig_secrets)
+
+    kubectl --context "$ctx" patch klusterlet klusterlet --type=merge -p "{
+      "spec": {
+        "registrationConfiguration": {
+          "featureGates": [
+            { "feature": "MultipleHubs", "mode": "Enable" }
+          ],
+          "bootstrapKubeConfigs": {
+            "type": "LocalSecrets",
+            "localSecretsConfig": {
+              "hubConnectionTimeoutSeconds": 60,
+              "kubeConfigSecrets": ${hub_secrets}
+            }
+          }
+        }
+      }
+    }"
+
+    # 4. Restart registration agent so it picks up the new MultipleHubs config immediately
+    log_info "Restarting klusterlet-registration-agent on ${spoke} to apply MultipleHubs config..."
+    kubectl --context "$ctx" -n open-cluster-management-agent rollout restart deployment       klusterlet-registration-agent 2>/dev/null || true
+    kubectl --context "$ctx" -n open-cluster-management-agent delete pod       -l app=klusterlet-registration-agent --wait=false --request-timeout=5s --ignore-not-found=true 2>/dev/null || true
+    sleep 5
+
+    # 5. Approve CSRs on primary hub
+    log_info "Accepting ${spoke} on ${primary_hub}..."
+    local accepted=false
+    for i in $(seq 1 45); do
+      if clusteradm accept --context "kind-${primary_hub}" --clusters "$spoke" >/dev/null 2>&1; then
+        accepted=true; break
+      fi
+      sleep 2
+    done
+    [ "$accepted" = false ] && log_warn "clusteradm accept did not succeed for ${spoke} yet (CSR may still be pending)."
+    kubectl --context "kind-${primary_hub}" patch managedcluster "$spoke" --type merge -p '{"spec":{"leaseDurationSeconds":5}}' 2>/dev/null || true
+
+    # Poll until ManagedClusterConditionAvailable = True on primary hub
+    local avail="False"
+    for i in $(seq 1 60); do
+      clusteradm accept --context "kind-${primary_hub}" --clusters "$spoke" >/dev/null 2>&1 || true
+      avail=$(kubectl --context "kind-${primary_hub}" get managedcluster "$spoke"         -o jsonpath='{.status.conditions[?(@.type=="ManagedClusterConditionAvailable")].status}'         2>/dev/null || echo "False")
+      [ "$avail" == "True" ] && break
+      sleep 4
+    done
+
+    if [ "$avail" == "True" ]; then
+      log_success "Spoke '${spoke}' joined ${primary_hub} and is Available (standby hubs kept in failover chain)."
+    else
+      log_error "Spoke '${spoke}' did not become Available on ${primary_hub}."
+      _dump_klusterlet_debug "$ctx"
+    fi
+
+    # Best-effort pre-approve on all standby hubs
+    for standby_hub in "${HUB_LIST[@]:1}"; do
+      clusteradm accept --context "kind-${standby_hub}" --clusters "$spoke" >/dev/null 2>&1 || true
+    done
+  done
+}
+
+phase_16_join_spokes_to_ocm() {
   # Ensure hub apiserver certs cover the WG overlay IPs
   _ensure_hub_apiserver_sans "primaryhub"   "10.96.0.0/16"
   _ensure_hub_apiserver_sans "secondaryhub" "10.97.0.0/16"
@@ -448,60 +606,73 @@ phase_16_join_spokes_to_ocm() {
 }
 
 _check_phase_17() {
+  local primary_hub="${HUB_LIST[0]:-primaryhub}"
   local spoke lbl
-  for spoke in spoke1 spoke2; do
-    kubectl --context kind-secondaryhub get managedcluster "$spoke" >/dev/null 2>&1 || return 1
-    lbl=$(kubectl --context kind-primaryhub get managedcluster "$spoke" \
+  for spoke in "${SPOKE_LIST[@]}"; do
+    for standby_hub in "${HUB_LIST[@]:1}"; do
+      kubectl --context "kind-${standby_hub}" get managedcluster "$spoke" >/dev/null 2>&1 || return 1
+    done
+    lbl=$(kubectl --context "kind-${primary_hub}" get managedcluster "$spoke" \
       -o jsonpath='{.metadata.labels.sandbox-workload-capable}' 2>/dev/null || echo "")
     [ "$lbl" == "true" ] || return 1
   done
-  kubectl --context kind-secondaryhub get managedclusterset sandbox-spokes >/dev/null 2>&1 || return 1
+  for standby_hub in "${HUB_LIST[@]:1}"; do
+    kubectl --context "kind-${standby_hub}" get managedclusterset sandbox-spokes >/dev/null 2>&1 || return 1
+  done
   return 0
 }
 
 _do_phase_17_sync_spokes_to_secondaryhub() {
   if [ "$FORCE_RECONFIGURE" != "true" ] && _check_phase_17; then
-    log_info "Spoke registration and labels already synchronized to SecondaryHub – skipping."
+    log_info "Spoke registration and labels already synchronized to standby hubs – skipping."
     return 0
   fi
 
-  log_info "Syncing spoke registration resources to secondaryhub..."
-  for spoke in spoke1 spoke2; do
-    kubectl --context kind-primaryhub get namespace "$spoke" -o yaml 2>/dev/null | \
-      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-    kubectl --context kind-primaryhub get clusterrole \
-      "open-cluster-management:managedcluster:${spoke}" -o yaml 2>/dev/null | \
-      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-    kubectl --context kind-primaryhub get clusterrolebinding \
-      "open-cluster-management:managedcluster:${spoke}" -o yaml 2>/dev/null | \
-      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-    kubectl --context kind-primaryhub get rolebinding -n "$spoke" -o yaml 2>/dev/null | \
-      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-    kubectl --context kind-primaryhub get managedcluster "$spoke" -o json 2>/dev/null | \
-      jq 'del(
-            .metadata.uid,
-            .metadata.resourceVersion,
-            .metadata.creationTimestamp,
-            .metadata.ownerReferences,
-            .metadata.managedFields,
-            .metadata.annotations,
-            .metadata.finalizers,
-            .status
-          ) | .spec.hubAcceptsClient = false' | \
-      kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
+  local primary_hub="${HUB_LIST[0]:-primaryhub}"
+  log_info "Syncing spoke registration resources from ${primary_hub} to all standby hubs..."
+
+  for standby_hub in "${HUB_LIST[@]:1}"; do
+    local target_ctx="kind-${standby_hub}"
+    log_info "Syncing spokes to ${standby_hub}..."
+
+    for spoke in "${SPOKE_LIST[@]}"; do
+      kubectl --context "kind-${primary_hub}" get namespace "$spoke" -o yaml 2>/dev/null | \
+        kubectl --context "$target_ctx" apply -f - 2>/dev/null || true
+      kubectl --context "kind-${primary_hub}" get clusterrole \
+        "open-cluster-management:managedcluster:${spoke}" -o yaml 2>/dev/null | \
+        kubectl --context "$target_ctx" apply -f - 2>/dev/null || true
+      kubectl --context "kind-${primary_hub}" get clusterrolebinding \
+        "open-cluster-management:managedcluster:${spoke}" -o yaml 2>/dev/null | \
+        kubectl --context "$target_ctx" apply -f - 2>/dev/null || true
+      kubectl --context "kind-${primary_hub}" get rolebinding -n "$spoke" -o yaml 2>/dev/null | \
+        kubectl --context "$target_ctx" apply -f - 2>/dev/null || true
+      kubectl --context "kind-${primary_hub}" get managedcluster "$spoke" -o json 2>/dev/null | \
+        jq 'del(
+              .metadata.uid,
+              .metadata.resourceVersion,
+              .metadata.creationTimestamp,
+              .metadata.ownerReferences,
+              .metadata.managedFields,
+              .metadata.annotations,
+              .metadata.finalizers,
+              .status
+            ) | .spec.hubAcceptsClient = false' | \
+        kubectl --context "$target_ctx" apply -f - 2>/dev/null || true
+    done
+
+    kubectl --context "kind-${primary_hub}" get managedclusterset sandbox-spokes -o yaml 2>/dev/null | \
+      kubectl --context "$target_ctx" apply -f - 2>/dev/null || true
+    kubectl --context "kind-${primary_hub}" get managedclustersetbinding -A -o yaml 2>/dev/null | \
+      kubectl --context "$target_ctx" apply -f - 2>/dev/null || true
   done
 
-  kubectl --context kind-primaryhub get managedclusterset sandbox-spokes -o yaml 2>/dev/null | \
-    kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-  kubectl --context kind-primaryhub get managedclustersetbinding -A -o yaml 2>/dev/null | \
-    kubectl --context kind-secondaryhub apply -f - 2>/dev/null || true
-
-  for spoke in spoke1 spoke2; do
+  # Label spokes across all hubs (primary and standbys)
+  for spoke in "${SPOKE_LIST[@]}"; do
     local spoke_wg_ip
-    [ "$spoke" == "spoke1" ] && spoke_wg_ip="$WG_SPOKE1_IP" || spoke_wg_ip="$WG_SPOKE2_IP"
+    spoke_wg_ip=$(_get_wg_ip_for_node "$spoke")
 
-    for ctx in kind-primaryhub kind-secondaryhub; do
-      kubectl --context "$ctx" label managedcluster "$spoke" \
+    for hub in "${HUB_LIST[@]}"; do
+      kubectl --context "kind-${hub}" label managedcluster "$spoke" \
         wireguard-ip="${spoke_wg_ip}" \
         sandbox-workload-capable=true \
         runtime.gvisor=true runtime.kata=true runtime.kata-fc=true \
@@ -509,9 +680,9 @@ _do_phase_17_sync_spokes_to_secondaryhub() {
     done
   done
 
-  log_success "Spoke registration synced to both hubs."
+  log_success "Spoke registration synced across all active hub clusters."
 }
 
 phase_17_sync_spokes_to_secondaryhub() {
-  run_phase "17" "Labeling Spokes & Syncing Registration to SecondaryHub" _check_phase_17 _do_phase_17_sync_spokes_to_secondaryhub
+  run_phase "17" "Labeling Spokes & Syncing Registration to Standby Hubs" _check_phase_17 _do_phase_17_sync_spokes_to_secondaryhub
 }

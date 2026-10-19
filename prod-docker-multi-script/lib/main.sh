@@ -16,7 +16,11 @@ teardown_environment() {
 
   if $is_remote; then
     log_info "Tearing down remote EC2 cluster environments..."
-    local remote_nodes=("primaryhub:$PRIMARYHUB_HOST" "secondaryhub:$SECONDARYHUB_HOST" "spoke1:$SPOKE1_HOST" "spoke2:$SPOKE2_HOST")
+    local remote_nodes=()
+    for node in "${ALL_NODES[@]}"; do
+      local r_host="${NODE_HOSTS[$node]:-$node}"
+      remote_nodes+=("${node}:${r_host}")
+    done
     for r_entry in "${remote_nodes[@]}"; do
       local r_name="${r_entry%%:*}"
       local r_host="${r_entry##*:}"
@@ -30,7 +34,7 @@ teardown_environment() {
     ensure_docker_access
     docker rm -f envoy-gateway 2>/dev/null || true
 
-    for cluster in primaryhub secondaryhub spoke1 spoke2; do
+    for cluster in "${ALL_NODES[@]}"; do
       if kind get clusters 2>/dev/null | grep -q "^${cluster}$"; then
         log_info "Deleting KinD cluster '$cluster'..."
         kind delete cluster --name "$cluster" 2>/dev/null || true
@@ -62,28 +66,36 @@ teardown_environment() {
 run_verification() {
   log_step "End-to-End Health Verification"
 
-  echo -e "\n${BOLD}[1a] OCM Managed Clusters – PrimaryHub:${NC}"
-  kubectl --context kind-primaryhub get managedclusters 2>/dev/null || true
+  local primary_hub="${HUB_LIST[0]:-primaryhub}"
 
-  echo -e "\n${BOLD}[1b] OCM Managed Clusters – SecondaryHub (Standby):${NC}"
-  kubectl --context kind-secondaryhub get managedclusters 2>/dev/null || true
+  echo -e "\n${BOLD}[1] OCM Managed Clusters on Primary Hub (${primary_hub}):${NC}"
+  kubectl --context "kind-${primary_hub}" get managedclusters 2>/dev/null || true
 
-  echo -e "\n${BOLD}[2] PostgreSQL Replication Sender (PrimaryHub):${NC}"
-  kubectl --context kind-primaryhub exec -n opensandbox-system postgresql-primary-1 \
+  for standby_hub in "${HUB_LIST[@]:1}"; do
+    echo -e "\n${BOLD}[1-Standby] OCM Managed Clusters on Standby Hub (${standby_hub}):${NC}"
+    kubectl --context "kind-${standby_hub}" get managedclusters 2>/dev/null || true
+  done
+
+  echo -e "\n${BOLD}[2] PostgreSQL Replication Sender (${primary_hub}):${NC}"
+  kubectl --context "kind-${primary_hub}" exec -n opensandbox-system postgresql-primary-1 \
     -c postgres -- psql -U postgres -d apikeys \
     -c "SELECT client_addr,application_name,state,sync_state FROM pg_stat_replication;" \
     2>/dev/null || true
 
-  echo -e "\n${BOLD}[3] PostgreSQL WAL Receiver (SecondaryHub):${NC}"
-  kubectl --context kind-secondaryhub exec -n opensandbox-system postgresql-secondary-1 \
-    -c postgres -- psql -U postgres -d apikeys \
-    -c "SELECT status,sender_host,sender_port,latest_end_lsn FROM pg_stat_wal_receiver;" \
-    2>/dev/null || true
+  for standby_hub in "${HUB_LIST[@]:1}"; do
+    echo -e "\n${BOLD}[3] PostgreSQL WAL Receiver on ${standby_hub}:${NC}"
+    kubectl --context "kind-${standby_hub}" exec -n opensandbox-system postgresql-secondary-1 \
+      -c postgres -- psql -U postgres -d apikeys \
+      -c "SELECT status,sender_host,sender_port,latest_end_lsn FROM pg_stat_wal_receiver;" \
+      2>/dev/null || true
+  done
 
-  echo -e "\n${BOLD}[4] Valkey Replication (SecondaryHub):${NC}"
-  kubectl --context kind-secondaryhub exec -n opensandbox-system deploy/valkey -- \
-    valkey-cli info replication | grep -E "role|master_host|master_port|master_link_status" \
-    2>/dev/null || true
+  for standby_hub in "${HUB_LIST[@]:1}"; do
+    echo -e "\n${BOLD}[4] Valkey Replication on ${standby_hub}:${NC}"
+    kubectl --context "kind-${standby_hub}" exec -n opensandbox-system deploy/valkey -- \
+      valkey-cli info replication | grep -E "role|master_host|master_port|master_link_status" \
+      2>/dev/null || true
+  done
 
   echo -e "\n${GREEN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
   echo -e "${GREEN}${BOLD}  MULTI-CLUSTER HEALTH VERIFICATION COMPLETE${NC}"
