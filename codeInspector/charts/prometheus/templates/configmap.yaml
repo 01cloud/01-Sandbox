@@ -9,6 +9,12 @@ data:
       scrape_interval: 15s
       scrape_timeout: 10s
       evaluation_interval: 15s
+      # ── Cluster identity labels ──────────────────────────────────────────────
+      # Every metric carries cluster= and cluster_role= so Grafana can
+      # filter/group without ambiguity across the multi-cluster setup.
+      external_labels:
+        cluster: {{ .Values.clusterName | default "primaryhub" | quote }}
+        cluster_role: {{ .Values.clusterRole | default "hub" | quote }}
 
     rule_files:
       - /etc/prometheus/ocm-slo-rules.yml
@@ -200,7 +206,8 @@ data:
           - record: controller:workqueue_depth:sum
             expr: sum(workqueue_depth) by (name)
 
-            - name: postgresql-ha-replication
+      {{- if or (eq .Values.clusterRole "hub") (not .Values.clusterRole) }}
+      - name: postgresql-ha-replication
         rules:
           # HA SLI: Replication Lag in Seconds (SLO Target: 0s)
           - record: postgresql:replication_lag_seconds
@@ -217,3 +224,4 @@ data:
           # HA SLI: WAL Archival Failure Rate
           - record: postgresql:wal_archival_failed_total
             expr: cnpg_pg_stat_archiver_failed_count
+      {{- end }}

@@ -5,6 +5,17 @@ prometheusNamespace: monitoring
 prometheusServiceName: prometheus-service
 prometheusPort: 9090
 
+# Multi-Cluster remote Prometheus endpoints (via WireGuard overlay 10.99.0.0/24)
+remoteClusters:
+  secondaryhub:
+    prometheusUrl: "http://10.99.0.2:30900"
+  spoke1:
+    prometheusUrl: "http://10.99.0.3:30900"
+  spoke2:
+    prometheusUrl: "http://10.99.0.4:30900"
+  spoke3:
+    prometheusUrl: "http://10.99.0.5:30900"
+
 replicaCount: 1
 
 ingressRoute:

@@ -263,3 +263,214 @@ data:
       "uid": "codeinspector-main",
       "version": 1
     }
+  multi-cluster-overview.json: |
+    {
+      "title": "01-Sandbox Multi-Cluster Overview",
+      "uid": "01sandbox-overview",
+      "tags": ["multi-cluster", "01sandbox"],
+      "timezone": "browser",
+      "refresh": "30s",
+      "schemaVersion": 38,
+      "templating": {
+        "list": [
+          {
+            "name": "cluster",
+            "label": "Cluster",
+            "type": "datasource",
+            "pluginId": "prometheus",
+            "multi": true,
+            "includeAll": true,
+            "current": { "text": "All", "value": "$__all" }
+          }
+        ]
+      },
+      "panels": [
+        {
+          "id": 1,
+          "title": "Prometheus Scraper Health (all clusters)",
+          "type": "stat",
+          "gridPos": { "x": 0, "y": 0, "w": 24, "h": 3 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "${cluster}" },
+              "expr": "up",
+              "legendFormat": "{{ "{{" }}cluster{{ "}}" }} / {{ "{{" }}job{{ "}}" }}",
+              "refId": "A"
+            }
+          ],
+          "options": {
+            "reduceOptions": { "calcs": ["lastNotNull"] },
+            "colorMode": "background",
+            "graphMode": "none",
+            "textMode": "auto"
+          },
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "1": { "text": "UP", "color": "green" }, "0": { "text": "DOWN", "color": "red" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [{"color":"red","value":0},{"color":"green","value":1}] }
+            }
+          }
+        },
+        {
+          "id": 2,
+          "title": "Pod Restart Count (all clusters)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 3, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-primaryhub" },
+              "expr": "increase(kube_pod_container_status_restarts_total[1h])",
+              "legendFormat": "primaryhub / {{ "{{" }}namespace{{ "}}" }}/{{ "{{" }}pod{{ "}}" }}",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-secondaryhub" },
+              "expr": "increase(kube_pod_container_status_restarts_total[1h])",
+              "legendFormat": "secondaryhub / {{ "{{" }}namespace{{ "}}" }}/{{ "{{" }}pod{{ "}}" }}",
+              "refId": "B"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-spoke1" },
+              "expr": "increase(kube_pod_container_status_restarts_total[1h])",
+              "legendFormat": "spoke1 / {{ "{{" }}namespace{{ "}}" }}/{{ "{{" }}pod{{ "}}" }}",
+              "refId": "C"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-spoke2" },
+              "expr": "increase(kube_pod_container_status_restarts_total[1h])",
+              "legendFormat": "spoke2 / {{ "{{" }}namespace{{ "}}" }}/{{ "{{" }}pod{{ "}}" }}",
+              "refId": "D"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-spoke3" },
+              "expr": "increase(kube_pod_container_status_restarts_total[1h])",
+              "legendFormat": "spoke3 / {{ "{{" }}namespace{{ "}}" }}/{{ "{{" }}pod{{ "}}" }}",
+              "refId": "E"
+            }
+          ]
+        },
+        {
+          "id": 3,
+          "title": "PostgreSQL Replication Lag (primaryhub → secondaryhub)",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 3, "w": 12, "h": 8 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-primaryhub" },
+              "expr": "cnpg_pg_replication_lag",
+              "legendFormat": "replication_lag_seconds",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-primaryhub" },
+              "expr": "cnpg_pg_stat_replication_stream_replay_lag_bytes / 1048576",
+              "legendFormat": "replay_lag_MB",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": {
+            "overrides": [
+              { "matcher": { "id": "byName", "options": "replay_lag_MB" }, "properties": [{"id":"unit","value":"MB"}] },
+              { "matcher": { "id": "byName", "options": "replication_lag_seconds" }, "properties": [{"id":"unit","value":"s"}] }
+            ]
+          }
+        },
+        {
+          "id": 4,
+          "title": "OCM Webhook Admission Success Rate – primaryhub",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 11, "w": 12, "h": 7 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-primaryhub" },
+              "expr": "sum(rate(controller_runtime_webhook_requests_total{code=\"200\"}[5m])) / sum(rate(controller_runtime_webhook_requests_total[5m]))",
+              "legendFormat": "primaryhub admission success rate",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-secondaryhub" },
+              "expr": "sum(rate(controller_runtime_webhook_requests_total{code=\"200\"}[5m])) / sum(rate(controller_runtime_webhook_requests_total[5m]))",
+              "legendFormat": "secondaryhub admission success rate",
+              "refId": "B"
+            }
+          ],
+          "fieldConfig": { "defaults": { "unit": "percentunit", "min": 0, "max": 1 } }
+        },
+        {
+          "id": 5,
+          "title": "OCM Klusterlet Health – all spokes",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 11, "w": 12, "h": 7 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-spoke1" },
+              "expr": "up{job=\"open-cluster-management-agent\"}",
+              "legendFormat": "spoke1 klusterlet",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-spoke2" },
+              "expr": "up{job=\"open-cluster-management-agent\"}",
+              "legendFormat": "spoke2 klusterlet",
+              "refId": "B"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-spoke3" },
+              "expr": "up{job=\"open-cluster-management-agent\"}",
+              "legendFormat": "spoke3 klusterlet",
+              "refId": "C"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "1": {"text":"UP","color":"green"}, "0": {"text":"DOWN","color":"red"} } }
+              ]
+            }
+          }
+        },
+        {
+          "id": 6,
+          "title": "Controller Workqueue Depth (all hubs)",
+          "type": "timeseries",
+          "gridPos": { "x": 0, "y": 18, "w": 12, "h": 7 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-primaryhub" },
+              "expr": "sum(workqueue_depth) by (name)",
+              "legendFormat": "primaryhub / {{ "{{" }}name{{ "}}" }}",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-secondaryhub" },
+              "expr": "sum(workqueue_depth) by (name)",
+              "legendFormat": "secondaryhub / {{ "{{" }}name{{ "}}" }}",
+              "refId": "B"
+            }
+          ]
+        },
+        {
+          "id": 7,
+          "title": "PostgreSQL Active Connections",
+          "type": "timeseries",
+          "gridPos": { "x": 12, "y": 18, "w": 12, "h": 7 },
+          "targets": [
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-primaryhub" },
+              "expr": "cnpg_pg_stat_activity_connections",
+              "legendFormat": "primaryhub / {{ "{{" }}datname{{ "}}" }}",
+              "refId": "A"
+            },
+            {
+              "datasource": { "type": "prometheus", "uid": "prometheus-secondaryhub" },
+              "expr": "cnpg_pg_stat_activity_connections",
+              "legendFormat": "secondaryhub / {{ "{{" }}datname{{ "}}" }}",
+              "refId": "B"
+            }
+          ]
+        }
+      ],
+      "time": { "from": "now-1h", "to": "now" }
+    }

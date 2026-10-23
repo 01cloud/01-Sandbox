@@ -1,5 +1,11 @@
-# Default values for prometheus
-namespace: opensandbox-system
+namespace: monitoring
+
+clusterName: "primaryhub"
+clusterRole: "hub"
+retention: "6h"
+
+cnpgMetrics:
+  enabled: true
 
 apiServerNamespace: opensandbox-system
 apiServerServiceName: sandbox-api-service
@@ -8,7 +14,6 @@ apiServerPort: 80
 agentgatewayNamespace: agentgateway-system
 agentgatewayServiceName: agentgateway-proxy
 agentgatewayPort: 80
-
 
 replicaCount: 1
 
@@ -24,6 +29,9 @@ persistence:
 service:
   type: ClusterIP
   port: 9090
+  nodePort:
+    enabled: true
+    port: 30900
 
 
 resources:

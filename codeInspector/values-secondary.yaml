@@ -126,3 +126,20 @@ metallb:
       - 172.30.0.201-172.30.0.201
   l2Advertisement:
     enabled: true
+
+###############################################################
+# Monitoring (Secondary Hub)
+###############################################################
+prometheus:
+  enabled: true
+  clusterName: "secondaryhub"
+  clusterRole: "hub"
+  cnpgMetrics:
+    enabled: true
+  service:
+    nodePort:
+      enabled: true
+      port: 30900
+
+grafana:
+  enabled: false

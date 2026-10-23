@@ -3,14 +3,72 @@ kind: ConfigMap
 metadata:
   name: grafana-datasources
   namespace: {{ .Values.namespace }}
+  labels:
+    app: grafana
 data:
   datasources.yaml: |
     apiVersion: 1
     datasources:
-      - name: Prometheus
-        uid: Prometheus
+      {{- if .Values.datasources }}
+      {{- toYaml .Values.datasources | nindent 6 }}
+      {{- else }}
+      # ── Local: primaryhub ────────────────────────────────────────────────────
+      - name: "primaryhub"
+        uid: "prometheus-primaryhub"
         type: prometheus
         access: proxy
-        url: http://{{ .Values.prometheusServiceName }}.{{ .Values.prometheusNamespace }}.svc.cluster.local:{{ .Values.prometheusPort }}/prometheus
+        url: http://{{ .Values.prometheusServiceName }}.{{ .Values.prometheusNamespace }}.svc.cluster.local:{{ .Values.prometheusPort }}
         isDefault: true
-        editable: true
+        jsonData:
+          timeInterval: "15s"
+          httpMethod: GET
+        editable: false
+
+      # ── Remote: secondaryhub (via WireGuard) ─────────────────────────────────
+      - name: "secondaryhub"
+        uid: "prometheus-secondaryhub"
+        type: prometheus
+        url: {{ .Values.remoteClusters.secondaryhub.prometheusUrl | default "http://10.99.0.2:30900" | quote }}
+        access: proxy
+        isDefault: false
+        jsonData:
+          timeInterval: "15s"
+          httpMethod: GET
+        editable: false
+
+      # ── Remote: spoke1 (via WireGuard) ───────────────────────────────────────
+      - name: "spoke1"
+        uid: "prometheus-spoke1"
+        type: prometheus
+        url: {{ .Values.remoteClusters.spoke1.prometheusUrl | default "http://10.99.0.3:30900" | quote }}
+        access: proxy
+        isDefault: false
+        jsonData:
+          timeInterval: "15s"
+          httpMethod: GET
+        editable: false
+
+      # ── Remote: spoke2 (via WireGuard) ───────────────────────────────────────
+      - name: "spoke2"
+        uid: "prometheus-spoke2"
+        type: prometheus
+        url: {{ .Values.remoteClusters.spoke2.prometheusUrl | default "http://10.99.0.4:30900" | quote }}
+        access: proxy
+        isDefault: false
+        jsonData:
+          timeInterval: "15s"
+          httpMethod: GET
+        editable: false
+
+      # ── Remote: spoke3 (via WireGuard) ───────────────────────────────────────
+      - name: "spoke3"
+        uid: "prometheus-spoke3"
+        type: prometheus
+        url: {{ .Values.remoteClusters.spoke3.prometheusUrl | default "http://10.99.0.5:30900" | quote }}
+        access: proxy
+        isDefault: false
+        jsonData:
+          timeInterval: "15s"
+          httpMethod: GET
+        editable: false
+      {{- end }}

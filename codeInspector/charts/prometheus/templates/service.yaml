@@ -13,3 +13,27 @@ spec:
       port: 9090
       targetPort: 9090
   type: {{ .Values.service.type }}
+{{- if .Values.service.nodePort.enabled }}
+---
+# NodePort – exposes Prometheus on the node WireGuard IP (10.99.0.x:30900)
+# so the central Grafana on primaryhub can pull remote-cluster metrics via
+# the WireGuard mesh. Not reachable from public internet.
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-nodeport
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+  annotations:
+    note: "Reachable only via WireGuard overlay 10.99.0.0/24"
+spec:
+  selector:
+    app: prometheus
+  ports:
+    - name: web
+      port: 9090
+      targetPort: 9090
+      nodePort: {{ .Values.service.nodePort.port | default 30900 }}
+  type: NodePort
+{{- end }}

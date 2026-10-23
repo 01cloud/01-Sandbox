@@ -1,10 +1,15 @@
 ---
 # =====================================================================
-# Headless Prometheus Scraper (No UI / Scraper-Only Engine)
+# Prometheus Scraper – HUB VARIANT (primaryhub & secondaryhub)
 # =====================================================================
-# Scrapes metrics from CloudNativePG and Open Cluster Management
-# Exposes Prometheus API on port 9090 for programmatic metric collection
-# without deploying Grafana, dashboards, or external UI frontends.
+# Deployed on: kind-primaryhub and kind-secondaryhub
+# Scrapes: CNPG, OCM hub+agent, application services, Kubernetes pods
+# Each metric is tagged with external_labels so Grafana can distinguish
+# which cluster the metric originated from.
+#
+# The 'cluster' external_label value is templated by the apply script;
+# override at apply time with:
+#   sed 's/__CLUSTER_NAME__/primaryhub/' ... | kubectl apply -f -
 # =====================================================================
 
 apiVersion: v1
@@ -64,6 +69,12 @@ data:
       scrape_interval: 15s
       scrape_timeout: 10s
       evaluation_interval: 15s
+      # ── Cluster Identity Label ──────────────────────────────────────────────
+      # Every metric scraped on this cluster will carry cluster="<name>" so
+      # the central Grafana can filter/group by cluster without ambiguity.
+      external_labels:
+        cluster: "__CLUSTER_NAME__"
+        cluster_role: "__CLUSTER_ROLE__"
 
     scrape_configs:
       # 1. Prometheus Scraper Internal Metrics
@@ -72,6 +83,7 @@ data:
           - targets: ['localhost:9090']
 
       # 2. CloudNativePG Database Instances (PostgreSQL Metrics on Port 9187)
+      #    Hub clusters only – spoke clusters do not run PostgreSQL.
       - job_name: 'cloudnative-pg-instances'
         kubernetes_sd_configs:
           - role: pod
@@ -245,6 +257,7 @@ spec:
         - name: storage
           emptyDir: {}
 ---
+# ClusterIP Service – for in-cluster consumers (e.g. Grafana on same cluster)
 apiVersion: v1
 kind: Service
 metadata:
@@ -260,4 +273,28 @@ spec:
     - name: metrics
       port: 9090
       targetPort: 9090
+      protocol: TCP
+---
+# NodePort Service – exposes Prometheus on the WireGuard node IP so that
+# the central Grafana on primaryhub can pull remote-cluster metrics via
+# the WireGuard mesh (10.99.0.0/24). NodePort 30900 is reserved for this.
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus-scraper-nodeport
+  namespace: monitoring
+  labels:
+    app: prometheus-scraper
+  annotations:
+    # Document that this port is reached over WireGuard only – not public.
+    note: "Reachable only via WireGuard overlay 10.99.0.0/24"
+spec:
+  type: NodePort
+  selector:
+    app: prometheus-scraper
+  ports:
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      nodePort: 30900
       protocol: TCP

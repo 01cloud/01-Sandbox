@@ -223,3 +223,202 @@ cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
 * Does **not** touch or re-provision EC2 instances, launch templates, or KinD clusters.
 * Does **not** delete PVCs, database volumes, or persistent state (`--skip-crds` enabled).
 * Does **not** touch WireGuard VPN tunnels or OCM registration tokens.
+
+---
+
+## 8. Multi-Cluster Prometheus Architecture (All Clusters)
+
+### Overview
+
+Prometheus is now deployed on **all clusters** — both hubs and all spoke clusters. Each cluster's Prometheus carries an `external_label` that identifies which cluster the metric came from. A central **Grafana** instance on `primaryhub` pulls from all Prometheus scrapers over the existing WireGuard overlay (`10.99.0.0/24`).
+
+```
+                        ┌───────────────────────────────────────────────────┐
+                        │         Grafana – kind-primaryhub                 │
+                        │         (monitoring namespace, port 3000)          │
+                        └───┬───────────┬───────────┬──────────┬────────────┘
+                            │ (local)   │ WG mesh   │ WG mesh  │ WG mesh
+                            ▼           ▼           ▼          ▼
+                  ┌──────────────┐ ┌──────────┐ ┌────────┐ ┌────────┐ ┌────────┐
+                  │ Prometheus   │ │Prometheus│ │Prom.   │ │Prom.   │ │Prom.   │
+                  │ primaryhub   │ │secondary │ │spoke1  │ │spoke2  │ │spoke3  │
+                  │ :9090 (CIP)  │ │10.99.0.2 │ │10.99.0.3│ │10.99.0.4│ │10.99.0.5│
+                  │              │ │:30900    │ │:30900  │ │:30900  │ │:30900  │
+                  │cluster=      │ │cluster=  │ │cluster=│ │cluster=│ │cluster=│
+                  │"primaryhub"  │ │"2ndaryhub│ │"spoke1"│ │"spoke2"│ │"spoke3"│
+                  └──────────────┘ └──────────┘ └────────┘ └────────┘ └────────┘
+```
+
+### What Each Cluster Scrapes
+
+| Cluster | CNPG metrics | OCM Hub controllers | OCM Klusterlet agent | App services |
+| :--- | :---: | :---: | :---: | :---: |
+| `primaryhub` | ✅ | ✅ | ✅ | ✅ |
+| `secondaryhub` | ✅ | ✅ | ✅ | ✅ |
+| `spoke1` | ❌ | ❌ | ✅ | ✅ |
+| `spoke2` | ❌ | ❌ | ✅ | ✅ |
+| `spoke3` | ❌ | ❌ | ✅ | ✅ |
+
+### Cluster Identity Labels
+
+Every metric from every cluster carries:
+```
+cluster="primaryhub"    cluster_role="hub"
+cluster="secondaryhub"  cluster_role="hub"
+cluster="spoke1"        cluster_role="spoke"
+cluster="spoke2"        cluster_role="spoke"
+cluster="spoke3"        cluster_role="spoke"
+```
+This means in Grafana you can write a single PromQL query and filter by `{cluster="spoke1"}` to see only that cluster's metrics.
+
+### Deploying Monitoring to All Clusters
+
+```bash
+cd ~/Desktop/Kamal/01-Sandbox
+
+# Deploy Prometheus to ALL clusters + Grafana to primaryhub:
+./manifests/monitoring/apply-monitoring.sh all
+
+# Or deploy selectively:
+./manifests/monitoring/apply-monitoring.sh primaryhub
+./manifests/monitoring/apply-monitoring.sh secondaryhub
+./manifests/monitoring/apply-monitoring.sh spokes
+./manifests/monitoring/apply-monitoring.sh spoke3   # single spoke
+./manifests/monitoring/apply-monitoring.sh grafana  # Grafana only
+```
+
+---
+
+## 9. Centralized Grafana – Access & Dashboards
+
+### Accessing Grafana in Your Local Browser
+
+**Option 1 – Quickest (port-forward via SSM):**
+```bash
+cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
+./port-forward-grafana.sh
+```
+Open: **http://localhost:3000** — Login: `admin` / `sandbox-admin`
+
+**Option 2 – Manual:**
+```bash
+aws ssm start-session \
+  --target <PRIMARYHUB_INSTANCE_ID> \
+  --region us-east-1 \
+  --document-name AWS-StartPortForwardingSession \
+  --parameters '{"portNumber":["3000"],"localPortNumber":["3000"]}'
+```
+
+### Pre-Provisioned Dashboard: 01-Sandbox Multi-Cluster Overview
+
+The Grafana deployment automatically provisions a dashboard with:
+
+| Panel | Data source(s) |
+| :--- | :--- |
+| Prometheus Scraper Health (all clusters) | All datasources via `${cluster}` variable |
+| Pod Restart Count per cluster | All 5 cluster datasources |
+| PostgreSQL Replication Lag (primaryhub→secondaryhub) | primaryhub |
+| OCM Webhook Admission Success Rate | primaryhub + secondaryhub |
+| OCM Klusterlet Health – all spokes | spoke1, spoke2, spoke3 |
+| Controller Workqueue Depth | primaryhub + secondaryhub |
+| PostgreSQL Active Connections | primaryhub + secondaryhub |
+
+### Viewing Individual Cluster Prometheus
+
+```bash
+# View any specific cluster's raw Prometheus:
+./port-forward-prometheus.sh primaryhub
+./port-forward-prometheus.sh secondaryhub
+./port-forward-prometheus.sh spoke1
+./port-forward-prometheus.sh spoke2
+./port-forward-prometheus.sh spoke3
+```
+
+---
+
+## 10. Accessing Live Metrics from a Private Subnet
+
+All EC2 instances are in private subnets with no public IPs. The following options are available to view live dashboards from your local browser:
+
+### Option A: AWS SSM Port Forwarding (Current Recommended Approach)
+
+This is what `port-forward-grafana.sh` does. SSM creates an encrypted tunnel to the private EC2 instance, and `kubectl port-forward` tunnels Grafana's port to your laptop. No firewall changes needed — uses the existing SSM endpoint via AWS PrivateLink.
+
+```
+Laptop → AWS SSM PrivateLink → EC2 (primaryhub) → kubectl port-forward → Grafana:3000
+```
+
+**Pros:** Already working, no extra infra, no public exposure.
+**Cons:** Requires `aws-cli` + `session-manager-plugin` on your laptop; tunnel dies if SSM session times out.
+
+### Option B: Cloudflare Tunnel (Zero-Trust, Persistent URL)
+
+Cloudflare Tunnel (`cloudflared`) creates a permanent, TLS-encrypted tunnel from your private EC2 to Cloudflare's edge — giving you a stable `https://grafana.your-domain.workers.dev` URL accessible from any browser, anywhere, with no inbound firewall rules.
+
+**Architecture:**
+```
+Your Browser → https://grafana.yourdomain.com (Cloudflare Edge)
+                     ↕ (encrypted Cloudflare tunnel)
+               EC2 primaryhub (private subnet)
+                     ↓
+               kubectl port-forward → Grafana:3000
+```
+
+**Setup on primaryhub EC2 instance:**
+```bash
+# 1. Install cloudflared on the EC2 instance
+curl -L --output cloudflared.rpm \
+  https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-x86_64.rpm
+sudo rpm -ivh cloudflared.rpm
+
+# 2. Authenticate with your Cloudflare account
+cloudflared tunnel login
+
+# 3. Create a named tunnel
+cloudflared tunnel create grafana-sandbox
+
+# 4. Create tunnel config on the EC2:
+cat > ~/.cloudflared/config.yml << 'CFEOF'
+tunnel: grafana-sandbox
+credentials-file: /home/ec2-user/.cloudflared/<TUNNEL-ID>.json
+ingress:
+  - hostname: grafana.yourdomain.com
+    service: http://localhost:3000
+  - service: http_status:404
+CFEOF
+
+# 5. First: start Grafana port-forward in background on the EC2 host:
+KUBECONFIG=/etc/kubernetes/admin.conf kubectl -n monitoring \
+  port-forward --address 127.0.0.1 svc/grafana 3000:3000 &
+
+# 6. Start the tunnel (run as systemd service for persistence):
+cloudflared tunnel run grafana-sandbox
+```
+
+**Create systemd service for persistence:**
+```bash
+sudo cloudflared service install
+sudo systemctl enable cloudflared
+sudo systemctl start cloudflared
+```
+
+**Pros:** Persistent public HTTPS URL; works from any device; no VPN required; Cloudflare Access can add authentication (SSO, email OTP) on top.
+**Cons:** Requires a Cloudflare account and a domain managed on Cloudflare; adds a third-party in the data path (metrics are not sensitive, but worth noting).
+
+### Option C: AWS SSM + Permanent Local Port Mapping (tmux)
+
+Run the SSM tunnel in a persistent `tmux` session on your laptop so it survives terminal closure:
+```bash
+tmux new-session -d -s grafana-tunnel \
+  'aws ssm start-session --target <PRIMARYHUB_ID> --region us-east-1 \
+   --document-name AWS-StartPortForwardingSession \
+   --parameters "{\"portNumber\":[\"3000\"],\"localPortNumber\":[\"3000\"]}"'
+```
+
+### Recommendation
+
+| Scenario | Best Option |
+| :--- | :--- |
+| Quick ad-hoc inspection from your laptop | **Option A** (`port-forward-grafana.sh`) |
+| Permanent dashboard URL for the whole team | **Option B** (Cloudflare Tunnel) |
+| Team behind VPN / AWS internal access | **Option A** with tmux persistence |
