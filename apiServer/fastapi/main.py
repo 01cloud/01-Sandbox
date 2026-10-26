@@ -67,21 +67,41 @@ async def readonly_sql_handler(
     )
 
 
-# CORS configuration
-app.add_middleware(
-    CORSMiddleware,
-    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|sandbox\.01security\.com|.*\.01security\.com)(:\d+)?",
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
 # Custom Http middlewares
 app.add_middleware(CorrelationIDMiddleware)
 app.add_middleware(MetricsMiddleware)
 app.middleware("http")(log_headers)
 app.middleware("http")(cookie_auth_redirect_middleware)
+
+# Previous CORS configuration (commented out):
+# app.add_middleware(
+#     CORSMiddleware,
+#     # allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|sandbox\.01security\.com|.*\.01security\.com)(:\d+)?",
+#     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|sandbox\.01security\.com|.*\.01security\.com)(:\d+)?",
+#     allow_credentials=True,
+#     allow_methods=["*"],
+#     allow_headers=["*"],
+# )
+
+# CORS configuration (added last so it wraps all responses as the outermost middleware)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:8080",
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://127.0.0.1:8080",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:5173",
+        "https://dipper-shun-glowing.ngrok-free.dev",
+        "https://sandbox.01security.com",
+    ],
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1|10\.\d+\.\d+\.\d+|192\.168\.\d+\.\d+|172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|.*\.ngrok-free\.dev|.*\.ngrok-free\.app|.*\.01security\.com)(:\d+)?",
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    expose_headers=["*"],
+)
 
 # Register Swagger and OpenAPI routes
 register_docs_routes(app)

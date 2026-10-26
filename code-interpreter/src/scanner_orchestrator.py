@@ -42,11 +42,13 @@ class ScannerOrchestrator:
 
     def _get_enabled_tools(self) -> List[str]:
         """Determines tools based on explicit file classification."""
-        # 1. Discover all files first
+        # 1. Discover all files first (ignoring hidden / Kubernetes internal dirs)
         all_files = []
-        for root, _, files in os.walk(self.target_dir):
+        for root, dirs, files in os.walk(self.target_dir):
+            dirs[:] = [d for d in dirs if not d.startswith(".")]
             for file in files:
-                all_files.append(os.path.join(root, file))
+                if not file.startswith("."):
+                    all_files.append(os.path.join(root, file))
 
         # Standardize extensions to industry defaults for robust tool execution
         standardized_files = []

@@ -1,0 +1,838 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "id": 1,
+      "title": "PostgreSQL Streaming Replicas",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "cnpg_pg_replication_streaming_replicas",
+          "legendFormat": "Replicas",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "PostgreSQL Replication Lag",
+      "type": "stat",
+      "gridPos": {
+        "x": 4,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "cnpg_pg_replication_lag",
+          "legendFormat": "Lag",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 2
+              },
+              {
+                "color": "red",
+                "value": 5
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Replay Lag (Bytes)",
+      "type": "stat",
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "cnpg_pg_stat_replication_stream_replay_lag_bytes",
+          "legendFormat": "Replay Lag",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 5242880
+              },
+              {
+                "color": "red",
+                "value": 10485760
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "OCM Admission Success Rate (5m)",
+      "type": "stat",
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(controller_runtime_webhook_requests_total{code=\"200\"}[5m])) / sum(rate(controller_runtime_webhook_requests_total[5m])) * 100) or vector(100)",
+          "legendFormat": "Success Rate",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 99.0
+              },
+              {
+                "color": "green",
+                "value": 99.9
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "OCM Admissions Total (200 OK)",
+      "type": "stat",
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "sum(controller_runtime_webhook_requests_total{code=\"200\"})",
+          "legendFormat": "Admissions",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "area"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "blue",
+                "value": null
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "OCM Admission Errors (5xx)",
+      "type": "stat",
+      "gridPos": {
+        "x": 20,
+        "y": 0,
+        "w": 4,
+        "h": 4
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "sum(controller_runtime_webhook_requests_total{code=~\"5.*\"}) or vector(0)",
+          "legendFormat": "Errors",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "value",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "red",
+                "value": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 100,
+      "title": "High Availability PostgreSQL Streaming Replication & Engine",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 7,
+      "title": "PostgreSQL End-to-End Replication Lag (Target: 0s, <5s)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "cnpg_pg_replication_lag",
+          "legendFormat": "Replication Lag (seconds)",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 15
+          }
+        }
+      }
+    },
+    {
+      "id": 8,
+      "title": "WAL Streaming Lag Breakdown: Write vs Flush vs Replay",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 5,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "cnpg_pg_stat_replication_stream_write_lag_seconds",
+          "legendFormat": "Write Lag (s)",
+          "refId": "A"
+        },
+        {
+          "expr": "cnpg_pg_stat_replication_stream_flush_lag_seconds",
+          "legendFormat": "Flush Lag (s)",
+          "refId": "B"
+        },
+        {
+          "expr": "cnpg_pg_stat_replication_stream_replay_lag_seconds",
+          "legendFormat": "Replay Lag (s)",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 9,
+      "title": "WAL Lag in Bytes (Sent Lag vs Replay Lag)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 13,
+        "w": 8,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "cnpg_pg_stat_replication_stream_sent_lag_bytes",
+          "legendFormat": "Sent Lag Bytes",
+          "refId": "A"
+        },
+        {
+          "expr": "cnpg_pg_stat_replication_stream_replay_lag_bytes",
+          "legendFormat": "Replay Lag Bytes",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15
+          }
+        }
+      }
+    },
+    {
+      "id": 10,
+      "title": "Database Transactions: Commits vs Rollbacks",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 8,
+        "y": 13,
+        "w": 8,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(cnpg_pg_stat_database_xact_commit[5m])) by (datname)",
+          "legendFormat": "Commits/s - {{datname}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(cnpg_pg_stat_database_xact_rollback[5m])) by (datname)",
+          "legendFormat": "Rollbacks/s - {{datname}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 11,
+      "title": "Buffer Cache Hit Ratio & Active Connections",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 16,
+        "y": 13,
+        "w": 8,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "(sum(rate(cnpg_pg_stat_database_blks_hit[5m])) / (sum(rate(cnpg_pg_stat_database_blks_hit[5m])) + sum(rate(cnpg_pg_stat_database_blks_read[5m]))) * 100) or vector(100)",
+          "legendFormat": "Buffer Cache Hit %",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(cnpg_pg_stat_activity_connections) by (datname)",
+          "legendFormat": "Connections - {{datname}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line"
+          }
+        }
+      }
+    },
+    {
+      "id": 200,
+      "title": "Open Cluster Management (OCM) Webhooks & Controller SLI / SLO",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 12,
+      "title": "Admission Webhook Request Rate by Code & Path",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 21,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(controller_runtime_webhook_requests_total[5m])) by (webhook, code)",
+          "legendFormat": "{{code}} - {{webhook}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15
+          }
+        }
+      }
+    },
+    {
+      "id": 13,
+      "title": "Webhook Latency P99 & P95 (SLO: < 200ms)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 21,
+        "w": 12,
+        "h": 8
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.99, sum(rate(controller_runtime_webhook_latency_seconds_bucket[5m])) by (le, webhook))",
+          "legendFormat": "P99: {{webhook}}",
+          "refId": "A"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(controller_runtime_webhook_latency_seconds_bucket[5m])) by (le, webhook))",
+          "legendFormat": "P95: {{webhook}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 14,
+      "title": "Webhook Concurrent Requests In-Flight",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 29,
+        "w": 8,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "sum(controller_runtime_webhook_requests_in_flight) by (webhook)",
+          "legendFormat": "In Flight: {{webhook}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 20
+          }
+        }
+      }
+    },
+    {
+      "id": 15,
+      "title": "Controller Workqueue Depth (Target: < 10)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 8,
+        "y": 29,
+        "w": 8,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "sum(workqueue_depth) by (name)",
+          "legendFormat": "{{name}} depth",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "line",
+            "fillOpacity": 15
+          }
+        }
+      }
+    },
+    {
+      "id": 16,
+      "title": "Controller Workqueue Adds Rate & Retries",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 16,
+        "y": 29,
+        "w": 8,
+        "h": 7
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "sum(rate(workqueue_adds_total[5m])) by (name)",
+          "legendFormat": "Adds/s: {{name}}",
+          "refId": "A"
+        },
+        {
+          "expr": "sum(rate(workqueue_retries_total[5m])) by (name)",
+          "legendFormat": "Retries/s: {{name}}",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ops",
+          "custom": {
+            "drawStyle": "line"
+          }
+        }
+      }
+    },
+    {
+      "id": 300,
+      "title": "Cluster Health & Prometheus Scrapers",
+      "type": "row",
+      "gridPos": {
+        "x": 0,
+        "y": 36,
+        "w": 24,
+        "h": 1
+      },
+      "collapsed": false
+    },
+    {
+      "id": 17,
+      "title": "Prometheus Scraper Targets Health",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 37,
+        "w": 12,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "up",
+          "legendFormat": "{{job}} ({{instance}})",
+          "refId": "A"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                },
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 18,
+      "title": "Pod Restarts (Past 1h)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 37,
+        "w": 12,
+        "h": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "prometheus-primaryhub"
+      },
+      "targets": [
+        {
+          "expr": "sum(increase(kube_pod_container_status_restarts_total[1h])) by (namespace, pod)",
+          "legendFormat": "{{namespace}} / {{pod}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "custom": {
+            "drawStyle": "bars",
+            "fillOpacity": 40
+          }
+        }
+      }
+    }
+  ],
+  "refresh": "10s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [
+    "primaryhub",
+    "postgresql",
+    "ocm",
+    "01sandbox"
+  ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "primaryhub",
+          "value": "prometheus-primaryhub"
+        },
+        "hide": 0,
+        "includeAll": false,
+        "label": "Datasource",
+        "multi": false,
+        "name": "datasource",
+        "options": [],
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": ".*primaryhub.*|.*default.*",
+        "type": "datasource"
+      }
+    ]
+  },
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": [
+      "5s",
+      "10s",
+      "30s",
+      "1m",
+      "5m"
+    ]
+  },
+  "timezone": "browser",
+  "title": "PrimaryHub \u2013 PostgreSQL HA & OCM Observability",
+  "uid": "01sandbox-primaryhub",
+  "version": 1
+}

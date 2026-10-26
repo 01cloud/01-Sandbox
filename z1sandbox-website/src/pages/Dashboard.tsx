@@ -427,11 +427,14 @@ const Dashboard = () => {
       }
 
       const controller = new AbortController();
-      const timeoutDuration = import.meta.env.DEV ? 2500 : 10000;
+      const timeoutDuration = 15000;
       const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
 
       const response = await fetch(`${API_BASE_URL}/v1/backends`, {
-        headers,
+        headers: {
+          ...headers,
+          "ngrok-skip-browser-warning": "true",
+        },
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -488,11 +491,14 @@ const Dashboard = () => {
       }
 
       const controller = new AbortController();
-      const timeoutDuration = import.meta.env.DEV ? 2500 : 10000;
+      const timeoutDuration = 15000;
       const timeoutId = setTimeout(() => controller.abort(), timeoutDuration);
 
       const response = await fetch(`${API_BASE_URL}/v1/api-keys`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
+        },
         signal: controller.signal
       });
       clearTimeout(timeoutId);
@@ -1139,6 +1145,7 @@ const BackendKeysManagement = ({
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
         },
         body: JSON.stringify({
           name: sanitizedName,
@@ -1192,7 +1199,10 @@ const BackendKeysManagement = ({
 
       await fetch(`${API_BASE_URL}/v1/api-keys/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
+        },
       });
       toast.info("Key revoked successfully");
       onRefresh();

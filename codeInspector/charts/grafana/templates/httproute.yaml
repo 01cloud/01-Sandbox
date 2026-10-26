@@ -5,14 +5,15 @@ metadata:
   name: grafana-route
   namespace: agentgateway-system
 spec:
+  {{- if .Values.ingressHostnames }}
   hostnames:
-    {{- if .Values.ingressHostnames }}
     {{- range .Values.ingressHostnames }}
     - {{ . | quote }}
     {{- end }}
-    {{- else }}
+  {{- else if .Values.ingressHost }}
+  hostnames:
     - {{ .Values.ingressHost | quote }}
-    {{- end }}
+  {{- end }}
   parentRefs:
     - group: gateway.networking.k8s.io
       kind: Gateway

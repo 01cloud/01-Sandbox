@@ -59,5 +59,19 @@ echo -e "\n👉 \033[0;34m\033[1mOpen this URL in your web browser:\033[0m \033[
 echo -e "   Cluster: \033[1m${TARGET}\033[0m"
 echo -e "Press Ctrl+C anytime to stop.\n"
 
+# Discover Prometheus service and namespace
+PROM_NS="opensandbox-system"
+PROM_SVC="prometheus-service"
+if kubectl --kubeconfig "$KUBECONFIG" --context "kind-${TARGET}" -n monitoring get svc prometheus-scraper >/dev/null 2>&1; then
+  PROM_NS="monitoring"
+  PROM_SVC="prometheus-scraper"
+elif kubectl --kubeconfig "$KUBECONFIG" --context "kind-${TARGET}" -n opensandbox-system get svc prometheus-service >/dev/null 2>&1; then
+  PROM_NS="opensandbox-system"
+  PROM_SVC="prometheus-service"
+elif kubectl --kubeconfig "$KUBECONFIG" --context "kind-${TARGET}" -n monitoring get svc prometheus-service >/dev/null 2>&1; then
+  PROM_NS="monitoring"
+  PROM_SVC="prometheus-service"
+fi
+
 kubectl --kubeconfig "$KUBECONFIG" --context "kind-${TARGET}" \
-  -n monitoring port-forward svc/prometheus-scraper 9090:9090
+  -n "$PROM_NS" port-forward "svc/${PROM_SVC}" 9090:9090

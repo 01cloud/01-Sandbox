@@ -16,6 +16,11 @@ data:
         cluster: {{ .Values.clusterName | default "primaryhub" | quote }}
         cluster_role: {{ .Values.clusterRole | default "hub" | quote }}
 
+    {{- if .Values.remoteWrite }}
+    remote_write:
+      {{- toYaml .Values.remoteWrite | nindent 6 }}
+    {{- end }}
+
     rule_files:
       - /etc/prometheus/ocm-slo-rules.yml
 

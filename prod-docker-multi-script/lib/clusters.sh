@@ -195,6 +195,9 @@ nodes:
   - containerPort: 30379
     hostPort: 30379
     protocol: TCP
+  - containerPort: 30900
+    hostPort: 30900
+    protocol: TCP
 ${extra_mounts}
 EOF
 

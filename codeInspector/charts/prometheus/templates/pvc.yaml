@@ -1,0 +1,16 @@
+{{- if .Values.persistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.persistence.pvcName | default "prometheus-pvc" }}
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  storageClassName: {{ .Values.persistence.storageClass | default "standard" }}
+  resources:
+    requests:
+      storage: {{ .Values.persistence.size | default "25Gi" }}
+{{- end }}

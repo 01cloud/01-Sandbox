@@ -104,7 +104,10 @@ export default function UserSettingsDialog({ isOpen, onClose }: UserSettingsDial
       }
 
       const response = await fetch(`${API_BASE_URL}/v1/api-keys`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
+        },
       });
       if (response.ok) {
         const data = await response.json();
@@ -196,6 +199,7 @@ export default function UserSettingsDialog({ isOpen, onClose }: UserSettingsDial
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
         },
         body: JSON.stringify({
           name: sanitizedName,
@@ -252,7 +256,10 @@ export default function UserSettingsDialog({ isOpen, onClose }: UserSettingsDial
 
       await fetch(`${API_BASE_URL}/v1/api-keys/${id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
+        },
       });
       setKeys(keys.filter((k) => k.id !== id));
       toast.info("Key revoked successfully");

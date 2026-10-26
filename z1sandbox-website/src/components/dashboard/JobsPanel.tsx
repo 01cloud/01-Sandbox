@@ -183,7 +183,7 @@ export function JobsPanel({
                             I:{job.summary.info}
                           </Badge>
                         )}
-                        {(job.summary.critical ?? 0) === 0 && job.summary.high === 0 && job.summary.medium === 0 && job.summary.low === 0 && (
+                        {(job.summary.critical ?? 0) === 0 && (job.summary.high ?? 0) === 0 && (job.summary.medium ?? 0) === 0 && (job.summary.low ?? 0) === 0 && (job.summary.info ?? 0) === 0 && (
                           <Badge className="h-4 px-1 text-[8px] bg-emerald-500/20 hover:bg-emerald-500/20 text-emerald-500 border border-emerald-500/30 font-extrabold rounded-md">
                             SECURE
                           </Badge>

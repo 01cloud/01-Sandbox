@@ -136,6 +136,16 @@ prometheus:
   clusterRole: "hub"
   cnpgMetrics:
     enabled: true
+  remoteWrite:
+    - url: "http://10.99.0.1:30900/api/v1/write"
+      queue_config:
+        capacity: 10000
+        max_shards: 10
+        min_shards: 1
+        max_samples_per_send: 1000
+        batch_send_deadline: 5s
+        min_backoff: 500ms
+        max_backoff: 10s
   service:
     nodePort:
       enabled: true

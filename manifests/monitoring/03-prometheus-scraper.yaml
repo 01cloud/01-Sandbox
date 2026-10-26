@@ -76,6 +76,18 @@ data:
         cluster: "__CLUSTER_NAME__"
         cluster_role: "__CLUSTER_ROLE__"
 
+    # ── Push-Based Remote Write to Central TSDB in US East ──────────────────
+    remote_write:
+      - url: "http://10.99.0.1:30900/api/v1/write"
+        queue_config:
+          capacity: 10000
+          max_shards: 10
+          min_shards: 1
+          max_samples_per_send: 1000
+          batch_send_deadline: 5s
+          min_backoff: 500ms
+          max_backoff: 10s
+
     scrape_configs:
       # 1. Prometheus Scraper Internal Metrics
       - job_name: 'prometheus-scraper'

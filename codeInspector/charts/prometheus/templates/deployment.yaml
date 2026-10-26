@@ -23,8 +23,10 @@ spec:
           args:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.path=/prometheus"
-            - "--storage.tsdb.retention.time={{ .Values.retention | default "6h" }}"
+            - "--storage.tsdb.retention.time={{ .Values.retention | default "30d" }}"
             - "--web.enable-lifecycle"
+            - "--web.enable-remote-write-receiver"
+            - "--web.route-prefix=/"
             {{- if and .Values.ingressRoute .Values.ingressRoute.enabled }}
             - '--web.external-url={{ .Values.ingressPath | default "/prometheus" }}'
             {{- end }}

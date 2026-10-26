@@ -117,7 +117,10 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                 medium_count = 0
                 low_count = 0
                 info_count = 0
-                findings = data.get("findings", [])
+                report = (
+                    data.get("report") if isinstance(data.get("report"), dict) else {}
+                )
+                findings = data.get("findings") or report.get("findings") or []
                 for f in findings:
                     sev = str(f.get("severity", "INFO")).upper()
                     if "CRITICAL" in sev:
@@ -153,6 +156,14 @@ def get_scan_jobs_router(state, validate_token: Callable) -> APIRouter:
                             pass
 
                 detail_dict = dict(data)
+                detail_dict["findings"] = findings
+                if "report" not in detail_dict or not detail_dict["report"]:
+                    detail_dict["report"] = report or {"findings": findings}
+                elif (
+                    isinstance(detail_dict["report"], dict)
+                    and "findings" not in detail_dict["report"]
+                ):
+                    detail_dict["report"]["findings"] = findings
                 detail_dict["critical_count"] = critical_count
                 detail_dict["high_count"] = high_count
                 detail_dict["medium_count"] = medium_count

@@ -103,7 +103,11 @@ export function InlineApiKeyPanel({ backendId = "Z1_SANDBOX" }: InlineApiKeyPane
 
       const res = await fetch(`${API_BASE_URL}/v1/api-keys`, {
         method: "POST",
-        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+          "ngrok-skip-browser-warning": "true",
+        },
         body: JSON.stringify({ name: sanitizedName, backend: backendId, ttl_hours, user_email: user?.email }),
       });
 

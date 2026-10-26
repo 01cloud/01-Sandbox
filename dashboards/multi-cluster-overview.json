@@ -1,0 +1,343 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "links": [],
+  "liveNow": true,
+  "panels": [
+    {
+      "id": 1,
+      "title": "Prometheus Scraper Status Across Active Clusters",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 24,
+        "h": 4
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-primaryhub"
+          },
+          "expr": "up",
+          "legendFormat": "primaryhub: {{job}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-secondaryhub"
+          },
+          "expr": "up",
+          "legendFormat": "secondaryhub: {{job}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-spoke1"
+          },
+          "expr": "up",
+          "legendFormat": "spoke1: {{job}}",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-spoke2"
+          },
+          "expr": "up",
+          "legendFormat": "spoke2: {{job}}",
+          "refId": "D"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                },
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "PostgreSQL High Availability & Standby Replication Lag",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-primaryhub"
+          },
+          "expr": "cnpg_pg_replication_lag or cnpg_pg_stat_replication_stream_write_lag_seconds or vector(0)",
+          "legendFormat": "primaryhub: Write Lag (s)",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-primaryhub"
+          },
+          "expr": "cnpg_pg_stat_replication_stream_replay_lag_seconds or vector(0)",
+          "legendFormat": "primaryhub: Replay Lag (s)",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-secondaryhub"
+          },
+          "expr": "rate(cnpg_collector_wal_bytes[5m])",
+          "legendFormat": "secondaryhub: WAL Ingest Rate (Bps)",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 10
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "OCM Admission Webhook & Operator Throughput",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-primaryhub"
+          },
+          "expr": "sum(rate(controller_runtime_webhook_requests_total[5m])) by (code)",
+          "legendFormat": "primaryhub webhook: HTTP {{code}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-secondaryhub"
+          },
+          "expr": "sum(rate(workqueue_adds_total[5m]))",
+          "legendFormat": "secondaryhub workqueue ops/s",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Spoke Edge Clusters Status & DNS Health",
+      "type": "stat",
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-spoke1"
+          },
+          "expr": "up{job=\"prometheus-scraper\"} or up",
+          "legendFormat": "Spoke1 Edge Scraper",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-spoke1"
+          },
+          "expr": "up{job=\"kubernetes-services\",k8s_app=\"kube-dns\"} or up{job=\"kubernetes-services\"}",
+          "legendFormat": "Spoke1 CoreDNS Service",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-spoke2"
+          },
+          "expr": "up{job=\"prometheus-scraper\"} or up",
+          "legendFormat": "Spoke2 Edge Scraper",
+          "refId": "C"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-spoke2"
+          },
+          "expr": "up{job=\"kubernetes-services\",k8s_app=\"kube-dns\"} or up{job=\"kubernetes-services\"}",
+          "legendFormat": "Spoke2 CoreDNS Service",
+          "refId": "D"
+        }
+      ],
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ]
+        },
+        "colorMode": "background",
+        "graphMode": "none"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "1": {
+                  "text": "HEALTHY",
+                  "color": "green"
+                },
+                "0": {
+                  "text": "DEGRADED",
+                  "color": "red"
+                }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "red",
+                "value": 0
+              },
+              {
+                "color": "green",
+                "value": 1
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Spoke Edge CoreDNS Resolution Traffic (QPS)",
+      "type": "timeseries",
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 6
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-spoke1"
+          },
+          "expr": "sum(rate(coredns_dns_requests_total[5m]))",
+          "legendFormat": "spoke1 DNS QPS",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "prometheus-spoke2"
+          },
+          "expr": "sum(rate(coredns_dns_requests_total[5m]))",
+          "legendFormat": "spoke2 DNS QPS",
+          "refId": "B"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "lineWidth": 2,
+            "fillOpacity": 15
+          }
+        }
+      }
+    }
+  ],
+  "refresh": "15s",
+  "schemaVersion": 38,
+  "style": "dark",
+  "tags": [
+    "multi-cluster",
+    "overview",
+    "01sandbox"
+  ],
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "timezone": "browser",
+  "title": "01-Sandbox Multi-Cluster Central Overview",
+  "uid": "01sandbox-overview",
+  "version": 2
+}

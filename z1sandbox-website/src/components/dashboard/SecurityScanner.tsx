@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import {
   X,
   ShieldCheck,
@@ -7,13 +7,8 @@ import {
   FileCode,
   Activity,
   CheckCircle2,
-  ChevronDown,
-  ChevronUp,
   Loader2,
   Shield,
-  Copy,
-  Terminal,
-  Code2
 } from "lucide-react";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { Button } from "@/components/ui/button";
@@ -22,21 +17,22 @@ import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { useJobStore } from "@/hooks/useJobStore";
 import { resolveBackendUrl } from "@/lib/apiConfig";
 import { UnifiedPipelineView } from "./UnifiedPipelineView";
 import { JobsPanel } from "./JobsPanel";
-import { InlineApiKeyPanel } from "./InlineApiKeyPanel";
-import {
-  BarChart, Bar, XAxis, YAxis, Tooltip,
-  ResponsiveContainer, Cell
-} from "recharts";
 
 const LANG_COLORS = [
   "#6366f1", "#8b5cf6", "#06b6d4", "#10b981", "#f59e0b",
   "#ef4444", "#ec4899", "#14b8a6", "#84cc16", "#f97316",
 ];
+
+// Full class strings so Tailwind can see them at build time
+const COLOR_CLASSES: Record<string, string> = {
+  emerald: "bg-emerald-500/10 text-emerald-500",
+  indigo: "bg-indigo-500/10 text-indigo-500",
+  amber: "bg-amber-500/10 text-amber-500",
+};
 
 interface SecurityScannerProps {
   isOpen: boolean;
@@ -138,7 +134,8 @@ const SLACK_WEBHOOK = "https://hooks.slack.com/services/T00000000/B00000000/XXXX
 
 func main() {
 	fmt.Println("Starting AWS connection check...")
-	http.Post(AWS_WEBHOOK, "application/json", nil)
+	fmt.Println(AWS_ACCESS_KEY)
+	http.Post(SLACK_WEBHOOK, "application/json", nil)
 }
 `
   },
@@ -233,37 +230,249 @@ resource "aws_security_group_rule" "allow_all" {
   },
 ];
 
+/* ──────────────────────────────────────────────────────────────
+ * Helpers (module-level, pure)
+ * ────────────────────────────────────────────────────────────── */
+
+const isDoneStatus = (status?: string | null) => status === "DONE" || status === "COMPLETE";
+
+/**
+ * Read a fetch Response body without ever throwing on non-JSON content.
+ * Falls back to parsing only the first line (handles NDJSON / SSE-style bodies).
+ */
+async function readBody(response: Response): Promise<{ data: any; raw: string; isJson: boolean }> {
+  const raw = await response.text();
+  if (!raw.trim()) return { data: null, raw, isJson: true };
+
+  try {
+    return { data: JSON.parse(raw), raw, isJson: true };
+  } catch {
+    /* fall through */
+  }
+
+  const firstLine = raw.split("\n").find((l) => l.trim());
+  if (firstLine) {
+    try {
+      return { data: JSON.parse(firstLine.replace(/^data:\s*/, "")), raw, isJson: true };
+    } catch {
+      /* fall through */
+    }
+  }
+
+  console.error("Non-JSON response body:", {
+    url: response.url,
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    body: raw.slice(0, 500),
+  });
+  return { data: null, raw, isJson: false };
+}
+
+/** Build a readable error message from a failed response. */
+function errorMessageFrom(response: Response, data: any, raw: string, fallback: string): string {
+  const detail = data?.detail ?? data?.error ?? data?.message;
+  if (typeof detail === "string" && detail) return detail;
+  if (detail) {
+    try {
+      return JSON.stringify(detail).slice(0, 200);
+    } catch {
+      /* ignore */
+    }
+  }
+  const text = raw.trim();
+  if (text && !text.startsWith("<")) return `${fallback} (HTTP ${response.status}): ${text.slice(0, 120)}`;
+  return `${fallback} (HTTP ${response.status})`;
+}
+
+const detectLanguage = (code: string) => {
+  const text = code.trim();
+  if (!text) return "py";
+
+  const scores: Record<string, number> = {
+    py: 0,
+    yaml: 0,
+    k8s: 0,
+    js: 0,
+    ts: 0,
+    go: 0,
+    rs: 0,
+    sh: 0,
+    terraform: 0,
+  };
+
+  if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
+    try {
+      JSON.parse(text);
+      return "json";
+    } catch (e) { /* ignore */ }
+  }
+
+  if (text.startsWith("#!")) return "sh";
+
+  // Terraform / HCL
+  if (
+    /^[ \t]*(?:resource|provider|variable|output|module|data)\s+"[^"]+"/m.test(text) ||
+    /^[ \t]*terraform\s*\{/m.test(text) ||
+    /^[ \t]*(?:resource|provider|variable|output|module)\s+[\w"-]+/m.test(text)
+  ) {
+    scores.terraform += 25;
+  }
+
+  // Python
+  if (/\b(import|from)\s+\w+/.test(text)) scores.py += 10;
+  if (/\bdef\s+\w+\s*\(/.test(text)) scores.py += 15;
+  if (/\bclass\s+\w+[:\(]/.test(text)) scores.py += 10;
+  if (/\bprint\(/.test(text)) scores.py += 5;
+  if (/\bif\s+__name__\s*==/.test(text)) scores.py += 20;
+
+  // YAML / Kubernetes
+  if (text.startsWith("---")) scores.yaml += 15;
+  const hasApiVersion = /apiVersion:/m.test(text);
+  const hasKind = /kind:/m.test(text);
+  if (hasApiVersion && hasKind) {
+    scores.k8s += 30;
+  } else if (hasApiVersion || hasKind || /^(metadata|spec|services|version):/m.test(text)) {
+    scores.yaml += 10;
+  }
+
+  // JS & TS shared patterns
+  if (/\b(const|let|var)\s+\w+\s*=/.test(text)) { scores.js += 10; scores.ts += 10; }
+  if (/\brequire\s*\(\s*['"]/.test(text)) { scores.js += 15; scores.ts += 15; }
+  if (/\bimport\s+.*from\s+['"]/.test(text)) { scores.js += 15; scores.ts += 15; }
+  if (/\bexport\s+(default|const|let|function|class|\{)/.test(text)) { scores.js += 10; scores.ts += 10; }
+  if (/\bfunction\s+\w+\s*\(/.test(text)) { scores.js += 10; scores.ts += 10; }
+  if (/\bconsole\.(log|error|warn|info)\(/.test(text)) { scores.js += 10; scores.ts += 10; }
+  if (/\bapp\.(get|post|put|delete|listen|use)\(/.test(text)) { scores.js += 15; scores.ts += 15; }
+  if (/\b(req|res|next)\b/.test(text)) { scores.js += 10; scores.ts += 10; }
+  if (/=>\s*\{?/.test(text)) { scores.js += 5; scores.ts += 5; }
+
+  // TypeScript specific
+  if (/:\s*(any|string|number|boolean|void|never|unknown|object|\[\])\b/.test(text)) scores.ts += 25;
+  if (/\binterface\s+\w+\s*\{/.test(text)) scores.ts += 20;
+  if (/\btype\s+\w+\s*=/.test(text)) scores.ts += 20;
+  if (/\bas\s+(any|string|number|unknown)\b/.test(text)) scores.ts += 15;
+
+  // Go
+  if (/\bpackage\s+\w+/.test(text)) scores.go += 15;
+  if (/\bfunc\s+\w+\s*\(/.test(text)) scores.go += 10;
+
+  // Rust
+  if (/\bfn\s+\w+\s*\(/.test(text)) scores.rs += 15;
+  if (/\buse\s+std::/.test(text)) scores.rs += 15;
+  if (/\blet\s+mut\s+\w+/.test(text)) scores.rs += 15;
+  if (/\bprintln!/.test(text)) scores.rs += 10;
+  if (/\bunsafe\s+(fn|block|\{)/.test(text)) scores.rs += 15;
+  if (/\bCommand::new\(/.test(text)) scores.rs += 15;
+
+  // Shell
+  if (/\b(sudo|apt-get|yum|export|grep|awk|sed)\b/.test(text)) scores.sh += 5;
+
+  let maxScore = -1;
+  let detected = "py";
+  for (const lang in scores) {
+    if (scores[lang] > maxScore) {
+      maxScore = scores[lang];
+      detected = lang;
+    }
+  }
+  return maxScore > 0 ? detected : "py";
+};
+
+const getFilename = (lang: string) => {
+  switch (lang) {
+    case "py": return "main.py";
+    case "go": return "main.go";
+    case "rs":
+    case "rust": return "main.rs";
+    case "js": return "index.js";
+    case "ts":
+    case "typescript": return "index.ts";
+    case "k8s": return "pod.yaml";
+    case "yaml": return "config.yaml";
+    case "terraform":
+    case "tf": return "main.tf";
+    case "sh": return "script.sh";
+    case "json": return "data.json";
+    default: return "snippet.txt";
+  }
+};
+
+const K8S_TOOLS = ["kubelinter", "kubeconform", "kubescore"];
+
+const languageFromPath = (filePath: string, tool = ""): string => {
+  const ext = filePath.split(".").pop()?.toLowerCase();
+  switch (ext) {
+    case "py": return "Python";
+    case "go": return "Go";
+    case "rs": return "Rust";
+    case "js":
+    case "jsx": return "JavaScript";
+    case "ts":
+    case "tsx": return "TypeScript";
+    case "sh":
+    case "bash": return "Shell";
+    case "json": return "JSON";
+    case "tf":
+    case "tfvars":
+    case "terraform": return "Terraform";
+    case "yaml":
+    case "yml": return K8S_TOOLS.includes(tool.toLowerCase()) ? "Kubernetes" : "YAML";
+    default: return "Other";
+  }
+};
+
+const severityStyles = (sev: string) => {
+  switch (sev) {
+    case "CRITICAL":
+      return {
+        card: "border-red-500/30 bg-red-500/[0.03] text-red-900 dark:text-red-200",
+        left: "border-l-red-500 bg-red-500/[0.03]",
+        badge: "bg-red-500/10 text-red-600 dark:text-red-400",
+      };
+    case "HIGH":
+      return {
+        card: "border-orange-500/30 bg-orange-500/[0.03] text-orange-900 dark:text-orange-200",
+        left: "border-l-orange-500 bg-orange-500/[0.03]",
+        badge: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
+      };
+    case "MEDIUM":
+      return {
+        card: "border-yellow-500/30 bg-yellow-500/[0.03] text-yellow-900 dark:text-yellow-200",
+        left: "border-l-yellow-500 bg-yellow-500/[0.03]",
+        badge: "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400",
+      };
+    case "LOW":
+      return {
+        card: "border-blue-500/30 bg-blue-500/[0.03] text-blue-900 dark:text-blue-200",
+        left: "border-l-blue-500 bg-blue-500/[0.03]",
+        badge: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
+      };
+    default:
+      return {
+        card: "border-border/30 bg-muted/[0.02] text-foreground",
+        left: "border-l-muted-foreground/30 bg-muted/[0.02]",
+        badge: "bg-muted/30 text-muted-foreground",
+      };
+  }
+};
+
+/* ──────────────────────────────────────────────────────────────
+ * Component
+ * ────────────────────────────────────────────────────────────── */
+
 const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken, inline = false, onSwitchTab }: SecurityScannerProps) => {
   const effectiveBaseUrl = resolveBackendUrl(baseUrl);
   const effectiveApiKey = apiKey || "";
   const [code, setCode] = useState("# Simple Code Example\ndef greet(name):\n    return f\"Hello, {name}!\"\n\nprint(greet(\"User\"))");
   const [isScanning, setIsScanning] = useState(false);
   const [runtime, setRuntime] = useState<string>("gvisor");
-
-  const getFilename = (lang: string) => {
-    switch (lang) {
-      case "py": return "main.py";
-      case "go": return "main.go";
-      case "rs":
-      case "rust": return "main.rs";
-      case "js": return "index.js";
-      case "ts":
-      case "typescript": return "index.ts";
-      case "k8s": return "pod.yaml";
-      case "yaml": return "config.yaml";
-      case "terraform":
-      case "tf": return "main.tf";
-      case "sh": return "script.sh";
-      case "json": return "data.json";
-      default: return "snippet.txt";
-    }
-  };
-
   const [selectedJobId, setSelectedJobId] = useState<string | null>(null);
   const [expandedLang, setExpandedLang] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<"dashboard" | "telemetry">("dashboard");
 
-  // Initialize unified hook
+  const detectedLang = useMemo(() => detectLanguage(code), [code]);
+
+  // Unified job store
   const {
     jobs,
     volatileResults,
@@ -275,6 +484,12 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
     syncFromServer,
   } = useJobStore("quick-scan", effectiveBaseUrl, effectiveApiKey);
 
+  // Keep the latest lazyFetchResult in a ref so the effect doesn't depend on its identity
+  // (avoids stale closures AND refetch loops if the hook doesn't memoize it).
+  const lazyFetchRef = useRef(lazyFetchResult);
+  lazyFetchRef.current = lazyFetchResult;
+  const requestedResultsRef = useRef<Set<string>>(new Set());
+
   // Auto-select latest job if any
   useEffect(() => {
     if (jobs.length > 0 && !selectedJobId) {
@@ -282,109 +497,23 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
     }
   }, [jobs, selectedJobId]);
 
-  // Lazy load PVC report when selecting a completed job
+  // Lazy load the report when a completed job is selected (once per job)
   useEffect(() => {
-    if (selectedJobId) {
-      const job = jobs.find((j) => j.job_id === selectedJobId);
-      if (job && (job.status === "DONE" || job.status === "COMPLETE") && !volatileResults[selectedJobId]) {
-        lazyFetchResult(selectedJobId);
-      }
+    if (!selectedJobId) return;
+    const job = jobs.find((j) => j.job_id === selectedJobId);
+    if (
+      job &&
+      isDoneStatus(job.status) &&
+      !volatileResults[selectedJobId] &&
+      !requestedResultsRef.current.has(selectedJobId)
+    ) {
+      requestedResultsRef.current.add(selectedJobId);
+      Promise.resolve(lazyFetchRef.current(selectedJobId)).catch(() => {
+        // allow a retry if the fetch failed
+        requestedResultsRef.current.delete(selectedJobId);
+      });
     }
   }, [selectedJobId, jobs, volatileResults]);
-
-  const detectLanguage = (code: string) => {
-    const text = code.trim();
-    if (!text) return "py";
-
-    const scores: Record<string, number> = {
-      py: 0,
-      yaml: 0,
-      k8s: 0,
-      js: 0,
-      ts: 0,
-      go: 0,
-      rs: 0,
-      sh: 0,
-      terraform: 0,
-    };
-
-    if ((text.startsWith("{") && text.endsWith("}")) || (text.startsWith("[") && text.endsWith("]"))) {
-      try {
-        JSON.parse(text);
-        return "json";
-      } catch (e) { /* ignore */ }
-    }
-
-    if (text.startsWith("#!")) return "sh";
-
-    // Terraform / HCL: Must be top-level blocks or HCL definitions
-    if (
-      /^[ \t]*(?:resource|provider|variable|output|module|data)\s+"[^"]+"/m.test(text) ||
-      /^[ \t]*terraform\s*\{/m.test(text) ||
-      /^[ \t]*(?:resource|provider|variable|output|module)\s+[\w"-]+/m.test(text)
-    ) {
-      scores.terraform += 25;
-    }
-
-    // Python
-    if (/\b(import|from)\s+\w+/.test(text)) scores.py += 10;
-    if (/\bdef\s+\w+\s*\(/.test(text)) scores.py += 15;
-    if (/\bclass\s+\w+[:\(]/.test(text)) scores.py += 10;
-    if (/\bprint\(/.test(text)) scores.py += 5;
-    if (/\bif\s+__name__\s*==/.test(text)) scores.py += 20;
-
-    // YAML / Kubernetes
-    if (text.startsWith("---")) scores.yaml += 15;
-    const hasApiVersion = /apiVersion:/m.test(text);
-    const hasKind = /kind:/m.test(text);
-    if (hasApiVersion && hasKind) {
-      scores.k8s += 30;
-    } else if (hasApiVersion || hasKind || /^(metadata|spec|services|version):/m.test(text)) {
-      scores.yaml += 10;
-    }
-
-    // JS & TS Shared Patterns
-    if (/\b(const|let|var)\s+\w+\s*=/.test(text)) { scores.js += 10; scores.ts += 10; }
-    if (/\brequire\s*\(\s*['"]/.test(text)) { scores.js += 15; scores.ts += 15; }
-    if (/\bimport\s+.*from\s+['"]/.test(text)) { scores.js += 15; scores.ts += 15; }
-    if (/\bexport\s+(default|const|let|function|class|\{)/.test(text)) { scores.js += 10; scores.ts += 10; }
-    if (/\bfunction\s+\w+\s*\(/.test(text)) { scores.js += 10; scores.ts += 10; }
-    if (/\bconsole\.(log|error|warn|info)\(/.test(text)) { scores.js += 10; scores.ts += 10; }
-    if (/\bapp\.(get|post|put|delete|listen|use)\(/.test(text)) { scores.js += 15; scores.ts += 15; }
-    if (/\b(req|res|next)\b/.test(text)) { scores.js += 10; scores.ts += 10; }
-    if (/=>\s*\{?/.test(text)) { scores.js += 5; scores.ts += 5; }
-
-    // TypeScript Specific Patterns
-    if (/:\s*(any|string|number|boolean|void|never|unknown|object|\[\])\b/.test(text)) scores.ts += 25;
-    if (/\binterface\s+\w+\s*\{/.test(text)) scores.ts += 20;
-    if (/\btype\s+\w+\s*=/.test(text)) scores.ts += 20;
-    if (/\bas\s+(any|string|number|unknown)\b/.test(text)) scores.ts += 15;
-
-    // Go
-    if (/\bpackage\s+\w+/.test(text)) scores.go += 15;
-    if (/\bfunc\s+\w+\s*\(/.test(text)) scores.go += 10;
-
-    // Rust
-    if (/\bfn\s+\w+\s*\(/.test(text)) scores.rs += 15;
-    if (/\buse\s+std::/.test(text)) scores.rs += 15;
-    if (/\blet\s+mut\s+\w+/.test(text)) scores.rs += 15;
-    if (/\bprintln!/.test(text)) scores.rs += 10;
-    if (/\bunsafe\s+(fn|block|\{)/.test(text)) scores.rs += 15;
-    if (/\bCommand::new\(/.test(text)) scores.rs += 15;
-
-    // Shell
-    if (/\b(sudo|apt-get|yum|export|grep|awk|sed)\b/.test(text)) scores.sh += 5;
-
-    let maxScore = -1;
-    let detected = "py";
-    for (const lang in scores) {
-      if (scores[lang] > maxScore) {
-        maxScore = scores[lang];
-        detected = lang;
-      }
-    }
-    return maxScore > 0 ? detected : "py";
-  };
 
   const runScan = async () => {
     if (!code.trim()) {
@@ -400,8 +529,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
     try {
       setIsScanning(true);
 
-      const lang = detectLanguage(code);
-      const apiExt = lang === 'k8s' ? 'yaml' : (lang === 'terraform' ? 'tf' : (lang === 'rust' ? 'rs' : lang));
+      const apiExt = detectedLang === "k8s" ? "yaml" : detectedLang === "terraform" ? "tf" : detectedLang === "rust" ? "rs" : detectedLang;
       const filename = `input.${apiExt}`;
 
       // POST asynchronously to support SSE streams
@@ -410,20 +538,29 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
         headers: {
           "accept": "application/json",
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${effectiveApiKey}`
+          "Authorization": `Bearer ${effectiveApiKey}`,
         },
         body: JSON.stringify({
           files: { [filename]: code },
-          metadata: {
-            runtime: runtime
-          }
-        })
+          metadata: { runtime },
+        }),
       });
 
-      const data = await response.json();
-      if (!response.ok) throw new Error(data.detail || data.error || "Backend returned an error");
+      // Read as text first so a non-JSON body can never crash the parser
+      const { data, raw, isJson } = await readBody(response);
 
-      const { job_id } = data;
+      if (!response.ok) {
+        throw new Error(errorMessageFrom(response, data, raw, "Scan request failed"));
+      }
+      if (!isJson || !data) {
+        throw new Error(
+          `Server returned a non-JSON response (HTTP ${response.status}): ${raw.slice(0, 120) || "empty body"}. ` +
+          `Check that the backend URL (${effectiveBaseUrl}) is correct and that /scan-jobs is proxied.`
+        );
+      }
+
+      const job_id: string | undefined = data.job_id;
+      if (!job_id) throw new Error("Server response did not include a job_id");
 
       // Add to store
       addJob({
@@ -436,12 +573,12 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
         metadata: {
           files_count: 1,
           submitted_at: new Date().toISOString(),
-          runtime: runtime
+          runtime,
         },
         summary: null,
         result: null,
         submittedAt: new Date().toISOString(),
-        completedAt: null
+        completedAt: null,
       });
 
       setSelectedJobId(job_id);
@@ -467,12 +604,15 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       const response = await fetch(`${effectiveBaseUrl}/v1/jobs/${jobId}`, {
         method: "DELETE",
         headers: {
-          "Authorization": `Bearer ${effectiveApiKey}`
-        }
+          "Authorization": `Bearer ${effectiveApiKey}`,
+        },
       });
-      const data = await response.json();
+
+      // DELETE commonly returns 204 / empty body — never assume JSON
+      const { data, raw } = await readBody(response);
+
       if (!response.ok) {
-        throw new Error(data.detail || data.error || "Failed to cancel job");
+        throw new Error(errorMessageFrom(response, data, raw, "Failed to cancel job"));
       }
       toast.success("Job cancellation requested.");
       syncFromServer();
@@ -482,64 +622,39 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
     }
   };
 
-  // Find currently selected job record
+  // Currently selected job
   const selectedJob = jobs.find((j) => j.job_id === selectedJobId) || null;
-  const isSelectedDone = selectedJob?.status === "DONE" || selectedJob?.status === "COMPLETE";
-  const selectedResult = (selectedJobId && isSelectedDone ? volatileResults[selectedJobId] : null) ?? (
-    isSelectedDone ? selectedJob?.detail : null
-  );
+  const isSelectedDone = isDoneStatus(selectedJob?.status);
+  const isSelectedError = selectedJob?.status === "ERROR";
+  const selectedResult =
+    (selectedJobId && isSelectedDone ? volatileResults[selectedJobId] : null) ??
+    (isSelectedDone ? selectedJob?.detail : null);
 
   const generateSyntheticLanguages = (filesScanned: string[], findings: any[]): Record<string, any> => {
     const languages: Record<string, any> = {};
     const files = filesScanned && filesScanned.length > 0 ? filesScanned : ["input.py"];
+    const loc = code.split("\n").length || 0;
 
-    files.forEach(filePath => {
-      const ext = filePath.split('.').pop()?.toLowerCase();
-      let langName = "Other";
-      if (ext === "py") langName = "Python";
-      else if (ext === "go") langName = "Go";
-      else if (ext === "js" || ext === "jsx") langName = "JavaScript";
-      else if (ext === "ts" || ext === "tsx") langName = "TypeScript";
-      else if (ext === "sh" || ext === "bash") langName = "Shell";
-      else if (ext === "json") langName = "JSON";
-      else if (ext === "tf" || ext === "tfvars" || ext === "terraform") langName = "Terraform";
-      else if (ext === "yaml" || ext === "yml") {
-        const hasK8sTool = findings.some(f => {
-          const fileVal = f.file || "";
-          const toolVal = f.tool || "";
-          return fileVal === filePath && ["kubelinter", "kubeconform", "kubescore"].includes(toolVal.toLowerCase());
-        });
-        langName = hasK8sTool ? "Kubernetes" : "YAML";
-      }
+    files.forEach((filePath) => {
+      const hasK8sTool = findings.some(
+        (f) => (f.file || "") === filePath && K8S_TOOLS.includes((f.tool || "").toLowerCase())
+      );
+      const langName = languageFromPath(filePath, hasK8sTool ? "kubelinter" : "");
 
       if (!languages[langName]) {
         languages[langName] = {
           language: langName,
           file_count: 0,
-          lines_of_code: code.split('\n').length || 0,
+          lines_of_code: loc,
           percentage: 0,
-          findings: []
+          findings: [],
         };
       }
       languages[langName].file_count += 1;
     });
 
-    findings.forEach(finding => {
-      const filePath = finding.file || "input.py";
-      const ext = filePath.split('.').pop()?.toLowerCase();
-      let langName = "Other";
-      if (ext === "py") langName = "Python";
-      else if (ext === "go") langName = "Go";
-      else if (ext === "js" || ext === "jsx") langName = "JavaScript";
-      else if (ext === "ts" || ext === "tsx") langName = "TypeScript";
-      else if (ext === "sh" || ext === "bash") langName = "Shell";
-      else if (ext === "json") langName = "JSON";
-      else if (ext === "tf" || ext === "tfvars" || ext === "terraform") langName = "Terraform";
-      else if (ext === "yaml" || ext === "yml") {
-        const toolVal = finding.tool || "";
-        const isK8s = ["kubelinter", "kubeconform", "kubescore"].includes(toolVal.toLowerCase());
-        langName = isK8s ? "Kubernetes" : "YAML";
-      }
+    findings.forEach((finding) => {
+      const langName = languageFromPath(finding.file || "input.py", finding.tool || "");
 
       if (languages[langName]) {
         languages[langName].findings.push(finding);
@@ -547,15 +662,15 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
         languages[langName] = {
           language: langName,
           file_count: 1,
-          lines_of_code: code.split('\n').length || 0,
+          lines_of_code: loc,
           percentage: 0,
-          findings: [finding]
+          findings: [finding],
         };
       }
     });
 
     const totalFiles = files.length || 1;
-    Object.keys(languages).forEach(key => {
+    Object.keys(languages).forEach((key) => {
       languages[key].percentage = parseFloat(((languages[key].file_count / totalFiles) * 100).toFixed(1));
     });
 
@@ -564,10 +679,54 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
 
   // Custom renderer for scan result findings
   const renderQuickScanResult = (result: any) => {
-    const normalized = result.report || result;
-    const findings = normalized.findings || [];
-    const filesScanned = normalized.files_scanned || ["input." + detectLanguage(code)];
+    const reportObj =
+      result?.report && typeof result.report === "object" && (result.report.findings || result.report.summary)
+        ? result.report
+        : result?.detail?.report && typeof result.detail.report === "object" && (result.detail.report.findings || result.detail.report.summary)
+        ? result.detail.report
+        : result?.detail || result || {};
+
+    const rawFindings: any[] =
+      Array.isArray(reportObj.findings)
+        ? reportObj.findings
+        : Array.isArray(result?.findings)
+        ? result.findings
+        : Array.isArray(result?.detail?.findings)
+        ? result.detail.findings
+        : [];
+
+    // Filter out internal kubernetes symlink paths and deduplicate identical findings
+    const cleanFindings = rawFindings
+      .filter((f: any) => {
+        const fileStr = String(f?.file || "");
+        return !fileStr.includes("/..") && !fileStr.startsWith("..");
+      })
+      .filter((f: any, idx: number, arr: any[]) =>
+        idx === arr.findIndex((t: any) =>
+          t.tool === f.tool && t.issue === f.issue && t.line === f.line
+        )
+      );
+
+    const findings = cleanFindings.length > 0 ? cleanFindings : rawFindings;
+
+    const rawFiles: string[] =
+      (Array.isArray(reportObj.files_scanned) && reportObj.files_scanned.length > 0)
+        ? reportObj.files_scanned
+        : (Array.isArray(result?.files_scanned) && result.files_scanned.length > 0)
+        ? result.files_scanned
+        : (Array.isArray(result?.detail?.files_scanned) && result.detail.files_scanned.length > 0)
+        ? result.detail.files_scanned
+        : ["input." + detectedLang];
+
+    const filesScannedFiltered = rawFiles.filter((f: string) => !f.startsWith("..") && !f.includes("/.."));
+    const filesScanned = filesScannedFiltered.length > 0 ? filesScannedFiltered : ["input." + detectedLang];
+
     const totalFindings = findings.length;
+
+    const hasSecurityFlaws = findings.some((f: any) => {
+      const sev = (f.severity || "INFO").toUpperCase();
+      return sev === "CRITICAL" || sev === "HIGH" || sev === "MEDIUM" || sev === "LOW";
+    });
 
     const syntheticLangs = generateSyntheticLanguages(filesScanned, findings);
     const langEntries = Object.entries(syntheticLangs);
@@ -579,13 +738,15 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
 
     return (
       <div className="space-y-7 animate-in fade-in duration-500">
-        {/* Verdict Banner (Flat) */}
+        {/* Verdict Banner */}
         <div className="p-1 flex flex-wrap items-center gap-4">
           <div className={cn(
             "w-10 h-10 rounded-xl flex items-center justify-center shrink-0 border",
             totalFindings === 0
               ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-500"
-              : "bg-red-500/10 border-red-500/20 text-red-500"
+              : hasSecurityFlaws
+              ? "bg-red-500/10 border-red-500/20 text-red-500"
+              : "bg-amber-500/10 border-amber-500/20 text-amber-500"
           )}>
             {totalFindings === 0 ? (
               <CheckCircle2 className="w-5 h-5" />
@@ -595,18 +756,29 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
           </div>
           <div className="flex-1 min-w-0">
             <p className="font-black text-base text-foreground">
-              {totalFindings === 0 ? "SCAN VERDICT: SECURE" : "VULNERABILITIES DETECTED"}
+              {totalFindings === 0
+                ? "SCAN VERDICT: SECURE"
+                : hasSecurityFlaws
+                ? "VULNERABILITIES DETECTED"
+                : "RISKS & CODE ISSUES FOUND"}
             </p>
             <p className="text-[11px] text-muted-foreground mt-0.5">
               Detected by <span className="font-semibold text-violet-500">Unified Ingestion Pipeline</span>
-              {" · "}{filesScanned.length} files scanned{" · "}{code.split('\n').length} lines of code
+              {" · "}{filesScanned.length} files scanned{" · "}{code.split("\n").length} lines of code
             </p>
           </div>
           <div className="flex gap-2 flex-wrap">
             <Badge variant="outline" className="bg-violet-500/10 text-violet-600 dark:text-violet-400 border-violet-500/25 font-bold text-xs px-3 py-1">
               {langEntries.length} {langEntries.length === 1 ? "Language" : "Languages"}
             </Badge>
-            <Badge variant="outline" className={cn("font-bold text-xs px-3 py-1", totalFindings === 0 ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25" : "bg-orange-500/10 text-orange-600 dark:text-orange-400 border-orange-500/25")}>
+            <Badge variant="outline" className={cn(
+              "font-bold text-xs px-3 py-1",
+              totalFindings === 0
+                ? "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25"
+                : hasSecurityFlaws
+                ? "bg-red-500/10 text-red-600 dark:text-red-400 border-red-500/25"
+                : "bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25"
+            )}>
               {totalFindings} Findings
             </Badge>
           </div>
@@ -614,30 +786,21 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
 
         {/* Tab Toggle */}
         <div className="flex bg-muted/30 p-0.5 rounded-lg max-w-xs">
-          <button
-            type="button"
-            onClick={() => setActiveTab("dashboard")}
-            className={cn(
-              "flex-1 py-1 px-3 text-[10px] font-black uppercase tracking-wider rounded-md transition-all",
-              activeTab === "dashboard"
-                ? "bg-violet-600 text-white shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            Dashboard
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("telemetry")}
-            className={cn(
-              "flex-1 py-1 px-3 text-[10px] font-black uppercase tracking-wider rounded-md transition-all",
-              activeTab === "telemetry"
-                ? "bg-violet-600 text-white shadow-sm"
-                : "text-muted-foreground hover:text-foreground"
-            )}
-          >
-            Telemetry
-          </button>
+          {(["dashboard", "telemetry"] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setActiveTab(tab)}
+              className={cn(
+                "flex-1 py-1 px-3 text-[10px] font-black uppercase tracking-wider rounded-md transition-all",
+                activeTab === tab
+                  ? "bg-violet-600 text-white shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {tab === "dashboard" ? "Dashboard" : "Telemetry"}
+            </button>
+          ))}
         </div>
 
         {activeTab === "dashboard" ? (
@@ -653,7 +816,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                   </span>
                 </div>
 
-                {/* Thinner stacked horizontal color bar */}
+                {/* Stacked horizontal color bar */}
                 <div className="h-1.5 rounded-full overflow-hidden flex border border-border/10 bg-muted/20">
                   {chartData.map((d, i) => (
                     <div
@@ -672,187 +835,167 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                   ))}
                 </div>
 
-                {/* Grid legend list with file count and percentage (no individual bars) */}
+                {/* Legend grid */}
                 <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 pt-1">
-                  {chartData.map((d, i) => {
-                    const langInfo = syntheticLangs[d.name];
-                    return (
-                      <div key={d.name} className="flex items-center justify-between text-xs py-1 border-b border-border/10">
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span
-                            className="w-2 h-2 rounded-full shrink-0"
-                            style={{ backgroundColor: LANG_COLORS[i % LANG_COLORS.length] }}
-                          />
-                          <span className="font-bold text-foreground/90 truncate">{d.name}</span>
-                        </div>
-                        <div className="flex items-center gap-2 text-right shrink-0">
-                          <span className="font-semibold text-foreground/80">{d.value}%</span>
-                        </div>
+                  {chartData.map((d, i) => (
+                    <div key={d.name} className="flex items-center justify-between text-xs py-1 border-b border-border/10">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className="w-2 h-2 rounded-full shrink-0"
+                          style={{ backgroundColor: LANG_COLORS[i % LANG_COLORS.length] }}
+                        />
+                        <span className="font-bold text-foreground/90 truncate">{d.name}</span>
                       </div>
-                    );
-                  })}
+                      <div className="flex items-center gap-2 text-right shrink-0">
+                        <span className="font-semibold text-foreground/80">{d.value}%</span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
 
-        {/* ── Per-Language Details ── */}
-        <div className="border-t border-border/60 pt-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
-              Per-Language Details
-            </h3>
-            <span className="text-[10px] text-muted-foreground/60">
-              {langEntries.length} {langEntries.length === 1 ? "language" : "languages"} analyzed
-            </span>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {langEntries.map(([lang, info]: [string, any], i) => {
-              const sevCounts = info.findings.reduce(
-                (acc: any, f: any) => {
-                  const sev = (f.severity || "INFO").toUpperCase();
-                  if (sev === "CRITICAL") {
-                    acc.critical = (acc.critical || 0) + 1;
-                  } else if (sev === "HIGH") {
-                    acc.high = (acc.high || 0) + 1;
-                  } else if (sev === "MEDIUM") {
-                    acc.medium = (acc.medium || 0) + 1;
-                  } else if (sev === "LOW") {
-                    acc.low = (acc.low || 0) + 1;
-                  } else if (sev === "INFO") {
-                    acc.info = (acc.info || 0) + 1;
-                  }
-                  return acc;
-                },
-                { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
-              );
-              const isSecure = sevCounts.critical === 0 && sevCounts.high === 0 && sevCounts.medium === 0 && sevCounts.low === 0 && sevCounts.info === 0;
+            {/* Per-Language Details */}
+            <div className="border-t border-border/60 pt-6 space-y-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-[10px] font-black uppercase tracking-[0.25em] text-muted-foreground">
+                  Per-Language Details
+                </h3>
+                <span className="text-[10px] text-muted-foreground/60">
+                  {langEntries.length} {langEntries.length === 1 ? "language" : "languages"} analyzed
+                </span>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {langEntries.map(([lang, info]: [string, any], i) => {
+                  const sevCounts = info.findings.reduce(
+                    (acc: any, f: any) => {
+                      const sev = (f.severity || "INFO").toUpperCase();
+                      if (sev === "CRITICAL") acc.critical += 1;
+                      else if (sev === "HIGH") acc.high += 1;
+                      else if (sev === "MEDIUM") acc.medium += 1;
+                      else if (sev === "LOW") acc.low += 1;
+                      else acc.info += 1;
+                      return acc;
+                    },
+                    { critical: 0, high: 0, medium: 0, low: 0, info: 0 }
+                  );
+                  const isSecure = info.findings.length === 0;
 
-              return (
-                <div key={lang} className="rounded-2xl border border-border bg-muted/10 hover:bg-muted/20 transition-all">
-                  <button
-                    className="w-full p-5 flex items-center justify-between text-left"
-                    onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        className="w-3 h-3 rounded-full shrink-0"
-                        style={{ background: LANG_COLORS[i % LANG_COLORS.length] }}
-                      />
-                      <span className="font-black text-sm text-foreground">{lang}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-right">
-                      <div className="flex flex-col items-end gap-1">
-                        <div className="text-[10px] font-bold text-foreground/80">
-                          {info.percentage?.toFixed(1)}%
+                  return (
+                    <div key={lang} className="rounded-2xl border border-border bg-muted/10 hover:bg-muted/20 transition-all">
+                      <button
+                        className="w-full p-5 flex items-center justify-between text-left"
+                        onClick={() => setExpandedLang(expandedLang === lang ? null : lang)}
+                      >
+                        <div className="flex items-center gap-3">
+                          <span
+                            className="w-3 h-3 rounded-full shrink-0"
+                            style={{ background: LANG_COLORS[i % LANG_COLORS.length] }}
+                          />
+                          <span className="font-black text-sm text-foreground">{lang}</span>
                         </div>
-                        <div className="flex gap-1 items-center">
-                          {isSecure ? (
-                            <Badge className="h-4.5 px-1.5 text-[8px] bg-emerald-500/10 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold rounded-md">
-                              SECURE
-                            </Badge>
-                          ) : (
-                            <>
-                              {sevCounts.critical > 0 && (
-                                <Badge className="h-4.5 px-1.5 text-[8px] bg-red-500/10 hover:bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 font-extrabold rounded-md">
-                                  C:{sevCounts.critical}
+                        <div className="flex items-center gap-3 text-right">
+                          <div className="flex flex-col items-end gap-1">
+                            <div className="text-[10px] font-bold text-foreground/80">
+                              {info.percentage?.toFixed(1)}%
+                            </div>
+                            <div className="flex gap-1 items-center">
+                              {isSecure ? (
+                                <Badge className="h-4.5 px-1.5 text-[8px] bg-emerald-500/10 hover:bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20 font-bold rounded-md">
+                                  SECURE
                                 </Badge>
-                              )}
-                              {sevCounts.high > 0 && (
-                                <Badge className="h-4.5 px-1.5 text-[8px] bg-orange-500/10 hover:bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 font-extrabold rounded-md">
-                                  H:{sevCounts.high}
-                                </Badge>
-                              )}
-                              {sevCounts.medium > 0 && (
-                                <Badge className="h-4.5 px-1.5 text-[8px] bg-yellow-500/10 hover:bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20 font-extrabold rounded-md">
-                                  M:{sevCounts.medium}
-                                </Badge>
-                              )}
-                              {sevCounts.low > 0 && (
-                                <Badge className="h-4.5 px-1.5 text-[8px] bg-blue-500/10 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-extrabold rounded-md">
-                                  L:{sevCounts.low}
-                                </Badge>
-                              )}
-                              {sevCounts.info > 0 && (
-                                <Badge className="h-4.5 px-1.5 text-[8px] bg-slate-500/10 hover:bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20 font-extrabold rounded-md">
-                                  I:{sevCounts.info}
-                                </Badge>
-                              )}
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  </button>
-
-                  {expandedLang === lang && (
-                    <div className="border-t border-border/50">
-                      {info.findings.length === 0 ? (
-                        <div className="p-5 text-xs font-semibold text-muted-foreground/60">
-                          No security findings for this language
-                        </div>
-                      ) : (
-                        <div className="overflow-y-auto p-4 space-y-2.5 max-h-[420px]">
-                          {info.findings.map((f: any, fi: number) => {
-                            const sev = f.severity?.toUpperCase() ?? "INFO";
-                            const sevColor =
-                              sev === "CRITICAL" ? "border-red-500/30 bg-red-500/[0.03] text-red-900 dark:text-red-200" :
-                              sev === "HIGH"     ? "border-orange-500/30 bg-orange-500/[0.03] text-orange-900 dark:text-orange-200" :
-                              sev === "MEDIUM"   ? "border-yellow-500/30 bg-yellow-500/[0.03] text-yellow-900 dark:text-yellow-200" :
-                              sev === "LOW"      ? "border-blue-500/30 bg-blue-500/[0.03] text-blue-900 dark:text-blue-200" :
-                                                   "border-border/30 bg-muted/[0.02] text-foreground";
-                            const badgeColor =
-                              sev === "CRITICAL" ? "bg-red-500/10 text-red-600 dark:text-red-400" :
-                              sev === "HIGH"     ? "bg-orange-500/10 text-orange-600 dark:text-orange-400" :
-                              sev === "MEDIUM"   ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" :
-                              sev === "LOW"      ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" :
-                                                   "bg-muted/30 text-muted-foreground";
-                            const rawPath = f.file || "";
-                            const cleanPath = rawPath.includes("/workspace/")
-                              ? rawPath.split("/workspace/")[1]
-                              : rawPath.replace(/^\.\//, "");
-                            const fileName = cleanPath ? cleanPath.split("/").pop() : "";
-
-                            return (
-                              <div key={fi} className={cn("p-3 rounded-xl border text-[11px] transition-all flex flex-col gap-1.5", sevColor)}>
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide px-1.5 py-0 border-0 rounded-md", badgeColor)}>
-                                    {sev}
-                                  </Badge>
-                                  <span className="text-[10px] font-bold text-muted-foreground">
-                                    {f.tool} {fileName ? `(${fileName})` : ""}
-                                  </span>
-                                  {f.line && (
-                                    <span className="text-[9px] font-mono font-bold text-muted-foreground/80 ml-auto bg-background/60 px-1.5 py-0.5 rounded border border-border/30">
-                                      L:{f.line}
-                                    </span>
+                              ) : (
+                                <>
+                                  {sevCounts.critical > 0 && (
+                                    <Badge className="h-4.5 px-1.5 text-[8px] bg-red-500/10 hover:bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/20 font-extrabold rounded-md">
+                                      C:{sevCounts.critical}
+                                    </Badge>
                                   )}
-                                </div>
-                                <p className="font-semibold text-foreground/90 leading-snug">{f.issue}</p>
-                                {cleanPath && (
-                                  <div className="flex items-center gap-1.5 mt-1">
-                                    <p className="text-[9px] font-mono font-medium text-muted-foreground/70 bg-background/40 px-2 py-0.5 rounded border border-border/20 truncate" title={cleanPath}>
-                                      📄 {cleanPath}
-                                    </p>
+                                  {sevCounts.high > 0 && (
+                                    <Badge className="h-4.5 px-1.5 text-[8px] bg-orange-500/10 hover:bg-orange-500/10 text-orange-600 dark:text-orange-400 border border-orange-500/20 font-extrabold rounded-md">
+                                      H:{sevCounts.high}
+                                    </Badge>
+                                  )}
+                                  {sevCounts.medium > 0 && (
+                                    <Badge className="h-4.5 px-1.5 text-[8px] bg-yellow-500/10 hover:bg-yellow-500/10 text-yellow-600 dark:text-yellow-400 border border-yellow-500/20 font-extrabold rounded-md">
+                                      M:{sevCounts.medium}
+                                    </Badge>
+                                  )}
+                                  {sevCounts.low > 0 && (
+                                    <Badge className="h-4.5 px-1.5 text-[8px] bg-blue-500/10 hover:bg-blue-500/10 text-blue-600 dark:text-blue-400 border border-blue-500/20 font-extrabold rounded-md">
+                                      L:{sevCounts.low}
+                                    </Badge>
+                                  )}
+                                  {sevCounts.info > 0 && (
+                                    <Badge className="h-4.5 px-1.5 text-[8px] bg-slate-500/10 hover:bg-slate-500/10 text-slate-600 dark:text-slate-400 border border-slate-500/20 font-extrabold rounded-md">
+                                      I:{sevCounts.info}
+                                    </Badge>
+                                  )}
+                                </>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </button>
+
+                      {expandedLang === lang && (
+                        <div className="border-t border-border/50">
+                          {info.findings.length === 0 ? (
+                            <div className="p-5 text-xs font-semibold text-muted-foreground/60">
+                              No security findings for this language
+                            </div>
+                          ) : (
+                            <div className="overflow-y-auto p-4 space-y-2.5 max-h-[420px]">
+                              {info.findings.map((f: any, fi: number) => {
+                                const sev = f.severity?.toUpperCase() ?? "INFO";
+                                const styles = severityStyles(sev);
+                                const rawPath = f.file || "";
+                                const cleanPath = rawPath.includes("/workspace/")
+                                  ? rawPath.split("/workspace/")[1]
+                                  : rawPath.replace(/^\.\//, "");
+                                const fileName = cleanPath ? cleanPath.split("/").pop() : "";
+
+                                return (
+                                  <div key={fi} className={cn("p-3 rounded-xl border text-[11px] transition-all flex flex-col gap-1.5", styles.card)}>
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <Badge variant="outline" className={cn("text-[8px] font-black uppercase tracking-wide px-1.5 py-0 border-0 rounded-md", styles.badge)}>
+                                        {sev}
+                                      </Badge>
+                                      <span className="text-[10px] font-bold text-muted-foreground">
+                                        {f.tool} {fileName ? `(${fileName})` : ""}
+                                      </span>
+                                      {f.line && (
+                                        <span className="text-[9px] font-mono font-bold text-muted-foreground/80 ml-auto bg-background/60 px-1.5 py-0.5 rounded border border-border/30">
+                                          L:{f.line}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <p className="font-semibold text-foreground/90 leading-snug">{f.issue}</p>
+                                    {cleanPath && (
+                                      <div className="flex items-center gap-1.5 mt-1">
+                                        <p className="text-[9px] font-mono font-medium text-muted-foreground/70 bg-background/40 px-2 py-0.5 rounded border border-border/20 truncate" title={cleanPath}>
+                                          📄 {cleanPath}
+                                        </p>
+                                      </div>
+                                    )}
+                                    {f.remediation && (
+                                      <p className="text-[9px] text-muted-foreground/60 mt-1 leading-relaxed">{f.remediation}</p>
+                                    )}
                                   </div>
-                                )}
-                                {f.remediation && (
-                                  <p className="text-[9px] text-muted-foreground/60 mt-1 leading-relaxed">{f.remediation}</p>
-                                )}
-                              </div>
-                            );
-                          })}
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
+                  );
+                })}
+              </div>
+            </div>
           </div>
         ) : (
-          /* Developer split view: Report vs Insights (Flat) */
+          /* Developer split view: Report vs Insights */
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 h-[700px] animate-in fade-in duration-300">
             {/* JSON Telemetry */}
             <section className="flex flex-col gap-3 overflow-hidden">
@@ -879,30 +1022,19 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                     <div className="space-y-4">
                       {findings.map((f: any, i: number) => {
                         const severity = (f.severity || "MEDIUM").toUpperCase();
-                        const borderLeftColor =
-                          severity === "CRITICAL" ? "border-l-red-500 bg-red-500/[0.03]" :
-                          severity === "HIGH"     ? "border-l-orange-500 bg-orange-500/[0.03]" :
-                          severity === "MEDIUM"   ? "border-l-yellow-500 bg-yellow-500/[0.03]" :
-                          severity === "LOW"      ? "border-l-blue-500 bg-blue-500/[0.03]" :
-                                                    "border-l-muted-foreground/30 bg-muted/[0.02]";
-                        const badgeColor =
-                          severity === "CRITICAL" ? "bg-red-500/10 text-red-600 dark:text-red-400" :
-                          severity === "HIGH"     ? "bg-orange-500/10 text-orange-600 dark:text-orange-400" :
-                          severity === "MEDIUM"   ? "bg-yellow-500/10 text-yellow-600 dark:text-yellow-400" :
-                          severity === "LOW"      ? "bg-blue-500/10 text-blue-600 dark:text-blue-400" :
-                                                    "bg-muted/30 text-muted-foreground";
+                        const styles = severityStyles(severity);
 
                         return (
                           <div
                             key={i}
                             className={cn(
                               "p-4 border-l-2 border-y-0 border-r-0 rounded-r-xl text-[11px] transition-all flex flex-col gap-2 relative overflow-hidden",
-                              borderLeftColor
+                              styles.left
                             )}
                           >
                             <div className="flex items-center justify-between mb-1">
                               <div className="flex items-center gap-2">
-                                <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0 border-0", badgeColor)}>
+                                <Badge variant="outline" className={cn("text-[8px] font-black px-1.5 py-0 border-0", styles.badge)}>
                                   {severity}
                                 </Badge>
                                 <span className="text-[9px] font-mono text-muted-foreground tracking-widest uppercase">
@@ -946,6 +1078,98 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
     );
   };
 
+  /** Shared job-state rendering (in-progress / error / done / loading) for both layouts. */
+  const renderJobStates = (variant: "dialog" | "inline") => {
+    if (!selectedJob) return null;
+
+    // In progress: anything that is neither done nor errored
+    if (!isSelectedDone && !isSelectedError) {
+      return (
+        <div className="max-w-5xl mx-auto w-full">
+          <UnifiedPipelineView
+            job={selectedJob}
+            steps={QUICK_SCAN_STEPS}
+            result={selectedResult}
+            onResultRender={renderQuickScanResult}
+            onCancel={handleCancelJob}
+            logs={selectedJobId ? volatileLogs[selectedJobId] : undefined}
+          />
+        </div>
+      );
+    }
+
+    if (isSelectedError) {
+      const isDialog = variant === "dialog";
+      return (
+        <div className={cn(
+          "border-2 border-destructive/20 bg-destructive/5 flex flex-col",
+          isDialog ? "rounded-[2rem] p-10 gap-6" : "rounded-xl p-8 gap-5"
+        )}>
+          <div className={cn("flex items-center text-destructive", isDialog ? "gap-4" : "gap-3")}>
+            <AlertCircle className={isDialog ? "w-10 h-10" : "w-8 h-8"} />
+            <h2 className={cn("font-black tracking-tight", isDialog ? "text-2xl" : "text-xl")}>Scan Failed</h2>
+          </div>
+          <p className={cn(
+            "font-mono text-sm text-destructive/80 bg-black/5 border border-destructive/10 leading-relaxed",
+            isDialog ? "rounded-2xl p-6" : "rounded-xl p-5"
+          )}>
+            {selectedJob.stepMessage || "An unexpected error occurred during sandbox execution."}
+          </p>
+        </div>
+      );
+    }
+
+    // Done
+    if (selectedResult) {
+      return (
+        <div className="max-w-5xl mx-auto w-full">
+          {renderQuickScanResult(selectedResult)}
+        </div>
+      );
+    }
+
+    // Done but result still loading
+    return (
+      <div className="flex flex-col items-center justify-center h-full min-h-[300px] gap-3 text-muted-foreground/50">
+        <Loader2 className="w-6 h-6 animate-spin" />
+        <span className="text-xs font-semibold">Loading scan results…</span>
+      </div>
+    );
+  };
+
+  const renderRuntimeSelector = (microVmLabel: string) => (
+    <div className="flex bg-muted/40 rounded-xl p-0.5 border border-border/50">
+      <button
+        type="button"
+        disabled={isScanning}
+        onClick={() => setRuntime("gvisor")}
+        className={cn(
+          "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
+          runtime === "gvisor"
+            ? "bg-violet-600 text-white shadow-sm"
+            : "text-muted-foreground hover:text-foreground"
+        )}
+      >
+        <Shield className="w-3 h-3" />
+        gVisor
+      </button>
+      <button
+        type="button"
+        disabled={isScanning}
+        onClick={() => setRuntime("kata-fc")}
+        className={cn(
+          "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
+          runtime === "kata-fc"
+            ? "bg-violet-600 text-white shadow-sm"
+            : "text-muted-foreground hover:text-foreground"
+        )}
+      >
+        <Activity className="w-3 h-3" />
+        {microVmLabel}
+      </button>
+    </div>
+  );
+
   const bodyContent = (
     <div className="flex-1 overflow-y-auto p-6 sm:p-10 w-full max-w-7xl mx-auto">
       <div className="grid grid-cols-1 lg:grid-cols-[460px_1fr] gap-8 items-start">
@@ -968,7 +1192,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                       onClick={() => setCode(tmpl.code)}
                       className={cn(
                         "px-2.5 py-1.5 rounded-lg border border-border/50 bg-background/50 hover:bg-secondary/40 text-[10px] font-bold text-muted-foreground hover:text-foreground transition-all flex items-center gap-1.5",
-                        detectLanguage(code) === tmpl.lang && code === tmpl.code ? "border-violet-500/30 bg-violet-500/5 text-violet-500" : ""
+                        detectedLang === tmpl.lang && code === tmpl.code ? "border-violet-500/30 bg-violet-500/5 text-violet-500" : ""
                       )}
                     >
                       <img src={tmpl.icon} alt="" className="w-3.5 h-3.5 object-contain flex-shrink-0" />
@@ -978,7 +1202,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 </div>
               </div>
 
-              {/* Source Ingestion Header / IDE Window mockup */}
+              {/* Source Ingestion / IDE window */}
               <div className="flex flex-col gap-1.5 mt-2">
                 <div className="flex items-center justify-between text-muted-foreground">
                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground block">
@@ -987,7 +1211,6 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 </div>
 
                 <div className="relative h-[380px] rounded-2xl bg-[#0b0e14] border border-border/60 overflow-hidden flex flex-col transition-all shadow-lg shadow-black/10">
-                  {/* Editor Window Header Tab */}
                   <div className="flex items-center justify-between px-4 py-2.5 bg-[#111622] border-b border-border/30 select-none">
                     <div className="flex items-center gap-3">
                       <div className="flex gap-1.5">
@@ -998,17 +1221,16 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                       <div className="h-3 w-px bg-zinc-800 mx-1" />
                       <span className="font-mono text-[11px] text-zinc-400 flex items-center gap-1.5">
                         <FileCode className="w-3.5 h-3.5 text-violet-400" />
-                        {getFilename(detectLanguage(code))}
+                        {getFilename(detectedLang)}
                       </span>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="font-mono text-[9px] font-black tracking-wider uppercase text-zinc-500 bg-zinc-900 px-1.5 py-0.5 rounded border border-zinc-800">
-                        {detectLanguage(code).toUpperCase()}
+                        {detectedLang.toUpperCase()}
                       </span>
                     </div>
                   </div>
 
-                  {/* Editor Body */}
                   <textarea
                     value={code}
                     onChange={(e) => setCode(e.target.value)}
@@ -1025,36 +1247,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75">
                   Isolation Runtime
                 </label>
-                <div className="flex bg-muted/40 rounded-xl p-0.5 border border-border/50">
-                  <button
-                    type="button"
-                    disabled={isScanning}
-                    onClick={() => setRuntime("gvisor")}
-                    className={cn(
-                      "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
-                      runtime === "gvisor"
-                        ? "bg-violet-600 text-white shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <Shield className="w-3 h-3" />
-                    gVisor
-                  </button>
-                  <button
-                    type="button"
-                    disabled={isScanning}
-                    onClick={() => setRuntime("kata-fc")}
-                    className={cn(
-                      "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
-                      runtime === "kata-fc"
-                        ? "bg-violet-600 text-white shadow-sm"
-                        : "text-muted-foreground hover:text-foreground"
-                    )}
-                  >
-                    <Activity className="w-3 h-3" />
-                    MicroVM
-                  </button>
-                </div>
+                {renderRuntimeSelector("MicroVM")}
               </div>
 
               <Button
@@ -1080,23 +1273,23 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                   <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground">Pipeline Status</label>
                   <div className="flex flex-col gap-1">
                     {QUICK_SCAN_STEPS.map((step, i) => {
-                      const stepIdx = QUICK_SCAN_STEPS.findIndex(s => s.key === selectedJob.status);
+                      const stepIdx = QUICK_SCAN_STEPS.findIndex((s) => s.key === selectedJob.status);
                       const isError = selectedJob.status === "ERROR";
-                      const isDone = selectedJob.status === "DONE" ? true : i < stepIdx;
+                      const isDone = isSelectedDone ? true : i < stepIdx;
                       const isActive = step.key === selectedJob.status && !isError;
                       return (
-                         <div key={step.key} className={cn("flex items-center gap-3 py-2 px-3 rounded-xl transition-all", isActive ? "bg-violet-500/8" : "")}>
-                           <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 border-2 transition-all",
-                             isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
-                               isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
-                                 isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
-                                   "border-border text-muted-foreground/30")}>
-                             {isDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : isActive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>{i + 1}</span>}
-                           </div>
-                           <span className={cn("text-xs font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/40")}>
-                             {step.label}
-                           </span>
-                         </div>
+                        <div key={step.key} className={cn("flex items-center gap-3 py-2 px-3 rounded-xl transition-all", isActive ? "bg-violet-500/8" : "")}>
+                          <div className={cn("w-6 h-6 rounded-full flex items-center justify-center shrink-0 border-2 transition-all",
+                            isError && i >= stepIdx ? "border-destructive/30 text-destructive/30" :
+                              isDone ? "border-emerald-500 bg-emerald-500/10 text-emerald-500" :
+                                isActive ? "border-violet-500 bg-violet-500/10 text-violet-500" :
+                                  "border-border text-muted-foreground/30")}>
+                            {isDone ? <CheckCircle2 className="w-3.5 h-3.5" /> : isActive ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <span>{i + 1}</span>}
+                          </div>
+                          <span className={cn("text-xs font-semibold", isDone ? "text-emerald-500" : isActive ? "text-foreground" : "text-muted-foreground/40")}>
+                            {step.label}
+                          </span>
+                        </div>
                       );
                     })}
                   </div>
@@ -1115,10 +1308,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
           {/* Ready state */}
           {!selectedJob && (
             <div className="h-[600px] rounded-[2.5rem] border border-border/40 bg-card/10 backdrop-blur-sm p-8 flex flex-col justify-between overflow-hidden shadow-inner relative animate-in fade-in duration-500">
-              {/* Decorative top-right glow */}
               <div className="absolute -top-24 -right-24 w-48 h-48 rounded-full bg-violet-500/10 blur-3xl" />
 
-              {/* Top Section: Header */}
               <div className="flex flex-col items-center text-center mt-12">
                 <div className="p-4 rounded-3xl bg-violet-500/10 border border-violet-500/20 text-violet-500 mb-5 relative">
                   <div className="absolute inset-0 rounded-3xl bg-violet-500/5 animate-ping" />
@@ -1132,10 +1323,9 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 </p>
               </div>
 
-              {/* Middle Section: Feature Grid */}
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4 my-8">
                 <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
-                  <div className="p-2 rounded-lg bg-emerald-500/10 text-emerald-500 w-fit border border-emerald-500/20">
+                  <div className={cn("p-2 rounded-lg w-fit border border-emerald-500/20", COLOR_CLASSES.emerald)}>
                     <Activity className="w-4 h-4" />
                   </div>
                   <div>
@@ -1147,7 +1337,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 </div>
 
                 <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
-                  <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-500 w-fit border border-indigo-500/20">
+                  <div className={cn("p-2 rounded-lg w-fit border border-indigo-500/20", COLOR_CLASSES.indigo)}>
                     <FileCode className="w-4 h-4" />
                   </div>
                   <div>
@@ -1159,7 +1349,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 </div>
 
                 <div className="p-5 rounded-2xl border border-border/40 bg-background/50 flex flex-col gap-3">
-                  <div className="p-2 rounded-lg bg-amber-500/10 text-amber-500 w-fit border border-amber-500/20">
+                  <div className={cn("p-2 rounded-lg w-fit border border-amber-500/20", COLOR_CLASSES.amber)}>
                     <Zap className="w-4 h-4" />
                   </div>
                   <div>
@@ -1171,7 +1361,6 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 </div>
               </div>
 
-              {/* Bottom Section: Footer/Status */}
               <div className="border-t border-border/30 pt-5 flex items-center justify-between text-muted-foreground/60 text-[10px] font-bold uppercase tracking-widest mt-auto">
                 <div className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shadow-[0_0_10px_rgba(16,185,129,0.5)] animate-pulse" />
@@ -1184,39 +1373,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
             </div>
           )}
 
-          {/* Ingress / Scanning active state */}
-          {selectedJob && selectedJob.status !== "DONE" && selectedJob.status !== "ERROR" && (
-            <div className="max-w-5xl mx-auto w-full">
-              <UnifiedPipelineView
-                job={selectedJob}
-                steps={QUICK_SCAN_STEPS}
-                result={selectedResult}
-                onResultRender={renderQuickScanResult}
-                onCancel={handleCancelJob}
-                logs={selectedJobId ? volatileLogs[selectedJobId] : undefined}
-              />
-            </div>
-          )}
-
-          {/* Error state */}
-          {selectedJob && selectedJob.status === "ERROR" && (
-            <div className="rounded-[2rem] border-2 border-destructive/20 bg-destructive/5 p-10 flex flex-col gap-6">
-              <div className="flex items-center gap-4 text-destructive">
-                <AlertCircle className="w-10 h-10" />
-                <h2 className="text-2xl font-black tracking-tight">Scan Failed</h2>
-              </div>
-              <p className="font-mono text-sm text-destructive/80 bg-black/5 rounded-2xl p-6 border border-destructive/10 leading-relaxed">
-                {selectedJob.stepMessage || "An unexpected error occurred during sandbox execution."}
-              </p>
-            </div>
-          )}
-
-          {/* Finished / Done state */}
-          {selectedJob && selectedJob.status === "DONE" && selectedResult && (
-            <div className="max-w-5xl mx-auto w-full">
-              {renderQuickScanResult(selectedResult)}
-            </div>
-          )}
+          {renderJobStates("dialog")}
         </div>
 
       </div>
@@ -1224,6 +1381,12 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
   );
 
   if (inline) {
+    const readyCards = [
+      { icon: <Activity className="w-3.5 h-3.5" />, color: "emerald", title: "Isolated Sandboxes" },
+      { icon: <FileCode className="w-3.5 h-3.5" />, color: "indigo", title: "Multi-Language" },
+      { icon: <Zap className="w-3.5 h-3.5" />, color: "amber", title: "Deep Inspections" },
+    ];
+
     return (
       <div className="w-full h-[calc(100vh-210px)] min-h-[600px] border-t border-b border-border flex flex-row overflow-hidden p-0 animate-in fade-in duration-500">
 
@@ -1232,7 +1395,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
           <div className="p-4 space-y-3 h-full flex flex-col justify-between">
             {/* Integrated Templates & Editor Box */}
             <div className="flex-grow flex flex-col min-h-0 border border-border rounded-lg bg-white dark:bg-[#0b0e14] overflow-hidden transition-all">
-              {/* Top part: Quick Templates */}
+              {/* Quick Templates */}
               <div className="p-3 bg-gray-50/50 dark:bg-[#0f131a] border-b border-border shrink-0">
                 <span className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75 block mb-2">
                   Quick Templates
@@ -1247,7 +1410,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                       className={cn(
                         "px-2 py-1 rounded-md border text-[9px] font-bold transition-all flex items-center gap-1",
                         "border-border/60 bg-secondary/30 text-foreground/70 hover:bg-secondary/60 hover:text-foreground hover:border-border",
-                        detectLanguage(code) === tmpl.lang && code === tmpl.code
+                        detectedLang === tmpl.lang && code === tmpl.code
                           ? "border-violet-500/40 bg-violet-500/10 text-violet-600 dark:text-violet-400"
                           : ""
                       )}
@@ -1259,9 +1422,8 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 </div>
               </div>
 
-              {/* Bottom part: Editor (Source Ingestion) */}
+              {/* Editor (Source Ingestion) */}
               <div className="flex-grow flex flex-col min-h-0">
-                {/* Editor Tab Bar */}
                 <div className="flex items-center justify-between px-3 py-2 bg-gray-100 dark:bg-[#111622] border-b border-border select-none shrink-0">
                   <div className="flex items-center gap-2">
                     <div className="flex gap-1">
@@ -1271,20 +1433,18 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                     </div>
                     <span className="font-mono text-[10px] text-muted-foreground/70 flex items-center gap-1">
                       <FileCode className="w-3 h-3 text-violet-400" />
-                      {getFilename(detectLanguage(code))}
+                      {getFilename(detectedLang)}
                     </span>
                   </div>
                   <span className="font-mono text-[8px] font-black uppercase text-muted-foreground/50 bg-muted/40 px-1 py-0.5 rounded border border-border/40">
-                    {detectLanguage(code).toUpperCase()}
+                    {detectedLang.toUpperCase()}
                   </span>
                 </div>
 
-                {/* Code textarea */}
+                {/* Code textarea (removed undefined setIsEditorFocused handlers) */}
                 <textarea
                   value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  onFocus={() => setIsEditorFocused(true)}
-                  onBlur={() => setIsEditorFocused(false)}
                   className="flex-grow bg-transparent p-3 font-mono text-[11px] text-foreground focus:outline-none resize-none leading-relaxed overflow-y-auto selection:bg-violet-500/30 caret-violet-500"
                   spellCheck="false"
                   placeholder="# Paste code here..."
@@ -1298,36 +1458,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
               <label className="text-[10px] font-black uppercase tracking-[0.2em] text-muted-foreground/75">
                 Isolation Runtime
               </label>
-              <div className="flex bg-muted/40 rounded-xl p-0.5 border border-border/50">
-                <button
-                  type="button"
-                  disabled={isScanning}
-                  onClick={() => setRuntime("gvisor")}
-                  className={cn(
-                    "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
-                    runtime === "gvisor"
-                      ? "bg-violet-600 text-white shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <Shield className="w-3 h-3" />
-                  gVisor
-                </button>
-                <button
-                  type="button"
-                  disabled={isScanning}
-                  onClick={() => setRuntime("kata-fc")}
-                  className={cn(
-                    "flex-grow py-1.5 text-[9px] font-black uppercase rounded-lg transition-all flex items-center justify-center gap-1",
-                    runtime === "kata-fc"
-                      ? "bg-violet-600 text-white shadow-sm"
-                      : "text-muted-foreground hover:text-foreground"
-                  )}
-                >
-                  <Activity className="w-3 h-3" />
-                  Kata-FC
-                </button>
-              </div>
+              {renderRuntimeSelector("Kata-FC")}
             </div>
 
             <Button
@@ -1387,13 +1518,9 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                 </p>
               </div>
               <div className="grid grid-cols-3 gap-3 w-full max-w-lg">
-                {[
-                  { icon: <Activity className="w-3.5 h-3.5" />, color: "emerald", title: "Isolated Sandboxes" },
-                  { icon: <FileCode className="w-3.5 h-3.5" />, color: "indigo", title: "Multi-Language" },
-                  { icon: <Zap className="w-3.5 h-3.5" />, color: "amber", title: "Deep Inspections" },
-                ].map((card) => (
+                {readyCards.map((card) => (
                   <div key={card.title} className="flex flex-col items-center gap-2 p-3 rounded-lg border border-border/30 bg-muted/10">
-                    <div className={`p-1.5 rounded-md bg-${card.color}-500/10 text-${card.color}-500`}>{card.icon}</div>
+                    <div className={cn("p-1.5 rounded-md", COLOR_CLASSES[card.color])}>{card.icon}</div>
                     <span className="text-[10px] font-black uppercase tracking-wider text-muted-foreground">{card.title}</span>
                   </div>
                 ))}
@@ -1401,47 +1528,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
             </div>
           )}
 
-          {/* Scanning / in-progress state */}
-          {selectedJob && selectedJob.status !== "DONE" && selectedJob.status !== "ERROR" && (
-            <div className="max-w-5xl mx-auto w-full">
-              <UnifiedPipelineView
-                job={selectedJob}
-                steps={QUICK_SCAN_STEPS}
-                result={selectedResult}
-                onResultRender={renderQuickScanResult}
-                onCancel={handleCancelJob}
-                logs={selectedJobId ? volatileLogs[selectedJobId] : undefined}
-              />
-            </div>
-          )}
-
-          {/* Error state */}
-          {selectedJob && selectedJob.status === "ERROR" && (
-            <div className="rounded-xl border-2 border-destructive/20 bg-destructive/5 p-8 flex flex-col gap-5">
-              <div className="flex items-center gap-3 text-destructive">
-                <AlertCircle className="w-8 h-8" />
-                <h2 className="text-xl font-black tracking-tight">Scan Failed</h2>
-              </div>
-              <p className="font-mono text-sm text-destructive/80 bg-black/5 rounded-xl p-5 border border-destructive/10 leading-relaxed">
-                {selectedJob.stepMessage || "An unexpected error occurred during sandbox execution."}
-              </p>
-            </div>
-          )}
-
-          {/* Done state */}
-          {selectedJob && selectedJob.status === "DONE" && selectedResult && (
-            <div className="max-w-5xl mx-auto w-full">
-              {renderQuickScanResult(selectedResult)}
-            </div>
-          )}
-
-          {/* Done state but result still loading */}
-          {selectedJob && selectedJob.status === "DONE" && !selectedResult && (
-            <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground/50">
-              <Loader2 className="w-6 h-6 animate-spin" />
-              <span className="text-xs font-semibold">Loading scan results…</span>
-            </div>
-          )}
+          {renderJobStates("inline")}
         </div>
       </div>
     );

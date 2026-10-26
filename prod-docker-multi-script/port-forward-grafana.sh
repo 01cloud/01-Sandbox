@@ -41,5 +41,16 @@ echo -e "     • ${CYAN}01-Sandbox Multi-Cluster Overview${NC} — all 5 cluste
 echo ""
 echo -e "Press ${BOLD}Ctrl+C${NC} to stop the tunnel.\n"
 
+# Discover Grafana namespace and service name
+GF_NS="opensandbox-system"
+GF_SVC="grafana-service"
+if kubectl --kubeconfig "$KUBECONFIG" --context kind-primaryhub -n monitoring get svc grafana >/dev/null 2>&1; then
+  GF_NS="monitoring"
+  GF_SVC="grafana"
+elif kubectl --kubeconfig "$KUBECONFIG" --context kind-primaryhub -n opensandbox-system get svc grafana-service >/dev/null 2>&1; then
+  GF_NS="opensandbox-system"
+  GF_SVC="grafana-service"
+fi
+
 kubectl --kubeconfig "$KUBECONFIG" --context kind-primaryhub \
-  -n monitoring port-forward svc/grafana 3000:3000
+  -n "$GF_NS" port-forward "svc/${GF_SVC}" 3000:3000

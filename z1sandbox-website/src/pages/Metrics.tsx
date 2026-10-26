@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { Activity, Clock, RefreshCw, ExternalLink, Shield } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { getGrafanaUrl } from "@/lib/apiConfig";
+import { getGrafanaUrl, getRawApiBaseUrl } from "@/lib/apiConfig";
 
 export default function Metrics() {
   const [lastUpdated, setLastUpdated] = useState<Date>(new Date());
@@ -9,6 +9,7 @@ export default function Metrics() {
 
   // The Grafana subpath is /grafana, and the dashboard UID is codeinspector-main
   const grafanaDashboardUrl = getGrafanaUrl();
+  const cleanBase = getRawApiBaseUrl() || window.location.origin;
 
   const handleRefresh = () => {
     setIsRefreshing(true);

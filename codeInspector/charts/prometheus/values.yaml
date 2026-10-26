@@ -1,8 +1,8 @@
-namespace: monitoring
+namespace: opensandbox-system
 
 clusterName: "primaryhub"
 clusterRole: "hub"
-retention: "6h"
+retention: "30d"
 
 cnpgMetrics:
   enabled: true
@@ -23,8 +23,10 @@ image:
   pullPolicy: IfNotPresent
 
 persistence:
-  enabled: false
+  enabled: true
   pvcName: "prometheus-pvc"
+  storageClass: "standard"
+  size: "25Gi"
 
 service:
   type: ClusterIP

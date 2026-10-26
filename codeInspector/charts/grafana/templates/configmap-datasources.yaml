@@ -24,11 +24,11 @@ data:
           httpMethod: GET
         editable: false
 
-      # ── Remote: secondaryhub (via WireGuard) ─────────────────────────────────
+      # ── Remote: secondaryhub (Central Ingestion via Push) ─────────────────────
       - name: "secondaryhub"
         uid: "prometheus-secondaryhub"
         type: prometheus
-        url: {{ .Values.remoteClusters.secondaryhub.prometheusUrl | default "http://10.99.0.2:30900" | quote }}
+        url: http://{{ .Values.prometheusServiceName }}.{{ .Values.prometheusNamespace }}.svc.cluster.local:{{ .Values.prometheusPort }}
         access: proxy
         isDefault: false
         jsonData:
@@ -36,11 +36,11 @@ data:
           httpMethod: GET
         editable: false
 
-      # ── Remote: spoke1 (via WireGuard) ───────────────────────────────────────
+      # ── Remote: spoke1 (Central Ingestion via Push) ───────────────────────────
       - name: "spoke1"
         uid: "prometheus-spoke1"
         type: prometheus
-        url: {{ .Values.remoteClusters.spoke1.prometheusUrl | default "http://10.99.0.3:30900" | quote }}
+        url: http://{{ .Values.prometheusServiceName }}.{{ .Values.prometheusNamespace }}.svc.cluster.local:{{ .Values.prometheusPort }}
         access: proxy
         isDefault: false
         jsonData:
@@ -48,11 +48,11 @@ data:
           httpMethod: GET
         editable: false
 
-      # ── Remote: spoke2 (via WireGuard) ───────────────────────────────────────
+      # ── Remote: spoke2 (Central Ingestion via Push) ───────────────────────────
       - name: "spoke2"
         uid: "prometheus-spoke2"
         type: prometheus
-        url: {{ .Values.remoteClusters.spoke2.prometheusUrl | default "http://10.99.0.4:30900" | quote }}
+        url: http://{{ .Values.prometheusServiceName }}.{{ .Values.prometheusNamespace }}.svc.cluster.local:{{ .Values.prometheusPort }}
         access: proxy
         isDefault: false
         jsonData:

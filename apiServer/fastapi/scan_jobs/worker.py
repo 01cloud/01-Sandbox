@@ -98,7 +98,8 @@ async def run_scan_in_background(job_id: str, req_dict: dict, state=None):
             await _stop_log_polling(done_event, poller_task)
 
         critical_count = high_count = medium_count = low_count = info_count = 0
-        findings = data.get("findings", [])
+        report = data.get("report") if isinstance(data.get("report"), dict) else {}
+        findings = data.get("findings") or report.get("findings") or []
         for f in findings:
             sev = str(f.get("severity", "INFO")).upper()
             if "CRITICAL" in sev:
@@ -148,6 +149,14 @@ async def run_scan_in_background(job_id: str, req_dict: dict, state=None):
                 pass
 
         detail_dict = dict(data)
+        detail_dict["findings"] = findings
+        if "report" not in detail_dict or not detail_dict["report"]:
+            detail_dict["report"] = report or {"findings": findings}
+        elif (
+            isinstance(detail_dict["report"], dict)
+            and "findings" not in detail_dict["report"]
+        ):
+            detail_dict["report"]["findings"] = findings
         detail_dict["critical_count"] = critical_count
         detail_dict["high_count"] = high_count
         detail_dict["medium_count"] = medium_count

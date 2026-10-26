@@ -5,10 +5,10 @@
  */
 
 /**
- * Returns the base API URL configured in the environment.
+ * Returns the raw configured base API URL from environment variables.
  * Priority: window._env_.VITE_API_BASE_URL -> import.meta.env.VITE_API_BASE_URL -> ""
  */
-export function getApiBaseUrl(): string {
+export function getRawApiBaseUrl(): string {
   let raw = (window as any)._env_?.VITE_API_BASE_URL || import.meta.env.VITE_API_BASE_URL || "";
   if (!raw || typeof raw !== "string") return "";
   return raw
@@ -16,6 +16,20 @@ export function getApiBaseUrl(): string {
     .replace(/^http:\/\/http:\/\//, "http://")
     .replace(/^https:\/\/https:\/\//, "https://")
     .replace(/\/+$/, "");
+}
+
+/**
+ * Returns the base API URL to use for fetch calls.
+ * In development mode (Vite dev server), returns "" so requests are same-origin
+ * and routed through Vite's local dev proxy (configured in vite.config.ts).
+ * This completely avoids browser CORS checks, prevents ngrok browser-warning
+ * interstitials, and eliminates timeout issues.
+ */
+export function getApiBaseUrl(): string {
+  if (import.meta.env.DEV) {
+    return "";
+  }
+  return getRawApiBaseUrl();
 }
 
 /**
@@ -47,7 +61,7 @@ export function getHealthUrl(): string {
  * Returns the Grafana dashboard URL.
  */
 export function getGrafanaUrl(): string {
-  const base = getApiBaseUrl();
+  const base = getRawApiBaseUrl();
   return `${base}/grafana/d/codeinspector-main/codeinspector-system-dashboard?orgId=1&kiosk`;
 }
 
