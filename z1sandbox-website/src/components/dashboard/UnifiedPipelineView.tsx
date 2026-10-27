@@ -120,13 +120,13 @@ export function UnifiedPipelineView({
   const effectiveProgress = isDoneOrComplete ? 100 : job.progress;
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
-  const [showConsole, setShowConsole] = useState(false);
+  const [showConsole, setShowConsole] = useState(true);
 
   useEffect(() => {
     if (showConsole && consoleEndRef.current) {
       consoleEndRef.current.scrollIntoView({ behavior: "smooth" });
     }
-  }, [logs, showConsole]);
+  }, [allLogs, showConsole]);
 
   // Helper to get step durations matching Image 2
   const getStepDuration = (stepKey: string): string => {
@@ -331,12 +331,12 @@ export function UnifiedPipelineView({
                 </div>
                 {/* Terminal Body */}
                 <div className="p-4 h-[180px] overflow-y-auto font-mono text-[10px] leading-relaxed text-zinc-300 space-y-1 select-text scrollbar-thin scrollbar-thumb-zinc-800 text-left w-full">
-                  {!logs || logs.length === 0 ? (
+                  {!allLogs || allLogs.length === 0 ? (
                     <div className="text-zinc-500 italic flex items-center justify-center h-full">
                       Waiting for sandbox process logs...
                     </div>
                   ) : (
-                    logs.map((log, index) => {
+                    allLogs.map((log, index) => {
                       let lineClass = "text-zinc-300";
                       if (log.includes("[ERROR]") || log.includes("Error:") || log.includes("FAILED")) {
                         lineClass = "text-red-400 font-bold";

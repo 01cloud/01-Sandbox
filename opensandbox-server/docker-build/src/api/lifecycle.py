@@ -675,14 +675,34 @@ async def create_scan_job(
     except Exception:
         pass
 
+    # For OCM multi-cluster workloads, spoke pods stream logs directly via POST /scan-jobs/{job_id}/logs.
+    is_ocm_workload = False
+    try:
+        from src.services.k8s.ocm_provider import OcmWorkloadProvider
+
+        if isinstance(
+            getattr(sandbox_service, "workload_provider", None), OcmWorkloadProvider
+        ):
+            is_ocm_workload = True
+    except Exception:
+        pass
+
     _stop_log_stream = threading.Event()
-    _log_thread = threading.Thread(
-        target=stream_pod_logs_to_file,
-        args=(sandbox_id, job_id, _sandbox_namespace, _stop_log_stream, parent_job_id),
-        daemon=True,
-        name=f"pod-log-stream-{job_id[:8]}",
-    )
-    _log_thread.start()
+    _log_thread = None
+    if not is_ocm_workload:
+        _log_thread = threading.Thread(
+            target=stream_pod_logs_to_file,
+            args=(
+                sandbox_id,
+                job_id,
+                _sandbox_namespace,
+                _stop_log_stream,
+                parent_job_id,
+            ),
+            daemon=True,
+            name=f"pod-log-stream-{job_id[:8]}",
+        )
+        _log_thread.start()
     # ─────────────────────────────────────────────────────────────────────────
 
     import glob
@@ -821,7 +841,8 @@ async def create_scan_job(
     finally:
         # Always stop the log streamer thread when the job ends
         _stop_log_stream.set()
-        _log_thread.join(timeout=3)
+        if _log_thread:
+            _log_thread.join(timeout=3)
 
     # Schedule automatic pod termination after scan completion (configurable via AUTO_TERMINATION_SECONDS env var)
     if final_response is not None:
@@ -874,6 +895,37 @@ async def create_scan_job(
         status="FAILED",
         error="Scan timed out waiting for the report to be written to the PVC.",
     )
+
+
+@router.post("/scan-jobs/{job_id}/logs", tags=["Security Scan Pipeline"])
+async def upload_scan_logs(job_id: str, request: Request):
+    """
+    Receives real-time log chunks directly from remote sandboxes (spoke clusters).
+    Appends them to data_root/job_id/reports/process.log.
+    """
+    import os
+
+    try:
+        body = await request.body()
+        log_text = body.decode("utf-8", errors="replace")
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "INVALID_LOGS", "message": str(e)},
+        )
+
+    if log_text:
+        data_root = os.environ.get("SCAN_DATA_ROOT", "/data")
+        reports_dir = os.path.join(data_root, job_id, "reports")
+        os.makedirs(reports_dir, exist_ok=True)
+        log_path = os.path.join(reports_dir, "process.log")
+        try:
+            with open(log_path, "a") as f:
+                f.write(log_text)
+        except Exception as e:
+            logger.error("Failed to write live process logs for %s: %s", job_id, e)
+
+    return {"status": "SUCCESS", "job_id": job_id}
 
 
 @router.post("/scan-jobs/{job_id}/report", tags=["Security Scan Pipeline"])

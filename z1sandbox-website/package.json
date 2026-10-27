@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=24.22.1"
+  },
   "scripts": {
     "predev": "cp ../CHANGELOG.md public/CHANGELOG.md 2>/dev/null || true",
     "prebuild": "cp ../CHANGELOG.md public/CHANGELOG.md 2>/dev/null || true",
@@ -75,7 +78,7 @@
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
-    "@types/node": "^22.16.5",
+    "@types/node": "^24.19.2",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react-swc": "^4.3.0",

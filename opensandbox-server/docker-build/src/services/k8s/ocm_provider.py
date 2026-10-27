@@ -382,12 +382,31 @@ class OcmWorkloadProvider(WorkloadProvider):
             actual_job_id = extensions.get("job_id") or sandbox_id
 
         callback_url = (
-            os.environ.get("REPORT_CALLBACK_URL") or "http://10.99.0.100/api/v1/01sbx"
+            os.environ.get("REPORT_CALLBACK_URL") or "http://10.99.0.1/api/v1/01sbx"
         ).rstrip("/")
 
         upload_script = (
             f"rm -f /usr/local/bin/trivy /usr/local/bin/gitleaks; "
+            f"( "
+            f"  last_off=0; "
+            f"  while [ ! -f /tmp/scan_done ]; do "
+            f"    if [ -f /reports/process.log ]; then "
+            f"      cur_len=$(wc -c < /reports/process.log 2>/dev/null || echo 0); "
+            f'      if [ "$cur_len" -gt "$last_off" ]; then '
+            f"        tail -c +$((last_off + 1)) /reports/process.log | curl -s -X POST -H 'Content-Type: text/plain' --data-binary @- {callback_url}/scan-jobs/{actual_job_id}/logs || true; "
+            f"        last_off=$cur_len; "
+            f"      fi; "
+            f"    fi; "
+            f"    sleep 1; "
+            f"  done; "
+            f"  if [ -f /reports/process.log ]; then "
+            f"    tail -c +$((last_off + 1)) /reports/process.log | curl -s -X POST -H 'Content-Type: text/plain' --data-binary @- {callback_url}/scan-jobs/{actual_job_id}/logs || true; "
+            f"  fi; "
+            f") & "
+            f"LOG_PID=$!; "
             f"/opt/opensandbox/code-interpreter.sh; "
+            f"touch /tmp/scan_done; "
+            f"wait $LOG_PID 2>/dev/null || true; "
             f"if [ -f /reports/security_scan_report.json ]; then "
             f"curl -s -X POST -H 'Content-Type: application/json' -d @/reports/security_scan_report.json {callback_url}/scan-jobs/{actual_job_id}/report || true; "
             f"fi"

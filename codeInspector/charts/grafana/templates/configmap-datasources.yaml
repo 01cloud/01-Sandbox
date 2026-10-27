@@ -12,7 +12,7 @@ data:
       {{- if .Values.datasources }}
       {{- toYaml .Values.datasources | nindent 6 }}
       {{- else }}
-      # ── Local: primaryhub ────────────────────────────────────────────────────
+      # ── Local: primaryhub (Central TSDB for All Fleet Metrics) ───────────────
       - name: "primaryhub"
         uid: "prometheus-primaryhub"
         type: prometheus
@@ -29,42 +29,6 @@ data:
         uid: "prometheus-secondaryhub"
         type: prometheus
         url: http://{{ .Values.prometheusServiceName }}.{{ .Values.prometheusNamespace }}.svc.cluster.local:{{ .Values.prometheusPort }}
-        access: proxy
-        isDefault: false
-        jsonData:
-          timeInterval: "15s"
-          httpMethod: GET
-        editable: false
-
-      # ── Remote: spoke1 (Central Ingestion via Push) ───────────────────────────
-      - name: "spoke1"
-        uid: "prometheus-spoke1"
-        type: prometheus
-        url: http://{{ .Values.prometheusServiceName }}.{{ .Values.prometheusNamespace }}.svc.cluster.local:{{ .Values.prometheusPort }}
-        access: proxy
-        isDefault: false
-        jsonData:
-          timeInterval: "15s"
-          httpMethod: GET
-        editable: false
-
-      # ── Remote: spoke2 (Central Ingestion via Push) ───────────────────────────
-      - name: "spoke2"
-        uid: "prometheus-spoke2"
-        type: prometheus
-        url: http://{{ .Values.prometheusServiceName }}.{{ .Values.prometheusNamespace }}.svc.cluster.local:{{ .Values.prometheusPort }}
-        access: proxy
-        isDefault: false
-        jsonData:
-          timeInterval: "15s"
-          httpMethod: GET
-        editable: false
-
-      # ── Remote: spoke3 (via WireGuard) ───────────────────────────────────────
-      - name: "spoke3"
-        uid: "prometheus-spoke3"
-        type: prometheus
-        url: {{ .Values.remoteClusters.spoke3.prometheusUrl | default "http://10.99.0.5:30900" | quote }}
         access: proxy
         isDefault: false
         jsonData:

@@ -291,36 +291,9 @@ data:
                 "type": "prometheus",
                 "uid": "prometheus-primaryhub"
               },
-              "expr": "up{cluster=~\"primaryhub|\"}",
-              "legendFormat": "primaryhub: {{ "{{" }}job{{ "}}" }}",
+              "expr": "up{job=\"prometheus-scraper\"}",
+              "legendFormat": "{{ "{{" }}cluster{{ "}}" }}",
               "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus-secondaryhub"
-              },
-              "expr": "up{cluster=\"secondaryhub\"}",
-              "legendFormat": "secondaryhub: {{ "{{" }}job{{ "}}" }}",
-              "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus-spoke1"
-              },
-              "expr": "up{cluster=\"spoke1\"}",
-              "legendFormat": "spoke1: {{ "{{" }}job{{ "}}" }}",
-              "refId": "C"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus-spoke2"
-              },
-              "expr": "up{cluster=\"spoke2\"}",
-              "legendFormat": "spoke2: {{ "{{" }}job{{ "}}" }}",
-              "refId": "D"
             }
           ],
           "options": {
@@ -471,38 +444,20 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus-spoke1"
+                "uid": "prometheus-primaryhub"
               },
-              "expr": "up{cluster=\"spoke1\",job=\"prometheus-scraper\"} or up{cluster=\"spoke1\"}",
-              "legendFormat": "Spoke1 Edge Scraper",
+              "expr": "up{role=\"spoke\",job=\"prometheus-scraper\"}",
+              "legendFormat": "{{ "{{" }}cluster{{ "}}" }} Edge Scraper",
               "refId": "A"
             },
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus-spoke1"
+                "uid": "prometheus-primaryhub"
               },
-              "expr": "up{cluster=\"spoke1\",job=\"kubernetes-services\"} or up{cluster=\"spoke1\"}",
-              "legendFormat": "Spoke1 CoreDNS Service",
+              "expr": "up{role=\"spoke\",job=\"kubernetes-services\"}",
+              "legendFormat": "{{ "{{" }}cluster{{ "}}" }} CoreDNS Service",
               "refId": "B"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus-spoke2"
-              },
-              "expr": "up{cluster=\"spoke2\",job=\"prometheus-scraper\"} or up{cluster=\"spoke2\"}",
-              "legendFormat": "Spoke2 Edge Scraper",
-              "refId": "C"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus-spoke2"
-              },
-              "expr": "up{cluster=\"spoke2\",job=\"kubernetes-services\"} or up{cluster=\"spoke2\"}",
-              "legendFormat": "Spoke2 CoreDNS Service",
-              "refId": "D"
             }
           ],
           "options": {
@@ -561,20 +516,11 @@ data:
             {
               "datasource": {
                 "type": "prometheus",
-                "uid": "prometheus-spoke1"
+                "uid": "prometheus-primaryhub"
               },
-              "expr": "sum(rate(coredns_dns_requests_total{cluster=\"spoke1\"}[5m])) or sum(rate(coredns_dns_request_count_total{cluster=\"spoke1\"}[5m])) or vector(0)",
-              "legendFormat": "spoke1 DNS QPS",
+              "expr": "sum by (cluster) (rate(coredns_dns_requests_total[5m])) or sum by (cluster) (rate(coredns_dns_request_count_total[5m])) or vector(0)",
+              "legendFormat": "{{ "{{" }}cluster{{ "}}" }} DNS QPS",
               "refId": "A"
-            },
-            {
-              "datasource": {
-                "type": "prometheus",
-                "uid": "prometheus-spoke2"
-              },
-              "expr": "sum(rate(coredns_dns_requests_total{cluster=\"spoke2\"}[5m])) or sum(rate(coredns_dns_request_count_total{cluster=\"spoke2\"}[5m])) or vector(0)",
-              "legendFormat": "spoke2 DNS QPS",
-              "refId": "B"
             }
           ],
           "fieldConfig": {
@@ -1964,7 +1910,7 @@ data:
       "uid": "01sandbox-secondaryhub",
       "version": 2
     }
-  spoke1.json: |
+  spoke-fleet.json: |
     {
       "annotations": {
         "list": []
@@ -1988,13 +1934,17 @@ data:
           },
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus-spoke1"
+            "uid": "prometheus-primaryhub"
           },
           "targets": [
             {
-              "expr": "up{job=\"prometheus-scraper\"} or up",
+              "expr": "up{cluster=\"$cluster\",job=\"prometheus-scraper\"}",
               "legendFormat": "Scraper Health",
-              "refId": "A"
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             }
           ],
           "options": {
@@ -2051,13 +2001,17 @@ data:
           },
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus-spoke1"
+            "uid": "prometheus-primaryhub"
           },
           "targets": [
             {
-              "expr": "up{job=\"kubernetes-services\",k8s_app=\"kube-dns\"} or up{job=\"kubernetes-services\"}",
+              "expr": "up{cluster=\"$cluster\",job=\"kubernetes-services\",k8s_app=\"kube-dns\"} or up{cluster=\"$cluster\",job=\"kubernetes-services\"}",
               "legendFormat": "CoreDNS Health",
-              "refId": "A"
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             }
           ],
           "options": {
@@ -2114,13 +2068,17 @@ data:
           },
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus-spoke1"
+            "uid": "prometheus-primaryhub"
           },
           "targets": [
             {
-              "expr": "sum(rate(coredns_dns_requests_total[5m])) or vector(0)",
+              "expr": "sum(rate(coredns_dns_requests_total{cluster=\"$cluster\"}[5m])) or vector(0)",
               "legendFormat": "Query Rate",
-              "refId": "A"
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             }
           ],
           "options": {
@@ -2159,13 +2117,17 @@ data:
           },
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus-spoke1"
+            "uid": "prometheus-primaryhub"
           },
           "targets": [
             {
-              "expr": "(sum(rate(coredns_cache_requests_total[5m])) - sum(rate(coredns_cache_misses_total[5m]))) / sum(rate(coredns_cache_requests_total[5m])) * 100 or vector(100)",
+              "expr": "(sum(rate(coredns_cache_requests_total{cluster=\"$cluster\"}[5m])) - sum(rate(coredns_cache_misses_total{cluster=\"$cluster\"}[5m]))) / sum(rate(coredns_cache_requests_total{cluster=\"$cluster\"}[5m])) * 100 or vector(100)",
               "legendFormat": "Hit Ratio",
-              "refId": "A"
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             }
           ],
           "options": {
@@ -2212,13 +2174,17 @@ data:
           },
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus-spoke1"
+            "uid": "prometheus-primaryhub"
           },
           "targets": [
             {
-              "expr": "sum(process_resident_memory_bytes)",
+              "expr": "sum(process_resident_memory_bytes{cluster=\"$cluster\"}) or vector(0)",
               "legendFormat": "RSS Memory",
-              "refId": "A"
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             }
           ],
           "options": {
@@ -2261,13 +2227,17 @@ data:
           },
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus-spoke1"
+            "uid": "prometheus-primaryhub"
           },
           "targets": [
             {
-              "expr": "sum(rate(coredns_dns_requests_total[5m])) by (proto, type)",
+              "expr": "sum by (proto, type) (rate(coredns_dns_requests_total{cluster=\"$cluster\"}[5m]))",
               "legendFormat": "{{ "{{" }}proto{{ "}}" }} - {{ "{{" }}type{{ "}}" }}",
-              "refId": "A"
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             }
           ],
           "fieldConfig": {
@@ -2294,23 +2264,35 @@ data:
           },
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus-spoke1"
+            "uid": "prometheus-primaryhub"
           },
           "targets": [
             {
-              "expr": "histogram_quantile(0.99, sum(rate(coredns_dns_request_duration_seconds_bucket[5m])) by (le))",
+              "expr": "histogram_quantile(0.99, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket{cluster=\"$cluster\"}[5m])))",
               "legendFormat": "P99 Latency",
-              "refId": "A"
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             },
             {
-              "expr": "histogram_quantile(0.90, sum(rate(coredns_dns_request_duration_seconds_bucket[5m])) by (le))",
+              "expr": "histogram_quantile(0.90, sum by (le) (rate(coredns_dns_request_duration_seconds_bucket{cluster=\"$cluster\"}[5m])))",
               "legendFormat": "P90 Latency",
-              "refId": "B"
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             },
             {
-              "expr": "sum(rate(coredns_dns_request_duration_seconds_sum[5m])) / sum(rate(coredns_dns_request_duration_seconds_count[5m]))",
+              "expr": "sum(rate(coredns_dns_request_duration_seconds_sum{cluster=\"$cluster\"}[5m])) / sum(rate(coredns_dns_request_duration_seconds_count{cluster=\"$cluster\"}[5m]))",
               "legendFormat": "Avg Latency",
-              "refId": "C"
+              "refId": "C",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             }
           ],
           "fieldConfig": {
@@ -2337,18 +2319,26 @@ data:
           },
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus-spoke1"
+            "uid": "prometheus-primaryhub"
           },
           "targets": [
             {
-              "expr": "rate(prometheus_engine_queries[5m])",
+              "expr": "rate(prometheus_engine_queries{cluster=\"$cluster\"}[5m])",
               "legendFormat": "Queries / sec",
-              "refId": "A"
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             },
             {
-              "expr": "prometheus_tsdb_head_series",
+              "expr": "prometheus_tsdb_head_series{cluster=\"$cluster\"}",
               "legendFormat": "Active TSDB Head Series",
-              "refId": "B"
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             }
           ],
           "fieldConfig": {
@@ -2375,18 +2365,26 @@ data:
           },
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus-spoke1"
+            "uid": "prometheus-primaryhub"
           },
           "targets": [
             {
-              "expr": "go_goroutines",
+              "expr": "go_goroutines{cluster=\"$cluster\"}",
               "legendFormat": "{{ "{{" }}job{{ "}}" }} - Goroutines",
-              "refId": "A"
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             },
             {
-              "expr": "process_resident_memory_bytes",
+              "expr": "process_resident_memory_bytes{cluster=\"$cluster\"}",
               "legendFormat": "{{ "{{" }}job{{ "}}" }} - Memory (Bytes)",
-              "refId": "B"
+              "refId": "B",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             }
           ],
           "fieldConfig": {
@@ -2402,7 +2400,7 @@ data:
         },
         {
           "id": 10,
-          "title": "Spoke1 All Scrape Targets Health Table",
+          "title": "Spoke Scrape Targets Health Table",
           "type": "table",
           "gridPos": {
             "x": 0,
@@ -2412,15 +2410,19 @@ data:
           },
           "datasource": {
             "type": "prometheus",
-            "uid": "prometheus-spoke1"
+            "uid": "prometheus-primaryhub"
           },
           "targets": [
             {
-              "expr": "up",
+              "expr": "up{cluster=\"$cluster\"}",
               "legendFormat": "{{ "{{" }}job{{ "}}" }} - {{ "{{" }}instance{{ "}}" }}",
               "format": "table",
               "instant": true,
-              "refId": "A"
+              "refId": "A",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "prometheus-primaryhub"
+              }
             }
           ],
           "fieldConfig": {
@@ -2465,993 +2467,34 @@ data:
       "schemaVersion": 38,
       "style": "dark",
       "tags": [
-        "spoke1",
-        "edge",
+        "01sandbox",
         "coredns",
-        "01sandbox"
-      ],
-      "templating": {
-        "list": []
-      },
-      "time": {
-        "from": "now-1h",
-        "to": "now"
-      },
-      "timezone": "browser",
-      "title": "Spoke1 \u2013 Edge Observability & Services",
-      "uid": "01sandbox-spoke1",
-      "version": 2
-    }
-  spoke2.json: |
-    {
-      "annotations": {
-        "list": []
-      },
-      "editable": true,
-      "fiscalYearStartMonth": 0,
-      "graphTooltip": 1,
-      "id": null,
-      "links": [],
-      "liveNow": true,
-      "panels": [
-        {
-          "id": 1,
-          "title": "Prometheus Scraper Health",
-          "type": "stat",
-          "gridPos": {
-            "x": 0,
-            "y": 0,
-            "w": 5,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-spoke2"
-          },
-          "targets": [
-            {
-              "expr": "up{job=\"prometheus-scraper\"} or up",
-              "legendFormat": "Scraper Health",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "background",
-            "graphMode": "none"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "mappings": [
-                {
-                  "type": "value",
-                  "options": {
-                    "1": {
-                      "text": "HEALTHY",
-                      "color": "green"
-                    },
-                    "0": {
-                      "text": "UNREACHABLE",
-                      "color": "red"
-                    }
-                  }
-                }
-              ],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "red",
-                    "value": 0
-                  },
-                  {
-                    "color": "green",
-                    "value": 1
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 2,
-          "title": "CoreDNS Service Health",
-          "type": "stat",
-          "gridPos": {
-            "x": 5,
-            "y": 0,
-            "w": 5,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-spoke2"
-          },
-          "targets": [
-            {
-              "expr": "up{job=\"kubernetes-services\",k8s_app=\"kube-dns\"} or up{job=\"kubernetes-services\"}",
-              "legendFormat": "CoreDNS Health",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "background",
-            "graphMode": "none"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "mappings": [
-                {
-                  "type": "value",
-                  "options": {
-                    "1": {
-                      "text": "ONLINE",
-                      "color": "green"
-                    },
-                    "0": {
-                      "text": "OFFLINE",
-                      "color": "red"
-                    }
-                  }
-                }
-              ],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "red",
-                    "value": 0
-                  },
-                  {
-                    "color": "green",
-                    "value": 1
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 3,
-          "title": "CoreDNS Query Rate (Throughput)",
-          "type": "stat",
-          "gridPos": {
-            "x": 10,
-            "y": 0,
-            "w": 5,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-spoke2"
-          },
-          "targets": [
-            {
-              "expr": "sum(rate(coredns_dns_requests_total[5m])) or vector(0)",
-              "legendFormat": "Query Rate",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "value",
-            "graphMode": "area"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "blue",
-                    "value": 0
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 4,
-          "title": "CoreDNS Cache Hit Ratio",
-          "type": "stat",
-          "gridPos": {
-            "x": 15,
-            "y": 0,
-            "w": 4,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-spoke2"
-          },
-          "targets": [
-            {
-              "expr": "(sum(rate(coredns_cache_requests_total[5m])) - sum(rate(coredns_cache_misses_total[5m]))) / sum(rate(coredns_cache_requests_total[5m])) * 100 or vector(100)",
-              "legendFormat": "Hit Ratio",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "value",
-            "graphMode": "none"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "percent",
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "red",
-                    "value": 0
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 50
-                  },
-                  {
-                    "color": "green",
-                    "value": 80
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 5,
-          "title": "Edge Memory Consumption",
-          "type": "stat",
-          "gridPos": {
-            "x": 19,
-            "y": 0,
-            "w": 5,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-spoke2"
-          },
-          "targets": [
-            {
-              "expr": "sum(process_resident_memory_bytes)",
-              "legendFormat": "RSS Memory",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "value",
-            "graphMode": "area"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "bytes",
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "orange",
-                    "value": 524288000
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 6,
-          "title": "CoreDNS Requests Rate by Protocol & Type",
-          "type": "timeseries",
-          "gridPos": {
-            "x": 0,
-            "y": 4,
-            "w": 12,
-            "h": 7
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-spoke2"
-          },
-          "targets": [
-            {
-              "expr": "sum(rate(coredns_dns_requests_total[5m])) by (proto, type)",
-              "legendFormat": "{{ "{{" }}proto{{ "}}" }} - {{ "{{" }}type{{ "}}" }}",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "reqps",
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "smooth",
-                "lineWidth": 2,
-                "fillOpacity": 15
-              }
-            }
-          }
-        },
-        {
-          "id": 7,
-          "title": "CoreDNS DNS Request Latency (P99, P90, Avg)",
-          "type": "timeseries",
-          "gridPos": {
-            "x": 12,
-            "y": 4,
-            "w": 12,
-            "h": 7
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-spoke2"
-          },
-          "targets": [
-            {
-              "expr": "histogram_quantile(0.99, sum(rate(coredns_dns_request_duration_seconds_bucket[5m])) by (le))",
-              "legendFormat": "P99 Latency",
-              "refId": "A"
-            },
-            {
-              "expr": "histogram_quantile(0.90, sum(rate(coredns_dns_request_duration_seconds_bucket[5m])) by (le))",
-              "legendFormat": "P90 Latency",
-              "refId": "B"
-            },
-            {
-              "expr": "sum(rate(coredns_dns_request_duration_seconds_sum[5m])) / sum(rate(coredns_dns_request_duration_seconds_count[5m]))",
-              "legendFormat": "Avg Latency",
-              "refId": "C"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "s",
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "smooth",
-                "lineWidth": 2,
-                "fillOpacity": 10
-              }
-            }
-          }
-        },
-        {
-          "id": 8,
-          "title": "Edge Scraper Engine Queries & Active Metrics Series",
-          "type": "timeseries",
-          "gridPos": {
-            "x": 0,
-            "y": 11,
-            "w": 12,
-            "h": 7
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-spoke2"
-          },
-          "targets": [
-            {
-              "expr": "rate(prometheus_engine_queries[5m])",
-              "legendFormat": "Queries / sec",
-              "refId": "A"
-            },
-            {
-              "expr": "prometheus_tsdb_head_series",
-              "legendFormat": "Active TSDB Head Series",
-              "refId": "B"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "smooth",
-                "lineWidth": 2,
-                "fillOpacity": 15
-              }
-            }
-          }
-        },
-        {
-          "id": 9,
-          "title": "Spoke Go Runtime Goroutines & Memory",
-          "type": "timeseries",
-          "gridPos": {
-            "x": 12,
-            "y": 11,
-            "w": 12,
-            "h": 7
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-spoke2"
-          },
-          "targets": [
-            {
-              "expr": "go_goroutines",
-              "legendFormat": "{{ "{{" }}job{{ "}}" }} - Goroutines",
-              "refId": "A"
-            },
-            {
-              "expr": "process_resident_memory_bytes",
-              "legendFormat": "{{ "{{" }}job{{ "}}" }} - Memory (Bytes)",
-              "refId": "B"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "custom": {
-                "drawStyle": "line",
-                "lineInterpolation": "smooth",
-                "lineWidth": 2,
-                "fillOpacity": 10
-              }
-            }
-          }
-        },
-        {
-          "id": 10,
-          "title": "Spoke2 All Scrape Targets Health Table",
-          "type": "table",
-          "gridPos": {
-            "x": 0,
-            "y": 18,
-            "w": 24,
-            "h": 8
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus-spoke2"
-          },
-          "targets": [
-            {
-              "expr": "up",
-              "legendFormat": "{{ "{{" }}job{{ "}}" }} - {{ "{{" }}instance{{ "}}" }}",
-              "format": "table",
-              "instant": true,
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "custom": {
-                "align": "left",
-                "displayMode": "auto"
-              }
-            },
-            "overrides": [
-              {
-                "matcher": {
-                  "id": "byName",
-                  "options": "Value"
-                },
-                "properties": [
-                  {
-                    "id": "mappings",
-                    "value": [
-                      {
-                        "type": "value",
-                        "options": {
-                          "1": {
-                            "text": "HEALTHY / UP",
-                            "color": "green"
-                          },
-                          "0": {
-                            "text": "UNREACHABLE",
-                            "color": "red"
-                          }
-                        }
-                      }
-                    ]
-                  }
-                ]
-              }
-            ]
-          }
-        }
-      ],
-      "refresh": "10s",
-      "schemaVersion": 38,
-      "style": "dark",
-      "tags": [
-        "spoke2",
         "edge",
-        "coredns",
-        "01sandbox"
-      ],
-      "templating": {
-        "list": []
-      },
-      "time": {
-        "from": "now-1h",
-        "to": "now"
-      },
-      "timezone": "browser",
-      "title": "Spoke2 \u2013 Edge Observability & Services",
-      "uid": "01sandbox-spoke2",
-      "version": 2
-    }
-  spoke3.json: |
-    {
-      "annotations": {
-        "list": []
-      },
-      "editable": true,
-      "fiscalYearStartMonth": 0,
-      "graphTooltip": 1,
-      "id": null,
-      "links": [],
-      "liveNow": true,
-      "panels": [
-        {
-          "id": 1,
-          "title": "OCM Klusterlet Agent Health",
-          "type": "stat",
-          "gridPos": {
-            "x": 0,
-            "y": 0,
-            "w": 6,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "expr": "up{job=\"open-cluster-management-agent\"} or up{job=~\".*agent.*\"}",
-              "legendFormat": "Agent Health",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "background",
-            "graphMode": "none"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "mappings": [
-                {
-                  "type": "value",
-                  "options": {
-                    "1": {
-                      "text": "HEALTHY",
-                      "color": "green"
-                    },
-                    "0": {
-                      "text": "DEGRADED",
-                      "color": "red"
-                    }
-                  }
-                }
-              ],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "red",
-                    "value": 0
-                  },
-                  {
-                    "color": "green",
-                    "value": 1
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 2,
-          "title": "Prometheus Scraper Health",
-          "type": "stat",
-          "gridPos": {
-            "x": 6,
-            "y": 0,
-            "w": 6,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "expr": "up{job=\"prometheus\"} or up",
-              "legendFormat": "Scraper",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "background",
-            "graphMode": "none"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "mappings": [
-                {
-                  "type": "value",
-                  "options": {
-                    "1": {
-                      "text": "ONLINE",
-                      "color": "green"
-                    },
-                    "0": {
-                      "text": "OFFLINE",
-                      "color": "red"
-                    }
-                  }
-                }
-              ],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "red",
-                    "value": 0
-                  },
-                  {
-                    "color": "green",
-                    "value": 1
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 3,
-          "title": "Active Workqueue Backlog",
-          "type": "stat",
-          "gridPos": {
-            "x": 12,
-            "y": 0,
-            "w": 6,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "expr": "sum(workqueue_depth) or vector(0)",
-              "legendFormat": "Queue Depth",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "value",
-            "graphMode": "area"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "yellow",
-                    "value": 5
-                  },
-                  {
-                    "color": "red",
-                    "value": 20
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 4,
-          "title": "Total Restarts (Past 1h)",
-          "type": "stat",
-          "gridPos": {
-            "x": 18,
-            "y": 0,
-            "w": 6,
-            "h": 4
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "expr": "sum(increase(kube_pod_container_status_restarts_total[1h])) or vector(0)",
-              "legendFormat": "Restarts",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "value",
-            "graphMode": "area"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": null
-                  },
-                  {
-                    "color": "red",
-                    "value": 1
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 100,
-          "title": "OCM Klusterlet Telemetry & Controller Workqueues",
-          "type": "row",
-          "gridPos": {
-            "x": 0,
-            "y": 4,
-            "w": 24,
-            "h": 1
-          },
-          "collapsed": false
-        },
-        {
-          "id": 5,
-          "title": "Klusterlet Workqueue Depth by Worker",
-          "type": "timeseries",
-          "gridPos": {
-            "x": 0,
-            "y": 5,
-            "w": 12,
-            "h": 8
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "expr": "sum(workqueue_depth) by (name)",
-              "legendFormat": "{{ "{{" }}name{{ "}}" }} depth",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "custom": {
-                "drawStyle": "line",
-                "fillOpacity": 15
-              }
-            }
-          }
-        },
-        {
-          "id": 6,
-          "title": "Workqueue Event Rate (Adds/s) vs Retries",
-          "type": "timeseries",
-          "gridPos": {
-            "x": 12,
-            "y": 5,
-            "w": 12,
-            "h": 8
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "expr": "sum(rate(workqueue_adds_total[5m])) by (name)",
-              "legendFormat": "Adds/s: {{ "{{" }}name{{ "}}" }}",
-              "refId": "A"
-            },
-            {
-              "expr": "sum(rate(workqueue_retries_total[5m])) by (name)",
-              "legendFormat": "Retries/s: {{ "{{" }}name{{ "}}" }}",
-              "refId": "B"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "ops",
-              "custom": {
-                "drawStyle": "line"
-              }
-            }
-          }
-        },
-        {
-          "id": 200,
-          "title": "Cluster Pod Health & Prometheus Scrapers",
-          "type": "row",
-          "gridPos": {
-            "x": 0,
-            "y": 13,
-            "w": 24,
-            "h": 1
-          },
-          "collapsed": false
-        },
-        {
-          "id": 7,
-          "title": "Prometheus Scrape Targets Status",
-          "type": "stat",
-          "gridPos": {
-            "x": 0,
-            "y": 14,
-            "w": 12,
-            "h": 6
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "expr": "up",
-              "legendFormat": "{{ "{{" }}job{{ "}}" }} ({{ "{{" }}instance{{ "}}" }})",
-              "refId": "A"
-            }
-          ],
-          "options": {
-            "reduceOptions": {
-              "calcs": [
-                "lastNotNull"
-              ]
-            },
-            "colorMode": "background",
-            "graphMode": "none"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "mappings": [
-                {
-                  "type": "value",
-                  "options": {
-                    "1": {
-                      "text": "UP",
-                      "color": "green"
-                    },
-                    "0": {
-                      "text": "DOWN",
-                      "color": "red"
-                    }
-                  }
-                }
-              ],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "red",
-                    "value": 0
-                  },
-                  {
-                    "color": "green",
-                    "value": 1
-                  }
-                ]
-              }
-            }
-          }
-        },
-        {
-          "id": 8,
-          "title": "Pod Restarts over Time",
-          "type": "timeseries",
-          "gridPos": {
-            "x": 12,
-            "y": 14,
-            "w": 12,
-            "h": 6
-          },
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "targets": [
-            {
-              "expr": "sum(increase(kube_pod_container_status_restarts_total[1h])) by (namespace, pod)",
-              "legendFormat": "{{ "{{" }}namespace{{ "}}" }} / {{ "{{" }}pod{{ "}}" }}",
-              "refId": "A"
-            }
-          ],
-          "fieldConfig": {
-            "defaults": {
-              "unit": "short",
-              "custom": {
-                "drawStyle": "bars",
-                "fillOpacity": 40
-              }
-            }
-          }
-        }
-      ],
-      "refresh": "10s",
-      "schemaVersion": 38,
-      "style": "dark",
-      "tags": [
-        "spoke3",
         "spoke",
-        "klusterlet",
-        "01sandbox"
+        "dynamic",
+        "fleet"
       ],
       "templating": {
         "list": [
           {
+            "name": "cluster",
+            "label": "Spoke Cluster",
+            "type": "query",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "prometheus-primaryhub"
+            },
+            "query": "query_result((up{role=\"spoke\", job=\"prometheus-scraper\"} == 1) and ((time() - timestamp(up{role=\"spoke\", job=\"prometheus-scraper\"})) < 60))",
+            "refresh": 2,
+            "includeAll": false,
+            "multi": false,
             "current": {
               "selected": true,
-              "text": "spoke3",
-              "value": "prometheus-spoke3"
+              "text": "spoke1",
+              "value": "spoke1"
             },
-            "hide": 0,
-            "includeAll": false,
-            "label": "Datasource",
-            "multi": false,
-            "name": "datasource",
-            "options": [],
-            "query": "prometheus",
-            "refresh": 1,
-            "regex": ".*spoke3.*",
-            "type": "datasource"
+            "regex": "/.*cluster=\"([^\"]+)\".*/",
+            "sort": 1
           }
         ]
       },
@@ -3460,7 +2503,7 @@ data:
         "to": "now"
       },
       "timezone": "browser",
-      "title": "Spoke3 \u2013 OCM Klusterlet & Edge Observability",
-      "uid": "01sandbox-spoke3",
-      "version": 1
+      "title": "Spoke Edge Fleet \u2013 Dynamic Multi-Cluster Observability",
+      "uid": "01sandbox-spokes-dynamic",
+      "version": 2
     }

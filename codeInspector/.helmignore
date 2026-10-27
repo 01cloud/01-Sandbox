@@ -1,5 +1,7 @@
 # Exclude large CRDs and unnecessary files from release secret payload
 crds/
 charts/cloudnative-pg/templates/crds/
+manifests/
+dashboards/
 *.git*
 .DS_Store

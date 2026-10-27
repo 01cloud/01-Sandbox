@@ -27,13 +27,129 @@ The Prometheus monitoring component is deployed as a lightweight, headless scrap
 └──────────────────┘           └───────────────────┘          └───────────────────┘
 ```
 
+### Core Manifests Defining this Architecture:
+* **Prometheus Deployment Specification**: [`codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml)
+  ```yaml
+  apiVersion: apps/v1
+  kind: Deployment
+  metadata:
+    name: prometheus
+    namespace: {{ .Values.namespace }}
+  spec:
+    replicas: {{ .Values.replicaCount }}
+    template:
+      spec:
+        serviceAccountName: prometheus
+        containers:
+          - name: prometheus
+            image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+            args:
+              - "--config.file=/etc/prometheus/prometheus.yml"
+              - "--storage.tsdb.path=/prometheus"
+              - "--storage.tsdb.retention.time={{ .Values.retention | default "30d" }}"
+              - "--web.enable-lifecycle"
+              - "--web.enable-remote-write-receiver"
+  ```
+* **Chart Values & Defaults**: [`codeInspector/charts/prometheus/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml)
+  ```yaml
+  namespace: opensandbox-system
+  clusterName: "primaryhub"
+  clusterRole: "hub"
+  retention: "30d"
+  cnpgMetrics:
+    enabled: true
+  persistence:
+    enabled: true
+    pvcName: "prometheus-pvc"
+    storageClass: "standard"
+    size: "25Gi"
+  service:
+    type: ClusterIP
+    port: 9090
+    nodePort:
+      enabled: true
+      port: 30900
+  ```
+
 ---
 
 ## 2. High Availability PostgreSQL Replication Metrics
 
 CloudNative-PG exposes full database metrics on port `9187`. The custom query configuration map (`cnpg-default-monitoring`) enables real-time physical streaming replication tracking.
 
-### Active Recording Rules & Metrics
+### A. Exposing Postgres Metrics via Dedicated Service
+Defined in: [`codeInspector/charts/prometheus/templates/cnpg-metrics-services.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/cnpg-metrics-services.yaml)
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql-primary-metrics
+  namespace: {{ .Values.namespace }}
+  labels:
+    app.kubernetes.io/name: postgresql-primary-metrics
+    app.kubernetes.io/component: database-metrics
+    cnpg.io/cluster: postgresql-primary
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "9187"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    cnpg.io/cluster: postgresql-primary
+  ports:
+  - name: metrics
+    port: 9187
+    targetPort: 9187
+    protocol: TCP
+```
+
+### B. Dynamic Pod Discovery Scraper Config
+Defined in: [`codeInspector/charts/prometheus/templates/configmap.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml#L38-L56)
+```yaml
+- job_name: 'cloudnative-pg-instances'
+  kubernetes_sd_configs:
+    - role: pod
+  relabel_configs:
+    - source_labels: [__meta_kubernetes_pod_label_cnpg_io_cluster]
+      action: keep
+      regex: .+
+    - source_labels: [__address__]
+      action: replace
+      regex: ([^:]+)(?::\d+)?
+      replacement: $1:9187
+      target_label: __address__
+    - action: labelmap
+      regex: __meta_kubernetes_pod_label_(.+)
+    - source_labels: [__meta_kubernetes_namespace]
+      target_label: kubernetes_namespace
+    - source_labels: [__meta_kubernetes_pod_name]
+      target_label: kubernetes_pod_name
+```
+
+### C. Active Recording Rules for Replication Lag
+Defined in: [`codeInspector/charts/prometheus/templates/configmap.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml#L215-L232)
+```yaml
+- name: postgresql-ha-replication
+  rules:
+    # HA SLI: Replication Lag in Seconds (SLO Target: 0s)
+    - record: postgresql:replication_lag_seconds
+      expr: cnpg_pg_replication_lag
+
+    # HA SLI: WAL Streaming Lag in Bytes (SLO Target: < 10MB)
+    - record: postgresql:wal_streaming_replay_lag_bytes
+      expr: cnpg_pg_stat_replication_stream_replay_lag_bytes
+
+    # HA SLI: Streaming Replicas Count (SLO Target: >= 1 on Primary)
+    - record: postgresql:streaming_replicas_count
+      expr: cnpg_pg_replication_streaming_replicas
+
+    # HA SLI: WAL Archival Failure Rate
+    - record: postgresql:wal_archival_failed_total
+      expr: cnpg_pg_stat_archiver_failed_count
+```
+
+### D. Metric Reference & SLO Targets
 
 | Recording Rule / Metric | PromQL Expression | Target / SLO | Description |
 | :--- | :--- | :--- | :--- |
@@ -50,7 +166,89 @@ CloudNative-PG exposes full database metrics on port `9187`. The custom query co
 
 Open Cluster Management manages multi-region spoke clusters (`spoke1`, `spoke2`, `spoke3`, `spoke4`, `spoke5`). It exposes cluster admission, mutation, and validation metrics via its admission webhooks on port `8080`.
 
-### Active Recording Rules & Metrics
+### A. Exposing OCM Hub Controllers via Dedicated Services
+Defined in: [`codeInspector/charts/prometheus/templates/ocm-metrics-services.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/ocm-metrics-services.yaml)
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: ocm-registration-controller-metrics
+  namespace: open-cluster-management-hub
+  labels:
+    app.kubernetes.io/name: ocm-registration-controller-metrics
+    app.kubernetes.io/component: ocm-hub-controller
+  annotations:
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8080"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: cluster-manager-registration-controller
+  ports:
+  - name: metrics
+    port: 8080
+    targetPort: 8080
+    protocol: TCP
+```
+
+### B. Hub Controller Scraper Configuration
+Defined in: [`codeInspector/charts/prometheus/templates/configmap.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml#L78-L100)
+```yaml
+- job_name: 'open-cluster-management-hub'
+  kubernetes_sd_configs:
+    - role: pod
+      namespaces:
+        names:
+          - open-cluster-management-hub
+          - open-cluster-management
+  relabel_configs:
+    - source_labels: [__meta_kubernetes_pod_label_app]
+      action: keep
+      regex: (cluster-manager-.+|registration-.+)
+    - source_labels: [__address__]
+      action: replace
+      regex: ([^:]+)(?::\d+)?
+      replacement: $1:8080
+      target_label: __address__
+    - action: labelmap
+      regex: __meta_kubernetes_pod_label_(.+)
+    - source_labels: [__meta_kubernetes_namespace]
+      target_label: kubernetes_namespace
+    - source_labels: [__meta_kubernetes_pod_name]
+      target_label: kubernetes_pod_name
+```
+
+### C. Continuous SLO/SLI Recording Rules
+Defined in: [`codeInspector/charts/prometheus/templates/configmap.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml#L175-L213)
+```yaml
+groups:
+  - name: ocm-slo-sli
+    rules:
+      # OCM SLI 1: ManagedCluster Webhook Admission Success Rate (SLO Target: >= 99.9%)
+      - record: ocm:admission_success_rate:ratio_rate5m
+        expr: |
+          (
+            sum(rate(controller_runtime_webhook_requests_total{job="open-cluster-management-hub",code="200"}[5m]))
+            /
+            clamp_min(sum(rate(controller_runtime_webhook_requests_total{job="open-cluster-management-hub"}[5m])), 0.0001)
+          )
+
+      # OCM SLI 2: Total ManagedCluster Validations & Mutations Accepted
+      - record: ocm:managedcluster_admissions_total
+        expr: sum(controller_runtime_webhook_requests_total{job="open-cluster-management-hub",code="200"})
+
+      # OCM SLI 3: Total ManagedCluster Admission Errors (SLO Target: 0)
+      - record: ocm:managedcluster_admission_errors_total
+        expr: sum(controller_runtime_webhook_requests_total{job="open-cluster-management-hub",code=~"5.*"}) or vector(0)
+
+      # OCM SLI 4: P99 Admission Webhook Latency (SLO Target: < 0.2s)
+      - record: ocm:webhook_latency_seconds:p99
+        expr: |
+          histogram_quantile(0.99, sum(rate(controller_runtime_webhook_latency_seconds_bucket{job="open-cluster-management-hub"}[5m])) by (le, webhook))
+```
+
+### D. Metric Reference & SLO Targets
 
 | Recording Rule / Metric | Description | Target / SLO |
 | :--- | :--- | :--- |
@@ -100,6 +298,36 @@ kubectl exec -n opensandbox-system deploy/prometheus -- \
 # Search for specific metrics (e.g., replication, memory, connection):
 kubectl exec -n opensandbox-system deploy/prometheus -- \
   wget -qO- "http://localhost:9090/api/v1/label/__name__/values" | jq -r '.data[]' | grep -i "replication"
+```
+
+### E. Automated Verification Test Suite
+Instead of manual curls, execute the platform test suite:
+Defined in: [`manifests/monitoring/verify-metrics.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/verify-metrics.sh)
+```bash
+# Execute against PrimaryHub or SecondaryHub:
+./manifests/monitoring/verify-metrics.sh kind-primaryhub
+```
+**Underlying Verification Logic**:
+```bash
+# tests both direct exec and ephemeral port-forward fallback:
+test_pod_metrics() {
+  local namespace="$1" label="$2" port="$3" path="${4:-/metrics}" name="$5"
+  echo -e "[Testing ${name}]"
+  local pod=$(kubectl --context "$CTX" -n "$namespace" get pods -l "$label" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+  if [ -z "$pod" ]; then
+    echo -e "  ⚠ Pod with label '${label}' not found in namespace '${namespace}'. Skipping."
+    return 0
+  fi
+  local sample=$(kubectl --context "$CTX" -n "$namespace" exec "$pod" -- curl -s --max-time 5 "http://127.0.0.1:${port}${path}" 2>/dev/null || true)
+  if [ -z "$sample" ]; then
+    local local_port=$((19000 + RANDOM % 1000))
+    kubectl --context "$CTX" -n "$namespace" port-forward "pod/${pod}" "${local_port}:${port}" >/dev/null 2>&1 &
+    local pf_pid=$!
+    sleep 2
+    sample=$(curl -s --max-time 5 "http://127.0.0.1:${local_port}${path}" 2>/dev/null || true)
+    kill -9 "$pf_pid" 2>/dev/null || true
+  fi
+}
 ```
 
 ---
@@ -166,20 +394,37 @@ Exported from port `9187` on `postgresql-primary-1`:
 | Metric | Unit | What It Measures | Healthy / Ideal Value |
 | :--- | :--- | :--- | :--- |
 | **`cnpg_pg_stat_database_xact_commit`** | Counter | Cumulative successful transaction commits. | Steadily increasing. |
-| **`cnpg_pg_stat_database_xact_rollback`** | Counter | Cumulative aborted or rolled back transactions. | Low ratio compared to commits ($< 1\%$). |
+| **`cnpg_pg_stat_database_xact_rollback`** | Counter | Cumulative aborted or rolled back transactions. | Low ratio compared to commits (< 1%). |
 | **`cnpg_pg_stat_database_blks_hit`** | Counter | Disk blocks read directly from PostgreSQL RAM buffer cache. | High value. |
-| **`cnpg_pg_stat_database_blks_read`** | Counter | Disk blocks that had to be read from physical EBS storage. | Low value. Cache hit ratio = $\frac{\text{hit}}{\text{hit} + \text{read}} > 99\%$. |
-| **`cnpg_pg_stat_activity_connections`** | Gauge | Current active backend client connections to PostgreSQL. | Stable within pool limits ($< 100$). |
+| **`cnpg_pg_stat_database_blks_read`** | Counter | Disk blocks that had to be read from physical EBS storage. | Low value. Cache hit ratio = hit / (hit + read) > 99%. |
+| **`cnpg_pg_stat_activity_connections`** | Gauge | Current active backend client connections to PostgreSQL. | Stable within pool limits (< 100). |
 
 ## 6. Viewing in the Web Browser
 
 When you are ready to explore metrics visually via interactive charts, targets, and query consoles:
 
 ### Option 1: 1-Command Script from Your Laptop
-From your local orchestrator terminal:
+Defined in: [`prod-docker-multi-script/port-forward-prometheus.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/port-forward-prometheus.sh)
 ```bash
 cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
 ./port-forward-prometheus.sh
+```
+**Port Forwarding Script Core Logic**:
+```bash
+# prod-docker-multi-script/port-forward-prometheus.sh
+case "$TARGET" in
+  primaryhub)   SSM_HOST="$PRIMARYHUB_HOST" ;;
+  secondaryhub) SSM_HOST="$SECONDARYHUB_HOST" ;;
+  spoke1)       SSM_HOST="$SPOKE1_HOST" ;;
+  spoke2)       SSM_HOST="$SPOKE2_HOST" ;;
+  spoke3)       SSM_HOST="${SPOKE3_HOST:-}" ;;
+esac
+
+ensure_node_ssm_access "$SSM_HOST"
+ensure_cluster_ssh_tunnel "$TARGET" "$SSM_HOST"
+# Port-forward directly to prometheus-service:9090
+kubectl --kubeconfig "$KUBECONFIG" --context "kind-${TARGET}" -n opensandbox-system \
+  port-forward svc/prometheus-service 9090:9090
 ```
 Open your browser to: **[http://localhost:9090](http://localhost:9090)**
 
@@ -209,6 +454,7 @@ Open your browser to: **[http://localhost:9090](http://localhost:9090)**
 
 When modifying Helm values or adding recording rules, use the dedicated safe upgrade script to prevent resetting existing clusters or state:
 
+Defined in: [`prod-docker-multi-script/upgrade-helm.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/upgrade-helm.sh)
 ```bash
 cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
 
@@ -217,6 +463,27 @@ cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
 
 # Or upgrade both PrimaryHub and SecondaryHub:
 ./upgrade-helm.sh all
+```
+
+### Script Execution Logic:
+```bash
+# prod-docker-multi-script/upgrade-helm.sh
+upgrade_primary() {
+  log_step "Upgrading Helm release on PrimaryHub..."
+  ensure_node_ssm_access "$PRIMARYHUB_HOST"
+  ensure_cluster_ssh_tunnel "primaryhub" "$PRIMARYHUB_HOST"
+
+  helm upgrade codeinspector "${CODE_INSPECTOR_DIR}" \
+    --skip-crds \
+    --kubeconfig "$KUBECONFIG" \
+    --kube-context kind-primaryhub \
+    --namespace opensandbox-system \
+    --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --set cloudnative-pg.webhook.mutating.failurePolicy=Ignore \
+    --set cloudnative-pg.webhook.validating.failurePolicy=Ignore \
+    --set-string apiServer.configMap.ALLOW_MOCK_KEYS="true" \
+    --timeout 5m
+}
 ```
 
 ### Safety Guarantees:
@@ -230,7 +497,7 @@ cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
 
 ### Overview
 
-Prometheus is now deployed on **all clusters** — both hubs and all spoke clusters. Each cluster's Prometheus carries an `external_label` that identifies which cluster the metric came from. A central **Grafana** instance on `primaryhub` pulls from all Prometheus scrapers over the existing WireGuard overlay (`10.99.0.0/24`).
+Prometheus is deployed on **all clusters** — both hubs and all spoke clusters. Each cluster's Prometheus carries an `external_label` that identifies which cluster the metric came from. A central **Grafana** instance on `primaryhub` visualizes metrics from all scrapers.
 
 ```
                         ┌───────────────────────────────────────────────────┐
@@ -249,29 +516,43 @@ Prometheus is now deployed on **all clusters** — both hubs and all spoke clust
                   └──────────────┘ └──────────┘ └────────┘ └────────┘ └────────┘
 ```
 
-### What Each Cluster Scrapes
+### Spoke Scraper Definition
+Defined in: [`manifests/monitoring/04-prometheus-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/04-prometheus-spoke.yaml)
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-scraper-config
+  namespace: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+      external_labels:
+        cluster: '__CLUSTER_NAME__'
+        cluster_role: '__CLUSTER_ROLE__'
 
-| Cluster | CNPG metrics | OCM Hub controllers | OCM Klusterlet agent | App services |
-| :--- | :---: | :---: | :---: | :---: |
-| `primaryhub` | ✅ | ✅ | ✅ | ✅ |
-| `secondaryhub` | ✅ | ✅ | ✅ | ✅ |
-| `spoke1` | ❌ | ❌ | ✅ | ✅ |
-| `spoke2` | ❌ | ❌ | ✅ | ✅ |
-| `spoke3` | ❌ | ❌ | ✅ | ✅ |
-
-### Cluster Identity Labels
-
-Every metric from every cluster carries:
+    remote_write:
+      - url: "http://10.99.0.1:30900/api/v1/write"
+        remote_timeout: 30s
+        queue_config:
+          max_samples_per_send: 500
+          batch_send_deadline: 5s
 ```
-cluster="primaryhub"    cluster_role="hub"
-cluster="secondaryhub"  cluster_role="hub"
-cluster="spoke1"        cluster_role="spoke"
-cluster="spoke2"        cluster_role="spoke"
-cluster="spoke3"        cluster_role="spoke"
-```
-This means in Grafana you can write a single PromQL query and filter by `{cluster="spoke1"}` to see only that cluster's metrics.
 
 ### Deploying Monitoring to All Clusters
+Defined in: [`manifests/monitoring/apply-monitoring.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/apply-monitoring.sh)
+```bash
+# apply-monitoring.sh core rendering logic:
+render_and_apply() {
+  local manifest="$1" cluster_name="$2" cluster_role="$3" ctx="$4"
+  sed \
+    -e "s/__CLUSTER_NAME__/${cluster_name}/g" \
+    -e "s/__CLUSTER_ROLE__/${cluster_role}/g" \
+    "${manifest}" | kubectl --context "${ctx}" apply -f -
+}
+```
 
 ```bash
 cd ~/Desktop/Kamal/01-Sandbox
@@ -291,39 +572,77 @@ cd ~/Desktop/Kamal/01-Sandbox
 
 ## 9. Centralized Grafana – Access & Dashboards
 
-### Accessing Grafana in Your Local Browser
+### A. Accessing Grafana in Your Local Browser
 
 **Option 1 – Quickest (port-forward via SSM):**
+Defined in: [`prod-docker-multi-script/port-forward-grafana.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/port-forward-grafana.sh)
 ```bash
 cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
 ./port-forward-grafana.sh
 ```
 Open: **http://localhost:3000** — Login: `admin` / `sandbox-admin`
 
-**Option 2 – Manual:**
+**Script Tunnel Logic**:
 ```bash
-aws ssm start-session \
-  --target <PRIMARYHUB_INSTANCE_ID> \
-  --region us-east-1 \
-  --document-name AWS-StartPortForwardingSession \
-  --parameters '{"portNumber":["3000"],"localPortNumber":["3000"]}'
+ensure_node_ssm_access "$PRIMARYHUB_HOST"
+ensure_cluster_ssh_tunnel "primaryhub" "$PRIMARYHUB_HOST"
+kubectl --kubeconfig "$KUBECONFIG" --context kind-primaryhub -n monitoring \
+  port-forward svc/grafana 3000:3000
 ```
 
-### Pre-Provisioned Dashboard: 01-Sandbox Multi-Cluster Overview
+### B. Pre-Configured Multi-Cluster Datasources
+Defined in: [`codeInspector/charts/grafana/templates/configmap-datasources.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml)
+```yaml
+apiVersion: 1
+datasources:
+  - name: "primaryhub"
+    uid: "prometheus-primaryhub"
+    type: prometheus
+    url: http://prometheus-service.opensandbox-system.svc.cluster.local:9090
+    access: proxy
+    isDefault: true
+    jsonData:
+      timeInterval: "15s"
 
-The Grafana deployment automatically provisions a dashboard with:
+  - name: "secondaryhub"
+    uid: "prometheus-secondaryhub"
+    type: prometheus
+    url: http://prometheus-service.opensandbox-system.svc.cluster.local:9090
+    access: proxy
 
-| Panel | Data source(s) |
-| :--- | :--- |
-| Prometheus Scraper Health (all clusters) | All datasources via `${cluster}` variable |
-| Pod Restart Count per cluster | All 5 cluster datasources |
-| PostgreSQL Replication Lag (primaryhub→secondaryhub) | primaryhub |
-| OCM Webhook Admission Success Rate | primaryhub + secondaryhub |
-| OCM Klusterlet Health – all spokes | spoke1, spoke2, spoke3 |
-| Controller Workqueue Depth | primaryhub + secondaryhub |
-| PostgreSQL Active Connections | primaryhub + secondaryhub |
+  - name: "spoke1"
+    uid: "prometheus-spoke1"
+    type: prometheus
+    url: http://prometheus-service.opensandbox-system.svc.cluster.local:9090
+    access: proxy
+```
 
-### Viewing Individual Cluster Prometheus
+### C. Ingress Gateway HTTPRoute for External Access
+Defined in: [`codeInspector/charts/grafana/templates/httproute.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/httproute.yaml)
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: grafana-route
+  namespace: agentgateway-system
+spec:
+  parentRefs:
+    - group: gateway.networking.k8s.io
+      kind: Gateway
+      name: agentgateway-proxy
+      namespace: agentgateway-system
+  rules:
+    - matches:
+        - path:
+            type: PathPrefix
+            value: "/grafana"
+      backendRefs:
+        - name: grafana-service
+          namespace: monitoring
+          port: 3000
+```
+
+### D. Viewing Individual Cluster Prometheus
 
 ```bash
 # View any specific cluster's raw Prometheus:
@@ -559,7 +878,7 @@ EDGE PROMETHEUS SCRAPER INTERNALS:
 │    │ Queue: 2.5k│          │ Queue: 2.5k│          │ Queue: 2.5k│ │
 │    └─────┬─────┘          └─────┬─────┘          └─────┬─────┘  │
 └──────────┼──────────────────────┼──────────────────────┼────────┘
-           │ 3. Batch (500 samples or 5s deadline)       │
+           │ 3. Batch (up to 1,000 samples or 5s deadline)│
            ▼                      ▼                      ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │ Protocol Buffer Encoding (prometheus.WriteRequest)              │
@@ -941,6 +1260,11 @@ kubectl exec -n opensandbox-system deploy/prometheus -- \
 }
 ```
 
+**Target Inventory (What These 49 Endpoints Represent)**:
+* **PrimaryHub (20 targets)**: PostgreSQL cluster leader & poolers (`cnpg_...`), CNPG operator, FastAPI backend service, AgentGateway Envoy proxies, OCM Hub controllers, and CoreDNS.
+* **SecondaryHub (17 targets)**: Standby PostgreSQL replica, secondary API, secondary OCM agents, CoreDNS, and node telemetry.
+* **Spoke 1 & Spoke 2 (6 targets each)**: Local scraper (`prometheus-scraper`), OCM Klusterlet registration & work agents, CoreDNS replicas, and node storage controllers.
+
 #### B. Verifying Remote Write Outbound Traffic on Spokes
 ```bash
 # On Spoke 1 (eu-central-1):
@@ -1001,6 +1325,61 @@ PrimaryHub Host (:30896) ──> KinD Node (172.18.0.2:30896)
                          ├── /api/z1sandbox/    ──> sandbox-api-service:8000
                          └── /health            ──> sandbox-api-service:8000
 ```
+
+#### Gateway API Route Definitions
+1. **Prometheus HTTPRoute**:
+   Defined in: [`codeInspector/charts/prometheus/templates/httproute.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/httproute.yaml)
+   ```yaml
+   apiVersion: gateway.networking.k8s.io/v1
+   kind: HTTPRoute
+   metadata:
+     name: prometheus-route
+     namespace: agentgateway-system
+   spec:
+     parentRefs:
+       - group: gateway.networking.k8s.io
+         kind: Gateway
+         name: agentgateway-proxy
+         namespace: agentgateway-system
+     rules:
+       # Redirect /metrics to federated scrape endpoint
+       - matches:
+           - path: { type: Exact, value: /metrics }
+         filters:
+           - type: RequestRedirect
+             requestRedirect:
+               path:
+                 type: ReplaceFullPath
+                 replaceFullPath: "/federate?match%5B%5D=%7Bjob%3D~%22.%2B%22%7D"
+               statusCode: 302
+       # Route UI and query APIs directly to Prometheus
+       - matches:
+           - path: { type: PathPrefix, value: /api/v1/query }
+           - path: { type: PathPrefix, value: /api/v1/targets }
+           - path: { type: PathPrefix, value: /graph }
+         backendRefs:
+           - name: prometheus-service
+             namespace: opensandbox-system
+             port: 9090
+   ```
+
+2. **Cross-Namespace ReferenceGrant**:
+   Defined in: [`codeInspector/charts/prometheus/templates/referencegrant.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/referencegrant.yaml)
+   ```yaml
+   apiVersion: gateway.networking.k8s.io/v1beta1
+   kind: ReferenceGrant
+   metadata:
+     name: allow-agentgateway-to-prometheus
+     namespace: opensandbox-system
+   spec:
+     from:
+       - group: gateway.networking.k8s.io
+         kind: HTTPRoute
+         namespace: agentgateway-system
+     to:
+       - group: ""
+         kind: Service
+   ```
 
 #### A. Step 1: Install & Authenticate ngrok on the PrimaryHub Host
 
@@ -1075,3 +1454,97 @@ Once ngrok is forwarding, the AgentGateway routes all paths under the same domai
      ```bash
      curl -H "ngrok-skip-browser-warning: true" https://dipper-shun-glowing.ngrok-free.dev/health
      ```
+
+---
+
+## 12. Summary: How Push-Based Remote Write (PRW) Works
+
+### 12.1 Core Architectural Concept
+Instead of Grafana or a central server making dozens of slow queries over the public internet to individual edge clusters across the globe (the traditional **pull** model), edge spoke clusters continuously package, compress, and push their own metrics back to the central hub (the **push** model).
+
+> 💡 **What is a "Sample" in Prometheus?**
+> A **sample** is a single discrete measurement in a time series: `(Timestamp, Value)` — e.g. `(1761556053480, 12450.32)`. At ~60 samples/sec, Spoke 1 ingests ~60 data points per second across its pods and nodes.
+>
+> 💡 **Are Raw Disk WAL Segments Sent Across the Wire?**
+> **No.** Raw 128 MB disk files (`00000008`) remain on the Spoke's local disk as a crash-recovery buffer. The Spoke's internal **WAL Watcher** tails the log, extracts newly committed samples, serializes them into **Google Protocol Buffers (`prompb.WriteRequest`)**, compresses the batch with **Google Snappy**, and dispatches them via HTTP `POST /api/v1/write`. The Centralized Prometheus on PrimaryHub receives the HTTP request and writes the samples into **its own local TSDB stored on PrimaryHub's AWS EBS Volume**. Grafana then queries PrimaryHub's EBS TSDB locally via PromQL.
+
+```
+┌────────────────────────────────────────────────────────┐
+│ Edge Cluster (Spoke 1, Spoke 2, SecondaryHub)          │
+│                                                        │
+│ 1. Local Scrape (15s): Target Exporter → Local WAL     │
+│    (128MB uncompressed crash-safe disk buffer)         │
+│    File: manifests/monitoring/04-prometheus-spoke.yaml │
+│                                                        │
+│ 2. WAL Watcher reads samples & encodes to Protobuf     │
+│    + Google Snappy in-flight compression (~18 B/sample)│
+│    File: manifests/monitoring/04-prometheus-spoke.yaml │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            │ HTTP POST /api/v1/write (~18 KB batch)
+                            │ WireGuard Mesh Tunnel: 10.99.0.1:30900
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ PrimaryHub EC2 Host (Kernel Netfilter Ingress)         │
+│                                                        │
+│ 3. Port Mapping: WireGuard :30900 → KinD :30900        │
+│    Files: prod-docker-multi-script/lib/clusters.sh     │
+│           codeInspector/charts/prometheus/service.yaml │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ Central Prometheus Ingest Engine (opensandbox-system)  │
+│                                                        │
+│ 4. Receiver Flag: --web.enable-remote-write-receiver   │
+│    Tagging: cluster="spoke1", region="eu-central-1"    │
+│    File: codeInspector/charts/prometheus/              │
+│          templates/deployment.yaml                     │
+│                                                        │
+│ 5. Persistent TSDB Storage on 100 GiB AWS EBS Volume   │
+│    Files: codeInspector/charts/prometheus/pvc.yaml     │
+│           codeInspector/charts/prometheus/values.yaml  │
+└───────────────────────────┬────────────────────────────┘
+                            │
+                            │ Local In-Cluster DNS Query (< 2 ms)
+                            ▼
+┌────────────────────────────────────────────────────────┐
+│ Central Grafana (opensandbox-system / monitoring)      │
+│                                                        │
+│ 6. Declarative Multi-Cluster Datasource Provisioning   │
+│    Files: codeInspector/charts/grafana/templates/      │
+│           configmap-datasources.yaml                   │
+│           codeInspector/charts/grafana/httproute.yaml  │
+└────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 12.2 Step-by-Step Flow & Code Resides Directory
+
+| Step | Operation | How It Works | File Where Code Resides |
+| :--- | :--- | :--- | :--- |
+| **1** | **Local Scrape & WAL Decoupling** | Spoke scrapers poll local Kubernetes components (Klusterlet, cAdvisor) every 15s and immediately append samples to a local Write-Ahead Log (WAL) on disk/RAM. Scrapes are 100% decoupled from internet reliability. | [`manifests/monitoring/04-prometheus-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/04-prometheus-spoke.yaml#L8-L16)<br>[`codeInspector/values-secondary.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-secondary.yaml#L685-L695) |
+| **2** | **Batching & Snappy Compression** | A WAL-tailing worker (`walWatcher`) reads samples off the active uncompressed disk WAL, pools them into in-memory batches of up to 1,000 (or every 5s), serializes them via Protocol Buffers (`prometheus.WriteRequest`), and compresses the in-memory payload with Google Snappy (reducing WAN bandwidth by 85% down to ~18 B/sample) before dispatching via HTTP POST. Disk segments remain uncompressed. | [`manifests/monitoring/04-prometheus-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/04-prometheus-spoke.yaml#L83-L90) |
+| **3** | **Network Ingress & NodePort Routing** | Outbound HTTP POST requests travel through the encrypted WireGuard overlay (`10.99.0.0/24`) to PrimaryHub at `10.99.0.1:30900`. Linux Kernel Netfilter NAT and KinD container `extraPortMappings` route port 30900 directly to the Prometheus pod. | [`prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/lib/clusters.sh#L186-L202)<br>[`codeInspector/charts/prometheus/templates/service.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/service.yaml#L16-L40) |
+| **4** | **Central Receiver Ingestion** | PrimaryHub's Prometheus runs with `--web.enable-remote-write-receiver` to accept the `/api/v1/write` stream. Incoming samples are disambiguated by external labels (`cluster="spoke1"`, `cluster="secondaryhub"`) and written directly to the head chunks. | [`codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml#L24-L35) |
+| **5** | **Persistent Storage Survival** | All TSDB blocks are written to `/prometheus`, mounted to a 25 GiB PVC backed by an AWS 100 GiB GP3 EBS volume (`DeleteOnTermination=false`). If instances are destroyed or recreated, cloud-init reattaches the EBS volume and Prometheus resumes historical data seamlessly. | [`codeInspector/charts/prometheus/templates/pvc.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/pvc.yaml#L1-L15)<br>[`codeInspector/charts/prometheus/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml#L25-L30) |
+| **6** | **Centralized Visualization** | Grafana connects to the local TSDB via ClusterIP DNS (`http://prometheus-service:9090`). Because all clusters push into the same TSDB, Grafana datasources (`primaryhub`, `spoke1`, `spoke2`, `secondaryhub`) all point to this single endpoint for sub-millisecond query performance without crossing WAN links. Metrics are strictly isolated by label namespacing (`cluster="spoke1"`), completely preventing collisions. | [`codeInspector/charts/grafana/templates/configmap-datasources.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml#L15-L62)<br>[`codeInspector/charts/grafana/templates/httproute.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/httproute.yaml#L22-L31) |
+| **7** | **Zero-Touch Autonomous Provisioning** | When new spoke instances launch via Terraform in any AWS region, cloud-init triggers `deploy_spoke_monitoring()` to dynamically provision RBAC, scraper config, and deployment without requiring manual operator intervention. | Launch Template `user_data.sh.tftpl`<br>[`manifests/monitoring/apply-monitoring.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/apply-monitoring.sh#L23-L33) |
+
+---
+
+### 12.3 Performance Comparison
+
+| Metric / Attribute | Old Cross-WAN Pull Model | Push-Based Remote Write (PRW) |
+| :--- | :--- | :--- |
+| **Grafana Dashboard Load Time** | 4.5 s – 8.2 s (48 WAN queries per refresh) | **0.25 s – 0.40 s (< 2 ms per panel)** |
+| **Network Payload per Scrape** | ~180 KB uncompressed HTTP per scrape | **~18 KB Snappy-compressed Protobuf** |
+| **WAN Packet Loss Resilience** | Failed panel queries / HTTP 504 timeouts | **Zero UI errors**; edge buffers in WAL until link recovers |
+| **Node Termination Impact** | 100% metric loss upon spoke teardown | **100% metric preservation** on PrimaryHub's AWS EBS drive |
+
+---
+
+### 12.4 Hands-On Team Demo Walkthrough
+For a complete, command-by-command presentation script featuring live terminal commands, expected outputs, talking points, and failure simulations for each of the 6 pillars, see:
+👉 **[`docs/prometheus/walkthrough-demo.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/walkthrough-demo.md)** (or [`prometheus/walkthrough-demo.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prometheus/walkthrough-demo.md))
