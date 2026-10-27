@@ -3,5 +3,6 @@ crds/
 charts/cloudnative-pg/templates/crds/
 manifests/
 dashboards/
+gateway/
 *.git*
 .DS_Store
