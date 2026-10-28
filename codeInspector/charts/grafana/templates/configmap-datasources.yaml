@@ -22,6 +22,12 @@ data:
         jsonData:
           timeInterval: "15s"
           httpMethod: GET
+        {{- if and .Values.prometheusAuth .Values.prometheusAuth.enabled }}
+        basicAuth: true
+        basicAuthUser: {{ .Values.prometheusAuth.username | quote }}
+        secureJsonData:
+          basicAuthPassword: {{ .Values.prometheusAuth.password | quote }}
+        {{- end }}
         editable: false
 
       # ── Remote: secondaryhub (Central Ingestion via Push) ─────────────────────
@@ -34,5 +40,11 @@ data:
         jsonData:
           timeInterval: "15s"
           httpMethod: GET
+        {{- if and .Values.prometheusAuth .Values.prometheusAuth.enabled }}
+        basicAuth: true
+        basicAuthUser: {{ .Values.prometheusAuth.username | quote }}
+        secureJsonData:
+          basicAuthPassword: {{ .Values.prometheusAuth.password | quote }}
+        {{- end }}
         editable: false
       {{- end }}

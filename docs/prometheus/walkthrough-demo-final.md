@@ -12,7 +12,7 @@ A concise, command-by-command presentation script to prove the reliability, perf
 | **2 — Batching & Compression** | Snappy compression reduces WAN bandwidth by **88%** (~17.8 bytes/sample vs ~200 bytes) | `tcpdump -i wg0 "tcp port 30900"` |
 | **3 — Network Ingress** | Traffic enters PrimaryHub via encrypted WireGuard and kernel Netfilter DNAT at wire speed | `iptables -t nat -L PREROUTING | grep 30900` |
 | **4 — Central Ingestion** | PrimaryHub stores metrics from all 4 clusters, disambiguated by `cluster="..."` labels | `count by (cluster)(up)` → **49 targets** |
-| **5 — EBS Persistence** | Complete EC2 termination leaves 30 days of TSDB history 100% intact on the EBS volume | `kubectl get pvc prometheus-pvc` |
+| **5 — EBS Persistence** | Complete EC2 termination leaves 7 days of TSDB history 100% intact on the EBS volume (auto-cleaned after 7d) | `kubectl get pvc prometheus-pvc` |
 | **6 — Grafana Visualization** | Grafana queries execute locally in `< 3ms` — no cross-WAN round trips at all | `curl ... up → 0.003s` |
 
 ---
@@ -126,14 +126,28 @@ Cross-region metric batches travel over the **encrypted WireGuard mesh** and are
 ### Commands
 
 ```bash
-# 3.1 — Test direct connectivity from Spoke 1 to PrimaryHub over WireGuard:
+# 3.1 — Verify authenticated WireGuard ingress from Spoke 1 to PrimaryHub:
+# Unauthenticated health check attempt (rejected):
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
-  wget -qS -O- "http://10.99.0.1:30900/-/healthy"
-```
-**Expected Output:**
-```text
-HTTP/1.1 200 OK
-Prometheus Server is Healthy.
+  wget -qS -O- "http://10.99.0.1:30900/-/healthy" 2>&1 | grep "HTTP/"
+# Expected: HTTP/1.1 401 Unauthorized
+
+# Authenticated health check attempt (accepted):
+kubectl -n monitoring exec deploy/prometheus-scraper -- \
+  wget -qS -O- --header="Authorization: Basic $(echo -n 'prometheus-rw:PrometheusRemoteWriteSecure2026!' | base64)" \
+  "http://10.99.0.1:30900/-/healthy"
+# Expected: HTTP/1.1 200 OK (Prometheus Server is Healthy.)
+
+# Direct write endpoint test (/api/v1/write):
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
+# Expected: 401 (Unauthorized without credentials)
+
+curl -s -u "prometheus-rw:PrometheusRemoteWriteSecure2026!" -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
+# Expected: 400 (Bad Request on empty probe body, proving credentials passed auth check)
+
+# Verify spoke scraper logs show zero 401s:
+kubectl -n monitoring logs deploy/prometheus-scraper --tail=10 | grep -E "WAL|remote"
+# Expected: msg="Done replaying WAL" (clean streaming)
 ```
 
 ```bash
@@ -195,7 +209,7 @@ kubectl -n opensandbox-system exec deploy/prometheus -- \
 ## Step 5 — Persistent Storage Survival on AWS EBS
 
 ### What You Are Proving
-All TSDB block data resides on a dedicated **100 GiB AWS EBS volume** with `DeleteOnTermination=false`. If the EC2 instance is terminated, stopped, or replaced, the EBS volume survives intact. On re-provisioning, cloud-init automatically re-attaches it, and Prometheus resumes the full 30-day historical timeline without missing a sample.
+All TSDB block data resides on a dedicated **100 GiB AWS EBS volume** with `DeleteOnTermination=false`. If the EC2 instance is terminated, stopped, or replaced, the EBS volume survives intact. On re-provisioning, cloud-init automatically re-attaches it, and Prometheus resumes the full 7-day historical timeline without missing a sample (metrics older than 7 days are automatically purged by the TSDB compactor).
 
 ### Commands
 
@@ -240,7 +254,7 @@ kubectl -n opensandbox-system exec deploy/prometheus -- \
 **Expected Output:** `5760` *(5,760 × 15-second samples = exactly 24 hours)*
 
 ### Talking Point
-> *"These `01JAX...` directories are 2-hour TSDB blocks, compressed with Facebook Gorilla encoding to ~1.37 bytes per sample. They're stored on `/dev/nvme1n1` — the EBS volume, not the EC2 instance's ephemeral disk. Terminate this EC2 right now and this volume survives. When the Launch Template provisions a new instance, cloud-init attaches this exact volume, and Prometheus serves the complete 30-day history immediately."*
+> *"These `01JAX...` directories are 2-hour TSDB blocks, compressed with Facebook Gorilla encoding to ~1.37 bytes per sample. They're stored on `/dev/nvme1n1` — the EBS volume, not the EC2 instance's ephemeral disk. Terminate this EC2 right now and this volume survives. When the Launch Template provisions a new instance, cloud-init attaches this exact volume, and Prometheus serves the complete 7-day history immediately while automatically cleaning up data older than 7 days."*
 
 ---
 
@@ -301,5 +315,5 @@ cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 | *"What happens if the WireGuard link between Mumbai and Virginia drops?"* | *"Nothing is lost. Spoke 2's local scraper keeps appending to its WAL on disk. When WireGuard reconnects, the WAL Watcher replays from its last byte offset and the Shard Controller auto-scales to 10 workers to drain the backlog instantly."* |
 | *"Doesn't sending metrics over the internet waste bandwidth?"* | *"We proved in Step 2 that Snappy compression reduces each metric to ~17.8 bytes. The entire spoke cluster generates under 5 KB/s of outbound traffic — negligible."* |
 | *"Why is there no separate data source per spoke in Grafana?"* | *"Because Grafana doesn't query spokes directly. Every spoke pushes into PrimaryHub's TSDB. All metrics carry `cluster=\"..\"` labels. Grafana queries the local TSDB in `< 3ms` and the `$cluster` variable filters dynamically."* |
-| *"If we terminate the PrimaryHub EC2 right now, do we lose everything?"* | *"No. Step 5 proved TSDB blocks live on a 100 GiB EBS volume with `DeleteOnTermination=false`. The Launch Template cloud-init re-attaches it on the next boot and Prometheus resumes the 30-day history immediately."* |
+| *"If we terminate the PrimaryHub EC2 right now, do we lose everything?"* | *"No. Step 5 proved TSDB blocks live on a 100 GiB EBS volume with `DeleteOnTermination=false`. The Launch Template cloud-init re-attaches it on the next boot and Prometheus resumes the 7-day history immediately (auto-cleaning blocks older than 7d). "* |
 | *"Why is Grafana so much faster than before?"* | *"The old model had Grafana issue 48 cross-WAN queries per dashboard refresh (~4–8 seconds). Now every query is a local DNS call inside the Kubernetes cluster: ~2.8ms per query, ~0.3s full dashboard render."* |

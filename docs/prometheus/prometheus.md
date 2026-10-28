@@ -192,7 +192,7 @@ drwxr-xr-x  2 nobody  nobody       22 Oct 27 05:45 checkpoint.00000005  ← Comp
 - Bytes appended per scrape: 1,377,181 bytes ÷ 264 scrapes ≈ **~5.2 KB per scrape cycle**
 - Live ingestion rate query: `~58.8 float samples/sec` continuously streaming into the active segment
 
-**Defined in:** EC2 Launch Template `user_data.sh.tftpl` → `deploy_spoke_monitoring()`
+**Defined in:** EC2 Launch Template [`/home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/<region>/compute/templates/user_data.sh.tftpl`](file:///home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/eu-central-1/compute/templates/user_data.sh.tftpl) → `deploy_spoke_monitoring()`
 
 ---
 
@@ -254,7 +254,7 @@ queue_config:
 - Snappy-compressed Protobuf: **~17.8 bytes per sample** (~88% reduction)
 - Entire spoke cluster bandwidth: **< 5 KB/s** outbound WAN traffic
 
-**Defined in:** EC2 Launch Template `user_data.sh.tftpl` → `deploy_spoke_monitoring()`
+**Defined in:** EC2 Launch Template [`/home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/<region>/compute/templates/user_data.sh.tftpl`](file:///home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/eu-central-1/compute/templates/user_data.sh.tftpl) → `deploy_spoke_monitoring()`
 
 ---
 
@@ -293,7 +293,7 @@ Central Prometheus Pod (port 9090)
 **Why kernel Netfilter instead of a userspace proxy:**
 Standard Docker port publishing (`docker-proxy`) runs a userspace daemon for every published port, introducing system call overhead and packet copies. The Netfilter DNAT rules intercept packets entirely in kernel space at wire speed — matching the declarative design used for PostgreSQL (`:30432`) and Valkey (`:30379`).
 
-**KinD `extraPortMappings` declaration** ([`script/prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/clusters.sh)):
+**KinD `extraPortMappings` declaration** ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/clusters.sh)):
 ```yaml
 nodes:
 - role: control-plane
@@ -325,7 +325,7 @@ nodes:
 
 **What happens:** PrimaryHub's Prometheus receives the HTTP POST, decompresses the Snappy payload, validates the Protobuf structure, and appends the samples into its local Time-Series Database (TSDB). The `cluster="..."` external labels ensure that metrics from different clusters are stored as completely separate time-series, preventing any collision.
 
-**The receiver flag** ([`codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml)):
+**The receiver flag** ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml)):
 ```yaml
 containers:
   - name: prometheus
@@ -333,9 +333,10 @@ containers:
     args:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
-      - "--storage.tsdb.retention.time=30d"
+      - "--storage.tsdb.retention.time=7d"
       - "--web.enable-remote-write-receiver"   # ← Unlocks POST /api/v1/write
       - "--web.enable-lifecycle"
+      - "--web.config.file=/etc/prometheus-web/web.yml" # ← Dynamic Basic Auth security
 ```
 
 **Dual-mode operation:** Central Prometheus simultaneously:
@@ -347,7 +348,7 @@ containers:
 Each edge cluster configures `external_labels` in its scraper config. These labels are permanently attached to every sample before it leaves the spoke:
 
 ```yaml
-# Injected via user_data.sh.tftpl (deploy_spoke_monitoring()) on Spoke 1:
+# Injected via /home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/eu-central-1/compute/templates/user_data.sh.tftpl (deploy_spoke_monitoring()) on Spoke 1:
 global:
   external_labels:
     cluster: 'spoke1'
@@ -356,7 +357,7 @@ global:
 ```
 
 ```yaml
-# codeInspector/values-secondary.yaml (SecondaryHub):
+# In /home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-secondary.yaml (SecondaryHub):
 prometheus:
   global:
     external_labels:
@@ -444,9 +445,9 @@ written         replayed — 100% history intact
 3. Docker's `data-root` is set to `/data/docker` on this volume
 4. KinD uses `rancher.io/local-path` provisioner — all PVs inherit EBS persistence
 5. Prometheus PVC `prometheus-pvc` binds to this storage class
-6. On restart, Prometheus replays the WAL and serves the full 30-day historical timeline
+6. On restart, Prometheus replays the WAL and serves the full 7-day historical timeline (metrics older than 7 days are automatically purged by the TSDB compactor)
 
-**Kubernetes PVC definition** ([`codeInspector/charts/prometheus/templates/pvc.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/pvc.yaml)):
+**Kubernetes PVC definition** ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/pvc.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/pvc.yaml)):
 ```yaml
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -473,7 +474,7 @@ spec:
 In Grafana's data sources config, all cluster names (`primaryhub`, `secondaryhub`, `spoke1`, `spoke2`) point to the **same URL**:
 
 ```yaml
-# codeInspector/charts/grafana/templates/configmap-datasources.yaml
+# /home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml
 datasources:
   - name: "primaryhub"
     url: http://prometheus-service.opensandbox-system.svc.cluster.local:9090
@@ -514,79 +515,74 @@ query_result(
 
 ### 4.1 Interactive Mermaid Diagram
 
-The following sequence diagram tracks a single metric sample from its initial local scrape at the edge in Frankfurt, through in-flight Snappy compression and WireGuard transit, to kernel Netfilter NAT, TSDB ingestion on PrimaryHub, and local in-cluster rendering in Grafana:
+The following sequence diagram tracks a single metric sample from its initial local scrape at the edge in Frankfurt, through dynamic SSM credential retrieval, in-flight Snappy compression, WireGuard transit, kernel Netfilter NAT, HTTP Basic Auth validation against `/etc/prometheus-web/web.yml`, TSDB ingestion with 7-day retention on PrimaryHub, and authenticated query rendering in Grafana:
 
 ```mermaid
 sequenceDiagram
     autonumber
 
     actor User as Engineer / Browser
+    participant Targets as K8s Targets (cAdvisor, OCM)
+    participant Scraper as Spoke Prometheus (Edge)
+    participant DiskWAL as Local Disk WAL (/prometheus/wal)
+    participant WALWatcher as WAL Watcher (Workers)
+    participant SSM as AWS SSM (/sandbox/monitoring/rw-*)
+    participant WireGuard as WireGuard VPN (10.99.0.0/24)
+    participant Netfilter as Linux Kernel (DNAT :30900)
+    participant WebAuth as Prometheus Web Auth (web.yml)
+    participant CentralProm as Central TSDB (Receiver)
+    participant EBS as AWS EBS (7d Retention)
+    participant Grafana as Central Grafana
 
-    box rgb(30, 41, 59) Edge Cluster (e.g. Spoke 1 – Frankfurt)
-        participant Targets as K8s Targets<br/>(cAdvisor, CoreDNS, OCM)
-        participant Scraper as Spoke Prometheus<br/>(Local Scraper)
-        participant DiskWAL as Local Disk WAL<br/>(/prometheus/wal)
-        participant WALWatcher as WAL Watcher & Workers<br/>(Snappy Compression)
-    end
-
-    box rgb(15, 23, 42) Encrypted Transit
-        participant WireGuard as WireGuard VPN Mesh<br/>(10.99.0.0/24)
-    end
-
-    box rgb(30, 58, 138) PrimaryHub (us-east-1)
-        participant Netfilter as Host Linux Kernel<br/>(Netfilter DNAT :30900)
-        participant CentralProm as Central Prometheus<br/>(--web.enable-remote-write-receiver)
-        participant EBS as Persistent Storage<br/>(100 GiB AWS EBS)
-        participant Grafana as Central Grafana<br/>(Universal Fleet Dashboard)
-    end
+    %% PHASE 0: BOOTSTRAP & DYNAMIC CREDENTIALS
+    == Phase 0: Zero-Touch Bootstrap & Dynamic SSM Credentials ==
+    Scraper->>SSM: 1. EC2 boot: query /sandbox/monitoring/rw-username & rw-password
+    SSM-->>Scraper: 2. Return credentials dynamically via IAM instance profile
+    Scraper->>Scraper: 3. Configure basic_auth in remote_write block
 
     %% PHASE 1: LOCAL SCRAPING & WAL COMMIT
-    rect rgb(38, 50, 70)
-    note over Targets, DiskWAL: Phase 1 — Local Scrape & Crash-Safe WAL (Network-Independent)
-    Scraper->>Targets: 1. Poll metrics every 15s (localhost / in-cluster)
+    == Phase 1: Local Scrape & Crash-Safe WAL (Network-Independent) ==
+    Scraper->>Targets: 4. Poll metrics every 15s (localhost / in-cluster)
     Targets-->>Scraper: Return ~60 samples/sec
-    Scraper->>DiskWAL: 2. Append to active segment (e.g. 00000008) — sync, uncompressed
-    note right of DiskWAL: Network failure here has ZERO impact.<br/>Scrapes continue appending to disk uninterrupted.
-    end
+    Scraper->>DiskWAL: 5. Append to active segment (sync, uncompressed)
+    Note over DiskWAL: Scrapes continue appending uninterrupted even if WAN drops
 
     %% PHASE 2: WAL WATCHING, BATCHING & COMPRESSION
-    rect rgb(45, 60, 85)
-    note over DiskWAL, WALWatcher: Phase 2 — WAL Watching, Label Namespacing & Snappy Compression
-    WALWatcher->>DiskWAL: 3. Tail committed samples (like 'tail -f')
+    == Phase 2: WAL Watching, Batching & Snappy Compression ==
+    WALWatcher->>DiskWAL: 6. Tail committed samples (like 'tail -f')
     DiskWAL-->>WALWatcher: Stream new sample bytes
-    WALWatcher->>WALWatcher: 4. Pool batches (≤1,000 samples or 5s deadline)
-    WALWatcher->>WALWatcher: 5. Attach: cluster="spoke1", role="spoke", region="eu-central-1"
-    WALWatcher->>WALWatcher: 6. Serialize → Protobuf (prompb.WriteRequest)
-    WALWatcher->>WALWatcher: 7. Google Snappy compress → ~88% WAN bandwidth reduction
-    end
+    WALWatcher->>WALWatcher: 7. Pool batches (<=1,000 samples or 5s deadline)
+    WALWatcher->>WALWatcher: 8. Attach: cluster="spoke1", role="spoke", region="eu-central-1"
+    WALWatcher->>WALWatcher: 9. Serialize -> Protobuf (prompb.WriteRequest)
+    WALWatcher->>WALWatcher: 10. Google Snappy compress (~88% WAN reduction)
 
-    %% PHASE 3: TRANSIT
-    rect rgb(30, 45, 75)
-    note over WALWatcher, Netfilter: Phase 3 — Wire-Speed Transit & Kernel NAT
-    WALWatcher->>WireGuard: 8. HTTP POST /api/v1/write (~12–18 KB batch)
-    WireGuard->>Netfilter: 9. Arrives at 10.99.0.1:30900 (ChaCha20 decrypted)
-    Netfilter->>CentralProm: 10. Kernel DNAT → KinD pod (172.18.0.2:30900)
-    end
+    %% PHASE 3: AUTHENTICATED TRANSIT & KERNEL NAT
+    == Phase 3: Authenticated Transit & Kernel NAT Ingress ==
+    WALWatcher->>WireGuard: 11. HTTP POST /api/v1/write + Authorization: Basic [credentials]
+    WireGuard->>Netfilter: 12. Arrives at 10.99.0.1:30900 (ChaCha20 decrypted)
+    Netfilter->>WebAuth: 13. Kernel DNAT -> KinD container (172.18.0.2:30900)
 
-    %% PHASE 4: INGESTION & PERSISTENCE
-    rect rgb(20, 50, 90)
-    note over CentralProm, EBS: Phase 4 — Head Chunk Ingest & AWS EBS Persistence
-    CentralProm->>CentralProm: 11. Decompress Snappy & validate Protobuf
-    CentralProm->>CentralProm: 12. Index time-series by labels (cluster="spoke1")
-    CentralProm->>CentralProm: 13. Append into in-memory Head Chunks
-    CentralProm-->>WALWatcher: 14. HTTP 204 No Content (batch acknowledged)
-    CentralProm->>EBS: 15. Every 2h: compact to immutable blocks on AWS EBS (/prometheus PVC)
-    note right of EBS: EBS survives complete EC2 replacement. History is never lost.
+    %% PHASE 4: AUTHENTICATION, INGESTION & PERSISTENCE
+    == Phase 4: Security Gate (Bcrypt), TSDB Ingest & 7-Day EBS Storage ==
+    WebAuth->>WebAuth: 14. Validate basic_auth against web.yml (bcrypt hash)
+    alt Credentials Valid
+        WebAuth->>CentralProm: 15. Forward payload to Remote Write Receiver
+        CentralProm->>CentralProm: 16. Decompress Snappy & index {cluster="spoke1"}
+        CentralProm->>CentralProm: 17. Append into in-memory Head Chunks
+        CentralProm-->>WALWatcher: 18. HTTP 204 No Content (batch committed)
+    else Invalid / Missing Credentials
+        WebAuth-->>WALWatcher: 19. HTTP 401 Unauthorized (Write Blocked)
     end
+    CentralProm->>EBS: 20. Every 2h: compact to immutable blocks on EBS
+    Note over EBS: TSDB compactor auto-purges blocks older than 7 days
 
     %% PHASE 5: VISUALIZATION
-    rect rgb(15, 65, 80)
-    note over User, Grafana: Phase 5 — Instant Visualization (Zero WAN Round-Trips)
-    User->>Grafana: 16. Select dashboard & pick "spoke1" in $cluster dropdown
-    Grafana->>CentralProm: 17. PromQL via local DNS (< 3ms): up{cluster="spoke1"}
-    CentralProm-->>Grafana: 18. Return TSDB data instantly
-    Grafana-->>User: 19. Dashboard renders in < 0.3s
-    end
+    == Phase 5: Instant Visualization via Authenticated Datasource ==
+    User->>Grafana: 21. Select dashboard & pick "spoke1" in $cluster dropdown
+    Grafana->>WebAuth: 22. PromQL via local DNS (< 3ms) with Basic Auth
+    WebAuth->>CentralProm: 23. Pass authenticated query: up{cluster="spoke1"}
+    CentralProm-->>Grafana: 24. Return TSDB data instantly
+    Grafana-->>User: 25. Dashboard renders in < 0.3s
 ```
 
 ---
@@ -596,54 +592,65 @@ sequenceDiagram
 The same flow in plain-text format for terminal viewing or documentation without Mermaid rendering:
 
 ```text
-=================================================================================================================
-              PUSH-BASED PROMETHEUS REMOTE WRITE (PRW) – END-TO-END SEQUENCE
-=================================================================================================================
+================================================================================================================================
+                    PUSH-BASED PROMETHEUS REMOTE WRITE (PRW) – END-TO-END SEQUENCE WITH AUTHENTICATION
+================================================================================================================================
 
- [K8s Targets]   [Spoke Scraper]     [Disk WAL]    [WAL Watcher]   [WireGuard]   [PrimaryHub]  [TSDB]  [Grafana]
-(cAdvisor/OCM)  (Edge Prometheus)  (/prom/wal)    (Worker Pool)   (10.99.0.0/24) (Netfilter)  (EBS)   (Dashboard)
-      │                │                │               │               │              │           │         │
-      │  PHASE 1: LOCAL SCRAPE & CRASH-SAFE DISK WAL (100% decoupled from internet health)        │         │
-      │  ────────────────────────────────────────────────────────────────────────────────          │         │
-      │◄── Scrape (15s) ──┤                │               │               │              │        │         │
-      │── Metrics (60/s) ─►                │               │               │              │        │         │
-      │                   ├── Append Sample ─►             │               │              │        │         │
-      │                   │   (raw binary, │               │               │              │        │         │
-      │                   │   uncompressed)│               │               │              │        │         │
-      │                   │                │               │               │              │        │         │
-      │  PHASE 2: WAL WATCHING, BATCHING & IN-FLIGHT SNAPPY COMPRESSION                  │        │         │
-      │  ──────────────────────────────────────────────────────────────────               │        │         │
-      │                   │                │◄── Tail ──────┤               │              │        │         │
-      │                   │                ├── Raw bytes ──►               │              │        │         │
-      │                   │                │               ├── 1. Pool in RAM (≤1000 or 5s)        │         │
-      │                   │                │               ├── 2. Tag: cluster="spoke1"            │         │
-      │                   │                │               ├── 3. Encode → Protobuf                │         │
-      │                   │                │               └── 4. Google Snappy (-88% WAN)         │         │
-      │                   │                │               │               │              │        │         │
-      │  PHASE 3: WIRE-SPEED ENCRYPTED TRANSIT & KERNEL INGRESS NAT                      │        │         │
-      │  ──────────────────────────────────────────────────────────                       │        │         │
-      │                   │                │               ├── HTTP POST (~12KB) ──────►  │        │         │
-      │                   │                │               │   /api/v1/write  │           │        │         │
-      │                   │                │               │               ├── ChaCha20 ──►        │         │
-      │                   │                │               │               │  encrypted   │        │         │
-      │                   │                │               │               │              ├──DNAT──►         │
-      │                   │                │               │               │              │ :30900  │         │
-      │                   │                │               │               │              │ → KinD  │         │
-      │  PHASE 4: TSDB INGESTION, LABEL INDEXING & AWS EBS PERSISTENCE                   │        │         │
-      │  ─────────────────────────────────────────────────────────────────────────────────        │         │
-      │                   │                │               │               │              │        ├── 1. Decompress & Validate
-      │                   │                │               │               │              │        ├── 2. Index: {cluster="spoke1"}
-      │                   │                │               │               │              │        ├── 3. Append → Head Chunks
-      │                   │                │               │◄─────── HTTP 204 No Content ─┼────────┤
-      │                   │                │               │               │              │        ├── 4. Flush 2h blocks → EBS
-      │                   │                │               │               │              │        │   (100GiB GP3, DeleteOnTermination=false)
-      │  PHASE 5: INSTANT LOCAL VISUALIZATION (ZERO WAN ROUND-TRIPS)                             │         │
-      │  ───────────────────────────────────────────────────────────                              │         │
-      │                   │                │               │               │              │        │◄── PromQL ─┤
-      │                   │                │               │               │              │        │   (< 3ms)  │ select $cluster
-      │                   │                │               │               │              │        │── Results ─►│
-      │                   │                │               │               │              │        │            │ renders < 0.3s
-=================================================================================================================
+ [K8s Targets]   [Spoke Scraper]     [Disk WAL]    [WAL Watcher]   [AWS SSM]     [WireGuard]    [Kernel NAT]   [Web Auth / TSDB]   [EBS PVC]    [Grafana]
+(cAdvisor/OCM)  (Edge Prometheus)  (/prom/wal)    (Worker Pool)  (us-east-1)   (10.99.0.0/24)  (iptables)     (--web.config.file) (7d Retain)  (Dashboard)
+      │                │                │               │             │              │              │                 │              │           │
+      │  PHASE 0: ZERO-TOUCH BOOTSTRAP & DYNAMIC CREDENTIALS          │              │              │                 │              │           │
+      │  ───────────────────────────────────────────────────          │              │              │                 │              │           │
+      │                ├── Query /sandbox/monitoring/rw-* ───────────►│              │              │                 │              │           │
+      │                │◄── Dynamic credentials (IAM profile) ────────┤              │              │                 │              │           │
+      │                ├── Configure basic_auth in remote_write       │              │              │                 │              │           │
+      │                │                │               │             │              │              │                 │              │           │
+      │  PHASE 1: LOCAL SCRAPE & CRASH-SAFE DISK WAL (100% decoupled from internet health)          │                 │              │           │
+      │  ─────────────────────────────────────────────────────────────────────────────────          │                 │              │           │
+      │◄── Scrape (15s) ──┤                │               │             │              │              │                 │              │           │
+      │── Metrics (60/s) ─►                │               │             │              │              │                 │              │           │
+      │                   ├── Append Sample ─►             │             │              │              │                 │              │           │
+      │                   │   (raw binary, │               │             │              │              │                 │              │           │
+      │                   │   uncompressed)│               │             │              │              │                 │              │           │
+      │                   │                │               │             │              │              │                 │              │           │
+      │  PHASE 2: WAL WATCHING, BATCHING & IN-FLIGHT SNAPPY COMPRESSION                         │                 │              │           │
+      │  ───────────────────────────────────────────────────────                                │                 │              │           │
+      │                   │                │◄── Tail ──────┤             │              │              │                 │              │           │
+      │                   │                ├── Raw bytes ──►             │              │              │                 │              │           │
+      │                   │                │               ├── 1. Pool in RAM (≤1000 or 5s)             │                 │              │           │
+      │                   │                │               ├── 2. Tag: cluster="spoke1"                 │                 │              │           │
+      │                   │                │               ├── 3. Encode → Protobuf                     │                 │              │           │
+      │                   │                │               └── 4. Google Snappy (-88% WAN)              │                 │              │           │
+      │                   │                │               │             │              │              │                 │              │           │
+      │  PHASE 3: AUTHENTICATED TRANSIT & KERNEL INGRESS NAT                                    │                 │              │           │
+      │  ───────────────────────────────────────────────────                                    │                 │              │           │
+      │                   │                │               ├── HTTP POST (/api/v1/write) +              │                 │              │           │
+      │                   │                │               │   Authorization: Basic [credentials] ──►   │                 │              │           │
+      │                   │                │               │             │              ├──ChaCha20─────►                 │              │           │
+      │                   │                │               │             │              │  encrypted   ├──DNAT :30900─────►              │           │
+      │                   │                │               │             │              │              │  to KinD IP      │              │           │
+      │  PHASE 4: BASIC AUTH SECURITY GATE, TSDB INGESTION & 7-DAY EBS STORAGE                                            │              │           │
+      │  ─────────────────────────────────────────────────────────────────────                                            │              │           │
+      │                   │                │               │             │              │              │   1. Validate Bcrypt in web.yml     │           │
+      │                   │                │               │             │              │              │   ├─ [Fail]: Return HTTP 401 ────┐  │           │
+      │                   │                │               │             │              │              │   └─ [Pass]: Decompress Snappy   │  │           │
+      │                   │                │               │             │              │              │   2. Index: {cluster="spoke1"}   │  │           │
+      │                   │                │               │             │              │              │   3. Append → Head Chunks        │  │           │
+      │                   │                │               │◄────────────┼──────────────┼──────────────┼────── HTTP 204 No Content        │  │           │
+      │                   │                │               │             │              │              │   4. Every 2h: compact to disk   │  │           │
+      │                   │                │               │             │              │              │   5. TSDB auto-purges > 7d ─────┼──►          │
+      │                   │                │               │             │              │              │      (EBS survives EC2 replace) │  │          │
+      │                   │                │               │             │              │              │                                 │  │          │
+      │  PHASE 5: INSTANT LOCAL VISUALIZATION (AUTHENTICATED DATASOURCE)                                                                 │  │          │
+      │  ───────────────────────────────────────────────────────────────                                                                 │  │          │
+      │                   │                │               │             │              │              │                 │◄── PromQL ────┼──┼──────────┤
+      │                   │                │               │             │              │              │                 │    with Basic │  │          │
+      │                   │                │               │             │              │              │                 │    Auth (<3ms)│  │          │
+      │                   │                │               │             │              │              │                 ├── Results ────┼──┼─────────►│
+      │                   │                │               │             │              │              │                 │               │  │ renders  │
+      │                   │                │               │             │              │              │                 │               │  │ < 0.3s    │
+================================================================================================================================
+```
 ```
 
 ---
@@ -665,7 +672,7 @@ The same flow in plain-text format for terminal viewing or documentation without
 
 CloudNativePG exports full database internals from `pg_stat_replication` and `pg_stat_wal_receiver` on port `9187`.
 
-**Dedicated metrics service** ([`codeInspector/charts/prometheus/templates/cnpg-metrics-services.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/cnpg-metrics-services.yaml)):
+**Dedicated metrics service** ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/cnpg-metrics-services.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/cnpg-metrics-services.yaml)):
 ```yaml
 apiVersion: v1
 kind: Service
@@ -685,7 +692,7 @@ spec:
     targetPort: 9187
 ```
 
-**Recording rules for HA SLIs** ([`codeInspector/charts/prometheus/templates/configmap.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml)):
+**Recording rules for HA SLIs** ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml)):
 ```yaml
 - name: postgresql-ha-replication
   rules:
@@ -808,21 +815,77 @@ These track the health of internal worker queues for operators (CNPG operator, O
 
 ### 6.1 Spoke Scraper: Zero-Touch Cloud-Init Provisioning
 
-Spoke monitoring is **fully automated** via the EC2 Launch Template `user_data.sh.tftpl`. There are no manual deployment steps.
+Spoke monitoring is **fully automated** via the EC2 Launch Template [`/home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/<region>/compute/templates/user_data.sh.tftpl`](file:///home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/eu-central-1/compute/templates/user_data.sh.tftpl) across all 4 AWS regions (`ap-south-1`, `eu-central-1`, `eu-west-1`, `us-east-1`). There are zero manual configuration steps.
 
-When any new spoke instance boots (any region: `ap-south-1`, `eu-central-1`, `eu-west-1`, `us-east-1`):
+**The Spoke Bootstrapping Pipeline:**
+1. cloud-init boots the instance, joins WireGuard (`10.99.0.0/24`), and starts the KinD cluster container
+2. Executes `clusteradm join` to register with Open Cluster Management (OCM)
+3. Invokes `deploy_spoke_monitoring()` which:
+   - Queries AWS SSM Parameter Store (`/sandbox/monitoring/rw-username` and `rw-password`) using the instance's IAM Profile
+   - Applies the `monitoring` Namespace, ServiceAccount, and ClusterRole RBAC
+   - Renders the `prometheus-scraper-config` ConfigMap with cluster labels, `remote_write` URL, and `basic_auth`
+   - Applies the `prometheus-scraper` Deployment running `prom/prometheus:v2.54.1`
+4. Within 10–15 seconds, the scraper pod reaches `Running` state and streams authenticated batches to PrimaryHub
+5. In Grafana, the new spoke dynamically appears in the `$cluster` dropdown variable within 60 seconds
 
-1. cloud-init boots the instance, joins WireGuard, and forms the KinD cluster
-2. Runs `clusteradm join` to register with OCM
-3. Invokes `deploy_spoke_monitoring()` which dynamically generates and applies:
-   - Namespace `monitoring`, ServiceAccount, and ClusterRole RBAC
-   - ConfigMap `prometheus-scraper-config` with cluster-specific `external_labels` and `remote_write` URL
-   - Deployment `prometheus-scraper` running `prom/prometheus:v2.54.1`
-4. Within 10–15 seconds, the scraper pod is `Running` and begins streaming to PrimaryHub
-5. In Grafana, the new spoke appears in the `$cluster` dropdown within 60 seconds — automatically
+**Autonomous Cloud-Init Script Snippet ([`/home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/eu-central-1/compute/templates/user_data.sh.tftpl`](file:///home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/eu-central-1/compute/templates/user_data.sh.tftpl)):**
+```bash
+# =============================================================================
+# Autonomous Spoke Prometheus Remote Write Deployment (/home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/eu-central-1/compute/templates/user_data.sh.tftpl)
+# =============================================================================
+deploy_spoke_monitoring() {
+  echo "=== Deploying Autonomous Spoke Prometheus Scraper (Push to PrimaryHub) ==="
+  export KUBECONFIG=/etc/kubernetes/admin.conf
 
-**Generated scraper ConfigMap (injected via cloud-init):**
-```yaml
+  # 1. Base RBAC & Namespace
+  kubectl apply -f - <<'EOF_MON_BASE'
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: monitoring
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-scraper
+  namespace: monitoring
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-scraper-role
+rules:
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/metrics", "services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["daemonsets", "statefulsets", "deployments"]
+    verbs: ["get", "list", "watch"]
+  - nonResourceURLs: ["/metrics"]
+    verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-scraper-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-scraper-role
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-scraper
+    namespace: monitoring
+EOF_MON_BASE
+
+  # 2. Dynamically retrieve Remote Write credentials from AWS SSM Parameter Store (Zero-Touch N Spokes)
+  RW_USER=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-username" --region "us-east-1" --query "Parameter.Value" --output text 2>/dev/null || true)
+  [ -z "$RW_USER" ] || [ "$RW_USER" = "None" ] && RW_USER="prometheus-rw"
+  RW_PASS=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-password" --region "us-east-1" --query "Parameter.Value" --with-decryption --output text 2>/dev/null || true)
+  [ -z "$RW_PASS" ] || [ "$RW_PASS" = "None" ] && RW_PASS="PrometheusRemoteWriteSecure2026!"
+
+  # 3. Apply scraper ConfigMap with remote_write and basic_auth
+  cat <<EOF_CM | kubectl apply -f -
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -833,53 +896,162 @@ data:
     global:
       scrape_interval: 15s
       evaluation_interval: 15s
+      scrape_timeout: 10s
       external_labels:
-        cluster: '${cluster_name}'
-        role:    'spoke'
-        region:  '${region}'
+        cluster: "${cluster_name}"
+        role: "${role}"
+        region: "${region}"
 
     remote_write:
       - url: "http://10.99.0.1:30900/api/v1/write"
-        remote_timeout: 30s
+        basic_auth:
+          username: "$${RW_USER}"
+          password: "$${RW_PASS}"
         queue_config:
-          max_samples_per_send: 500
+          capacity: 10000
+          max_shards: 10
+          min_shards: 1
+          max_samples_per_send: 1000
           batch_send_deadline: 5s
+          min_backoff: 500ms
+          max_backoff: 10s
 
     scrape_configs:
       - job_name: 'prometheus-scraper'
         static_configs:
-          - targets: ['127.0.0.1:9090']
+          - targets: ['localhost:9090']
 
-      - job_name: 'kubernetes-nodes-cadvisor'
-        scheme: https
-        tls_config:
-          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
-          insecure_skip_verify: true
-        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+      - job_name: 'open-cluster-management-agent'
         kubernetes_sd_configs:
-          - role: node
+          - role: pod
+            namespaces:
+              names:
+                - open-cluster-management-agent
         relabel_configs:
+          - source_labels: [__address__]
+            action: replace
+            regex: ([^:]+)(?::\d+)?
+            replacement: \$1:8080
+            target_label: __address__
           - action: labelmap
-            regex: __meta_kubernetes_node_label_(.+)
-          - target_label: __metrics_path__
-            replacement: /metrics/cadvisor
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: kubernetes_pod_name
+
+      - job_name: 'kubernetes-services'
+        kubernetes_sd_configs:
+          - role: service
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_service_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_service_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: \$1:\$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_service_label_(.+)
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_service_name]
+            target_label: kubernetes_name
+
+      - job_name: 'kubernetes-pods'
+        kubernetes_sd_configs:
+          - role: pod
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_scrape]
+            action: keep
+            regex: true
+          - source_labels: [__meta_kubernetes_pod_annotation_prometheus_io_path]
+            action: replace
+            target_label: __metrics_path__
+            regex: (.+)
+          - source_labels: [__address__, __meta_kubernetes_pod_annotation_prometheus_io_port]
+            action: replace
+            regex: ([^:]+)(?::\d+)?;(\d+)
+            replacement: \$1:\$2
+            target_label: __address__
+          - action: labelmap
+            regex: __meta_kubernetes_pod_label_(.+)
+          - source_labels: [__meta_kubernetes_pod_namespace]
+            action: replace
+            target_label: kubernetes_namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            action: replace
+            target_label: kubernetes_pod_name
+EOF_CM
+
+  # 4. Deploy the Prometheus Scraper container
+  cat <<'EOF_DEP' | kubectl apply -f -
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus-scraper
+  namespace: monitoring
+  labels:
+    app: prometheus-scraper
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: prometheus-scraper
+  template:
+    metadata:
+      labels:
+        app: prometheus-scraper
+    spec:
+      serviceAccountName: prometheus-scraper
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.54.1
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time=2h"
+            - "--web.enable-lifecycle"
+          ports:
+            - containerPort: 9090
+              name: web
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: storage
+              mountPath: /prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-scraper-config
+        - name: storage
+          emptyDir: {}
+EOF_DEP
+}
 ```
 
-### 6.2 Hub & Standby Monitoring: Helm Chart Deployment
+---
 
-Monitoring on the control plane hubs is managed by the self-contained Helm chart [`codeInspector`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector), deployed during cluster provisioning in [`script/prod-docker-multi-script/lib/deploy.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/deploy.sh):
+### 6.2 Hub & Standby Monitoring: Helm Chart Architecture & Code
 
-| Hub | Deployment Mode | Key Configuration |
-| :--- | :--- | :--- |
-| **PrimaryHub** | Central TSDB receiver + local scraper | `--web.enable-remote-write-receiver`, NodePort `30900` for inbound push streams |
-| **SecondaryHub** | Push client + local scraper | `remote_write` → `http://10.99.0.1:30900/api/v1/write` |
+Monitoring on the control plane hubs is managed by the self-contained Helm chart [`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector), deployed during cluster provisioning in [`/home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/deploy.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/deploy.sh):
 
-**Chart values defaults** ([`codeInspector/charts/prometheus/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml)):
+| Hub | Deployment Mode | Security & Ingress | Retention |
+| :--- | :--- | :--- | :--- |
+| **PrimaryHub** | Central TSDB receiver + local scraper | `--web.config.file` (Basic Auth), NodePort `30900` | **7 days** (automated EBS compaction) |
+| **SecondaryHub** | Push client + local scraper | `remote_write` with `basic_auth` → `10.99.0.1:30900` | Local 2h buffer + central streaming |
+
+#### 1. Helm Values Configuration ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml))
 ```yaml
 namespace: opensandbox-system
 clusterName: "primaryhub"
 clusterRole: "hub"
-retention: "30d"
+retention: "7d"             # Automated compactor cleans blocks older than 7d
 cnpgMetrics:
   enabled: true
 persistence:
@@ -893,6 +1065,132 @@ service:
   nodePort:
     enabled: true
     port: 30900
+auth:
+  enabled: true
+  remoteWrite:
+    username: "prometheus-rw"
+    hashedPassword: "$2y$10$XNVJltW/XwJnMEwAxlcUo.mcQWUhIJrlqLONxd9Xn8etCITQkHo5O" # bcrypt hash
+    plainPassword: "PrometheusRemoteWriteSecure2026!"
+```
+
+#### 2. Prometheus Web Configuration Secret Template ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/secret-web-config.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/secret-web-config.yaml))
+```yaml
+{{- if and .Values.auth .Values.auth.enabled }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: prometheus-web-config
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+type: Opaque
+stringData:
+  web.yml: |
+    basic_auth_users:
+      {{ .Values.auth.remoteWrite.username }}: {{ .Values.auth.remoteWrite.hashedPassword | quote }}
+{{- end }}
+```
+
+#### 3. PrimaryHub Prometheus Deployment Manifest ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml))
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: 1
+  template:
+    spec:
+      containers:
+        - name: prometheus
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.path=/prometheus"
+            - "--storage.tsdb.retention.time={{ .Values.retention | default "7d" }}"
+            - "--web.enable-lifecycle"
+            - "--web.enable-remote-write-receiver"
+            - "--web.route-prefix=/"
+            {{- if and .Values.auth .Values.auth.enabled }}
+            - "--web.config.file=/etc/prometheus-web/web.yml"
+            {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            {{- if and .Values.auth .Values.auth.enabled }}
+            - name: web-config
+              mountPath: /etc/prometheus-web
+            {{- end }}
+            - name: storage
+              mountPath: /prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        {{- if and .Values.auth .Values.auth.enabled }}
+        - name: web-config
+          secret:
+            secretName: prometheus-web-config
+        {{- end }}
+        - name: storage
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.pvcName }}
+```
+
+#### 4. PrimaryHub Prometheus Self-Scrape Authentication ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml))
+```yaml
+    scrape_configs:
+      - job_name: 'prometheus'
+        metrics_path: '{{ if and .Values.ingressRoute .Values.ingressRoute.enabled }}/prometheus/metrics{{ else }}/metrics{{ end }}'
+        {{- if and .Values.auth .Values.auth.enabled }}
+        basic_auth:
+          username: {{ .Values.auth.remoteWrite.username | quote }}
+          password: {{ .Values.auth.remoteWrite.plainPassword | quote }}
+        {{- end }}
+        static_configs:
+          - targets: ['localhost:9090']
+```
+
+#### 5. SecondaryHub Push Client Values ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-secondary.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-secondary.yaml))
+```yaml
+prometheus:
+  enabled: true
+  clusterName: "secondaryhub"
+  clusterRole: "hub"
+  remoteWrite:
+    - url: "http://10.99.0.1:30900/api/v1/write"
+      basic_auth:
+        username: "prometheus-rw"
+        password: "PrometheusRemoteWriteSecure2026!"
+      queue_config:
+        capacity: 10000
+        max_shards: 10
+        min_shards: 1
+        max_samples_per_send: 1000
+        batch_send_deadline: 5s
+        min_backoff: 500ms
+        max_backoff: 10s
+```
+
+#### 6. Central Grafana Authenticated Datasources ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml))
+```yaml
+      - name: "primaryhub"
+        uid: "prometheus-primaryhub"
+        type: prometheus
+        access: proxy
+        url: http://{{ .Values.prometheusServiceName }}.{{ .Values.prometheusNamespace }}.svc.cluster.local:{{ .Values.prometheusPort }}
+        isDefault: true
+        jsonData:
+          timeInterval: "15s"
+          httpMethod: GET
+        {{- if and .Values.prometheusAuth .Values.prometheusAuth.enabled }}
+        basicAuth: true
+        basicAuthUser: {{ .Values.prometheusAuth.username | quote }}
+        secureJsonData:
+          basicAuthPassword: {{ .Values.prometheusAuth.password | quote }}
+        {{- end }}
+        editable: false
 ```
 
 ### 6.3 Spoke Egress NAT Issue & Fix
@@ -948,7 +1246,7 @@ aws ssm start-session \
 
 ### 7.2 Pre-Provisioned Dashboards
 
-All dashboards are embedded inside Helm ConfigMap `grafana-dashboard-codeinspector` ([`codeInspector/charts/grafana/templates/configmap-dashboards.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-dashboards.yaml)) and auto-mounted into Grafana at startup — no manual JSON imports needed.
+All dashboards are embedded inside Helm ConfigMap `grafana-dashboard-codeinspector` ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-dashboards.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-dashboards.yaml)) and auto-mounted into Grafana at startup — no manual JSON imports needed.
 
 | Dashboard | Key | Description |
 | :--- | :--- | :--- |
@@ -1039,13 +1337,16 @@ nohup ngrok http --domain=dipper-shun-glowing.ngrok-free.dev 172.18.0.2:30896 \
 ### 9.1 Multi-Cluster Ingestion Verification
 
 ```bash
+# Helper: Export base64 auth token for Prometheus CLI queries:
+AUTH_HEADER="Authorization: Basic $(echo -n 'prometheus-rw:PrometheusRemoteWriteSecure2026!' | base64)"
+
 # Verify all 4 clusters are streaming (the "crown jewel" query):
 kubectl exec -n opensandbox-system deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=count%20by%20(cluster)(up)" | jq .
+  wget -qO- --header="$AUTH_HEADER" "http://localhost:9090/api/v1/query?query=count%20by%20(cluster)(up)" | jq .
 
 # Verify all scrape target health statuses:
 kubectl exec -n opensandbox-system deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/targets" | \
+  wget -qO- --header="$AUTH_HEADER" "http://localhost:9090/api/v1/targets" | \
   jq '.data.activeTargets[] | {job: .labels.job, cluster: .labels.cluster, health: .health}'
 ```
 
@@ -1054,7 +1355,7 @@ kubectl exec -n opensandbox-system deploy/prometheus -- \
 ```bash
 # All replication and PostgreSQL metrics:
 kubectl exec -n opensandbox-system deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query={__name__=~\"cnpg_pg_stat_replication.*|postgresql:.*\"}" \
+  wget -qO- --header="$AUTH_HEADER" "http://localhost:9090/api/v1/query?query={__name__=~\"cnpg_pg_stat_replication.*|postgresql:.*\"}" \
   | jq -r '.data.result[] | "\(.metric.__name__): \(.value[1])"' | sort -u
 ```
 
@@ -1063,11 +1364,11 @@ kubectl exec -n opensandbox-system deploy/prometheus -- \
 ```bash
 # Total successful spoke admissions:
 kubectl exec -n opensandbox-system deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=sum(controller_runtime_webhook_requests_total{code=\"200\",app=~\"cluster-manager.*\"})" | jq .
+  wget -qO- --header="$AUTH_HEADER" "http://localhost:9090/api/v1/query?query=sum(controller_runtime_webhook_requests_total{code=\"200\",app=~\"cluster-manager.*\"})" | jq .
 
 # Total admission errors (should be 0):
 kubectl exec -n opensandbox-system deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=sum(controller_runtime_webhook_requests_total{code=\"500\",app=~\"cluster-manager.*\"})%20or%20vector(0)" | jq .
+  wget -qO- --header="$AUTH_HEADER" "http://localhost:9090/api/v1/query?query=sum(controller_runtime_webhook_requests_total{code=\"500\",app=~\"cluster-manager.*\"})%20or%20vector(0)" | jq .
 ```
 
 ### 9.4 Remote Write Outbound Verification (on Spokes)
@@ -1090,7 +1391,43 @@ kubectl -n monitoring exec deploy/prometheus-scraper -- \
 kubectl -n monitoring logs deploy/prometheus-scraper --tail=30 | grep -i "remote"
 ```
 
-### 9.5 EBS Persistence Verification (on PrimaryHub Host)
+### 9.5 Remote Write Receiver Authentication Verification
+
+Execute these verification checks from any node or management host across the WireGuard mesh (`10.99.0.0/24`):
+
+```bash
+# 1. Unauthenticated write test (MUST be rejected with HTTP 401 Unauthorized):
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
+# Expected output: 401
+
+# 2. Authenticated health probe test (MUST succeed with HTTP 200 OK):
+curl -s -u "prometheus-rw:PrometheusRemoteWriteSecure2026!" -o /dev/null -w "%{http_code}\n" \
+  http://10.99.0.1:30900/-/healthy
+# Expected output: 200
+
+# 3. Authenticated write endpoint probe (MUST accept credentials - HTTP 400 Bad Request on empty payload, NOT 401):
+curl -s -u "prometheus-rw:PrometheusRemoteWriteSecure2026!" -o /dev/null -w "%{http_code}\n" -X POST \
+  http://10.99.0.1:30900/api/v1/write
+# Expected output: 400
+
+# 4. Verify AWS SSM Parameter Store credential provisioning (for zero-touch N-spoke joins):
+aws ssm get-parameter --name "/sandbox/monitoring/rw-username" --region "us-east-1" --query "Parameter.Value" --output text
+# Expected output: prometheus-rw
+
+aws ssm get-parameter --name "/sandbox/monitoring/rw-password" --with-decryption --region "us-east-1" --query "Parameter.Value" --output text
+# Expected output: PrometheusRemoteWriteSecure2026!
+
+# 5. Verify spoke scrapers show zero 401 errors and successful WAL replay:
+kubectl -n monitoring logs deploy/prometheus-scraper --tail=20 | grep -E "WAL|remote"
+# Expected output: caller=dedupe.go:112 component=remote level=info ... msg="Done replaying WAL"
+
+# 6. Verify Central Grafana datasource proxy succeeds:
+kubectl -n opensandbox-system exec deploy/grafana -- \
+  curl -s -u admin:sandbox-admin "http://localhost:3000/api/datasources/proxy/uid/prometheus-primaryhub/api/v1/query?query=count%20by%20(cluster)(up)" | jq .
+# Expected output: {"status":"success","data":{"resultType":"vector","result":[...]}}
+```
+
+### 9.6 EBS Persistence Verification (on PrimaryHub Host)
 
 ```bash
 # Verify EBS volume is mounted on /data:
@@ -1104,9 +1441,10 @@ kubectl -n opensandbox-system get pvc prometheus-pvc
 # Inspect the 2-hour TSDB block directories:
 kubectl -n opensandbox-system exec deploy/prometheus -- ls -lh /prometheus
 
-# Verify 30 days of historical data retention:
+# Verify 7 days of historical data retention (compactor auto-cleans blocks older than 7d):
 kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=up[24h]" | \
+  wget -qO- --header="Authorization: Basic $(echo -n 'prometheus-rw:PrometheusRemoteWriteSecure2026!' | base64)" \
+  "http://localhost:9090/api/v1/query?query=up[24h]" | \
   jq '.data.result[0].values | length'
 # Expected: 5760  (5,760 × 15s = 24 hours of continuous data)
 ```
@@ -1145,7 +1483,7 @@ cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 ./upgrade-helm.sh all           # Upgrade both PrimaryHub and SecondaryHub
 ```
 
-**What the script does** ([`script/prod-docker-multi-script/upgrade-helm.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/upgrade-helm.sh)):
+**What the script does** ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/upgrade-helm.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/upgrade-helm.sh)):
 ```bash
 helm upgrade codeinspector "${CODE_INSPECTOR_DIR}" \
   --skip-crds \
@@ -1181,6 +1519,6 @@ helm upgrade codeinspector "${CODE_INSPECTOR_DIR}" \
 
 *For a step-by-step hands-on demonstration of these 6 phases with live terminal commands, real cluster outputs, and talking points for each pillar, see:*
 
-👉 **[`docs/prometheus/walkthrough-demo-final.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/walkthrough-demo-final.md)** — concise presentation script (10–15 min)
+👉 **[`/home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/walkthrough-demo-final.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/walkthrough-demo-final.md)** — concise presentation script (10–15 min)
 
-👉 **[`docs/prometheus/walkthrough-demo.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/walkthrough-demo.md)** — detailed technical demo with deep-dive explanations
+👉 **[`/home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/walkthrough-demo.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/walkthrough-demo.md)** — detailed technical demo with deep-dive explanations

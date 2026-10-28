@@ -27,6 +27,11 @@ data:
     scrape_configs:
       - job_name: 'prometheus'
         metrics_path: '{{ if and .Values.ingressRoute .Values.ingressRoute.enabled }}/prometheus/metrics{{ else }}/metrics{{ end }}'
+        {{- if and .Values.auth .Values.auth.enabled }}
+        basic_auth:
+          username: {{ .Values.auth.remoteWrite.username | quote }}
+          password: {{ .Values.auth.remoteWrite.plainPassword | quote }}
+        {{- end }}
         static_configs:
           - targets: ['localhost:9090']
 

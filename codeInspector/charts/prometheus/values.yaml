@@ -2,7 +2,7 @@ namespace: opensandbox-system
 
 clusterName: "primaryhub"
 clusterRole: "hub"
-retention: "30d"
+retention: "7d"
 
 cnpgMetrics:
   enabled: true
@@ -43,3 +43,11 @@ resources:
   limits:
     cpu: "500m"
     memory: "512Mi"
+
+# Remote write receiver & web API authentication
+auth:
+  enabled: true
+  remoteWrite:
+    username: "prometheus-rw"
+    hashedPassword: "$2y$10$XNVJltW/XwJnMEwAxlcUo.mcQWUhIJrlqLONxd9Xn8etCITQkHo5O"
+    plainPassword: "PrometheusRemoteWriteSecure2026!"

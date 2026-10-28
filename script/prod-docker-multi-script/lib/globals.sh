@@ -25,7 +25,11 @@ CODE_INSPECTOR_DIR="${ROOT_DIR}/codeInspector"
 OPENSANDBOX_BUILD_DIR="${ROOT_DIR}/opensandbox-server/docker-build"
 
 # Detect repository location relative to the script or common paths
-if [ -d "${SCRIPT_DIR}/../codeInspector" ]; then
+if [ -d "${SCRIPT_DIR}/../../codeInspector" ]; then
+  SANDBOX_REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
+  CODE_INSPECTOR_DIR="${SANDBOX_REPO_DIR}/codeInspector"
+  OPENSANDBOX_BUILD_DIR="${SANDBOX_REPO_DIR}/opensandbox-server/docker-build"
+elif [ -d "${SCRIPT_DIR}/../codeInspector" ]; then
   SANDBOX_REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
   CODE_INSPECTOR_DIR="${SANDBOX_REPO_DIR}/codeInspector"
   OPENSANDBOX_BUILD_DIR="${SANDBOX_REPO_DIR}/opensandbox-server/docker-build"

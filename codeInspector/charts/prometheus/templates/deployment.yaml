@@ -23,10 +23,13 @@ spec:
           args:
             - "--config.file=/etc/prometheus/prometheus.yml"
             - "--storage.tsdb.path=/prometheus"
-            - "--storage.tsdb.retention.time={{ .Values.retention | default "30d" }}"
+            - "--storage.tsdb.retention.time={{ .Values.retention | default "7d" }}"
             - "--web.enable-lifecycle"
             - "--web.enable-remote-write-receiver"
             - "--web.route-prefix=/"
+            {{- if and .Values.auth .Values.auth.enabled }}
+            - "--web.config.file=/etc/prometheus-web/web.yml"
+            {{- end }}
             {{- if and .Values.ingressRoute .Values.ingressRoute.enabled }}
             - '--web.external-url={{ .Values.ingressPath | default "/prometheus" }}'
             {{- end }}
@@ -38,12 +41,21 @@ spec:
           volumeMounts:
             - name: config
               mountPath: /etc/prometheus
+            {{- if and .Values.auth .Values.auth.enabled }}
+            - name: web-config
+              mountPath: /etc/prometheus-web
+            {{- end }}
             - name: storage
               mountPath: /prometheus
       volumes:
         - name: config
           configMap:
             name: prometheus-config
+        {{- if and .Values.auth .Values.auth.enabled }}
+        - name: web-config
+          secret:
+            secretName: prometheus-web-config
+        {{- end }}
         - name: storage
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

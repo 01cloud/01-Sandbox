@@ -328,7 +328,7 @@ prometheus:
   namespace: opensandbox-system
   clusterName: "primaryhub"
   clusterRole: "hub"
-  retention: "30d"
+  retention: "7d"
   cnpgMetrics:
     enabled: true
   apiServerNamespace: opensandbox-system
@@ -367,6 +367,12 @@ prometheus:
     limits:
       cpu: "500m"
       memory: "512Mi"
+  auth:
+    enabled: true
+    remoteWrite:
+      username: "prometheus-rw"
+      hashedPassword: "$2y$10$XNVJltW/XwJnMEwAxlcUo.mcQWUhIJrlqLONxd9Xn8etCITQkHo5O"
+      plainPassword: "PrometheusRemoteWriteSecure2026!"
 ###############################################################
 # Grafana component values
 ###############################################################
@@ -376,6 +382,10 @@ grafana:
   prometheusNamespace: opensandbox-system
   prometheusServiceName: prometheus-service
   prometheusPort: 9090
+  prometheusAuth:
+    enabled: true
+    username: "prometheus-rw"
+    password: "PrometheusRemoteWriteSecure2026!"
   replicaCount: 1
   remoteClusters:
     secondaryhub:

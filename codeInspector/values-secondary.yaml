@@ -138,6 +138,9 @@ prometheus:
     enabled: true
   remoteWrite:
     - url: "http://10.99.0.1:30900/api/v1/write"
+      basic_auth:
+        username: "prometheus-rw"
+        password: "PrometheusRemoteWriteSecure2026!"
       queue_config:
         capacity: 10000
         max_shards: 10

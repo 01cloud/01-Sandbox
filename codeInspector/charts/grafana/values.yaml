@@ -4,6 +4,10 @@ namespace: opensandbox-system
 prometheusNamespace: opensandbox-system
 prometheusServiceName: prometheus-service
 prometheusPort: 9090
+prometheusAuth:
+  enabled: true
+  username: "prometheus-rw"
+  password: "PrometheusRemoteWriteSecure2026!"
 
 # Multi-Cluster remote Prometheus endpoints (via WireGuard overlay 10.99.0.0/24)
 remoteClusters:

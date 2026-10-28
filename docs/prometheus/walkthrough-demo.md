@@ -342,11 +342,24 @@ Standard Docker port publishing (`docker-proxy`) creates a userspace daemon for 
 
 ### Commands & Expected Output
 
-#### 3.1 — Test End-to-End WireGuard Connectivity from Spoke to PrimaryHub
+#### 3.1 — Verify Secure Ingress & Authentication from Spoke to PrimaryHub
 
 ```bash
+# 3.1a — Test unauthenticated probe (MUST be rejected with HTTP 401 Unauthorized):
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
-  wget -qS -O- "http://10.99.0.1:30900/-/healthy"
+  wget -qS -O- "http://10.99.0.1:30900/-/healthy" 2>&1 | grep "HTTP/"
+```
+
+**Expected Output:**
+```text
+  HTTP/1.1 401 Unauthorized
+```
+
+```bash
+# 3.1b — Test authenticated probe using dynamic credentials (MUST succeed with HTTP 200 OK):
+kubectl -n monitoring exec deploy/prometheus-scraper -- \
+  wget -qS -O- --header="Authorization: Basic $(echo -n 'prometheus-rw:PrometheusRemoteWriteSecure2026!' | base64)" \
+  "http://10.99.0.1:30900/-/healthy"
 ```
 
 **Expected Output:**
@@ -359,7 +372,28 @@ kubectl -n monitoring exec deploy/prometheus-scraper -- \
 Prometheus Server is Healthy.
 ```
 
-This confirms the complete path: Spoke → WireGuard tunnel → PrimaryHub port 30900 → KinD container → Prometheus pod.
+```bash
+# 3.1c — Test Remote Write endpoint directly (/api/v1/write):
+# Unauthenticated attempt (rejected with HTTP 401):
+curl -s -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
+# Output: 401
+
+# Authenticated attempt (credentials accepted; HTTP 400 Bad Request returned because probe body is empty, proving auth passed):
+curl -s -u "prometheus-rw:PrometheusRemoteWriteSecure2026!" -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
+# Output: 400
+```
+
+```bash
+# 3.1d — Verify Spoke Scraper logs show zero 401 errors and clean authenticated streaming:
+kubectl -n monitoring logs deploy/prometheus-scraper --tail=20 | grep -E "WAL|remote"
+```
+
+**Expected Output:**
+```text
+caller=dedupe.go:112 component=remote level=info subcomponent=wal msg="Done replaying WAL" duration=...
+```
+
+This confirms the complete path: Spoke → WireGuard tunnel → PrimaryHub port 30900 → KinD container → Prometheus HTTP Basic Auth Security Layer.
 
 #### 3.2 — Inspect the Kernel-Level DNAT Ingress Rule on PrimaryHub
 
@@ -443,10 +477,11 @@ kubectl -n opensandbox-system get deploy prometheus \
 [
   "--config.file=/etc/prometheus/prometheus.yml",
   "--storage.tsdb.path=/prometheus",
-  "--storage.tsdb.retention.time=30d",
+  "--storage.tsdb.retention.time=7d",
   "--web.enable-lifecycle",
   "--web.enable-remote-write-receiver",
-  "--web.route-prefix=/"
+  "--web.route-prefix=/",
+  "--web.config.file=/etc/prometheus-web/web.yml"
 ]
 ```
 
