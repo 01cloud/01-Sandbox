@@ -356,9 +356,13 @@ kubectl -n monitoring exec deploy/prometheus-scraper -- \
 ```
 
 ```bash
-# 3.1b — Test authenticated probe using dynamic credentials (MUST succeed with HTTP 200 OK):
+# 3.1b — Dynamically fetch credentials from AWS SSM Parameter Store:
+RW_USER=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-username" --region "us-east-1" --query "Parameter.Value" --output text)
+RW_PASS=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-password" --region "us-east-1" --with-decryption --query "Parameter.Value" --output text)
+
+# Test authenticated probe using dynamic credentials (MUST succeed with HTTP 200 OK):
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
-  wget -qS -O- --header="Authorization: Basic $(echo -n 'prometheus-rw:PrometheusRemoteWriteSecure2026!' | base64)" \
+  wget -qS -O- --header="Authorization: Basic $(echo -n "${RW_USER}:${RW_PASS}" | base64)" \
   "http://10.99.0.1:30900/-/healthy"
 ```
 
@@ -379,7 +383,7 @@ curl -s -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/w
 # Output: 401
 
 # Authenticated attempt (credentials accepted; HTTP 400 Bad Request returned because probe body is empty, proving auth passed):
-curl -s -u "prometheus-rw:PrometheusRemoteWriteSecure2026!" -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
+curl -s -u "${RW_USER}:${RW_PASS}" -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
 # Output: 400
 ```
 

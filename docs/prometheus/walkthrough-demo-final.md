@@ -132,9 +132,13 @@ kubectl -n monitoring exec deploy/prometheus-scraper -- \
   wget -qS -O- "http://10.99.0.1:30900/-/healthy" 2>&1 | grep "HTTP/"
 # Expected: HTTP/1.1 401 Unauthorized
 
+# Dynamically fetch credentials from AWS SSM Parameter Store (zero hardcoding):
+RW_USER=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-username" --region "us-east-1" --query "Parameter.Value" --output text)
+RW_PASS=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-password" --region "us-east-1" --with-decryption --query "Parameter.Value" --output text)
+
 # Authenticated health check attempt (accepted):
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
-  wget -qS -O- --header="Authorization: Basic $(echo -n 'prometheus-rw:PrometheusRemoteWriteSecure2026!' | base64)" \
+  wget -qS -O- --header="Authorization: Basic $(echo -n "${RW_USER}:${RW_PASS}" | base64)" \
   "http://10.99.0.1:30900/-/healthy"
 # Expected: HTTP/1.1 200 OK (Prometheus Server is Healthy.)
 
@@ -142,7 +146,7 @@ kubectl -n monitoring exec deploy/prometheus-scraper -- \
 curl -s -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
 # Expected: 401 (Unauthorized without credentials)
 
-curl -s -u "prometheus-rw:PrometheusRemoteWriteSecure2026!" -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
+curl -s -u "${RW_USER}:${RW_PASS}" -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
 # Expected: 400 (Bad Request on empty probe body, proving credentials passed auth check)
 
 # Verify spoke scraper logs show zero 401s:

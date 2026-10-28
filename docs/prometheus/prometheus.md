@@ -879,10 +879,16 @@ subjects:
 EOF_MON_BASE
 
   # 2. Dynamically retrieve Remote Write credentials from AWS SSM Parameter Store (Zero-Touch N Spokes)
-  RW_USER=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-username" --region "us-east-1" --query "Parameter.Value" --output text 2>/dev/null || true)
-  [ -z "$RW_USER" ] || [ "$RW_USER" = "None" ] && RW_USER="prometheus-rw"
-  RW_PASS=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-password" --region "us-east-1" --query "Parameter.Value" --with-decryption --output text 2>/dev/null || true)
-  [ -z "$RW_PASS" ] || [ "$RW_PASS" = "None" ] && RW_PASS="PrometheusRemoteWriteSecure2026!"
+  echo "Fetching Remote Write credentials from AWS SSM Parameter Store (/sandbox/monitoring/rw-* in us-east-1)..."
+  if ! RW_USER=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-username" --region "us-east-1" --query "Parameter.Value" --output text); then
+    echo "FATAL: Failed to retrieve /sandbox/monitoring/rw-username from AWS SSM Parameter Store in us-east-1. No fallback permitted; aborting." >&2
+    return 1
+  fi
+
+  if ! RW_PASS=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-password" --region "us-east-1" --query "Parameter.Value" --with-decryption --output text); then
+    echo "FATAL: Failed to retrieve /sandbox/monitoring/rw-password from AWS SSM Parameter Store in us-east-1. No fallback password permitted; aborting." >&2
+    return 1
+  fi
 
   # 3. Apply scraper ConfigMap with remote_write and basic_auth
   cat <<EOF_CM | kubectl apply -f -
@@ -1400,13 +1406,17 @@ Execute these verification checks from any node or management host across the Wi
 curl -s -o /dev/null -w "%{http_code}\n" -X POST http://10.99.0.1:30900/api/v1/write
 # Expected output: 401
 
-# 2. Authenticated health probe test (MUST succeed with HTTP 200 OK):
-curl -s -u "prometheus-rw:PrometheusRemoteWriteSecure2026!" -o /dev/null -w "%{http_code}\n" \
+# 2. Retrieve dynamic credentials from AWS SSM Parameter Store:
+RW_USER=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-username" --region "us-east-1" --query "Parameter.Value" --output text)
+RW_PASS=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-password" --with-decryption --region "us-east-1" --query "Parameter.Value" --output text)
+
+# 3. Authenticated health probe test (MUST succeed with HTTP 200 OK):
+curl -s -u "${RW_USER}:${RW_PASS}" -o /dev/null -w "%{http_code}\n" \
   http://10.99.0.1:30900/-/healthy
 # Expected output: 200
 
-# 3. Authenticated write endpoint probe (MUST accept credentials - HTTP 400 Bad Request on empty payload, NOT 401):
-curl -s -u "prometheus-rw:PrometheusRemoteWriteSecure2026!" -o /dev/null -w "%{http_code}\n" -X POST \
+# 4. Authenticated write endpoint probe (MUST accept credentials - HTTP 400 Bad Request on empty payload, NOT 401):
+curl -s -u "${RW_USER}:${RW_PASS}" -o /dev/null -w "%{http_code}\n" -X POST \
   http://10.99.0.1:30900/api/v1/write
 # Expected output: 400
 
