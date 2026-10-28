@@ -1,317 +1,205 @@
-# Prometheus Remote Write (PRW) & EBS Persistence: Live Demo Walkthrough
+# Prometheus Remote Write: Detailed Technical Demo Walkthrough
 
-This document provides a **complete, hands-on demonstration script** designed for technical reviews, team demos, and operational audits. It proves the reliability, latency advantages, and disaster-recovery capabilities of the **Push-Based Prometheus Remote Write (PRW)** and **AWS EBS Persistent Storage** architecture.
+This is the **comprehensive, in-depth walkthrough** for demonstrating and understanding every layer of the Push-Based Prometheus Remote Write (PRW) architecture. Each step explains **what is happening**, **why it matters**, **the exact commands to run**, **the expected output**, and **the architecture behind the output**.
+
+For the concise 10-minute presentation version, see [`walkthrough-demo-final.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/walkthrough-demo-final.md).
+
+For the complete architecture reference, see [`prometheus.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/prometheus.md).
 
 ---
 
-## Demo Overview & Presenter Cheat-Sheet
+## Demo Overview
 
-| Step | Topic | What You Prove to the Team | Command / Tool |
+| Step | Topic | What You Prove | Key Evidence |
 | :--- | :--- | :--- | :--- |
-| **1** | **Local Scrape & WAL Decoupling** | Spoke scrapes locally every 15s; network failure never drops samples | `kubectl exec ... ls -lh /prometheus/wal`<br>`rate(prometheus_tsdb_head_samples_appended_total[1m])` |
-| **2** | **Batching & Snappy Compression** | Outbound metrics are compressed with Snappy, achieving **85% bandwidth reduction** | `rate(prometheus_remote_storage_bytes_total) / rate(samples_total)` (~18 bytes/sample) |
-| **3** | **Network Ingress & NodePort** | Traffic flows over encrypted WireGuard mesh into Kernel Netfilter NAT without userspace overhead | `sudo iptables -t nat -L PREROUTING ...`<br>`kubectl get svc prometheus-nodeport` |
-| **4** | **Central Receiver Ingestion** | PrimaryHub ingests streams and disambiguates metrics across all clusters with `cluster="..."` | `count by (cluster)(up)` |
-| **5** | **Persistent Storage Survival** | Total EC2 termination leaves TSDB intact on dedicated AWS EBS volume; auto-recovers on boot | `df -hT /data`<br>`ls -lh /prometheus` (Immutable TSDB blocks) |
-| **6** | **Centralized Visualization** | Grafana executes sub-millisecond local queries (`< 5ms`) with zero WAN round-trip overhead | `time curl ... /api/v1/query?query=up`<br>`./port-forward-grafana.sh` |
+| **1** | Local Scrape & WAL | Scrapes are 100% independent from the WAN link | WAL file growing 5.2 KB every 15s |
+| **2** | Batching & Snappy Compression | 88% WAN bandwidth reduction | 17.84 bytes/sample on the wire |
+| **3** | Network Ingress & Kernel NAT | Zero userspace proxy overhead | `iptables` DNAT rule, HTTP 204 response |
+| **4** | Central Ingestion | 4 clusters, 49 targets, one TSDB | `count by (cluster)(up)` output |
+| **5** | EBS Persistence | EC2 termination does not destroy data | `df`, `pvc`, 5,760 samples over 24h |
+| **6** | Grafana Visualization | < 3ms local queries, zero WAN latency | `time curl` benchmark |
 
 ---
 
-## Prerequisites for Presenter
-
-Ensure your terminal has access to the cluster environments. Either run from the local orchestrator workstation or via AWS SSM session:
+## Prerequisites
 
 ```bash
 cd ~/Desktop/Kamal/01-Sandbox
 
-# Verify your kubectl contexts are active:
+# Verify all cluster contexts are available:
 kubectl config get-contexts
-# Expected: kind-primaryhub, kind-secondaryhub, kind-spoke1, kind-spoke2
+# Expected contexts: kind-primaryhub, kind-secondaryhub, kind-spoke1, kind-spoke2
 ```
 
 ---
 
-## Step 1: Local Scrape & WAL Decoupling
+## Step 1: Local Scrape & Write-Ahead Log (WAL)
 
-### 🎯 What We Are Demonstrating
-The edge scraper on `spoke1` (or `secondaryhub`) collects local metrics (Klusterlet, cAdvisor, node, containers) and commits them to its local **Write-Ahead Log (WAL)**. Scraping is **100% decoupled** from the remote write pipeline. Even if the WAN link or VPN goes down, the local scraper continues uninterrupted.
+### What We Are Demonstrating
 
-### 📋 Code Reference
-* Spoke Scraper Autonomous Provisioning: EC2 Launch Template `user_data.sh.tftpl` (`deploy_spoke_monitoring()`)
-* SecondaryHub Helm Values: [`codeInspector/values-secondary.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-secondary.yaml#L685-L695)
+The edge scraper on `spoke1` polls local Kubernetes components (cAdvisor, CoreDNS, OCM Klusterlet) every 15 seconds and immediately appends the collected samples to a local **Write-Ahead Log (WAL)** — a set of sequential binary files on disk. This is completely independent of the WAN link, WireGuard tunnel, or PrimaryHub availability.
+
+The WAL is the foundation of the zero-data-loss guarantee. Even if the internet link drops for hours, samples keep accumulating safely in the local WAL. When connectivity returns, the WAL Watcher replays the queued samples automatically without any operator intervention.
+
+> [!IMPORTANT]
+> The WAL contains **raw, uncompressed binary data**. Snappy compression happens later, strictly in RAM, only for network transmission. The WAL is a local crash-safety buffer — it is never transmitted over the network as a file.
+
+**Code Reference:** EC2 Launch Template `user_data.sh.tftpl` → function `deploy_spoke_monitoring()`
 
 ---
 
-### 💻 Demo Commands
+### Commands & Expected Output
 
-#### 1.1 Verify Spoke Scraper Pod Status
+#### 1.1 — Verify the Spoke Scraper is Running
+
 ```bash
-kubectl --context kind-spoke1 -n monitoring get pods -l app=prometheus-scraper -o wide
+kubectl -n monitoring get pods -l app=prometheus-scraper -o wide
 ```
+
 **Expected Output:**
 ```text
 NAME                                  READY   STATUS    RESTARTS   AGE   IP           NODE
 prometheus-scraper-695c8798cb-4kxq2   1/1     Running   0          2d    10.244.0.7   spoke1-control-plane
 ```
 
-#### 1.2 Inspect Physical WAL Segments on the Spoke
-Show the team that metrics are physically written to sequential WAL segment files on disk/RAM before transmission:
-```bash
-# Option A: Inspect directly from outside:
-kubectl --context kind-spoke1 -n monitoring exec deploy/prometheus-scraper -- ls -la /prometheus/wal
+#### 1.2 — Inspect the Physical WAL Segment Files on Disk
 
-# Option B: Enter an interactive shell inside the scraper:
-kubectl exec -it -n monitoring deploy/prometheus-scraper -- /bin/sh
-ls -la /prometheus/wal
+```bash
+kubectl -n monitoring exec deploy/prometheus-scraper -- ls -la /prometheus/wal
 ```
 
 **Live Cluster Output:**
 ```text
-/prometheus $ ls -la /prometheus/wal/
 total 2208
-drwxr-xr-x    3 nobody   nobody          81 Oct 27 05:45 .
-drwxrwxrwx    7 root     root           172 Oct 27 05:45 ..
--rw-r--r--    1 nobody   nobody     1179648 Oct 26 13:52 00000006
--rw-r--r--    1 nobody   nobody       32768 Oct 27 05:45 00000007
--rw-r--r--    1 nobody   nobody     1029818 Oct 27 06:33 00000008
-drwxr-xr-x    2 nobody   nobody          22 Oct 27 05:45 checkpoint.00000005
+drwxr-xr-x 3 nobody nobody      81 Oct 27 05:45 .
+-rw-r--r-- 1 nobody nobody 1179648 Oct 26 13:52 00000006
+-rw-r--r-- 1 nobody nobody   32768 Oct 27 05:45 00000007
+-rw-r--r-- 1 nobody nobody 1029818 Oct 27 06:33 00000008   ← Active WAL segment
+drwxr-xr-x 2 nobody nobody      22 Oct 27 05:45 checkpoint.00000005
 ```
 
-#### Live Verification of Continuous Append (File Growth Demonstration)
-If you list the directory again after ~60 minutes, you will observe the active segment file growing in real time:
-```text
-/prometheus/wal $ ls -la
-total 4768
-drwxr-xr-x    3 nobody   nobody          81 Oct 27 05:45 .
-drwxrwxrwx    7 root     root           172 Oct 27 05:45 ..
--rw-r--r--    1 nobody   nobody     1179648 Oct 26 13:52 00000006
--rw-r--r--    1 nobody   nobody       32768 Oct 27 05:45 00000007
--rw-r--r--    1 nobody   nobody     2406999 Oct 27 07:39 00000008   <-- Grew from 1.02 MB to 2.41 MB!
-drwxr-xr-x    2 nobody   nobody          22 Oct 27 05:45 checkpoint.00000005
-```
+**What each file represents:**
 
-**The Math Behind the Growth**:
-* **Time Elapsed**: ~66 minutes (from 06:33 to 07:39).
-* **Scrape Frequency**: Every 15 seconds (4 scrapes/min × 66 min = **~264 scrape intervals**).
-* **Bytes Appended**: 2,406,999 - 1,029,818 = **1,377,181 bytes** (~1.38 MB).
-* **Average Ingestion Velocity**: 1,377,181 bytes / 264 scrapes ≈ **5.2 KB per scrape cycle**.
-* Once `00000008` reaches **128 MB**, Prometheus seals it as immutable and automatically starts `00000009`.
-
----
-
-**What These Files Are & What They Contain:**
-
-| File / Directory | Type | Purpose & Contents |
+| File | Type | Description |
 | :--- | :--- | :--- |
-| **`00000006`** (`1.1 MB`) | Past Segment | A completed sequential WAL segment file from the previous day containing committed time-series samples. |
-| **`00000007`** (`32 KB`) | Replay Segment | A segment created during the pod initialization/reboot at 05:45 to store startup events. |
-| **`00000008`** (`2.4 MB+`)| **Active WAL Segment** | **The live, append-only segment currently in use.** Every 15 seconds, scraped samples from local pods and nodes are appended to this file. |
-| **`checkpoint.00000005`** | Compaction Checkpoint | Created every 2 hours during TSDB compaction. Consolidates only still-active series so older WAL files (`00000000`–`00000005`) can be safely deleted without losing state. |
+| `00000006` (1.1 MB) | Past segment | A completed sequential segment from the previous day, sealed and immutable |
+| `00000007` (32 KB) | Startup segment | Created when the pod rebooted at 05:45; contains startup events |
+| `00000008` (2.4 MB+) | **Active segment** | **The live file being appended every 15 seconds right now** |
+| `checkpoint.00000005` | Compaction marker | Created every 2 hours during TSDB block compaction. Allows older WAL files (`00000000`–`00000005`) to be safely deleted |
 
----
+#### 1.3 — Observe the WAL Growing in Real Time
 
-#### Are Scraped Metrics Compressed Before Being Stored in the WAL?
-**Crucial Architectural Distinction**:
-* **Disk WAL (`/prometheus/wal`)**: **Uncompressed raw binary** in 32 KB page frames. This guarantees maximum write throughput and zero CPU overhead during scrapes (< 1 ms).
-* **Network Remote Write**: **Snappy-compressed Protobuf** applied in-flight across the WireGuard tunnel to save ~85% WAN bandwidth.
-* **Long-Term Storage Blocks (`/prometheus/01M5...`)**: **Gorilla / Double-Delta XOR** compression applied every 2 hours to condense samples down to ~1.3 bytes per sample.
-
----
-
-#### How to Inspect What is Inside the Binary WAL File
-Because WAL segments are binary-encoded, `cat` or `nano` will display gibberish. You can inspect the real contents using:
-
-1. **Extract Human-Readable Metrics & Labels using `strings`**:
-   ```sh
-   strings /prometheus/wal/00000008 | head -n 30
-   # Or search for specific components:
-   strings /prometheus/wal/00000008 | grep -i "klusterlet" | head -n 15
-   ```
-   *Displays the actual scraped metric names and label sets stored on disk.*
-
-2. **Analyze WAL Cardinality with `promtool`**:
-   ```sh
-   promtool tsdb analyze /prometheus
-   ```
-   *Displays total active series, label pair cardinality, and top metric names.*
-
-3. **Dump Actual Time-Series Samples with `promtool`**:
-   ```sh
-   promtool tsdb dump /prometheus | head -n 30
-   ```
-   *Dumps the exact `(timestamp, value)` sample records written to the database.*
-
----
-
-#### 1.3 Architecture Deep-Dive: Clarifying the WAL Watcher, Snappy Compression, & Forwarding
-
-> [!IMPORTANT]
-> **Key Architectural Truths to Clear Up Confusion**:
-> 1. **The physical files on disk (`00000008`) are NEVER compressed with Snappy and NEVER transmitted across the network.** They remain 100% on the Spoke 1 disk as raw binary logs.
-> 2. **Snappy compression happens strictly in RAM (in-flight)** on batches of samples converted into Protocol Buffers (`prometheus.WriteRequest`) right before being dispatched over an HTTP socket.
-> 3. **Forwarding is standard HTTP/1.1 POST over WireGuard**: Spoke 1 sends an HTTP POST request to `http://10.99.0.1:30900/api/v1/write`. The Linux kernel routes the packets out through the encrypted `wg0` tunnel interface.
-
----
-
-##### Q1: "Do you mean that the segment files on disk are compressed using Snappy on Spoke 1 and then forwarded?"
-**No.** The segment files on disk are never compressed with Snappy and never sent as files over the network. Here is the exact difference across layers:
-
-| Layer | Where Data Resides | File / Format | Is It Compressed? | Purpose |
-| :--- | :--- | :--- | :--- | :--- |
-| **Disk (WAL)** | Spoke Local Disk | `/prometheus/wal/00000008` | ❌ **No (0% compression)** | Raw 32 KB binary pages for < 1 ms sub-millisecond local scrape speed with zero CPU overhead. |
-| **RAM (Batching)** | Scraper Memory Pool | Go Structs (`[]prompb.TimeSeries`) | ❌ **No** | Buffers up to 1,000 samples in RAM or waits up to 5s (`batch_send_deadline: 5s`). |
-| **RAM (Protobuf)** | Serialized Buffer | Protobuf `prometheus.WriteRequest` | ❌ **No (~90 KB)** | Standardized Google Protocol Buffers binary serialization. |
-| **RAM (Snappy)** | Compressed Buffer | Snappy Byte Slice | ✅ **Yes (~85% reduction)** | `snappy.Encode()` in RAM compresses ~90 KB down to ~12 KB immediately before transmission. |
-| **Wire (Network)**| WireGuard Tunnel `wg0` | HTTP POST Body to `10.99.0.1:30900/api/v1/write` | ✅ **Yes (Snappy)** | Compressed payload travels through ChaCha20-Poly1305 encrypted WireGuard tunnel. |
-| **Disk (Hub TSDB)**| PrimaryHub AWS EBS | `/data/prometheus/01M5...` (2-hour TSDB blocks) | ✅ **Yes (~95% reduction)** | Gorilla / Double-Delta XOR compression executed during TSDB block compaction. |
-
----
-
-##### Q2: "What does 'A background WAL Watcher tails 00000008 (like tail -f)' actually mean?"
-Inside the Prometheus Go source code (`tsdb/wal/wal.go` and `storage/remote/watcher.go`), there is a background Goroutine named **`walWatcher`**:
-* Just like running `tail -f /prometheus/wal/00000008` in a bash terminal follows new lines appended to a log file, the `walWatcher` keeps an open read pointer (byte offset) at the end of the active segment file `00000008`.
-* Every 15 seconds, when the local scrape loop writes new metric samples from Klusterlet and cAdvisor to disk, the `walWatcher` detects the new bytes and reads those sample records off the disk into memory (RAM).
-* It parses those binary records into in-memory Go structs (`prompb.TimeSeries`).
-* If the network is healthy, the `walWatcher` reads them milliseconds after they are written.
-* If PrimaryHub goes down or the network fails, `00000008` continues growing on disk. When connectivity returns, the `walWatcher` simply reads from its last recorded byte offset until it catches up. **Not a single metric is lost.**
-
----
-
-##### Q3: "How does Spoke 1 forward metrics to PrimaryHub over WireGuard?"
-The complete transmission pipeline operates as follows:
+Run the command a second time after 60+ minutes and compare the active segment size:
 
 ```text
-1. LOCAL SCRAPE (Spoke 1)
-   Klusterlet / cAdvisor / Node Exporter
-      │ (Local HTTP Scrape every 15s)
-      ▼
-2. LOCAL DISK WRITE (Raw Binary WAL)
-   /prometheus/wal/00000008 (Append-only, uncompressed raw binary, ~2.4 MB)
-      │
-      │ [WAL Watcher Goroutine reads new bytes off disk, like 'tail -f']
-      ▼
-3. IN-MEMORY BATCHING & PROTOBUF SERIALIZATION (RAM)
-   Pools up to 1,000 samples into 'prometheus.WriteRequest' Protobuf message (~90 KB in RAM)
-      │
-      │ [Go thread executes: snappy.Encode(dst, protobufBytes)]
-      ▼
-4. IN-FLIGHT SNAPPY COMPRESSION (RAM)
-   Byte slice compressed from ~90 KB down to ~12 KB (~85% WAN bandwidth savings)
-      │
-      │ [Go HTTP client sends POST request]
-      ▼
-5. HTTP POST OVER WIREGUARD (Network Socket)
-   Headers:
-     POST /api/v1/write HTTP/1.1
-     Host: 10.99.0.1:30900
-     Content-Type: application/x-protobuf
-     Content-Encoding: snappy
-     X-Prometheus-Remote-Write-Version: 0.1.0
-      │
-      │ Linux Kernel Routing: dst=10.99.0.1 -> dev wg0
-      ▼
-6. WIREGUARD TUNNEL (10.99.0.0/24)
-   Kernel encrypts packet with ChaCha20-Poly1305 -> UDP port 51820 across internet
-      │
-      ▼
-7. PRIMARYHUB INGRESS & INGESTION (10.99.0.1:30900)
-   WireGuard decrypts packet -> Netfilter NAT routes :30900 to Prometheus pod
-      │
-      │ PrimaryHub decompresses Snappy in memory, decodes Protobuf
-      ▼
-8. TSDB COMMIT & ACKNOWLEDGEMENT
-   Appends samples to EBS-backed TSDB Head Chunk -> Returns 'HTTP 204 No Content'
+# First observation (06:33):
+-rw-r--r-- 1 nobody nobody 1029818 Oct 27 06:33 00000008
+
+# Second observation (07:39, ~66 minutes later):
+-rw-r--r-- 1 nobody nobody 2406999 Oct 27 07:39 00000008  ← Grew from 1.02 MB to 2.41 MB
 ```
 
-##### What is cAdvisor and Why is It in the Diagram?
-* **cAdvisor (Container Advisor)**: An open-source component developed by Google that monitors, aggregates, and exports resource usage and performance metrics for all running containers on a node.
-* **Built Directly into Kubelet**: In modern Kubernetes, you do not need to install a separate agent. cAdvisor is **built directly into the node's `kubelet` daemon** on port `10250` (`/metrics/cadvisor`).
-* **What It Measures**: When Grafana displays container CPU (`container_cpu_usage_seconds_total`), memory working set (`container_memory_working_set_bytes`), or container network I/O, those metrics originate from cAdvisor.
-* **Role in Spoke 1**: The local `prometheus-scraper` polls cAdvisor locally every 15s, writes the metrics to disk WAL, and pushes them across WireGuard so PrimaryHub Grafana can render edge container health without querying across the internet.
+**The math behind the growth:**
+- Time elapsed: ~66 minutes = 264 scrape cycles (4 scrapes/min)
+- Bytes appended: 2,406,999 − 1,029,818 = **1,377,181 bytes**
+- Average ingestion velocity: 1,377,181 ÷ 264 ≈ **~5.2 KB per 15-second scrape cycle**
+- Once `00000008` reaches **128 MB**, Prometheus seals it and automatically creates `00000009`
 
----
+#### 1.4 — Verify Real-Time Local Ingestion Rate
 
-#### 1.4 Monitor Real-Time Sample Ingestion Rate into Local WAL
-Show the continuous stream of samples being written into the local head chunk:
 ```bash
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=rate(prometheus_tsdb_head_samples_appended_total[1m])" | jq .
-```
-**Actual Cluster Output:**
-```json
-{
-  "status": "success",
-  "data": {
-    "resultType": "vector",
-    "result": [
-      {
-        "metric": {
-          "instance": "localhost:9090",
-          "job": "prometheus-scraper",
-          "type": "float"
-        },
-        "value": [
-          1793088521.255,
-          "58.79999999999999"
-        ]
-      },
-      {
-        "metric": {
-          "instance": "localhost:9090",
-          "job": "prometheus-scraper",
-          "type": "histogram"
-        },
-        "value": [
-          1793088521.255,
-          "0"
-        ]
-      }
-    ]
-  }
-}
+  wget -qO- "http://localhost:9090/api/v1/query?query=sum(rate(prometheus_tsdb_head_samples_appended_total[1m]))" | \
+  jq '.data.result[0].value[1]'
 ```
 
-**Understanding the Output**:
-* **`type="float"`**: Traditional metric samples (gauges, counters, untyped). The live rate shows **~58.8 samples per second** continuously streaming into the head chunk and active WAL file `00000008`.
-  * **Math check**: 58.8 samples/sec × 15 seconds ≈ **882 samples per 15-second scrape interval**.
-  * **Hourly volume**: 58.8 samples/sec × 3,600 seconds ≈ **211,680 samples written locally per hour**.
-  * **Disk growth alignment**: 5,200 bytes / 882 samples ≈ **5.9 bytes per sample on disk** (perfectly matching the observed 5.2 KB growth per scrape cycle).
-* **`type="histogram"`**: Native sparse histogram samples (currently `0` because standard Kubernetes exporter metrics are float gauges/counters).
+**Expected Output:** `"58.8"` — ~59 samples written to the local disk WAL every second.
 
-💡 **Pro-Tip (Cleaner Presenter Query)**:
-To combine them or extract just the float rate as a single number:
+**Math cross-check:**
+- 58.8 samples/sec × 15 seconds = **882 samples per scrape cycle**
+- 5,200 bytes ÷ 882 samples ≈ **5.9 bytes per raw WAL sample** (matches the observed file growth)
+- 58.8 samples/sec × 3,600 sec = **~211,680 samples written locally per hour**
+
+#### 1.5 — Inspect the Raw Binary WAL Contents
+
+WAL files are binary — `cat` will show gibberish. Use these tools to inspect the real content:
+
 ```bash
-# Query sum rate:
+# Extract human-readable metric names and labels:
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=sum(rate(prometheus_tsdb_head_samples_appended_total[1m]))" | jq '.data.result[0].value[1]'
-# Output: "58.8"
+  sh -c "strings /prometheus/wal/00000008 | head -n 30"
+
+# Search for specific components:
+kubectl -n monitoring exec deploy/prometheus-scraper -- \
+  sh -c "strings /prometheus/wal/00000008 | grep -i klusterlet | head -n 10"
+
+# Full TSDB analysis (cardinality, top metrics):
+kubectl -n monitoring exec deploy/prometheus-scraper -- \
+  promtool tsdb analyze /prometheus
+
+# Dump raw time-series samples:
+kubectl -n monitoring exec deploy/prometheus-scraper -- \
+  promtool tsdb dump /prometheus | head -n 20
 ```
 
-#### 1.5 LIVE SIMULATION: Break the WAN Link & Prove Zero Scrape Loss
-Prove that network outages do not disrupt metric collection:
+#### 1.6 — Prove Zero Metric Loss During WAN Outage
+
+While the WAN link is healthy, the remote write queue is empty (pending = 0). Check it:
+
 ```bash
-# 1. Check pending queue backlog before disruption (normally 0 during healthy streaming):
+# Current pending queue (normally 0 during healthy streaming):
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
   wget -qO- "http://localhost:9090/api/v1/query?query=prometheus_remote_storage_samples_pending" | jq .
 
-# 2. Observe: Scrapes continue appending to WAL at steady pace:
+# Local ingestion rate (remains steady even if WireGuard drops):
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=sum(rate(prometheus_tsdb_head_samples_appended_total[1m]))" | jq '.data.result[0].value[1]'
-# Output remains steady: "58.8" (Zero metric loss!)
+  wget -qO- "http://localhost:9090/api/v1/query?query=sum(rate(prometheus_tsdb_head_samples_appended_total[1m]))" | \
+  jq '.data.result[0].value[1]'
+# Output stays: "58.8" — completely unaffected by network disruptions
 ```
 
-🗣️ **Talking Point for Teammates**:
-> *"Notice that even when egress is impacted, the local scraper doesn't timeout or drop data. Everything is safely buffered in the WAL segment files on disk, ready to be flushed as soon as connectivity resumes."*
+> *"Notice that the local scrape rate stays at 58.8 even when egress is disrupted. The WAL absorbs everything safely on disk. This is the zero-data-loss guarantee in action."*
 
 ---
 
-## Step 2: Batching & Snappy Compression
+## Step 2: Batching & In-Flight Snappy Compression
 
-### 🎯 What We Are Demonstrating
-Prometheus Remote Write does not send individual HTTP requests per metric. It uses an asynchronous worker pool that batches up to 1,000 samples (or flushes every 5 seconds), serializes the batch using **Protocol Buffers (`prometheus.WriteRequest`)**, and compresses it with **Google Snappy**. This reduces WAN network bandwidth consumption by **85%**.
+### What We Are Demonstrating
 
-### 📋 Code Reference
-* Scraper Queue Tuning: EC2 Launch Template `user_data.sh.tftpl` (`deploy_spoke_monitoring()`)
+Prometheus Remote Write does not send one HTTP request per metric. Instead, a background goroutine called the **WAL Watcher** (`walWatcher`) continuously tails the active WAL segment (just like `tail -f`) and groups newly committed samples into batches. Each batch is:
+
+1. Held in memory until 1,000 samples accumulate **or** 5 seconds pass (`batch_send_deadline`)
+2. Tagged with external labels: `cluster="spoke1"`, `role="spoke"`, `region="eu-central-1"`
+3. Serialized into a [Protocol Buffers](https://protobuf.dev/) message (`prompb.WriteRequest`, ~90 KB)
+4. Compressed with **Google Snappy** (→ ~12 KB, ~88% bandwidth reduction)
+5. Dispatched as an HTTP POST to `http://10.99.0.1:30900/api/v1/write`
+
+This batching approach reduces WAN bandwidth from ~200 bytes/sample (raw text) down to **~17.8 bytes/sample**.
+
+**The critical distinction — what stays on disk vs what travels the network:**
+
+| Layer | Location | Format | Compressed? |
+| :--- | :--- | :--- | :--- |
+| Disk WAL (`00000008`) | Spoke local disk | Raw binary, 32 KB pages | ❌ No |
+| In-memory batch | Spoke RAM | Go structs `[]prompb.TimeSeries` | ❌ No |
+| Serialized batch | Spoke RAM | Protobuf `WriteRequest` (~90 KB) | ❌ No |
+| **Network payload** | **WireGuard wire** | **Snappy-compressed bytes (~12 KB)** | ✅ **Yes** |
+| TSDB blocks on hub | PrimaryHub EBS | Gorilla XOR compression | ✅ Yes |
+
+**Code Reference:** EC2 Launch Template `user_data.sh.tftpl` → `queue_config` in `prometheus.yml`
+
+---
+
+### Commands & Expected Output
+
+#### 2.1 — Inspect the Live Queue Configuration
+
+```bash
+kubectl -n monitoring get cm prometheus-scraper-config \
+  -o jsonpath='{.data.prometheus\.yml}' | grep -A 10 "queue_config"
+```
+
+**Expected Output:**
 ```yaml
 queue_config:
   capacity: 10000
@@ -323,319 +211,144 @@ queue_config:
   max_backoff: 10s
 ```
 
----
+**What each setting does:**
 
-### 💻 Demo Commands
+| Setting | Value | Effect |
+| :--- | :--- | :--- |
+| `capacity` | 10,000 | Max samples buffered in RAM per shard before backpressure slows scraping |
+| `min_shards` / `max_shards` | 1–10 | Auto-scales parallel sender goroutines. 1 during normal flow; up to 10 during backlog recovery |
+| `max_samples_per_send` | 1,000 | Flush immediately when 1,000 samples accumulate |
+| `batch_send_deadline` | 5s | Flush whatever is ready after 5 seconds regardless of batch size |
+| `min_backoff` / `max_backoff` | 500ms–10s | Exponential retry delay during network errors |
 
-#### 2.1 Inspect the Queue Configuration in the Running Cluster
-```bash
-kubectl -n monitoring get cm prometheus-scraper-config \
-  -o jsonpath='{.data.prometheus\.yml}' | grep -A 10 "queue_config"
-```
-**Actual Cluster Output:**
-```yaml
-    queue_config:
-      capacity: 10000
-      max_shards: 10
-      min_shards: 1
-      max_samples_per_send: 1000
-      batch_send_deadline: 5s
-      min_backoff: 500ms
-      max_backoff: 10s
+At ~60 samples/sec: 60 × 5 = **~300 samples flushed every 5 seconds** (the deadline fires before the 1,000-sample limit).
 
-scrape_configs:
-  - job_name: 'prometheus-scraper'
-```
+#### 2.2 — Capture Live Wire Traffic (Indisputable Compression Proof)
 
-**What is a "Sample" in Prometheus?**:
-A **sample** is a single data point in a time series consisting of two values:
-* **Timestamp**: Milliseconds since Unix epoch (`int64`, e.g. `1761556053480`).
-* **Value**: 64-bit floating point measurement (`float64`, e.g. `12450.32`).
-When Spoke 1 ingests **~60.33 samples/sec**, it is recording ~60 individual metric readings every second across its local pods and nodes.
+On the PrimaryHub EC2 host via SSH or SSM:
 
-**What Each Setting Controls**:
-* **`capacity: 10000`**: Maximum number of samples buffered in RAM per shard before backpressure slows down ingestion.
-* **`min_shards: 1` / `max_shards: 10`**: Auto-scales parallel worker goroutines. Under normal load, it uses **1 shard**. If PrimaryHub temporarily lags or disconnects, the Shard Controller dynamically scales up to **10 shards** to flush queued samples 10x faster once reconnected.
-* **`max_samples_per_send: 1000`**: The batch limit. As soon as 1,000 samples accumulate in RAM, the shard worker compresses and sends them immediately.
-* **`batch_send_deadline: 5s`**: The time limit. If 1,000 samples haven't accumulated within 5 seconds, it flushes whatever has arrived (at ~60.3 samples/sec, **~301 samples** accumulate and flush every 5 seconds).
-* **`min_backoff: 500ms` / `max_backoff: 10s`**: Exponential backoff window during network interruptions to prevent flooding PrimaryHub when recovering.
-
----
-
-### 🔍 Architectural Deep-Dive: How Data Flows from Spoke to PrimaryHub EBS to Grafana
-
-```mermaid
-flowchart TD
-    subgraph Spoke_Cluster ["Spoke Cluster (e.g. Spoke 1)"]
-        Scrape[Scrape Targets: Pods, Nodes] --> SpokeHead[Spoke RAM Head Block]
-        SpokeHead --> SpokeWAL["Local Disk WAL (Ephemeral / Node Disk)\nRaw uncompressed 128MB binary segments"]
-        SpokeWAL -.->|"WAL Watcher reads & decodes"| ShardWorker["Remote Write Queue Worker"]
-        ShardWorker -->|"Encode to Protobuf + Snappy Compress"| HTTPPost["HTTP POST /api/v1/write\n(Across WireGuard wg0)"]
-    end
-
-    subgraph PrimaryHub_Cluster ["PrimaryHub (Central Management Cluster)"]
-        HTTPPost --> HubReceiver["Centralized Prometheus\n(--web.enable-remote-write-receiver)"]
-        HubReceiver --> HubHead["PrimaryHub RAM Head Block"]
-        HubHead --> HubWAL["PrimaryHub Local WAL on EBS Volume\n(/data/wal/00000001)"]
-        HubHead -.->|"Compacts every 2h"| TSDBBlocks["TSDB 2h Block Chunks on EBS\n(Gorilla compressed)"]
-    end
-
-    subgraph Visualization ["Visualization"]
-        Grafana["Grafana Dashboard"] -->|"PromQL Query (HTTP GET /api/v1/query)"| HubReceiver
-        HubReceiver -->|"Returns series data"| Grafana
-    end
-```
-
-**Common Questions Answered**:
-1. **Do raw WAL segment files get sent over the network?**
-   * **No.** Raw 128 MB disk files (`00000008`) remain strictly on Spoke 1's local disk as a crash-recovery safety net. Prometheus never transfers disk files over the network.
-   * Instead, the internal **WAL Watcher** tails the local WAL, reads newly committed samples, packages them into a standardized **Google Protocol Buffers (`prompb.WriteRequest`)** payload, compresses them with **Google Snappy**, and sends an HTTP POST.
-2. **Does Spoke write to PrimaryHub's EBS volume directly?**
-   * **No.** Spoke clusters have zero direct access to PrimaryHub's storage or EBS volumes. The only communication channel is HTTP traffic through the encrypted WireGuard overlay (`10.99.0.1:30900`).
-3. **Where does PrimaryHub store the metrics?**
-   * PrimaryHub runs the **Centralized Prometheus**.
-   * It receives the HTTP POST, decompresses and unmarshals the samples, tags them with cluster labels (`cluster="spoke1"`), and writes them directly into **its own local TSDB stored on PrimaryHub's AWS EBS Volume** (`/prometheus` PVC).
-4. **How does Grafana display the metrics?**
-   * Grafana connects to Centralized Prometheus as an in-cluster datasource: `http://prometheus:9090`.
-   * When opening a dashboard, Grafana executes PromQL queries (e.g. `rate(node_cpu_seconds_total{cluster="spoke1"}[5m])`) locally against Centralized Prometheus. Centralized Prometheus reads the metrics from its EBS-backed TSDB and returns the time-series points in `< 2 ms`. Zero cross-WAN queries are made.
-
----
-
-#### 2.2 Verify WAL Watcher & Shard Workers in Spoke Logs
-```bash
-kubectl -n monitoring logs deploy/prometheus-scraper --tail=30 | grep -i "remote"
-```
-**Actual Cluster Output:**
-```text
-ts=2026-10-27T05:45:08.794Z caller=dedupe.go:112 component=remote level=info remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Done replaying WAL" duration=9.76601393s
-ts=2026-10-27T05:45:39.585Z caller=dedupe.go:112 component=remote level=warn remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Failed to send batch, retrying" err="Post \"http://10.99.0.1:30900/api/v1/write\": context deadline exceeded"
-ts=2026-10-27T05:46:42.588Z caller=dedupe.go:112 component=remote level=warn remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Failed to send batch, retrying" err="Post \"http://10.99.0.1:30900/api/v1/write\": context deadline exceeded"
-ts=2026-10-27T05:47:54.590Z caller=dedupe.go:112 component=remote level=warn remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Failed to send batch, retrying" err="Post \"http://10.99.0.1:30900/api/v1/write\": dial tcp 10.99.0.1:30900: i/o timeout"
-ts=2026-10-27T05:48:06.535Z caller=dedupe.go:112 component=remote level=warn remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Failed to send batch, retrying" err="Post \"http://10.99.0.1:30900/api/v1/write\": context deadline exceeded"
-ts=2026-10-27T05:48:46.899Z caller=dedupe.go:112 component=remote level=warn remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Failed to send batch, retrying" err="Post \"http://10.99.0.1:30900/api/v1/write\": dial tcp 10.99.0.1:30900: connect: connection refused"
-ts=2026-10-27T05:49:47.454Z caller=dedupe.go:112 component=remote level=warn remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Failed to send batch, retrying" err="Post \"http://10.99.0.1:30900/api/v1/write\": dial tcp 10.99.0.1:30900: connect: connection refused"
-ts=2026-10-27T05:50:09.033Z caller=dedupe.go:112 component=remote level=warn remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Skipping resharding, resharding is disabled while waiting for recoverable errors" disabled_at=2026-10-27T05:48:24Z disabled_for=7.966049591s
-ts=2026-10-27T05:50:19.034Z caller=dedupe.go:112 component=remote level=info remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Remote storage resharding" from=1 to=3
-ts=2026-10-27T05:50:39.034Z caller=dedupe.go:112 component=remote level=info remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Remote storage resharding" from=3 to=2
-ts=2026-10-27T05:50:49.034Z caller=dedupe.go:112 component=remote level=info remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Remote storage resharding" from=2 to=3
-ts=2026-10-27T05:52:29.034Z caller=dedupe.go:112 component=remote level=info remote_name=a7e7f1 url=http://10.99.0.1:30900/api/v1/write msg="Remote storage resharding" from=2 to=1
-```
-
-**Key Operational Insights to Explain to Teammates**:
-1. **`Done replaying WAL` (`duration=9.76s`)**: When the scraper booted, the WAL watcher replayed all unpushed samples from the disk WAL without losing a single historical metric.
-2. **Exponential Backoff on Outage (`05:45` to `05:49`)**: PrimaryHub was temporarily restarting. Notice how Spoke 1 safely classified this as a **recoverable error**, did not crash, and buffered all new scraped metrics into the local WAL.
-3. **Dynamic Auto-Scaling (`05:50:19`)**: The instant PrimaryHub came back online, the Shard Controller calculated that 1 worker was too slow to clear the buffered backlog and **automatically scaled parallel shards from 1 to 3** (`from=1 to=3`) to flush 3x faster over WireGuard.
-4. **Scale Down to Baseline (`05:52:29`)**: Once the backlog was 100% delivered, Prometheus **scaled back down to 1 shard** (`from=2 to=1`) to conserve memory and CPU.
-
-#### 2.3 Prove the 85% Snappy Compression Ratio (Live Calculation)
-Calculate the exact bytes transferred per metric sample over the WireGuard network:
-```bash
-kubectl -n monitoring exec deploy/prometheus-scraper -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=rate(prometheus_remote_storage_bytes_total[5m])/rate(prometheus_remote_storage_samples_total[5m])" | jq .
-```
-**Expected Output:**
-```json
-{
-  "status": "success",
-  "data": {
-    "resultType": "vector",
-    "result": [
-      {
-        "metric": { "url": "http://10.99.0.1:30900/api/v1/write" },
-        "value": [ 1793082240.12, "17.84" ]
-      }
-    ]
-  }
-}
-```
-
-🗣️ **Talking Point for Teammates**:
-> *"Look at that result: **17.84 bytes per sample**. Standard Prometheus text format is ~180 to 220 bytes per metric line. Snappy-compressed Protobuf reduces WAN bandwidth consumption by nearly 90%, allowing thousands of edge metrics to cross the WireGuard tunnel using just a few kilobytes of bandwidth per second."*
-
-#### 2.4 Five Definitive Methods to Validate In-Flight Snappy Compression & Forwarding
-
-##### Method 1: Inspect Live Network Packet Headers (`Content-Encoding: snappy`)
-On either the Spoke 1 host or PrimaryHub host, capture the wire traffic traveling across the WireGuard network interface (`wg0`):
 ```bash
 sudo tcpdump -i wg0 -A -s 0 "tcp port 30900" -c 10
 ```
-**Actual Cluster Packet Capture:**
+
+**Live Packet Capture Output:**
 ```http
-# ── PACKET 1: Outbound Batch Request from Spoke (10.99.0.3 -> 10.99.0.1) ──
-08:27:33.480940 IP ip-10-99-0-3.eu-central-1...35842 > ip-10-99-0-1.eu-central-1...30900: Flags [P.], length 212
+# ── PACKET 1: Outbound from Spoke (10.99.0.3 → 10.99.0.1) ─────────────────
+08:27:33.480940 IP spoke1.35842 > primaryhub.30900: Flags [P.], length 212
 POST /api/v1/write HTTP/1.1
 Host: 10.99.0.1:30900
 User-Agent: Prometheus/2.54.1
 Content-Length: 605
-Content-Encoding: snappy                      <-- PROOF OF SNAPPY COMPRESSION
-Content-Type: application/x-protobuf          <-- PROOF OF PROTOBUF ENCODING
+Content-Encoding: snappy                   ← SNAPPY COMPRESSION CONFIRMED
+Content-Type: application/x-protobuf      ← PROTOBUF ENCODING CONFIRMED
 X-Prometheus-Remote-Write-Version: 0.1.0
 
-# ── PACKET 2: In-Flight Snappy Binary Payload (605 bytes) ───────────────────
-08:27:33.481012 length 605
-...klusterlet-registration-agent...spoke1...10.101.0.12:8080...open-cluster-management...
-
-# ── PACKET 3: PrimaryHub Ingestion Confirmation (10.99.0.1 -> 10.99.0.3) ───
-08:27:33.573167 IP ip-10-99-0-1.eu-central-1...30900 > ip-10-99-0-3.eu-central-1...35842: Flags [P.], length 64
-HTTP/1.1 204 No Content                      <-- PROOF OF TSDB RECEIPT & COMMIT
+# ── PACKET 2: PrimaryHub Acknowledges Ingestion ────────────────────────────
+08:27:33.573167 IP primaryhub.30900 > spoke1.35842: Flags [P.], length 64
+HTTP/1.1 204 No Content                   ← TSDB COMMIT CONFIRMED (92ms later)
 Date: Tue, 27 Oct 2026 08:27:33 GMT
 
-# ── PACKET 4: Next Batch Exactly 5 Seconds Later (batch_send_deadline: 5s) ──
-08:27:38.573954 IP ip-10-99-0-3.eu-central-1...35842 > ip-10-99-0-1.eu-central-1...30900: Flags [P.], length 213
+# ── PACKET 3: Next Batch Exactly 5 Seconds Later ──────────────────────────
+08:27:38.573954 IP spoke1.35842 > primaryhub.30900: Flags [P.], length 213
 POST /api/v1/write HTTP/1.1
-Host: 10.99.0.1:30900
-User-Agent: Prometheus/2.54.1
 Content-Length: 6783
-Content-Encoding: snappy                      <-- STILL COMPRESSED
+Content-Encoding: snappy                   ← STILL COMPRESSED
 Content-Type: application/x-protobuf
-X-Prometheus-Remote-Write-Version: 0.1.0
 ```
 
-**Four Indisputable Proofs Demonstrated on the Wire**:
-1. **Snappy Compression Confirmed**: The header `Content-Encoding: snappy` proves the HTTP body was compressed with Google Snappy prior to being placed onto the wire.
-2. **Protocol Buffers Confirmed**: The header `Content-Type: application/x-protobuf` proves the time-series samples were serialized as Protobuf objects.
-3. **PrimaryHub Ingestion Confirmed**: The response returns `HTTP/1.1 204 No Content` within **92 ms** (`08:27:33.480` to `08:27:33.573`), confirming PrimaryHub decompressed and committed the samples to its EBS TSDB.
-4. **5-Second Batch Send Deadline Confirmed**: Notice the exact timestamps of consecutive batches:
-   * First batch: `08:27:33.480`
-   * Next batch: `08:27:38.573`
-   * Difference: **5.09 seconds** (matching `batch_send_deadline: 5s` perfectly!).
+**Four indisputable proofs visible on the wire:**
+1. `Content-Encoding: snappy` → Batch was Snappy-compressed before being placed on the network
+2. `Content-Type: application/x-protobuf` → Samples are Protocol Buffers, not raw text
+3. `HTTP 204 No Content` after **92ms** → PrimaryHub successfully decompressed and committed samples to TSDB
+4. Timestamps `08:27:33.480` and `08:27:38.573` → exactly **5.09 seconds** apart, matching `batch_send_deadline: 5s`
 
-##### Method 2: Mathematical Ratio via Internal Prometheus Metrics
-Prometheus tracks both total samples read and compressed bytes transmitted over the network:
+#### 2.3 — Calculate Actual Bytes Per Sample on the Wire
+
 ```bash
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=rate(prometheus_remote_storage_bytes_total[5m])/rate(prometheus_remote_storage_samples_total[5m])" | jq .
+  wget -qO- "http://localhost:9090/api/v1/query?query=rate(prometheus_remote_storage_bytes_total[5m])/rate(prometheus_remote_storage_samples_total[5m])" | \
+  jq '.data.result[0].value[1]'
 ```
-* **Uncompressed Prometheus Text Format**: ~180 to 220 bytes/sample.
-* **Measured Output**: **~17.8 bytes/sample** (~88% bandwidth reduction).
-* **The Math**: To send 10,000 samples uncompressed would take ~2.0 MB. With Snappy compression, it takes only ~178 KB!
 
-##### Method 3: Spoke-Side Queue & Delivery Counters
-Query the Spoke's internal remote write subsystem to verify successful delivery and queue health:
+**Expected Output:** `"17.84"` — 17.84 bytes per sample on the wire.
+
+- Raw Prometheus text format: **~180–220 bytes/sample**
+- Snappy-compressed Protobuf: **~17.84 bytes/sample**
+- Bandwidth reduction: **~88%**
+- Real impact: Sending 10,000 samples uncompressed = ~2.0 MB. With Snappy = ~178 KB.
+
+#### 2.4 — Verify Successful Delivery Counters
+
 ```bash
-# 1. Total samples successfully delivered to PrimaryHub:
+# Rate of samples successfully delivered to PrimaryHub:
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
   wget -qO- "http://localhost:9090/api/v1/query?query=rate(prometheus_remote_storage_succeeded_samples_total[5m])" | jq .
 
-# 2. Check pending queue backlog (normally 0 or small during healthy flushing; spikes only during outages):
+# Current pending backlog (should be 0 during healthy streaming):
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
   wget -qO- "http://localhost:9090/api/v1/query?query=prometheus_remote_storage_samples_pending" | jq .
 ```
 
-##### Method 4: PrimaryHub Server-Side Ingestion Proof (HTTP 204 No Content)
-PrimaryHub accepts, decompresses, and ingests incoming Snappy batches. When decompression and TSDB commit succeed, PrimaryHub returns HTTP `204 No Content`.
-
-> [!TIP]
-> **Why `handler="/api/v1/write"` returns `[]`**:
-> In Prometheus's internal routing engine (`web/api/v1/api.go`), the route handler label is registered as **`handler="/write"`** (not the full URL `/api/v1/write`). Filtering by `/api/v1/write` matches zero series and returns empty results.
->
-> Furthermore, **`code="204"`** is 100% unique to incoming Remote Write requests across the entire Prometheus server (all query, target, and scrape endpoints return `200 OK`).
-
-```bash
-# 1. Total cumulative remote write batches ingested by PrimaryHub:
-kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- 'http://localhost:9090/api/v1/query?query=prometheus_http_requests_total{code="204"}' | jq .
-
-# 2. Or query by the internal handler label:
-kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- 'http://localhost:9090/api/v1/query?query=prometheus_http_requests_total{handler="/write",code="204"}' | jq .
-
-# 3. Live ingestion rate (batches received per second):
-kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- 'http://localhost:9090/api/v1/query?query=rate(prometheus_http_requests_total{code="204"}[1m])' | jq .
-
-# 4. Discover all active HTTP handlers and status codes on PrimaryHub:
-kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- 'http://localhost:9090/api/v1/query?query=count%20by%20(handler,%20code)%20(prometheus_http_requests_total)' | jq .
-```
-
-**Expected JSON Output (`code="204"`):**
-```json
-{
-  "status": "success",
-  "data": {
-    "resultType": "vector",
-    "result": [
-      {
-        "metric": {
-          "code": "204",
-          "handler": "/write",
-          "instance": "localhost:9090",
-          "job": "prometheus"
-        },
-        "value": [ 1793088650.12, "4218" ]
-      }
-    ]
-  }
-}
-```
-* **`code="204"`**: Confirms each batch was decompressed from Snappy and accepted into TSDB.
-* **`"4218"`**: Total compressed batches successfully delivered from edge spoke clusters since server startup.
-* If a sender transmits uncompressed or corrupted data, PrimaryHub immediately rejects the request with HTTP `400 Bad Request` or `415 Unsupported Media Type`.
-
-##### Method 5: Prometheus Specification & Code Requirement
-By the [Prometheus Remote Write 1.0 Specification](https://prometheus.io/docs/concepts/remote_write_spec/), compression is **mandatory**:
-* All remote write requests **must** be sent with `Content-Encoding: snappy`.
-* An uncompressed payload is invalid according to the specification.
-* In `user_data.sh.tftpl` (`deploy_spoke_monitoring()`), defining `remote_write.url` automatically engages the Snappy compression pipeline inside the binary without requiring any third-party plugins or sidecars.
-
-#### 2.5 Real-World Case Study: Analyzing Live Spoke Logs (Outage Recovery & Dynamic Resharding)
-When inspecting the running `prometheus-scraper` logs on `spoke1`, you will observe the exact 3-phase lifecycle that guarantees zero data loss:
+#### 2.5 — Real-World Log Analysis: Outage Recovery & Dynamic Resharding
 
 ```bash
 kubectl -n monitoring logs deploy/prometheus-scraper --tail=60
 ```
 
-**Actual Cluster Log Snippet:**
+**Live Cluster Log (actual output):**
 ```text
-# ── PHASE 1: Boot, TSDB Startup & WAL Replay ──────────────────────────
-ts=2026-10-27T05:44:58.478Z msg="Found healthy block" mint=... ulid=01M5VQ0BWG...
+# ── PHASE 1: Boot, TSDB Startup & WAL Replay ─────────────────────────────
 ts=2026-10-27T05:44:58.563Z msg="Replaying WAL, this may take a while"
-ts=2026-10-27T05:44:58.695Z msg="WAL segment loaded" segment=4 maxSegment=7
-ts=2026-10-27T05:44:59.014Z msg="WAL replay completed" checkpoint_replay_duration=33ms wal_replay_duration=417ms
-ts=2026-10-27T05:44:59.028Z component=remote msg="Starting WAL watcher" url=http://10.99.0.1:30900/api/v1/write
+ts=2026-10-27T05:44:59.014Z msg="WAL replay completed" wal_replay_duration=417ms
+ts=2026-10-27T05:44:59.028Z component=remote msg="Starting WAL watcher"
 ts=2026-10-27T05:45:08.794Z component=remote msg="Done replaying WAL" duration=9.76s
 
-# ── PHASE 2: Temporary Network / Server Unreachability ────────────────
+# ── PHASE 2: Network Outage (PrimaryHub was restarting) ──────────────────
 ts=2026-10-27T05:45:39.585Z level=warn msg="Failed to send batch, retrying" err="context deadline exceeded"
 ts=2026-10-27T05:47:54.590Z level=warn msg="Failed to send batch, retrying" err="dial tcp 10.99.0.1:30900: i/o timeout"
 ts=2026-10-27T05:48:46.899Z level=warn msg="Failed to send batch, retrying" err="dial tcp 10.99.0.1:30900: connect: connection refused"
 ts=2026-10-27T05:50:09.033Z level=warn msg="Skipping resharding, resharding is disabled while waiting for recoverable errors"
 
-# ── PHASE 3: Connection Restored & Automatic Dynamic Resharding ───────
+# ── PHASE 3: Connectivity Restored & Auto-Scaling ────────────────────────
 ts=2026-10-27T05:50:19.034Z level=info msg="Remote storage resharding" from=1 to=3
 ts=2026-10-27T05:50:39.034Z level=info msg="Remote storage resharding" from=3 to=2
-ts=2026-10-27T05:50:49.034Z level=info msg="Remote storage resharding" from=2 to=3
 ts=2026-10-27T05:52:29.034Z level=info msg="Remote storage resharding" from=2 to=1
 ```
 
-**Deep Dive Analysis for Teammates:**
-1. **Phase 1 (WAL Replay)**: When the pod restarted, it replayed disk WAL segments 4 through 7 in **417 ms** and caught up on all buffered data without losing any samples.
-2. **Phase 2 (Recoverable Error Handling)**: For ~4 minutes, PrimaryHub (`10.99.0.1:30900`) was temporarily restarting/unreachable. Prometheus marked this as a **recoverable error**, backed off retrying exponentially, and kept accumulating new samples in its local WAL queue.
-3. **Phase 3 (Dynamic Auto-Scaling)**: At **05:50:19**, connectivity was restored. The Dynamic Shard Controller calculated that 1 worker thread was too slow to clear the backlog and **auto-scaled from 1 to 3 parallel worker shards** (`from=1 to=3`) to flush the queue 3x faster over WireGuard.
-4. **Phase 4 (Scale Down)**: At **05:52:29**, the backlog was 100% delivered. Prometheus **scaled back down to 1 baseline shard** (`from=2 to=1`) to conserve memory and CPU.
+**What these three phases show:**
+
+| Phase | What Happened | What Prometheus Did |
+| :--- | :--- | :--- |
+| **Phase 1 (Boot)** | Pod restarted; needed to catch up | Replayed WAL segments 4–7 in 417ms. `Done replaying WAL` after 9.76s. Zero sample loss. |
+| **Phase 2 (Outage)** | PrimaryHub was unreachable for ~4 minutes | Classified errors as `recoverable`. Backed off exponentially. All new samples buffered safely in local WAL. |
+| **Phase 3 (Recovery)** | Connectivity restored at 05:50:19 | Shard Controller detected backlog. Auto-scaled from 1→3 workers. Flushed backlog 3× faster. Scaled back to 1 at 05:52:29 once fully caught up. |
 
 ---
 
-## Step 3: Network Ingress & NodePort Routing
+## Step 3: Network Ingress & Kernel Netfilter Routing
 
-### 🎯 What We Are Demonstrating
-Cross-region egress packets travel through the encrypted WireGuard overlay (`10.99.0.0/24`) destined for PrimaryHub at `10.99.0.1:30900`. On PrimaryHub, Linux Kernel Netfilter NAT routes incoming port 30900 directly to the KinD node container at wire speed without userspace proxies or systemd daemons.
+### What We Are Demonstrating
 
-### 📋 Code Reference
-* KinD NodePort Port Mapping: [`script/prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/clusters.sh#L186-L202)
-* Prometheus NodePort Service: [`codeInspector/charts/prometheus/templates/service.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/service.yaml#L16-L40)
+Compressed HTTP POST batches from edge spokes travel over the **encrypted WireGuard mesh** (`10.99.0.0/24`) and arrive at PrimaryHub on port `30900`. On PrimaryHub, the **Linux Kernel Netfilter (iptables DNAT)** intercepts the packets in kernel space and routes them directly into the KinD node container — with zero userspace proxy overhead, zero context switches, and zero packet copies.
+
+**Why kernel Netfilter instead of Docker port publishing:**
+Standard Docker port publishing (`docker-proxy`) creates a userspace daemon for every exposed port, copying each packet through user space and back. Netfilter DNAT operates entirely inside the kernel — the packet is rewritten at interrupt time and forwarded without ever entering userspace. This is the same pattern used for PostgreSQL (port 30432) and Valkey (port 30379).
+
+**Code References:**
+- KinD port mappings: [`script/prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/clusters.sh)
+- Prometheus NodePort service: [`codeInspector/charts/prometheus/templates/service.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/service.yaml)
 
 ---
 
-### 💻 Demo Commands
+### Commands & Expected Output
 
-#### 3.1 Test Direct Connectivity from Spoke to PrimaryHub NodePort
-Execute an HTTP check from inside the Spoke scraper container across the WireGuard tunnel:
+#### 3.1 — Test End-to-End WireGuard Connectivity from Spoke to PrimaryHub
+
 ```bash
 kubectl -n monitoring exec deploy/prometheus-scraper -- \
   wget -qS -O- "http://10.99.0.1:30900/-/healthy"
 ```
+
 **Expected Output:**
 ```text
   HTTP/1.1 200 OK
@@ -646,78 +359,85 @@ kubectl -n monitoring exec deploy/prometheus-scraper -- \
 Prometheus Server is Healthy.
 ```
 
-#### 3.2 Inspect PrimaryHub Linux Kernel Netfilter (iptables) Ingress Rules
-On the PrimaryHub EC2 host (via SSH or SSM):
+This confirms the complete path: Spoke → WireGuard tunnel → PrimaryHub port 30900 → KinD container → Prometheus pod.
+
+#### 3.2 — Inspect the Kernel-Level DNAT Ingress Rule on PrimaryHub
+
+Run this on the PrimaryHub EC2 host (via SSH or SSM):
+
 ```bash
-# Check DNAT PREROUTING table:
 sudo iptables -t nat -L PREROUTING -n -v --line-numbers | grep 30900
 ```
+
 **Expected Output:**
 ```text
 1   124K   21M DNAT  tcp  --  !br-+  *  0.0.0.0/0  0.0.0.0/0  tcp dpt:30900 to:172.18.0.2:30900
 ```
-*(Shows active packet and byte counters incrementing in real-time as remote write batches arrive).*
 
-#### 3.3 Why Docker Userspace Proxy is Bypassed in Favor of Pure Kernel Netfilter
+- `124K` packets and `21M` bytes: live counters that increment in real-time with every metric batch
+- `172.18.0.2`: the internal Docker bridge IP of the KinD control-plane container
+- No process name appears here because there **is no process** — this is pure kernel packet rewriting
 
-> [!NOTE]
-> If you run `docker port primaryhub-control-plane 30900`, Docker reports:
-> `Error: No public port '30900' published for primaryhub-control-plane`
->
-> **This is by design in production**:
-> 1. Standard Docker port publishing (`docker-proxy`) runs a userspace process for every published port, introducing context switches, packet copies, and CPU overhead.
-> 2. PrimaryHub uses **zero-overhead Linux Kernel Netfilter (iptables DNAT)**. The kernel intercepts incoming packets on WireGuard interface `wg0` and redirects them at wire-speed directly to the KinD node container IP `172.18.0.2:30900` entirely in kernel space.
-> 3. Verify the KinD container's internal IP address that receives this traffic:
->    ```bash
->    docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' primaryhub-control-plane
->    ```
->    **Expected Output:**
->    ```text
->    172.18.0.2
->    ```
->    *(Matches the destination IP in the `iptables` rule from Step 3.2: `to:172.18.0.2:30900`).*
+#### 3.3 — Verify the KinD Container IP (Matches the DNAT Destination)
 
-#### 3.4 Inspect the Kubernetes Service Definition on PrimaryHub
 ```bash
-kubectl --context kind-primaryhub -n opensandbox-system get svc prometheus-nodeport -o yaml | grep -A 8 "spec:"
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' primaryhub-control-plane
 ```
+
+**Expected Output:** `172.18.0.2` — exactly matching the `to:` destination in the iptables rule above.
+
+#### 3.4 — Verify the Kubernetes NodePort Service Definition
+
+```bash
+kubectl -n opensandbox-system get svc prometheus-nodeport -o yaml | grep -A 8 "spec:"
+```
+
 **Expected Output:**
 ```yaml
 spec:
   ports:
   - name: web
-    nodePort: 30900
+    nodePort: 30900     ← Exposed on the KinD node (172.18.0.2:30900)
     port: 9090
     protocol: TCP
-    targetPort: 9090
+    targetPort: 9090   ← Forwards to Prometheus pod port 9090
   selector:
     app: prometheus
   type: NodePort
 ```
 
-🗣️ **Talking Point for Teammates**:
-> *"There are zero userspace proxy daemons running on the host. Traffic hitting WireGuard `10.99.0.1:30900` is translated directly at the Linux kernel level into the KinD container interface `172.18.0.2:30900` and immediately delivered to the Prometheus pod port 9090."*
+**The complete ingress chain:**
+```
+WireGuard: 10.99.0.1:30900
+    ↓ Kernel Netfilter DNAT
+KinD node: 172.18.0.2:30900
+    ↓ kube-proxy NodePort rule
+Kubernetes Service ClusterIP: <clusterIP>:9090
+    ↓ Service selector: app=prometheus
+Central Prometheus Pod: <podIP>:9090
+```
 
 ---
 
-## Step 4: Central Receiver Ingestion
+## Step 4: Central Ingestion & Multi-Cluster Disambiguation
 
-### 🎯 What We Are Demonstrating
-PrimaryHub's Prometheus runs with `--web.enable-remote-write-receiver` to accept the `/api/v1/write` stream. Incoming samples are disambiguated by external labels (`cluster="spoke1"`, `cluster="secondaryhub"`, `cluster="primaryhub"`) and written directly to the head chunks.
+### What We Are Demonstrating
 
-### 📋 Code Reference
-* Receiver Flag in Deployment: [`codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml#L24-L35)
-* Spoke External Labels: EC2 Launch Template `user_data.sh.tftpl` (`deploy_spoke_monitoring()`)
+PrimaryHub's Prometheus runs with `--web.enable-remote-write-receiver`, which unlocks the `/api/v1/write` endpoint to accept inbound push streams. It receives and ingests simultaneous streams from SecondaryHub, Spoke 1, and Spoke 2 — storing all of them in a single unified TSDB. The `cluster="..."` external labels (injected at the spoke before transmission) ensure each cluster's metrics are stored as completely separate time-series, preventing any collision.
+
+**Code Reference:** [`codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml)
 
 ---
 
-### 💻 Demo Commands
+### Commands & Expected Output
 
-#### 4.1 Verify the Receiver Flag on the PrimaryHub Deployment
+#### 4.1 — Verify the Remote Write Receiver Flag is Enabled
+
 ```bash
-kubectl --context kind-primaryhub -n opensandbox-system get deploy prometheus \
+kubectl -n opensandbox-system get deploy prometheus \
   -o jsonpath='{.spec.template.spec.containers[0].args}' | jq .
 ```
+
 **Expected Output:**
 ```json
 [
@@ -730,175 +450,140 @@ kubectl --context kind-primaryhub -n opensandbox-system get deploy prometheus \
 ]
 ```
 
-#### 4.2 Measure Live Ingestion Throughput on Remote Write
-Query the rate of remote-write HTTP batches being processed by the ingestion engine:
+The `--web.enable-remote-write-receiver` flag is what unlocks `POST /api/v1/write`. Without it, all incoming PRW batches receive HTTP 405.
+
+#### 4.2 — Verify PrimaryHub is Actively Receiving Batches
+
 ```bash
+# Rate of remote write batches received per second:
 kubectl -n opensandbox-system exec deploy/prometheus -- \
   wget -qO- 'http://localhost:9090/api/v1/query?query=rate(prometheus_http_requests_total{code="204"}[1m])' | jq .
-```
-*(HTTP 204 No Content indicates successful decompression, verification, and TSDB sample persistence).*
 
-#### 4.3 PROVE MULTI-CLUSTER DISAMBIGUATION (The Crown Jewel Query)
-Run this single PromQL command to show all 4 global clusters streaming simultaneously into the same TSDB:
-```bash
+# Total cumulative batches received since startup:
 kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=count%20by%20(cluster)(up)" | jq .
+  wget -qO- 'http://localhost:9090/api/v1/query?query=prometheus_http_requests_total{handler="/write",code="204"}' | jq .
 ```
-**Actual Cluster Output:**
+
+**Expected Output (cumulative batches):**
 ```json
 {
-  "status": "success",
   "data": {
-    "resultType": "vector",
     "result": [
       {
-        "metric": {},
-        "value": [
-          1793090729.193,
-          "20"
-        ]
-      },
-      {
-        "metric": {
-          "cluster": "secondaryhub"
-        },
-        "value": [
-          1793090729.193,
-          "17"
-        ]
-      },
-      {
-        "metric": {
-          "cluster": "spoke1"
-        },
-        "value": [
-          1793090729.193,
-          "6"
-        ]
-      },
-      {
-        "metric": {
-          "cluster": "spoke2"
-        },
-        "value": [
-          1793090729.193,
-          "6"
-        ]
+        "metric": { "code": "204", "handler": "/write", "instance": "localhost:9090" },
+        "value": [ 1793088650.12, "4218" ]
       }
     ]
   }
 }
 ```
 
-**What This Proves to Your Teammates**:
-* **`{}` (20 targets)**: PrimaryHub local infrastructure (PostgreSQL, AgentGateway, node exporters, and API pods).
-* **`cluster="secondaryhub"` (17 targets)**: SecondaryHub edge cluster in US West streaming live over WireGuard.
-* **`cluster="spoke1"` (6 targets)**: Spoke 1 cluster in Frankfurt (`eu-central-1`) streaming live over WireGuard.
-* **`cluster="spoke2"` (6 targets)**: Spoke 2 cluster in Mumbai (`ap-south-1`) streaming live over WireGuard.
-* **Total: 49 monitored services** across 3 continents unified in a single central TSDB with zero latency and zero query cross-WAN hops!
+- `"4218"`: 4,218 batches successfully received, decompressed, and committed to TSDB since server startup
+- `code="204"` is unique to remote write — all other Prometheus endpoints return `200 OK`
 
-#### 4.4 Detailed Target Inventory (What the 49 Scraped Endpoints Represent)
+> [!TIP]
+> **Why query `code="204"` instead of `handler="/api/v1/write"`?**
+> Prometheus's internal routing registers the handler as `handler="/write"` (not the full path). Filtering by `/api/v1/write` returns empty results. `code="204"` is unambiguous — it is used **exclusively** by the remote write receiver across the entire Prometheus HTTP server.
 
-In Prometheus, each **target** is an individual HTTP `/metrics` endpoint polled every 15 seconds. When `up == 1`, the service is healthy and actively returning telemetry.
+#### 4.3 — The Crown Jewel Query: All 4 Clusters in One TSDB
 
-| Cluster | Total Targets | Components & Services Monitored |
-| :--- | :--- | :--- |
-| **Spoke 1** (`eu-central-1`) | **6** | • `prometheus-scraper` (self memory, CPU, and WAL telemetry on `:9090`)<br>• `klusterlet-registration-agent` (hub registration on `:8080`)<br>• `klusterlet-work-agent` (manifestwork sync on `:8080`)<br>• `coredns` replica 1 & 2 (`kube-system` DNS metrics on `:9153`)<br>• `local-path-provisioner` / node storage controller |
-| **Spoke 2** (`ap-south-1`) | **6** | • `prometheus-scraper` (self metrics)<br>• `klusterlet-registration-agent`<br>• `klusterlet-work-agent`<br>• `coredns` replica 1 & 2<br>• `local-path-provisioner` |
-| **PrimaryHub** (`us-east-1`) | **20** | • `cloudnative-pg-instances` (PostgreSQL leader & poolers on `:9187`)<br>• `cloudnative-pg-operator` (database reconciliation loops on `:8080`)<br>• `fastapi-api-server` (`sandbox-api-service` on `:8000`)<br>• `agentgateway-proxy` (Envoy reverse proxy & ingress routing)<br>• `open-cluster-management-hub` (registration, placement, work controllers)<br>• `open-cluster-management-agent` (local hub klusterlet)<br>• `coredns` replicas (`:9153`)<br>• `prometheus` server engine (`:9090`) |
-| **SecondaryHub** (`us-west-2`)| **17** | • Standby PostgreSQL replica (`:9187`)<br>• Backup FastAPI application service (`:8000`)<br>• SecondaryHub OCM controllers<br>• CoreDNS replicas (`:9153`)<br>• Local agents & node metrics |
-
-##### Live Commands to Inspect Individual Target Names
-
-1. **List all targets for Spoke 1**:
-   ```bash
-   kubectl -n opensandbox-system exec deploy/prometheus -- \
-     wget -qO- 'http://localhost:9090/api/v1/query?query=up{cluster="spoke1"}' | \
-     jq -r '.data.result[] | "\(.metric.job) -> \(.metric.instance)"'
-   ```
-
-2. **List all targets for PrimaryHub**:
-   ```bash
-   kubectl -n opensandbox-system exec deploy/prometheus -- \
-     wget -qO- 'http://localhost:9090/api/v1/query?query=up{cluster=""}' | \
-     jq -r '.data.result[] | "\(.metric.job) -> \(.metric.instance)"'
-   ```
-
-3. **List all 49 targets across all 4 clusters (Grouped View)**:
-   ```bash
-   kubectl -n opensandbox-system exec deploy/prometheus -- \
-     wget -qO- 'http://localhost:9090/api/v1/query?query=up' | \
-     jq -r '.data.result[] | "\(.metric.cluster // "primaryhub") | \(.metric.job) | \(.metric.instance)"' | sort
-   ```
-
-🗣️ **Talking Point for Teammates**:
-> *"Notice that all clusters are streaming into one unified engine, but every metric is cleanly partitioned by `cluster="..."`. We can query any cluster or compare them side-by-side in a single expression without querying across the internet."*
-
----
-
-## Step 5: Persistent Storage Survival
-
-### 🎯 What We Are Demonstrating
-All TSDB blocks are written to `/prometheus`, mounted to a 25 GiB PVC backed by an AWS 100 GiB GP3 EBS volume (`DeleteOnTermination=false`). If the EC2 host is destroyed or recreated, cloud-init automatically re-attaches the volume and Prometheus resumes historical data seamlessly.
-
-### 🧠 Deep-Dive: What is a TSDB and What Kind of TSDB Are We Using?
-
-#### 1. What is a TSDB (Time-Series Database)?
-A Time-Series Database is optimized specifically for sequential data where time is the primary index. Unlike relational databases (such as PostgreSQL) that require row locks, table scans, and ACID transactions, a TSDB is engineered for massive, append-only throughput of `(metric_labels, timestamp, value)` tuples with ultra-fast time-window aggregations (`rate`, `avg_over_time`).
-
-#### 2. What Kind of TSDB Are We Using?
-We are using **Prometheus's Native TSDB Engine (TSDB v3)**, embedded directly inside Prometheus `v2.54.1`:
-* **Embedded Architecture**: No external database clusters (like Cassandra or InfluxDB) to manage. Prometheus runs as a self-contained, high-performance engine.
-* **Storage Backing**: Mounted to a **100 GiB AWS GP3 EBS volume** (`nvme1n1`) providing 3,000 baseline IOPS and 125 MB/s throughput.
-* **Retention Window**: Configured for **30 days** (`--storage.tsdb.retention.time=30d`), automatically compacting and pruning old blocks.
-
-#### 3. How the Prometheus TSDB Works Internally
-```text
-           [Incoming Remote Write Stream over WireGuard]
-                                │
-                                ▼
-┌──────────────────────────────────────────────────────────────┐
-│ 1. IN-MEMORY HEAD CHUNK (RAM) + DISK WAL (/prometheus/wal)   │
-│    • Ingestion is buffered in RAM for instant query access.  │
-│    • Simultaneously appended to sequential WAL on disk.      │
-└───────────────────────────────┬──────────────────────────────┘
-                                │
-                                │ (Every 2 Hours: Block Compaction)
-                                ▼
-┌──────────────────────────────────────────────────────────────┐
-│ 2. COMPACTED 2-HOUR BLOCKS (/prometheus/01M5VQ0BWG...)       │
-│    • chunks/    -> Samples compressed via Facebook Gorilla   │
-│    • index      -> Inverted search index of all labels       │
-│    • meta.json  -> Block boundaries and total sample count   │
-└──────────────────────────────────────────────────────────────┘
+```bash
+kubectl -n opensandbox-system exec deploy/prometheus -- \
+  wget -qO- "http://localhost:9090/api/v1/query?query=count%20by%20(cluster)(up)" | jq .
 ```
 
-* **Facebook Gorilla Compression**:
-  * **Timestamps**: Stored using *Double-Delta encoding* (storing only the change between consecutive 15-second intervals). When intervals are consistent, it requires only **1 bit** per timestamp!
-  * **Values**: Stored using *XOR float compression* (only storing changed bits compared to the previous value).
-  * **Result**: Raw 16-byte time-series samples are compressed down to **~1.37 bytes per sample on disk** (> 90% storage savings).
+**Live Cluster Output:**
+```json
+{
+  "status": "success",
+  "data": {
+    "resultType": "vector",
+    "result": [
+      { "metric": {},                         "value": ["1793090729.193", "20"] },
+      { "metric": { "cluster": "secondaryhub" }, "value": ["1793090729.193", "17"] },
+      { "metric": { "cluster": "spoke1" },       "value": ["1793090729.193", "6"]  },
+      { "metric": { "cluster": "spoke2" },       "value": ["1793090729.193", "6"]  }
+    ]
+  }
+}
+```
 
-### 📋 Code Reference
-* Persistent Volume Claim: [`codeInspector/charts/prometheus/templates/pvc.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/pvc.yaml)
-* Chart Values: [`codeInspector/charts/prometheus/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml#L25-L30)
+**What this output proves:**
+
+| Cluster | Targets | What is Being Monitored |
+| :--- | :--- | :--- |
+| `{}` (PrimaryHub) | **20** | PostgreSQL leader & poolers, CNPG operator, FastAPI backend, AgentGateway, OCM Hub, CoreDNS, Prometheus self |
+| `secondaryhub` | **17** | Standby PostgreSQL, secondary FastAPI, secondary OCM agents, CoreDNS, node metrics |
+| `spoke1` | **6** | `prometheus-scraper`, `klusterlet-registration-agent`, `klusterlet-work-agent`, CoreDNS ×2, storage provisioner |
+| `spoke2` | **6** | Same 6 components as Spoke 1 |
+| **Total** | **49** | **3 continents, 4 clusters, 1 unified TSDB** |
+
+#### 4.4 — List Individual Targets per Cluster
+
+```bash
+# List all targets for Spoke 1:
+kubectl -n opensandbox-system exec deploy/prometheus -- \
+  wget -qO- 'http://localhost:9090/api/v1/query?query=up{cluster="spoke1"}' | \
+  jq -r '.data.result[] | "\(.metric.job) → \(.metric.instance)"'
+
+# List all targets for PrimaryHub:
+kubectl -n opensandbox-system exec deploy/prometheus -- \
+  wget -qO- 'http://localhost:9090/api/v1/query?query=up{cluster=""}' | \
+  jq -r '.data.result[] | "\(.metric.job) → \(.metric.instance)"'
+
+# List all 49 targets across all clusters (grouped):
+kubectl -n opensandbox-system exec deploy/prometheus -- \
+  wget -qO- 'http://localhost:9090/api/v1/query?query=up' | \
+  jq -r '.data.result[] | "\(.metric.cluster // "primaryhub") | \(.metric.job) | \(.metric.instance)"' | sort
+```
 
 ---
 
-### 💻 Demo Commands
+## Step 5: Persistent Storage on AWS EBS
 
-#### 5.1 Verify Physical AWS EBS Volume Mount on PrimaryHub EC2 Host
-On PrimaryHub host (via SSH or SSM):
+### What We Are Demonstrating
+
+All TSDB data on PrimaryHub is written to `/prometheus`, which is mounted from a Kubernetes PVC backed by a dedicated **100 GiB AWS GP3 EBS volume** configured with `DeleteOnTermination=false`. If the PrimaryHub EC2 instance is completely terminated, stopped, or replaced, the EBS volume survives intact in AWS with the full 30-day TSDB history preserved.
+
+When a replacement EC2 instance boots, the Launch Template cloud-init script automatically re-attaches this exact volume and Prometheus resumes serving the historical timeline immediately.
+
+**How the TSDB is structured on disk:**
+```
+/prometheus/
+  ├── wal/                      ← Active Write-Ahead Log (crash-safe live buffer)
+  │   └── 00000008              ← Current active WAL segment
+  │
+  ├── 01JAX1G0S.../             ← Immutable 2-hour TSDB block
+  │   ├── chunks/               ← Gorilla XOR compressed sample data (~1.37 bytes/sample)
+  │   ├── index                 ← Inverted label search index (label → series IDs)
+  │   └── meta.json             ← Block time range, sample count, checksum
+  │
+  └── 01JAX7M5F.../             ← Next 2-hour block (sealed, immutable)
+```
+
+**Code References:**
+- PVC definition: [`codeInspector/charts/prometheus/templates/pvc.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/pvc.yaml)
+- Chart values: [`codeInspector/charts/prometheus/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml)
+
+---
+
+### Commands & Expected Output
+
+#### 5.1 — Verify the Physical EBS Volume is Mounted on the EC2 Host
+
+Run on the PrimaryHub EC2 host via SSH or SSM:
+
 ```bash
 # Check block devices:
-lsblk -f | grep -E "nvme|sdf|data"
+lsblk -f | grep -E "nvme|data"
 ```
 **Expected Output:**
 ```text
-nvme1n1  ext4   100G  28G   72G   28% /data
+nvme1n1  ext4   100G  28G  72G  28%  /data
 ```
 
 ```bash
-# Verify filesystem capacity:
+# Verify filesystem details:
 df -hT /data
 ```
 **Expected Output:**
@@ -907,9 +592,10 @@ Filesystem     Type  Size  Used Avail Use% Mounted on
 /dev/nvme1n1   ext4  100G   28G   72G  28% /data
 ```
 
-#### 5.2 Verify Kubernetes PVC and StorageClass Binding
+#### 5.2 — Verify the Kubernetes PVC is Bound
+
 ```bash
-kubectl --context kind-primaryhub -n opensandbox-system get pvc prometheus-pvc
+kubectl -n opensandbox-system get pvc prometheus-pvc
 ```
 **Expected Output:**
 ```text
@@ -917,58 +603,62 @@ NAME             STATUS   VOLUME                                     CAPACITY   
 prometheus-pvc   Bound    pvc-11ab1300-e873-4451-9417-cc98982352e3   25Gi       RWO            standard       5d
 ```
 
-#### 5.3 Inspect Immutable TSDB Block Directories
-Show the 2-hour TSDB block directories generated by Prometheus:
+#### 5.3 — Inspect the Immutable 2-Hour TSDB Block Directories
+
 ```bash
-kubectl --context kind-primaryhub -n opensandbox-system exec deploy/prometheus -- \
-  ls -la /prometheus
+kubectl -n opensandbox-system exec deploy/prometheus -- ls -lh /prometheus
 ```
 **Expected Output:**
 ```text
-drwxr-xr-x 3 nobody nogroup 4096 Oct 27 02:00 01JAX1G0S...
-drwxr-xr-x 3 nobody nogroup 4096 Oct 27 04:00 01JAX7M5F...
-drwxr-xr-x 3 nobody nogroup 4096 Oct 27 06:00 01JAXDZ8N...
+drwxr-xr-x 3 nobody nogroup 4096 Oct 27 02:00 01JAX1G0S...   ← Block: 00:00–02:00
+drwxr-xr-x 3 nobody nogroup 4096 Oct 27 04:00 01JAX7M5F...   ← Block: 02:00–04:00
+drwxr-xr-x 3 nobody nogroup 4096 Oct 27 06:00 01JAXDZ8N...   ← Block: 04:00–06:00
 drwxr-xr-x 2 nobody nogroup 4096 Oct 27 06:20 chunks_head
 -rw-r--r-- 1 nobody nogroup    0 Oct 22 14:00 lock
 drwxr-xr-x 3 nobody nogroup 4096 Oct 27 06:20 wal
 ```
 
-#### 5.4 Demonstrate Historical Timeline Retrieval
-Query metric data from 24 hours ago to show full historical retention:
-```bash
-kubectl --context kind-primaryhub -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=up[24h]" | jq '.data.result[0].values | length'
-```
-**Expected Output:**
-```text
-5760
-```
-*(5,760 continuous 15-second samples spanning the last 24 hours intact).*
+Each directory contains:
+- `chunks/` — the Gorilla-compressed sample data (~1.37 bytes/sample, > 90% compression)
+- `index` — an inverted index from label combinations to series IDs for fast PromQL filtering
+- `meta.json` — block time boundaries and total sample count
 
-🗣️ **Talking Point for Teammates**:
-> *"Even if this EC2 instance were completely terminated right now, the 100 GiB AWS EBS volume remains safe in AWS. The Launch Template cloud-init script will discover `vol-007928387cbe1370f`, mount it to `/data`, and Prometheus will resume the historical timeline without losing a single sample."*
+#### 5.4 — Prove 24 Hours of Continuous History is Intact
+
+```bash
+kubectl -n opensandbox-system exec deploy/prometheus -- \
+  wget -qO- "http://localhost:9090/api/v1/query?query=up[24h]" | \
+  jq '.data.result[0].values | length'
+```
+**Expected Output:** `5760`
+
+5,760 data points × 15 seconds per point = **exactly 24 hours** of uninterrupted metric history.
+
+> *"This EBS volume is the reason we have 5,760 continuous samples. If this EC2 were terminated right now, that `vol-007928387cbe1370f` volume stays alive in AWS. The next instance boots, cloud-init attaches it, Docker mounts it to `/data`, KinD sees the PV, and Prometheus resumes from the exact last sample. Complete 30-day history restored instantly."*
 
 ---
 
-## Step 6: Centralized Visualization
+## Step 6: Centralized Visualization in Grafana
 
-### 🎯 What We Are Demonstrating
-Grafana connects to the local TSDB via in-cluster DNS (`http://prometheus-service.opensandbox-system.svc.cluster.local:9090`). Because all clusters push their telemetry into the same TSDB, Grafana queries execute locally with **sub-millisecond latency** (`< 5ms`), completely eliminating WAN round-trip overhead.
+### What We Are Demonstrating
 
-### 📋 Code Reference
-* Datasource Provisioning: [`codeInspector/charts/grafana/templates/configmap-datasources.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml#L15-L38)
-* Declarative Dashboards: [`codeInspector/charts/grafana/templates/configmap-dashboards.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-dashboards.yaml)
-* Gateway API Route: [`codeInspector/charts/grafana/templates/httproute.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/httproute.yaml)
-* 1-Command SSM Tunnel: [`script/prod-docker-multi-script/port-forward-grafana.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/port-forward-grafana.sh)
+Grafana runs inside the PrimaryHub Kubernetes cluster and connects to the central Prometheus via in-cluster DNS (`http://prometheus-service.opensandbox-system.svc.cluster.local:9090`). Because all edge clusters push their metrics into this one TSDB, **every Grafana query is a local Kubernetes DNS call**. There are zero cross-WAN requests, zero 504 timeouts, and zero inter-regional latency on any dashboard panel.
+
+The result: dashboards that previously took 4–8 seconds to load now render in **< 300ms**.
+
+**Code References:**
+- Datasource provisioning: [`codeInspector/charts/grafana/templates/configmap-datasources.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml)
+- Dashboard definitions: [`codeInspector/charts/grafana/templates/configmap-dashboards.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-dashboards.yaml)
+- Port-forward script: [`script/prod-docker-multi-script/port-forward-grafana.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/port-forward-grafana.sh)
 
 ---
 
-### 💻 Demo Commands
+### Commands & Expected Output
 
-#### 6.1 Benchmark In-Cluster Query Latency (Zero WAN Overhead)
-Benchmark the round-trip latency from the Grafana container to the Prometheus service:
+#### 6.1 — Benchmark Round-Trip Query Latency (Zero WAN Overhead)
+
 ```bash
-kubectl --context kind-primaryhub -n monitoring exec deploy/grafana -- \
+kubectl -n monitoring exec deploy/grafana -- \
   curl -s -w "\nTime Total: %{time_total}s\nHTTP Status: %{http_code}\n" -o /dev/null \
   "http://prometheus-service.opensandbox-system.svc.cluster.local:9090/api/v1/query?query=up"
 ```
@@ -977,59 +667,75 @@ kubectl --context kind-primaryhub -n monitoring exec deploy/grafana -- \
 Time Total: 0.002841s
 HTTP Status: 200
 ```
-*(~2.8 milliseconds total query time!)*
 
-#### 6.2 Verify Declarative Datasources via Grafana HTTP API
-Verify that the central TSDB datasources are connected:
+**~2.8 milliseconds** for a query spanning 49 active time-series across 4 clusters.
+
+Compare this to the old cross-WAN pull model:
+- `us-east-1` → Frankfurt (`eu-central-1`) round-trip: ~200ms
+- `us-east-1` → Mumbai (`ap-south-1`) round-trip: ~260ms
+- 12 dashboard panels × 4 clusters = 48 concurrent WAN queries → **4.5–8 second dashboard load**
+
+#### 6.2 — Verify Declarative Datasource Configuration
+
 ```bash
-kubectl --context kind-primaryhub -n monitoring exec deploy/grafana -- \
-  curl -s -u admin:sandbox-admin "http://localhost:3000/api/datasources" | jq '.[] | {name: .name, uid: .uid, url: .url, isDefault: .isDefault}'
+kubectl -n monitoring exec deploy/grafana -- \
+  curl -s -u admin:sandbox-admin "http://localhost:3000/api/datasources" | \
+  jq '.[] | {name: .name, uid: .uid, url: .url, isDefault: .isDefault}'
 ```
 **Expected Output:**
 ```json
-{
-  "name": "primaryhub",
-  "uid": "prometheus-primaryhub",
-  "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090",
-  "isDefault": true
-}
-{
-  "name": "secondaryhub",
-  "uid": "prometheus-secondaryhub",
-  "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090",
-  "isDefault": false
-}
+{ "name": "primaryhub",   "uid": "prometheus-primaryhub",   "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090", "isDefault": true  }
+{ "name": "secondaryhub", "uid": "prometheus-secondaryhub",  "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090", "isDefault": false }
 ```
 
-> 💡 **Why do both `primaryhub` and `secondaryhub` point to the same URL? Why are there no separate datasources for each Spoke?**
-> * **All Metrics Live in One TSDB**: Because every spoke cluster actively pushes its metrics into PrimaryHub's Prometheus over WireGuard, the central TSDB contains all time-series data for the entire fleet. Grafana does not need to connect to spoke clusters directly.
-> * **Zero Metric Clashing (Label Namespacing)**: Every metric carries immutable external labels: `cluster="spoke1"`, `cluster="spoke2"`, `cluster="secondaryhub"`, or `cluster="primaryhub"`. In Prometheus TSDB, time-series identity includes its labels. Therefore, `node_cpu_seconds_total{cluster="spoke1"}` and `node_cpu_seconds_total{cluster="spoke2"}` are stored as completely separate time-series in the TSDB.
-> * **Dynamic Spoke Discovery**: The universal **`Spoke Edge Fleet – Dynamic Multi-Cluster Observability`** dashboard uses a 60-second liveness query (`query_result((up{role="spoke", job="prometheus-scraper"} == 1) and ((time() - timestamp(up{role="spoke", job="prometheus-scraper"})) < 60))`) to auto-populate the `$cluster` dropdown with live spokes. When a cluster is selected, panels query `{cluster="$cluster"}` against the central TSDB in `< 3 ms`.
+**Why do all datasources point to the same URL?**
 
-#### 6.3 Launch the Web Browser Tunnel (Live Presentation Finale)
-From your laptop terminal:
+All four cluster names (`primaryhub`, `secondaryhub`, `spoke1`, `spoke2`) point to the same local URL because all cluster metrics live in PrimaryHub's TSDB — there is no need to reach out to individual spokes. Grafana uses PromQL label filtering to scope results per cluster:
+
+```promql
+up{cluster="spoke1"}     → Frankfurt metrics only
+up{cluster="spoke2"}     → Mumbai metrics only
+up{cluster=""}           → PrimaryHub local metrics
+```
+
+**Dynamic spoke auto-discovery:**
+
+The `$cluster` dropdown variable in the fleet dashboard auto-discovers live spokes using a 60-second liveness window:
+
+```promql
+query_result(
+  (up{role="spoke", job="prometheus-scraper"} == 1)
+  and
+  ((time() - timestamp(up{role="spoke", job="prometheus-scraper"})) < 60)
+)
+```
+
+When a new spoke is provisioned via Terraform and begins streaming, it appears in this dropdown within 60 seconds — no manual Grafana configuration needed. When a spoke is terminated, it disappears automatically after 60 seconds.
+
+#### 6.3 — Open the Live Dashboard
+
 ```bash
 cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 ./port-forward-grafana.sh
+# Open: http://localhost:3000   |  Login: admin / sandbox-admin
 ```
 
-1. Open your browser: **[http://localhost:3000](http://localhost:3000)** (or `https://dipper-shun-glowing.ngrok-free.dev/grafana/`)
-2. Login with credentials: `admin` / `sandbox-admin`
-3. Navigate to: **Dashboards** → **Spoke Edge Fleet – Dynamic Multi-Cluster Observability**
-4. Click the **`Spoke Cluster ($cluster)`** dropdown at the top:
-   - Select `spoke1`: Instantly renders Frankfurt node telemetry, cAdvisor containers, and Klusterlet metrics.
-   - Select `spoke2`: Instantly renders Mumbai node telemetry without any cross-WAN lag.
-5. Navigate to: **Dashboards** → **01-Sandbox Multi-Cluster Central Overview** to view global cross-cluster health across all active regions simultaneously.
-6. Point out to your team: **Zero delay, zero timeouts, and immediate graph rendering.**
+**Live walkthrough for the audience:**
+
+1. **Navigate to:** Dashboards → **Spoke Edge Fleet – Dynamic Multi-Cluster Observability**
+2. **Open the `$cluster` dropdown** — select `spoke1` → instant Frankfurt telemetry renders (node CPU, memory, container metrics, Klusterlet status)
+3. **Switch to `spoke2`** → instant Mumbai telemetry — no spinner, no delay
+4. **Navigate to:** Dashboards → **Global Fleet Overview** → cross-cluster summary table showing all 4 clusters in one view
+5. **Point out:** Zero loading delay on cluster switches. Zero timeouts. All data is local.
 
 ---
 
-## Demo Script Recap & Summary for Teammates
+## Demo Summary: Q&A Reference
 
-| Question Your Teammate Might Ask | Your Winning Answer |
+| Question | Answer |
 | :--- | :--- |
-| *"What happens if the WireGuard VPN tunnel between Mumbai and Virginia drops?"* | *"Nothing is lost. Spoke 2's local scraper continues appending samples to its local WAL files. When WireGuard reconnects, the WAL watcher replays and pushes the queued samples to PrimaryHub automatically."* |
-| *"Doesn't sending metrics over the internet consume too much bandwidth?"* | *"No, we verified in Step 2 that Snappy compression reduces metric size to ~17 bytes per sample. The entire spoke cluster generates under 5 KB/s of outbound traffic."* |
-| *"In Grafana's Data Sources page, why are there no separate data sources for each spoke cluster?"* | *"Because Grafana doesn't pull metrics across the WAN. All spokes push into the single central Prometheus TSDB on PrimaryHub. All metrics carry immutable labels like `cluster='spoke1'`. Grafana queries the local central TSDB in < 3ms and filters dynamically using the `$cluster` dropdown variable."* |
-| *"If we destroy the PrimaryHub EC2 instance, do we lose all graphs?"* | *"No. Step 5 demonstrated that TSDB blocks are stored on a 100 GiB AWS EBS volume configured with `DeleteOnTermination=false`. The launch template cloud-init attaches this exact volume on boot, preserving 100% of historical metrics."* |
-| *"Why is Grafana so much faster than before?"* | *"Under the old pull model, Grafana had to query 4 different continents on every dashboard refresh. Now Grafana queries locally via ClusterIP in ~2.8ms, rendering dashboards instantaneously."* |
+| *"What if the WireGuard link drops between Mumbai and Virginia?"* | *"Step 1 showed it: the local WAL absorbs all samples. The pending counter spikes, but once WireGuard recovers, the Shard Controller auto-scales to 10 workers and flushes the entire backlog automatically. Zero samples lost."* |
+| *"Doesn't sending metrics over the internet use too much bandwidth?"* | *"Step 2 proved it: only ~17.84 bytes per sample on the wire — 88% less than raw text format. The entire spoke cluster generates under 5 KB/s of outbound traffic."* |
+| *"Why are there no separate Grafana data sources per spoke?"* | *"All spokes push metrics into PrimaryHub's TSDB. Grafana queries that local TSDB in < 3ms. There's no reason to reach out to the spokes — everything is already here, tagged with `cluster=\"spoke1\"` etc."* |
+| *"If we terminate PrimaryHub's EC2 right now, do we lose all graphs?"* | *"No. The 100 GiB EBS volume has `DeleteOnTermination=false`. Terminate the EC2 and the volume survives in AWS. The Launch Template cloud-init re-attaches it on the next boot and Prometheus resumes the full 30-day history."* |
+| *"Why is Grafana so much faster than before?"* | *"The old model issued 48 cross-WAN queries per dashboard refresh — 4–8 second load times. Now every query is a local DNS call in 2.8ms. The entire dashboard renders in < 300ms."* |
