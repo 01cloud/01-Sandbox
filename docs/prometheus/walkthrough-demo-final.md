@@ -275,35 +275,35 @@ real    0m0.003s   <-- 3 MILLISECONDS!
 #### 6.2 Open Grafana & Switch Clusters Live
 1. Port-forward or open Grafana:
    ```bash
-   cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script && ./port-forward-grafana.sh
+   cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script && ./port-forward-grafana.sh
    # Open browser: http://localhost:3000 (admin / sandbox-admin)
    ```
-2. Navigate to: **Dashboards → 01-Sandbox Multi-Cluster Overview**.
-3. Click the **`${cluster}`** dropdown:
-   - Select `primaryhub`: Instantly loads Postgres replication & API metrics.
-   - Select `spoke1`: Instantly renders Frankfurt node telemetry.
+2. Navigate to: **Dashboards → Spoke Edge Fleet – Dynamic Multi-Cluster Observability**.
+3. Click the **`Spoke Cluster ($cluster)`** dropdown:
+   - Select `spoke1`: Instantly renders Frankfurt node telemetry, cAdvisor containers, and Klusterlet metrics.
    - Select `spoke2`: Instantly renders Mumbai node telemetry.
-4. **Point out to your team**: Zero delay, zero spinner wheels, and instantaneous dashboard rendering.
+4. Navigate to: **Dashboards → 01-Sandbox Multi-Cluster Central Overview** for the global fleet perspective.
+5. **Point out to your team**: Zero delay, zero spinner wheels, and instantaneous dashboard rendering.
 
-#### 6.3 Why Cluster Data Sources Share the Same Endpoint
+#### 6.3 Why All Clusters Share the Central Data Source
 If you open **Grafana → Connections → Data sources**, you will notice:
-* **`primaryhub`**, **`secondaryhub`**, **`spoke1`**, and **`spoke2`** all point to the exact same URL:
+* **`primaryhub`** and **`secondaryhub`** point to the exact same URL:
   `http://prometheus-service.opensandbox-system.svc.cluster.local:9090`
-* **`spoke3`** points to `http://10.99.0.5:30900` (legacy PULL model).
+* There are **no separate data sources for spoke clusters**.
 
-> 💡 **Doesn't having the same endpoint cause metrics to clash or overwrite each other?**
+> 💡 **Doesn't having one central endpoint cause metrics to clash or overwrite each other?**
 > **No.** In Prometheus TSDB, metric identity is determined by the metric name **plus all its labels**.
 > Every metric arriving from an edge cluster is automatically tagged with an immutable external label:
-> - `cluster="spoke1"`, `region="eu-central-1"`
-> - `cluster="spoke2"`, `region="us-east-1"`
-> - `cluster="secondaryhub"`, `region="eu-west-1"`
-> - `cluster="primaryhub"`
+> - `cluster="spoke1"`, `role="spoke"`, `region="eu-central-1"`
+> - `cluster="spoke2"`, `role="spoke"`, `region="ap-south-1"`
+> - `cluster="secondaryhub"`, `role="standby"`, `region="us-west-2"`
+> - `cluster="primaryhub"`, `role="hub"`, `region="us-east-1"`
 >
 > In the TSDB, `up{cluster="spoke1"}` and `up{cluster="spoke2"}` are stored as completely independent time-series.
 >
-> **Why are there multiple data source entries?**
-> 1. **Backwards Compatibility**: Older dashboard panels that had `"datasource": "spoke1"` hardcoded continue to work without breaking.
-> 2. **Querying Best Practice**: All 4 entries query the same central TSDB in `< 3ms`. To isolate data for a specific cluster, always include `{cluster="$cluster"}` in your PromQL queries.
+> **Why is this better than having a data source per spoke?**
+> 1. **Zero Maintenance**: When you spin up `spoke3` or `spoke4`, you **never have to add new Grafana data sources or new dashboards**. The universal dashboard auto-discovers live clusters within 60 seconds.
+> 2. **Sub-Millisecond Speed**: Grafana queries the local central TSDB in `< 3ms` via in-cluster DNS, completely eliminating cross-WAN query latency.
 
 ---
 
@@ -311,8 +311,8 @@ If you open **Grafana → Connections → Data sources**, you will notice:
 
 | Question from Teammate | Your Winning Answer |
 | :--- | :--- |
-| *"What happens if the WireGuard VPN tunnel between Mumbai and Virginia drops?"* | *"Nothing is lost. Spoke 2's local scraper continues appending samples to its local disk WAL. When the tunnel reconnects, the WAL watcher automatically auto-scales to 3 shards to flush the backlog 3x faster."* |
+| *"What happens if the WireGuard VPN tunnel between Mumbai and Virginia drops?"* | *"Nothing is lost. Spoke 2's local scraper continues appending samples to its local disk WAL. When the tunnel reconnects, the WAL watcher automatically auto-scales to 10 shards to flush the backlog 10x faster."* |
 | *"Doesn't sending metrics over the internet consume too much bandwidth?"* | *"No. We verified in Step 2 via `tcpdump` that Snappy compression reduces metric size to ~17.8 bytes per sample. The entire spoke cluster generates only ~5 KB/s of outbound traffic."* |
-| *"In Grafana's Data Sources page, primaryhub, secondaryhub, spoke1, and spoke2 all point to the same URL (prometheus-service:9090). Does this mix up their metrics?"* | *"No. Time-series identity includes labels. Each spoke attaches an immutable label like `cluster='spoke1'` and `region='eu-central-1'`. They are stored as separate series in the central TSDB. Pointing them to the same central service enables Grafana to load all multi-cluster dashboards locally in < 3ms without cross-WAN lag."* |
+| *"In Grafana's Data Sources page, why are there no separate data sources for each spoke cluster?"* | *"Because Grafana doesn't pull metrics across the WAN. All spokes push into the single central Prometheus TSDB on PrimaryHub. All metrics carry immutable labels like `cluster='spoke1'`. Grafana queries the local central TSDB in < 3ms and filters dynamically using the `$cluster` dropdown variable."* |
 | *"If we terminate or replace the PrimaryHub EC2 instance, do we lose historical graphs?"* | *"No. In Step 5, we showed TSDB blocks are stored on a dedicated AWS EBS volume with `DeleteOnTermination=false`. The launch template cloud-init automatically re-attaches this exact volume on boot."* |
 | *"Why is Grafana so much faster than before?"* | *"Under the old pull model, Grafana made dozens of slow cross-continent WAN queries per refresh (taking 4–8 seconds). Now Grafana queries locally via ClusterIP in ~3ms, rendering dashboards instantaneously."* |

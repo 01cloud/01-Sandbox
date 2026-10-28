@@ -301,33 +301,24 @@ kubectl exec -n opensandbox-system deploy/prometheus -- \
 ```
 
 ### E. Automated Verification Test Suite
-Instead of manual curls, execute the platform test suite:
-Defined in: [`manifests/monitoring/verify-metrics.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/verify-metrics.sh)
+Instead of manual curls, execute verification directly against the platform using the active toolchain:
+
+**1. Multi-Cluster End-to-End Verification**:
+Defined in: [`script/prod-docker-multi-script/docker-multi-cluster.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/docker-multi-cluster.sh)
 ```bash
-# Execute against PrimaryHub or SecondaryHub:
-./manifests/monitoring/verify-metrics.sh kind-primaryhub
+cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
+./docker-multi-cluster.sh --verify
 ```
-**Underlying Verification Logic**:
+
+**2. Direct Central Ingest Verification via kubectl**:
 ```bash
-# tests both direct exec and ephemeral port-forward fallback:
-test_pod_metrics() {
-  local namespace="$1" label="$2" port="$3" path="${4:-/metrics}" name="$5"
-  echo -e "[Testing ${name}]"
-  local pod=$(kubectl --context "$CTX" -n "$namespace" get pods -l "$label" -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
-  if [ -z "$pod" ]; then
-    echo -e "  ⚠ Pod with label '${label}' not found in namespace '${namespace}'. Skipping."
-    return 0
-  fi
-  local sample=$(kubectl --context "$CTX" -n "$namespace" exec "$pod" -- curl -s --max-time 5 "http://127.0.0.1:${port}${path}" 2>/dev/null || true)
-  if [ -z "$sample" ]; then
-    local local_port=$((19000 + RANDOM % 1000))
-    kubectl --context "$CTX" -n "$namespace" port-forward "pod/${pod}" "${local_port}:${port}" >/dev/null 2>&1 &
-    local pf_pid=$!
-    sleep 2
-    sample=$(curl -s --max-time 5 "http://127.0.0.1:${local_port}${path}" 2>/dev/null || true)
-    kill -9 "$pf_pid" 2>/dev/null || true
-  fi
-}
+# Verify active metrics ingestion count grouped by cluster
+kubectl exec -n opensandbox-system deploy/prometheus -- \
+  wget -qO- "http://localhost:9090/api/v1/query?query=count%20by%20(cluster)(up)" | jq .
+
+# Verify live scraper target health statuses across all clusters
+kubectl exec -n opensandbox-system deploy/prometheus -- \
+  wget -qO- "http://localhost:9090/api/v1/targets" | jq '.data.activeTargets[] | {job: .labels.job, cluster: .labels.cluster, health: .health}'
 ```
 
 ---
@@ -404,14 +395,14 @@ Exported from port `9187` on `postgresql-primary-1`:
 When you are ready to explore metrics visually via interactive charts, targets, and query consoles:
 
 ### Option 1: 1-Command Script from Your Laptop
-Defined in: [`prod-docker-multi-script/port-forward-prometheus.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/port-forward-prometheus.sh)
+Defined in: [`script/prod-docker-multi-script/port-forward-prometheus.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/port-forward-prometheus.sh)
 ```bash
-cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
+cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 ./port-forward-prometheus.sh
 ```
 **Port Forwarding Script Core Logic**:
 ```bash
-# prod-docker-multi-script/port-forward-prometheus.sh
+# script/prod-docker-multi-script/port-forward-prometheus.sh
 case "$TARGET" in
   primaryhub)   SSM_HOST="$PRIMARYHUB_HOST" ;;
   secondaryhub) SSM_HOST="$SECONDARYHUB_HOST" ;;
@@ -454,9 +445,9 @@ Open your browser to: **[http://localhost:9090](http://localhost:9090)**
 
 When modifying Helm values or adding recording rules, use the dedicated safe upgrade script to prevent resetting existing clusters or state:
 
-Defined in: [`prod-docker-multi-script/upgrade-helm.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/upgrade-helm.sh)
+Defined in: [`script/prod-docker-multi-script/upgrade-helm.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/upgrade-helm.sh)
 ```bash
-cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
+cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 
 # Upgrade PrimaryHub:
 ./upgrade-helm.sh primaryhub
@@ -467,7 +458,7 @@ cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
 
 ### Script Execution Logic:
 ```bash
-# prod-docker-multi-script/upgrade-helm.sh
+# script/prod-docker-multi-script/upgrade-helm.sh
 upgrade_primary() {
   log_step "Upgrading Helm release on PrimaryHub..."
   ensure_node_ssm_access "$PRIMARYHUB_HOST"
@@ -516,9 +507,13 @@ Prometheus is deployed on **all clusters** — both hubs and all spoke clusters.
                   └──────────────┘ └──────────┘ └────────┘ └────────┘ └────────┘
 ```
 
-### Spoke Scraper Definition
-Defined in: [`manifests/monitoring/04-prometheus-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/04-prometheus-spoke.yaml)
+### Spoke Scraper Definition & Autonomous Provisioning
+Spoke monitoring is fully automated and zero-touch. Legacy static manifests (`04-prometheus-spoke.yaml`) and manual wrapper scripts (`apply-monitoring.sh`) have been retired in favor of **autonomous cloud-init provisioning** in the EC2 Launch Template (`user_data.sh.tftpl`) and **declarative Helm deployment** (`codeInspector`).
+
+Whenever an EC2 instance launches in any region (`ap-south-1`, `eu-central-1`, `eu-west-1`, `us-east-1`), cloud-init invokes `deploy_spoke_monitoring()` to dynamically generate and apply the scraper configuration:
+
 ```yaml
+# Injected dynamically on Spoke instances via user_data.sh.tftpl
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -530,8 +525,9 @@ data:
       scrape_interval: 15s
       evaluation_interval: 15s
       external_labels:
-        cluster: '__CLUSTER_NAME__'
-        cluster_role: '__CLUSTER_ROLE__'
+        cluster: '${cluster_name}'
+        role: 'spoke'
+        region: '${region}'
 
     remote_write:
       - url: "http://10.99.0.1:30900/api/v1/write"
@@ -539,34 +535,33 @@ data:
         queue_config:
           max_samples_per_send: 500
           batch_send_deadline: 5s
+
+    scrape_configs:
+      - job_name: 'prometheus-scraper'
+        static_configs:
+          - targets: ['127.0.0.1:9090']
+      - job_name: 'kubernetes-nodes-cadvisor'
+        scheme: https
+        tls_config:
+          ca_file: /var/run/secrets/kubernetes.io/serviceaccount/ca.crt
+          insecure_skip_verify: true
+        bearer_token_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+        kubernetes_sd_configs:
+          - role: node
+        relabel_configs:
+          - action: labelmap
+            regex: __meta_kubernetes_node_label_(.+)
+          - target_label: __metrics_path__
+            replacement: /metrics/cadvisor
 ```
 
-### Deploying Monitoring to All Clusters
-Defined in: [`manifests/monitoring/apply-monitoring.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/apply-monitoring.sh)
-```bash
-# apply-monitoring.sh core rendering logic:
-render_and_apply() {
-  local manifest="$1" cluster_name="$2" cluster_role="$3" ctx="$4"
-  sed \
-    -e "s/__CLUSTER_NAME__/${cluster_name}/g" \
-    -e "s/__CLUSTER_ROLE__/${cluster_role}/g" \
-    "${manifest}" | kubectl --context "${ctx}" apply -f -
-}
-```
+### Provisioning Hub & Standby Monitoring
+Monitoring on the control plane hubs is fully managed by the self-contained Helm chart [`codeInspector`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector) executed during **Phase 11 & Phase 12** in [`script/prod-docker-multi-script/lib/deploy.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/deploy.sh):
 
-```bash
-cd ~/Desktop/Kamal/01-Sandbox
-
-# Deploy Prometheus to ALL clusters + Grafana to primaryhub:
-./manifests/monitoring/apply-monitoring.sh all
-
-# Or deploy selectively:
-./manifests/monitoring/apply-monitoring.sh primaryhub
-./manifests/monitoring/apply-monitoring.sh secondaryhub
-./manifests/monitoring/apply-monitoring.sh spokes
-./manifests/monitoring/apply-monitoring.sh spoke3   # single spoke
-./manifests/monitoring/apply-monitoring.sh grafana  # Grafana only
-```
+* **PrimaryHub (Central TSDB Ingestion)**:
+  Deployed with `prometheus.enabled=true`, `--web.enable-remote-write-receiver`, and NodePort `30900` to receive inbound Prometheus Remote Write streams from all spoke clusters.
+* **SecondaryHub (Standby Ingestion & Forwarding)**:
+  Deployed using [`codeInspector/values-secondary.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-secondary.yaml) with `remote_write` targeting PrimaryHub at `http://10.99.0.1:30900/api/v1/write`.
 
 ---
 
@@ -575,9 +570,9 @@ cd ~/Desktop/Kamal/01-Sandbox
 ### A. Accessing Grafana in Your Local Browser
 
 **Option 1 – Quickest (port-forward via SSM):**
-Defined in: [`prod-docker-multi-script/port-forward-grafana.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/port-forward-grafana.sh)
+Defined in: [`script/prod-docker-multi-script/port-forward-grafana.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/port-forward-grafana.sh)
 ```bash
-cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
+cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 ./port-forward-grafana.sh
 ```
 Open: **http://localhost:3000** — Login: `admin` / `sandbox-admin`
@@ -642,15 +637,27 @@ spec:
           port: 3000
 ```
 
-### D. Viewing Individual Cluster Prometheus
+### D. Declarative Pre-Provisioned Dashboards
+Defined in: [`codeInspector/charts/grafana/templates/configmap-dashboards.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-dashboards.yaml)
+
+All dashboards are embedded directly inside the Helm ConfigMap `grafana-dashboard-codeinspector` and automatically mounted into `/var/lib/grafana-dashboards` inside the Grafana container. There is no need for manual file imports or uploading JSONs.
+
+| Dashboard Name | Key in ConfigMap | Highlights & Metrics |
+| :--- | :--- | :--- |
+| **01sandbox - Spoke Clusters Fleet (Dynamic)** | `spoke-fleet.json` | **Universal dynamic dashboard** with active liveness discovery. The `$cluster` dropdown dynamically queries: `query_result((up{role="spoke", job="prometheus-scraper"} == 1) and ((time() - timestamp(up{role="spoke", job="prometheus-scraper"})) < 60))`. Freshly provisioned spoke EC2 instances auto-appear; terminated instances automatically vanish after 60s. |
+| **01sandbox - Global Fleet Overview** | `multi-cluster-overview.json` | Cross-cluster status table (`count by (cluster)(up)`), regional cluster distribution, aggregate CoreDNS query throughput, and global API request rates. |
+| **01sandbox - PrimaryHub Control Plane** | `primaryhub.json` | CloudNative-PG primary database (`cnpg_*`), WAL replication, FastAPI backend traffic, Envoy proxy performance, and OCM Hub controllers. |
+| **01sandbox - SecondaryHub Standby** | `secondaryhub.json` | Standby database replica status, streaming replication lag, standby FastAPI backend, and secondary OCM agent health. |
+| **01sandbox - Core Application Inspector** | `codeinspector-dashboard.json` | Detailed CodeInspector application worker metrics, queue sizes, scan jobs, and task execution durations. |
+
+### E. Viewing Individual Cluster Prometheus
 
 ```bash
 # View any specific cluster's raw Prometheus:
-./port-forward-prometheus.sh primaryhub
-./port-forward-prometheus.sh secondaryhub
-./port-forward-prometheus.sh spoke1
-./port-forward-prometheus.sh spoke2
-./port-forward-prometheus.sh spoke3
+./script/prod-docker-multi-script/port-forward-prometheus.sh primaryhub
+./script/prod-docker-multi-script/port-forward-prometheus.sh secondaryhub
+./script/prod-docker-multi-script/port-forward-prometheus.sh spoke1
+./script/prod-docker-multi-script/port-forward-prometheus.sh spoke2
 ```
 
 ---
@@ -986,12 +993,13 @@ Central Prometheus operates simultaneously in two modes:
 Edge clusters configure external labels in their `remote_write` block to guarantee global metric uniqueness:
 
 ```yaml
-# manifests/monitoring/04-prometheus-spoke.yaml (Spoke 1)
+# Injected dynamically on Spoke nodes via user_data.sh.tftpl (deploy_spoke_monitoring)
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
   external_labels:
     cluster: 'spoke1'
+    role: 'spoke'
     region: 'eu-central-1'
 
 remote_write:
@@ -1129,7 +1137,7 @@ All cross-cluster Remote Write traffic traverses the encrypted WireGuard mesh on
 To adhere to the platform's declarative design (matching PostgreSQL `30432` and Valkey `30379`), **no systemd units or userspace proxy daemons are used on the host**.
 
 1. **Declarative KinD Provisioning (`extraPortMappings`)**:
-   In [`prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/lib/clusters.sh), [`docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docker-multi-script/lib/clusters.sh), and the AWS EC2 `user_data.sh.tftpl` launch templates, port `30900` is declared directly under `extraPortMappings`:
+   In [`script/prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/clusters.sh), [`script/docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/docker-multi-script/lib/clusters.sh), and the AWS EC2 `user_data.sh.tftpl` launch templates, port `30900` is declared directly under `extraPortMappings`:
    ```yaml
    nodes:
    - role: control-plane
@@ -1174,14 +1182,14 @@ sudo iptables -t nat -D OUTPUT -p tcp -m tcp --dport 30900 -j DNAT --to-destinat
 Once removed, both host and container can directly communicate with `http://10.99.0.1:30900/-/healthy` with ~90ms ping latency over WireGuard.
 
 #### C. Autonomous Zero-Touch Spoke Monitoring Bootstrap
-To eliminate any manual deployment step (such as running `apply-monitoring.sh`), the launch template (`user_data.sh.tftpl`) across all AWS regions (`us-east-1`, `eu-west-1`, `eu-central-1`, `ap-south-1`) includes an embedded `deploy_spoke_monitoring()` lifecycle function.
+To ensure fully autonomous, hands-off operations without manual deployment steps, the launch template (`user_data.sh.tftpl`) across all AWS regions (`us-east-1`, `eu-west-1`, `eu-central-1`, `ap-south-1`) includes an embedded `deploy_spoke_monitoring()` lifecycle function.
 
 Whenever a brand-new spoke cluster (`spoke3`, `spoke4`, etc.) is provisioned via Terraform:
 1. `user_data.sh.tftpl` boots the instance, joins WireGuard, and forms the KinD cluster.
 2. It executes `clusteradm join` to register with Open Cluster Management (OCM).
 3. It immediately invokes `deploy_spoke_monitoring()` to deploy:
    - Namespace `monitoring`, ServiceAccount, and ClusterRole RBAC.
-   - ConfigMap `prometheus-scraper-config` configured with `external_labels.cluster: "${cluster_name}"` and `remote_write.url: "http://10.99.0.1:30900/api/v1/write"`.
+   - ConfigMap `prometheus-scraper-config` configured with `external_labels.cluster: "${cluster_name}"`, `external_labels.role: "spoke"`, `external_labels.region: "${region}"`, and `remote_write.url: "http://10.99.0.1:30900/api/v1/write"`.
    - Deployment `prometheus-scraper` running `prom/prometheus:v2.54.1`.
 4. As soon as the scraper pod transitions to `Running` (within 10-15s), its WAL watcher begins streaming local node, container, and OCM metrics to PrimaryHub over WireGuard without human intervention.
 5. In Grafana, the new spoke's metrics appear dynamically under the `$cluster` variable selector.
@@ -1474,11 +1482,11 @@ Instead of Grafana or a central server making dozens of slow queries over the pu
 │                                                        │
 │ 1. Local Scrape (15s): Target Exporter → Local WAL     │
 │    (128MB uncompressed crash-safe disk buffer)         │
-│    File: manifests/monitoring/04-prometheus-spoke.yaml │
+│    File: EC2 user_data.sh.tftpl (deploy_spoke_monitoring)│
 │                                                        │
 │ 2. WAL Watcher reads samples & encodes to Protobuf     │
 │    + Google Snappy in-flight compression (~18 B/sample)│
-│    File: manifests/monitoring/04-prometheus-spoke.yaml │
+│    File: EC2 user_data.sh.tftpl (deploy_spoke_monitoring)│
 └───────────────────────────┬────────────────────────────┘
                             │
                             │ HTTP POST /api/v1/write (~18 KB batch)
@@ -1488,7 +1496,8 @@ Instead of Grafana or a central server making dozens of slow queries over the pu
 │ PrimaryHub EC2 Host (Kernel Netfilter Ingress)         │
 │                                                        │
 │ 3. Port Mapping: WireGuard :30900 → KinD :30900        │
-│    Files: prod-docker-multi-script/lib/clusters.sh     │
+│    Files: script/prod-docker-multi-script/             │
+│           lib/clusters.sh                              │
 │           codeInspector/charts/prometheus/service.yaml │
 └───────────────────────────┬────────────────────────────┘
                             │
@@ -1511,30 +1520,109 @@ Instead of Grafana or a central server making dozens of slow queries over the pu
 ┌────────────────────────────────────────────────────────┐
 │ Central Grafana (opensandbox-system / monitoring)      │
 │                                                        │
-│ 6. Declarative Multi-Cluster Datasource Provisioning   │
+│ 6. Declarative Multi-Cluster Datasources & Dashboards  │
 │    Files: codeInspector/charts/grafana/templates/      │
 │           configmap-datasources.yaml                   │
-│           codeInspector/charts/grafana/httproute.yaml  │
+│           configmap-dashboards.yaml                    │
+│           httproute.yaml                               │
 └────────────────────────────────────────────────────────┘
 ```
 
 ---
 
-### 12.2 Step-by-Step Flow & Code Resides Directory
+### 12.2 End-to-End Sequence Diagram
 
-| Step | Operation | How It Works | File Where Code Resides |
-| :--- | :--- | :--- | :--- |
-| **1** | **Local Scrape & WAL Decoupling** | Spoke scrapers poll local Kubernetes components (Klusterlet, cAdvisor) every 15s and immediately append samples to a local Write-Ahead Log (WAL) on disk/RAM. Scrapes are 100% decoupled from internet reliability. | [`manifests/monitoring/04-prometheus-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/04-prometheus-spoke.yaml#L8-L16)<br>[`codeInspector/values-secondary.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-secondary.yaml#L685-L695) |
-| **2** | **Batching & Snappy Compression** | A WAL-tailing worker (`walWatcher`) reads samples off the active uncompressed disk WAL, pools them into in-memory batches of up to 1,000 (or every 5s), serializes them via Protocol Buffers (`prometheus.WriteRequest`), and compresses the in-memory payload with Google Snappy (reducing WAN bandwidth by 85% down to ~18 B/sample) before dispatching via HTTP POST. Disk segments remain uncompressed. | [`manifests/monitoring/04-prometheus-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/04-prometheus-spoke.yaml#L83-L90) |
-| **3** | **Network Ingress & NodePort Routing** | Outbound HTTP POST requests travel through the encrypted WireGuard overlay (`10.99.0.0/24`) to PrimaryHub at `10.99.0.1:30900`. Linux Kernel Netfilter NAT and KinD container `extraPortMappings` route port 30900 directly to the Prometheus pod. | [`prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/lib/clusters.sh#L186-L202)<br>[`codeInspector/charts/prometheus/templates/service.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/service.yaml#L16-L40) |
-| **4** | **Central Receiver Ingestion** | PrimaryHub's Prometheus runs with `--web.enable-remote-write-receiver` to accept the `/api/v1/write` stream. Incoming samples are disambiguated by external labels (`cluster="spoke1"`, `cluster="secondaryhub"`) and written directly to the head chunks. | [`codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml#L24-L35) |
-| **5** | **Persistent Storage Survival** | All TSDB blocks are written to `/prometheus`, mounted to a 25 GiB PVC backed by an AWS 100 GiB GP3 EBS volume (`DeleteOnTermination=false`). If instances are destroyed or recreated, cloud-init reattaches the EBS volume and Prometheus resumes historical data seamlessly. | [`codeInspector/charts/prometheus/templates/pvc.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/pvc.yaml#L1-L15)<br>[`codeInspector/charts/prometheus/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml#L25-L30) |
-| **6** | **Centralized Visualization** | Grafana connects to the local TSDB via ClusterIP DNS (`http://prometheus-service:9090`). Because all clusters push into the same TSDB, Grafana datasources (`primaryhub`, `spoke1`, `spoke2`, `secondaryhub`) all point to this single endpoint for sub-millisecond query performance without crossing WAN links. Metrics are strictly isolated by label namespacing (`cluster="spoke1"`), completely preventing collisions. | [`codeInspector/charts/grafana/templates/configmap-datasources.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml#L15-L62)<br>[`codeInspector/charts/grafana/templates/httproute.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/httproute.yaml#L22-L31) |
-| **7** | **Zero-Touch Autonomous Provisioning** | When new spoke instances launch via Terraform in any AWS region, cloud-init triggers `deploy_spoke_monitoring()` to dynamically provision RBAC, scraper config, and deployment without requiring manual operator intervention. | Launch Template `user_data.sh.tftpl`<br>[`manifests/monitoring/apply-monitoring.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/apply-monitoring.sh#L23-L33) |
+The following sequence diagram tracks a single metric sample from its initial local scrape at the edge in Frankfurt, through in-flight Snappy compression and WireGuard transit, to kernel Netfilter NAT, TSDB ingestion on PrimaryHub, and local in-cluster rendering in Grafana:
+
+```mermaid
+sequenceDiagram
+    autonumber
+
+    actor User as Engineer / Browser
+    box rgb(30, 41, 59) Edge Cluster (e.g. Spoke 1 - Frankfurt)
+        participant Targets as K8s Targets<br/>(cAdvisor, CoreDNS, OCM)
+        participant Scraper as Spoke Prometheus<br/>(Local Scraper Engine)
+        participant DiskWAL as Local Disk WAL<br/>(/prometheus/wal)
+        participant WALWatcher as WAL Watcher & Worker<br/>(Snappy Compression)
+    end
+
+    box rgb(15, 23, 42) Encrypted Transit Overlay
+        participant WireGuard as WireGuard VPN Mesh<br/>(10.99.0.0/24)
+    end
+
+    box rgb(30, 58, 138) PrimaryHub (us-east-1)
+        participant Netfilter as Host Linux Kernel<br/>(Netfilter Ingress NAT :30900)
+        participant CentralProm as Central Prometheus TSDB<br/>(--web.enable-remote-write-receiver)
+        participant EBS as Persistent Storage<br/>(100 GiB AWS EBS Volume)
+        participant Grafana as Central Grafana<br/>(Universal Dynamic Fleet)
+    end
+
+    %% PHASE 1: LOCAL SCRAPING & WAL COMMIT
+    rect rgb(38, 50, 70)
+    note over Targets, DiskWAL: Phase 1: Local Scrape & Crash-Safe WAL Decoupling
+    Scraper->>Targets: 1. Poll metrics every 15s (localhost / in-cluster)
+    Targets-->>Scraper: Return metric samples (e.g. 60 samples/sec)
+    Scraper->>DiskWAL: 2. Immediate synchronous append to active disk segment (e.g. 00000008)
+    note right of DiskWAL: Scrapes are 100% decoupled from internet reliability.<br/>If WAN drops, metrics continue appending to disk safely.
+    end
+
+    %% PHASE 2: WAL WATCHING, BATCHING & COMPRESSION
+    rect rgb(45, 60, 85)
+    note over DiskWAL, WALWatcher: Phase 2: WAL Watching, Label Namespacing & Snappy Compression
+    WALWatcher->>DiskWAL: 3. Tail committed samples off disk
+    DiskWAL-->>WALWatcher: Stream new samples
+    WALWatcher->>WALWatcher: 4. Group into batches (up to 1,000 samples or 5s deadline)
+    WALWatcher->>WALWatcher: 5. Attach external labels:<br/>cluster="spoke1", role="spoke", region="eu-central-1"
+    WALWatcher->>WALWatcher: 6. Serialize to Protobuf (prompb.WriteRequest)
+    WALWatcher->>WALWatcher: 7. In-flight Google Snappy Compression (~88% WAN bandwidth reduction)
+    end
+
+    %% PHASE 3: SECURE OVERLAY DISPATCH
+    rect rgb(30, 45, 75)
+    note over WALWatcher, Netfilter: Phase 3: Wire-Speed Transit & Netfilter NAT
+    WALWatcher->>WireGuard: 8. HTTP POST /api/v1/write (~18 KB batch)
+    WireGuard->>Netfilter: 9. Ingress at PrimaryHub WireGuard IP: 10.99.0.1:30900
+    Netfilter->>CentralProm: 10. Kernel DNAT routes port 30900 directly to KinD Pod (172.18.0.2:30900)
+    end
+
+    %% PHASE 4: INGESTION & DISK PERSISTENCE
+    rect rgb(20, 50, 90)
+    note over CentralProm, EBS: Phase 4: Head Chunk Ingest & AWS EBS Persistence
+    CentralProm->>CentralProm: 11. Decompress Snappy payload & validate Protobuf
+    CentralProm->>CentralProm: 12. Index time-series by labels (cluster="spoke1" prevents collision)
+    CentralProm->>CentralProm: 13. Append into in-memory Head Chunks
+    CentralProm-->>WALWatcher: 14. HTTP 204 No Content (Batch acknowledged)
+    CentralProm->>EBS: 15. Periodic 2-hour compaction flush to persistent AWS EBS (/prometheus PVC)
+    note right of EBS: EBS Volume survives instance replacement or spot recreation.
+    end
+
+    %% PHASE 5: INSTANT VISUALIZATION
+    rect rgb(15, 65, 80)
+    note over User, Grafana: Phase 5: Instant Visualization via Single Central TSDB
+    User->>Grafana: 16. Select dashboard & pick "spoke1" in $cluster dropdown
+    Grafana->>CentralProm: 17. PromQL query via local in-cluster DNS (< 3 ms)<br/>http://prometheus-service.opensandbox-system.svc:9090<br/>query: up{cluster="spoke1", job="prometheus-scraper"}
+    CentralProm-->>Grafana: 18. Return TSDB data points instantly (Zero WAN lag)
+    Grafana-->>User: 19. Render graphs immediately (< 0.3s dashboard load)
+    end
+```
 
 ---
 
-### 12.3 Performance Comparison
+### 12.3 Step-by-Step Flow & Code Resides Directory
+
+| Step | Operation | How It Works | File Where Code Resides |
+| :--- | :--- | :--- | :--- |
+| **1** | **Local Scrape & WAL Decoupling** | Spoke scrapers poll local Kubernetes components (Klusterlet, cAdvisor) every 15s and immediately append samples to a local Write-Ahead Log (WAL) on disk/RAM. Scrapes are 100% decoupled from internet reliability. | EC2 Launch Template `user_data.sh.tftpl`<br>[`codeInspector/values-secondary.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-secondary.yaml#L685-L695) |
+| **2** | **Batching & Snappy Compression** | A WAL-tailing worker (`walWatcher`) reads samples off the active uncompressed disk WAL, pools them into in-memory batches of up to 1,000 (or every 5s), serializes them via Protocol Buffers (`prometheus.WriteRequest`), and compresses the in-memory payload with Google Snappy (reducing WAN bandwidth by 85% down to ~18 B/sample) before dispatching via HTTP POST. Disk segments remain uncompressed. | EC2 Launch Template `user_data.sh.tftpl` |
+| **3** | **Network Ingress & NodePort Routing** | Outbound HTTP POST requests travel through the encrypted WireGuard overlay (`10.99.0.0/24`) to PrimaryHub at `10.99.0.1:30900`. Linux Kernel Netfilter NAT and KinD container `extraPortMappings` route port 30900 directly to the Prometheus pod. | [`script/prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/clusters.sh#L186-L202)<br>[`codeInspector/charts/prometheus/templates/service.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/service.yaml#L16-L40) |
+| **4** | **Central Receiver Ingestion** | PrimaryHub's Prometheus runs with `--web.enable-remote-write-receiver` to accept the `/api/v1/write` stream. Incoming samples are disambiguated by external labels (`cluster="spoke1"`, `cluster="secondaryhub"`) and written directly to the head chunks. | [`codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml#L24-L35) |
+| **5** | **Persistent Storage Survival** | All TSDB blocks are written to `/prometheus`, mounted to a 25 GiB PVC backed by an AWS 100 GiB GP3 EBS volume (`DeleteOnTermination=false`). If instances are destroyed or recreated, cloud-init reattaches the EBS volume and Prometheus resumes historical data seamlessly. | [`codeInspector/charts/prometheus/templates/pvc.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/pvc.yaml#L1-L15)<br>[`codeInspector/charts/prometheus/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml#L25-L30) |
+| **6** | **Centralized Visualization** | Grafana connects to the local TSDB via ClusterIP DNS (`http://prometheus-service:9090`). Because all clusters push into the same TSDB, Grafana datasources point to this single endpoint for sub-millisecond queries. Pre-baked dashboards in `configmap-dashboards.yaml` dynamically discover all alive spokes. | [`codeInspector/charts/grafana/templates/configmap-datasources.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml#L15-L62)<br>[`codeInspector/charts/grafana/templates/configmap-dashboards.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-dashboards.yaml)<br>[`codeInspector/charts/grafana/templates/httproute.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/httproute.yaml#L22-L31) |
+| **7** | **Zero-Touch Autonomous Provisioning** | When new spoke instances launch via Terraform in any AWS region, cloud-init triggers `deploy_spoke_monitoring()` to dynamically provision RBAC, scraper config, and deployment without requiring manual operator intervention. | Launch Template `user_data.sh.tftpl`<br>[`script/prod-docker-multi-script/lib/deploy.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/deploy.sh) |
+
+---
+
+### 12.4 Performance Comparison
 
 | Metric / Attribute | Old Cross-WAN Pull Model | Push-Based Remote Write (PRW) |
 | :--- | :--- | :--- |
@@ -1545,6 +1633,6 @@ Instead of Grafana or a central server making dozens of slow queries over the pu
 
 ---
 
-### 12.4 Hands-On Team Demo Walkthrough
+### 12.5 Hands-On Team Demo Walkthrough
 For a complete, command-by-command presentation script featuring live terminal commands, expected outputs, talking points, and failure simulations for each of the 6 pillars, see:
 👉 **[`docs/prometheus/walkthrough-demo.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/walkthrough-demo.md)** (or [`prometheus/walkthrough-demo.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prometheus/walkthrough-demo.md))

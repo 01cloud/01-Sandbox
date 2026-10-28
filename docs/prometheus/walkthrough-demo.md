@@ -37,7 +37,7 @@ kubectl config get-contexts
 The edge scraper on `spoke1` (or `secondaryhub`) collects local metrics (Klusterlet, cAdvisor, node, containers) and commits them to its local **Write-Ahead Log (WAL)**. Scraping is **100% decoupled** from the remote write pipeline. Even if the WAN link or VPN goes down, the local scraper continues uninterrupted.
 
 ### 📋 Code Reference
-* Spoke Scraper ConfigMap: [`manifests/monitoring/04-prometheus-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/04-prometheus-spoke.yaml)
+* Spoke Scraper Autonomous Provisioning: EC2 Launch Template `user_data.sh.tftpl` (`deploy_spoke_monitoring()`)
 * SecondaryHub Helm Values: [`codeInspector/values-secondary.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-secondary.yaml#L685-L695)
 
 ---
@@ -311,7 +311,7 @@ kubectl -n monitoring exec deploy/prometheus-scraper -- \
 Prometheus Remote Write does not send individual HTTP requests per metric. It uses an asynchronous worker pool that batches up to 1,000 samples (or flushes every 5 seconds), serializes the batch using **Protocol Buffers (`prometheus.WriteRequest`)**, and compresses it with **Google Snappy**. This reduces WAN network bandwidth consumption by **85%**.
 
 ### 📋 Code Reference
-* Scraper Queue Tuning: [`manifests/monitoring/04-prometheus-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/04-prometheus-spoke.yaml#L83-L90)
+* Scraper Queue Tuning: EC2 Launch Template `user_data.sh.tftpl` (`deploy_spoke_monitoring()`)
 ```yaml
 queue_config:
   capacity: 10000
@@ -577,7 +577,7 @@ kubectl -n opensandbox-system exec deploy/prometheus -- \
 By the [Prometheus Remote Write 1.0 Specification](https://prometheus.io/docs/concepts/remote_write_spec/), compression is **mandatory**:
 * All remote write requests **must** be sent with `Content-Encoding: snappy`.
 * An uncompressed payload is invalid according to the specification.
-* In [`manifests/monitoring/04-prometheus-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/04-prometheus-spoke.yaml#L18-L28), defining `remote_write.url` automatically engages the Snappy compression pipeline inside the binary without requiring any third-party plugins or sidecars.
+* In `user_data.sh.tftpl` (`deploy_spoke_monitoring()`), defining `remote_write.url` automatically engages the Snappy compression pipeline inside the binary without requiring any third-party plugins or sidecars.
 
 #### 2.5 Real-World Case Study: Analyzing Live Spoke Logs (Outage Recovery & Dynamic Resharding)
 When inspecting the running `prometheus-scraper` logs on `spoke1`, you will observe the exact 3-phase lifecycle that guarantees zero data loss:
@@ -623,7 +623,7 @@ ts=2026-10-27T05:52:29.034Z level=info msg="Remote storage resharding" from=2 to
 Cross-region egress packets travel through the encrypted WireGuard overlay (`10.99.0.0/24`) destined for PrimaryHub at `10.99.0.1:30900`. On PrimaryHub, Linux Kernel Netfilter NAT routes incoming port 30900 directly to the KinD node container at wire speed without userspace proxies or systemd daemons.
 
 ### 📋 Code Reference
-* KinD NodePort Port Mapping: [`prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/lib/clusters.sh#L186-L202)
+* KinD NodePort Port Mapping: [`script/prod-docker-multi-script/lib/clusters.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/clusters.sh#L186-L202)
 * Prometheus NodePort Service: [`codeInspector/charts/prometheus/templates/service.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/service.yaml#L16-L40)
 
 ---
@@ -707,7 +707,7 @@ PrimaryHub's Prometheus runs with `--web.enable-remote-write-receiver` to accept
 
 ### 📋 Code Reference
 * Receiver Flag in Deployment: [`codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml#L24-L35)
-* Spoke External Labels: [`manifests/monitoring/04-prometheus-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/manifests/monitoring/04-prometheus-spoke.yaml#L12-L16)
+* Spoke External Labels: EC2 Launch Template `user_data.sh.tftpl` (`deploy_spoke_monitoring()`)
 
 ---
 
@@ -956,9 +956,10 @@ kubectl --context kind-primaryhub -n opensandbox-system exec deploy/prometheus -
 Grafana connects to the local TSDB via in-cluster DNS (`http://prometheus-service.opensandbox-system.svc.cluster.local:9090`). Because all clusters push their telemetry into the same TSDB, Grafana queries execute locally with **sub-millisecond latency** (`< 5ms`), completely eliminating WAN round-trip overhead.
 
 ### 📋 Code Reference
-* Datasource Provisioning: [`codeInspector/charts/grafana/templates/configmap-datasources.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml#L15-L62)
+* Datasource Provisioning: [`codeInspector/charts/grafana/templates/configmap-datasources.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml#L15-L38)
+* Declarative Dashboards: [`codeInspector/charts/grafana/templates/configmap-dashboards.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-dashboards.yaml)
 * Gateway API Route: [`codeInspector/charts/grafana/templates/httproute.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/httproute.yaml)
-* 1-Command SSM Tunnel: [`prod-docker-multi-script/port-forward-grafana.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/prod-docker-multi-script/port-forward-grafana.sh)
+* 1-Command SSM Tunnel: [`script/prod-docker-multi-script/port-forward-grafana.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/port-forward-grafana.sh)
 
 ---
 
@@ -979,57 +980,47 @@ HTTP Status: 200
 *(~2.8 milliseconds total query time!)*
 
 #### 6.2 Verify Declarative Datasources via Grafana HTTP API
-Verify that all cluster datasources are green and verified:
+Verify that the central TSDB datasources are connected:
 ```bash
 kubectl --context kind-primaryhub -n monitoring exec deploy/grafana -- \
-  curl -s -u admin:sandbox-admin "http://localhost:3000/api/datasources" | jq '.[] | {name: .name, uid: .uid, url: .url}'
+  curl -s -u admin:sandbox-admin "http://localhost:3000/api/datasources" | jq '.[] | {name: .name, uid: .uid, url: .url, isDefault: .isDefault}'
 ```
 **Expected Output:**
 ```json
 {
   "name": "primaryhub",
   "uid": "prometheus-primaryhub",
-  "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090"
+  "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090",
+  "isDefault": true
 }
 {
   "name": "secondaryhub",
   "uid": "prometheus-secondaryhub",
-  "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090"
-}
-{
-  "name": "spoke1",
-  "uid": "prometheus-spoke1",
-  "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090"
-}
-{
-  "name": "spoke2",
-  "uid": "prometheus-spoke2",
-  "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090"
+  "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090",
+  "isDefault": false
 }
 ```
 
-> 💡 **Why do `primaryhub`, `secondaryhub`, `spoke1`, and `spoke2` have the same URL? Doesn't this clash metrics?**
-> * **Zero Metric Clashing (Label Namespacing)**: Every incoming metric carries immutable external labels: `cluster="spoke1"`, `cluster="spoke2"`, `cluster="secondaryhub"`, or `cluster="primaryhub"`. In Prometheus TSDB, time-series identity includes its labels. Therefore, `node_cpu_seconds_total{cluster="spoke1"}` and `node_cpu_seconds_total{cluster="spoke2"}` are stored as completely separate time-series in the TSDB.
-> * **Why they share the same URL**: Because Spoke 1, Spoke 2, and SecondaryHub push their metrics into Centralized Prometheus, Grafana queries the single in-cluster database (`http://prometheus-service...:9090`) in `< 3 ms` without crossing WAN links. (In contrast, `spoke3` points to `http://10.99.0.5:30900`, representing the legacy cross-WAN pull model).
-> * **Why multiple datasource entries exist**:
->   1. **Backwards Compatibility**: Existing dashboards with hardcoded `"datasource": "spoke1"` continue functioning without error.
->   2. **Querying Best Practice**: To isolate metrics for a specific cluster, include the cluster label filter: `{cluster="$cluster"}`.
+> 💡 **Why do both `primaryhub` and `secondaryhub` point to the same URL? Why are there no separate datasources for each Spoke?**
+> * **All Metrics Live in One TSDB**: Because every spoke cluster actively pushes its metrics into PrimaryHub's Prometheus over WireGuard, the central TSDB contains all time-series data for the entire fleet. Grafana does not need to connect to spoke clusters directly.
+> * **Zero Metric Clashing (Label Namespacing)**: Every metric carries immutable external labels: `cluster="spoke1"`, `cluster="spoke2"`, `cluster="secondaryhub"`, or `cluster="primaryhub"`. In Prometheus TSDB, time-series identity includes its labels. Therefore, `node_cpu_seconds_total{cluster="spoke1"}` and `node_cpu_seconds_total{cluster="spoke2"}` are stored as completely separate time-series in the TSDB.
+> * **Dynamic Spoke Discovery**: The universal **`Spoke Edge Fleet – Dynamic Multi-Cluster Observability`** dashboard uses a 60-second liveness query (`query_result((up{role="spoke", job="prometheus-scraper"} == 1) and ((time() - timestamp(up{role="spoke", job="prometheus-scraper"})) < 60))`) to auto-populate the `$cluster` dropdown with live spokes. When a cluster is selected, panels query `{cluster="$cluster"}` against the central TSDB in `< 3 ms`.
 
 #### 6.3 Launch the Web Browser Tunnel (Live Presentation Finale)
 From your laptop terminal:
 ```bash
-cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
+cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 ./port-forward-grafana.sh
 ```
 
 1. Open your browser: **[http://localhost:3000](http://localhost:3000)** (or `https://dipper-shun-glowing.ngrok-free.dev/grafana/`)
 2. Login with credentials: `admin` / `sandbox-admin`
-3. Navigate to: **Dashboards** → **01-Sandbox Multi-Cluster Overview**
-4. Click the **`${cluster}`** dropdown at the top:
-   - Select `primaryhub`: Instantly loads Postgres replication & API metrics.
-   - Select `spoke1`: Instantly renders Frankfurt node telemetry.
-   - Select `spoke2`: Instantly renders Mumbai node telemetry.
-5. Point out to your team: **Zero delay, zero timeouts, and immediate graph rendering.**
+3. Navigate to: **Dashboards** → **Spoke Edge Fleet – Dynamic Multi-Cluster Observability**
+4. Click the **`Spoke Cluster ($cluster)`** dropdown at the top:
+   - Select `spoke1`: Instantly renders Frankfurt node telemetry, cAdvisor containers, and Klusterlet metrics.
+   - Select `spoke2`: Instantly renders Mumbai node telemetry without any cross-WAN lag.
+5. Navigate to: **Dashboards** → **01-Sandbox Multi-Cluster Central Overview** to view global cross-cluster health across all active regions simultaneously.
+6. Point out to your team: **Zero delay, zero timeouts, and immediate graph rendering.**
 
 ---
 
@@ -1039,6 +1030,6 @@ cd ~/Desktop/Kamal/01-Sandbox/prod-docker-multi-script
 | :--- | :--- |
 | *"What happens if the WireGuard VPN tunnel between Mumbai and Virginia drops?"* | *"Nothing is lost. Spoke 2's local scraper continues appending samples to its local WAL files. When WireGuard reconnects, the WAL watcher replays and pushes the queued samples to PrimaryHub automatically."* |
 | *"Doesn't sending metrics over the internet consume too much bandwidth?"* | *"No, we verified in Step 2 that Snappy compression reduces metric size to ~17 bytes per sample. The entire spoke cluster generates under 5 KB/s of outbound traffic."* |
-| *"In Grafana's Data Sources page, primaryhub, secondaryhub, spoke1, and spoke2 all point to the same URL (prometheus-service:9090). Does this mix up their metrics?"* | *"No. Time-series identity includes labels. Each spoke attaches an immutable label like `cluster='spoke1'` and `region='eu-central-1'`. They are stored as separate series in the central TSDB. Pointing them to the same central service enables Grafana to load all multi-cluster dashboards locally in < 3ms without cross-WAN lag."* |
+| *"In Grafana's Data Sources page, why are there no separate data sources for each spoke cluster?"* | *"Because Grafana doesn't pull metrics across the WAN. All spokes push into the single central Prometheus TSDB on PrimaryHub. All metrics carry immutable labels like `cluster='spoke1'`. Grafana queries the local central TSDB in < 3ms and filters dynamically using the `$cluster` dropdown variable."* |
 | *"If we destroy the PrimaryHub EC2 instance, do we lose all graphs?"* | *"No. Step 5 demonstrated that TSDB blocks are stored on a 100 GiB AWS EBS volume configured with `DeleteOnTermination=false`. The launch template cloud-init attaches this exact volume on boot, preserving 100% of historical metrics."* |
 | *"Why is Grafana so much faster than before?"* | *"Under the old pull model, Grafana had to query 4 different continents on every dashboard refresh. Now Grafana queries locally via ClusterIP in ~2.8ms, rendering dashboards instantaneously."* |
