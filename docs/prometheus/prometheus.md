@@ -535,35 +535,35 @@ sequenceDiagram
     participant Grafana as Central Grafana
 
     %% PHASE 0: BOOTSTRAP & DYNAMIC CREDENTIALS
-    == Phase 0: Zero-Touch Bootstrap & Dynamic SSM Credentials ==
+    Note over Scraper, SSM: Phase 0 — Zero-Touch Bootstrap & Dynamic SSM Credentials
     Scraper->>SSM: 1. EC2 boot: query /sandbox/monitoring/rw-username & rw-password
     SSM-->>Scraper: 2. Return credentials dynamically via IAM instance profile
     Scraper->>Scraper: 3. Configure basic_auth in remote_write block
 
     %% PHASE 1: LOCAL SCRAPING & WAL COMMIT
-    == Phase 1: Local Scrape & Crash-Safe WAL (Network-Independent) ==
+    Note over Targets, DiskWAL: Phase 1 — Local Scrape & Crash-Safe WAL (Network-Independent)
     Scraper->>Targets: 4. Poll metrics every 15s (localhost / in-cluster)
     Targets-->>Scraper: Return ~60 samples/sec
     Scraper->>DiskWAL: 5. Append to active segment (sync, uncompressed)
     Note over DiskWAL: Scrapes continue appending uninterrupted even if WAN drops
 
     %% PHASE 2: WAL WATCHING, BATCHING & COMPRESSION
-    == Phase 2: WAL Watching, Batching & Snappy Compression ==
+    Note over DiskWAL, WALWatcher: Phase 2 — WAL Watching, Batching & Snappy Compression
     WALWatcher->>DiskWAL: 6. Tail committed samples (like 'tail -f')
     DiskWAL-->>WALWatcher: Stream new sample bytes
-    WALWatcher->>WALWatcher: 7. Pool batches (<=1,000 samples or 5s deadline)
+    WALWatcher->>WALWatcher: 7. Pool batches (<=1000 samples or 5s deadline)
     WALWatcher->>WALWatcher: 8. Attach: cluster="spoke1", role="spoke", region="eu-central-1"
     WALWatcher->>WALWatcher: 9. Serialize -> Protobuf (prompb.WriteRequest)
     WALWatcher->>WALWatcher: 10. Google Snappy compress (~88% WAN reduction)
 
     %% PHASE 3: AUTHENTICATED TRANSIT & KERNEL NAT
-    == Phase 3: Authenticated Transit & Kernel NAT Ingress ==
+    Note over WALWatcher, WebAuth: Phase 3 — Authenticated Transit & Kernel NAT Ingress
     WALWatcher->>WireGuard: 11. HTTP POST /api/v1/write + Authorization: Basic [credentials]
     WireGuard->>Netfilter: 12. Arrives at 10.99.0.1:30900 (ChaCha20 decrypted)
     Netfilter->>WebAuth: 13. Kernel DNAT -> KinD container (172.18.0.2:30900)
 
     %% PHASE 4: AUTHENTICATION, INGESTION & PERSISTENCE
-    == Phase 4: Security Gate (Bcrypt), TSDB Ingest & 7-Day EBS Storage ==
+    Note over WebAuth, EBS: Phase 4 — Security Gate (Bcrypt), TSDB Ingest & 7-Day EBS Storage
     WebAuth->>WebAuth: 14. Validate basic_auth against web.yml (bcrypt hash)
     alt Credentials Valid
         WebAuth->>CentralProm: 15. Forward payload to Remote Write Receiver
@@ -577,7 +577,7 @@ sequenceDiagram
     Note over EBS: TSDB compactor auto-purges blocks older than 7 days
 
     %% PHASE 5: VISUALIZATION
-    == Phase 5: Instant Visualization via Authenticated Datasource ==
+    Note over User, Grafana: Phase 5 — Instant Visualization via Authenticated Datasource
     User->>Grafana: 21. Select dashboard & pick "spoke1" in $cluster dropdown
     Grafana->>WebAuth: 22. PromQL via local DNS (< 3ms) with Basic Auth
     WebAuth->>CentralProm: 23. Pass authenticated query: up{cluster="spoke1"}
