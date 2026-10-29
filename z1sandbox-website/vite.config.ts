@@ -5,6 +5,7 @@ import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), '');
   const rawBackendUrl = env.VITE_API_BASE_URL || 'http://localhost:8000';
   const backendUrl = rawBackendUrl.replace(/\/+$/, '');
 
