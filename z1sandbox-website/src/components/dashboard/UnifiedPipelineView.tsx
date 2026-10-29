@@ -81,6 +81,60 @@ function generateLiveLogs(job: GenericJob | null): string[] {
   return logs;
 }
 
+// Helper to dynamically calculate real-time scan progress from container logs
+function computeRealtimeProgress(job: GenericJob, logs: string[], isDoneOrComplete: boolean): number {
+  if (isDoneOrComplete || job.status === "DONE" || job.status === "COMPLETE") {
+    return 100;
+  }
+  if (job.status === "ERROR") {
+    return Math.min(100, Math.max(0, job.progress || 100));
+  }
+  if (job.status === "QUEUED") {
+    return Math.min(15, Math.max(5, job.progress || 5));
+  }
+  if (job.status === "PROVISIONING") {
+    return Math.min(35, Math.max(20, job.progress || 25));
+  }
+
+  // Active SCANNING stage: compute progress dynamically from real-time logs
+  let calculated = Math.min(95, Math.max(40, job.progress && job.progress <= 100 ? job.progress : 40));
+
+  if (logs && logs.length > 0) {
+    // 1. Check if tool list was announced: "Enabled tools: tool1, tool2, ..."
+    let totalTools = 0;
+    for (const line of logs) {
+      const match = line.match(/Enabled tools:\s*([a-zA-Z0-9_,\s-]+)/i);
+      if (match && match[1]) {
+        const tools = match[1].split(",").map(t => t.trim()).filter(Boolean);
+        if (tools.length > 0) totalTools = tools.length;
+      }
+    }
+
+    // 2. Count distinct tools launched or running
+    const runningMatches = logs.filter(l => /Running\s+([a-zA-Z0-9_-]+)\s+scan/i.test(l));
+    const toolsTriggered = runningMatches.length;
+
+    if (totalTools > 0) {
+      // Scale from 45% to 90% across the tools
+      const ratio = Math.min(1, toolsTriggered / totalTools);
+      calculated = Math.max(calculated, Math.round(45 + ratio * 45));
+    } else if (toolsTriggered > 0) {
+      // If totalTools wasn't parsed, each tool adds progress up to 90%
+      calculated = Math.max(calculated, Math.min(90, 45 + toolsTriggered * 15));
+    } else {
+      // General logs: smooth progress as logs arrive
+      calculated = Math.max(calculated, Math.min(85, 40 + Math.floor(logs.length * 2.5)));
+    }
+
+    // Check for late-stage completion indicators in logs
+    if (logs.some(l => l.includes("Security scans complete") || l.includes("Analyzing finding patterns") || l.includes("Consolidated stats"))) {
+      calculated = Math.max(calculated, 95);
+    }
+  }
+
+  return Math.min(100, Math.max(0, calculated));
+}
+
 export function UnifiedPipelineView({
   job,
   steps,
@@ -117,7 +171,7 @@ export function UnifiedPipelineView({
     ? (steps.findIndex(s => s.key === "SCANNING") !== -1 ? steps.findIndex(s => s.key === "SCANNING") : 1)
     : (isDoneOrComplete ? steps.length - 1 : currentIdx);
 
-  const effectiveProgress = isDoneOrComplete ? 100 : job.progress;
+  const effectiveProgress = computeRealtimeProgress(job, allLogs, isDoneOrComplete);
 
   const consoleEndRef = useRef<HTMLDivElement>(null);
   const [showConsole, setShowConsole] = useState(true);

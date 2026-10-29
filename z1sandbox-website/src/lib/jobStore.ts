@@ -18,7 +18,11 @@ export const jobStore = {
     try {
       const list: GenericJob[] = JSON.parse(localStorage.getItem("unified_jobs_v1") || "[]");
       if (!Array.isArray(list)) return [];
-      return type ? list.filter(j => j.job_type === type) : list;
+      const sanitized = list.map(j => ({
+        ...j,
+        progress: Math.min(100, Math.max(0, typeof j.progress === "number" && !isNaN(j.progress) ? j.progress : 0))
+      }));
+      return type ? sanitized.filter(j => j.job_type === type) : sanitized;
     } catch (e) {
       console.error("[jobStore] Error reading from localStorage", e);
       return [];
@@ -30,9 +34,10 @@ export const jobStore = {
       const all = jobStore.getAll();
       const idx = all.findIndex((j) => j.job_id === job.job_id);
 
-      // Zero-overload rule: strip the heavy result details before saving to localStorage
+      // Zero-overload rule: strip the heavy result details and clamp progress to [0, 100]
       const strippedJob: GenericJob = {
         ...job,
+        progress: Math.min(100, Math.max(0, typeof job.progress === "number" && !isNaN(job.progress) ? job.progress : 0)),
         result: null
       };
 

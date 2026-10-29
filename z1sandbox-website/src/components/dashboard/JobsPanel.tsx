@@ -152,7 +152,7 @@ export function JobsPanel({
                         isActive && !isCancelled && (jobType === "repo-scan" ? "text-violet-400" : "text-blue-400")
                       )}
                     >
-                      {isActive ? `${job.status} (${job.progress}%)` : (isDone ? "SCAN COMPLETE" : job.status)}
+                      {isActive ? `${job.status} (${Math.min(100, Math.max(0, job.progress))}%)` : (isDone ? "SCAN COMPLETE" : job.status)}
                     </span>
 
                     {/* Severity Summary counts badge */}

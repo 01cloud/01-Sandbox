@@ -148,6 +148,14 @@ export function useJobStore(
         }
 
         if (ev.step === "LOG_LINE") {
+          const msg = ev.message || "";
+          const isFinished = (
+            msg.includes("All scans finished") ||
+            msg.includes("Repository scan complete") ||
+            msg.includes("Final report assembled") ||
+            msg.includes("Security scans complete.")
+          );
+
           setVolatileLogs(prev => {
             const currentLogs = prev[jobId] || [];
             return {
@@ -156,9 +164,7 @@ export function useJobStore(
             };
           });
 
-          const msg = ev.message || "";
-          // Only trigger completion fetch if parent pipeline signals final aggregation
-          if (msg.includes("All scans finished") || msg.includes("Repository scan complete") || msg.includes("Final report assembled")) {
+          if (isFinished) {
             const finishedJob: GenericJob = {
               ...stored,
               status: "DONE",
@@ -169,6 +175,25 @@ export function useJobStore(
             jobStore.upsert(finishedJob);
             setJobs(jobStore.getAll(jobType));
             lazyFetchResult(jobId);
+            return;
+          }
+
+          // Advance progress based on real-time log activity (between 40% and 95%)
+          const logCount = (volatileLogs[jobId]?.length || 0) + 1;
+          const currentP = Math.min(100, Math.max(0, stored.progress || 40));
+          let estProgress = Math.min(92, Math.max(currentP, 40 + Math.floor(logCount * 2.5)));
+          if (/Running\s+([a-zA-Z0-9_-]+)\s+scan/i.test(msg)) {
+            estProgress = Math.min(95, Math.max(estProgress, currentP + 10));
+          }
+
+          if (estProgress > currentP && stored.status !== "DONE" && stored.status !== "ERROR") {
+            const updated = {
+              ...stored,
+              progress: Math.min(95, estProgress),
+              stepMessage: msg.length > 80 ? msg.slice(0, 80) + "..." : msg
+            };
+            jobStore.upsert(updated);
+            setJobs(jobStore.getAll(jobType));
           }
           return;
         }
@@ -183,13 +208,14 @@ export function useJobStore(
           }));
         }
 
-        const storedProgress = typeof stored.progress === "number" && !isNaN(stored.progress) ? stored.progress : 0;
-        const newProgress = typeof ev.progress === "number" && !isNaN(ev.progress) ? ev.progress : 0;
+        const storedProgress = typeof stored.progress === "number" && !isNaN(stored.progress) ? Math.min(100, Math.max(0, stored.progress)) : 0;
+        const newProgress = typeof ev.progress === "number" && !isNaN(ev.progress) ? Math.min(100, Math.max(0, ev.progress)) : 0;
+        const boundedProgress = Math.min(100, Math.max(storedProgress, newProgress));
 
         const updatedJob: GenericJob = {
           ...stored,
           status: ev.step,
-          progress: Math.max(storedProgress, newProgress),
+          progress: ev.step === "DONE" ? 100 : boundedProgress,
           stepMessage: ev.message,
           eventIndex: since + 1,
           summary: ev.step === "DONE" && ev.detail
@@ -324,10 +350,11 @@ export function useJobStore(
           // ── Existing job: Sync state whenever server state or progress advances ────────
           const hasResult = !!volatileResults[sj.job_id];
           const isTerminalServerState = ["DONE", "ERROR", "CANCELLED"].includes(sj.status) || hasResult;
-          const existingProgress = typeof existing.progress === "number" && !isNaN(existing.progress) ? existing.progress : 0;
-          const newProgress = typeof sj.progress === "number" && !isNaN(sj.progress) ? sj.progress : 0;
+          const existingProgress = typeof existing.progress === "number" && !isNaN(existing.progress) ? Math.min(100, Math.max(0, existing.progress)) : 0;
+          const rawNewProgress = typeof sj.progress === "number" && !isNaN(sj.progress) ? sj.progress : 0;
+          const newProgress = Math.min(100, Math.max(0, rawNewProgress));
           const targetStatus = hasResult ? "DONE" : sj.status;
-          const targetProgress = (isTerminalServerState && targetStatus === "DONE") ? 100 : Math.max(existingProgress, newProgress);
+          const targetProgress = (isTerminalServerState && targetStatus === "DONE") ? 100 : Math.min(100, Math.max(existingProgress, newProgress));
 
           // If the server state or progress has advanced, update local state
           if (

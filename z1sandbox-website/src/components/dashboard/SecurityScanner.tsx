@@ -1311,7 +1311,7 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
                     })}
                   </div>
                   <div className="h-1.5 rounded-full bg-muted/50 overflow-hidden">
-                    <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${selectedJob.progress}%` }} />
+                    <div className={cn("h-full rounded-full transition-all duration-700 ease-out", selectedJob.status === "ERROR" ? "bg-destructive" : "bg-violet-500")} style={{ width: `${Math.min(100, Math.max(0, selectedJob.progress))}%` }} />
                   </div>
                   {selectedJob.stepMessage && <p className="text-[11px] text-muted-foreground">{selectedJob.stepMessage}</p>}
                 </div>

@@ -43,6 +43,11 @@ async def list_jobs(job_type: str, user_data: dict = Depends(validate_token)):
 
             job_status = redis_status if redis_status else job.step
 
+            calc_progress = 10
+            if job.event_log:
+                last_progress = getattr(job.event_log[-1], "progress", 10)
+                calc_progress = max(10, min(95, last_progress))
+
             # Strip result and build response skeleton
             jobs.append(
                 {
@@ -50,9 +55,7 @@ async def list_jobs(job_type: str, user_data: dict = Depends(validate_token)):
                     "job_type": job.job_type,
                     "status": job_status,
                     "progress": (
-                        100
-                        if job_status in ("DONE", "ERROR")
-                        else (len(job.event_log) * 10 if job.event_log else 10)
+                        100 if job_status in ("DONE", "ERROR") else calc_progress
                     ),
                     "stepMessage": job.event_log[-1].message if job.event_log else "",
                     "eventIndex": len(job.event_log),
