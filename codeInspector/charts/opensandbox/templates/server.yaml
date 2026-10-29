@@ -26,12 +26,15 @@ metadata:
     app: opensandbox-server
     component: server
 spec:
-  type: ClusterIP
+  type: {{ .Values.server.serviceType | default "NodePort" }}
   ports:
     - port: 80
       targetPort: 8080
       protocol: TCP
       name: http
+      {{- if or (eq (.Values.server.serviceType | default "NodePort") "NodePort") (eq (.Values.server.serviceType | default "NodePort") "LoadBalancer") }}
+      nodePort: {{ .Values.server.nodePort | default 30080 }}
+      {{- end }}
   selector:
     app: opensandbox-server
 ---
