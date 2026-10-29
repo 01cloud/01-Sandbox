@@ -736,6 +736,23 @@ const SecurityScanner = ({ isOpen, onClose, backend, baseUrl, apiKey, authToken,
       value: r && typeof r.percentage === "number" ? parseFloat(r.percentage.toFixed(1)) : 0,
     }));
 
+    const normalized = {
+      ...(result && typeof result === "object" ? result : {}),
+      ...(reportObj && typeof reportObj === "object" ? reportObj : {}),
+      job_id: result?.job_id || result?.id || reportObj?.job_id || selectedJobId,
+      status: result?.status || "DONE",
+      files_scanned: filesScanned,
+      languages: syntheticLangs,
+      summary: reportObj?.summary || result?.summary || {
+        critical: findings.filter((f: any) => (f.severity || "").toUpperCase() === "CRITICAL").length,
+        high: findings.filter((f: any) => (f.severity || "").toUpperCase() === "HIGH").length,
+        medium: findings.filter((f: any) => (f.severity || "").toUpperCase() === "MEDIUM").length,
+        low: findings.filter((f: any) => (f.severity || "").toUpperCase() === "LOW").length,
+        info: findings.filter((f: any) => !["CRITICAL", "HIGH", "MEDIUM", "LOW"].includes((f.severity || "").toUpperCase())).length,
+      },
+      findings,
+    };
+
     return (
       <div className="space-y-7 animate-in fade-in duration-500">
         {/* Verdict Banner */}
