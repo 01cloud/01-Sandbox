@@ -241,7 +241,18 @@ kubectl -n opensandbox-system exec deploy/prometheus -- \
 ## Step 5 — Persistent Storage Survival on AWS EBS
 
 ### What You Are Proving
-All TSDB block data resides on a dedicated **100 GiB AWS EBS volume** with `DeleteOnTermination=false`. If the EC2 instance is terminated, stopped, or replaced, the EBS volume survives intact. On re-provisioning, cloud-init automatically re-attaches it, and Prometheus resumes the full 7-day historical timeline without missing a sample (metrics older than 7 days are automatically purged by the TSDB compactor).
+All TSDB block data resides on a dedicated **100 GiB AWS EBS volume** (`vol-007928387cbe1370f`) with `DeleteOnTermination=false`. If the EC2 instance is terminated, stopped, or replaced, the EBS volume survives intact. On re-provisioning, cloud-init automatically re-attaches it, and Prometheus resumes the full 7-day historical timeline without missing a sample (metrics older than 7 days are automatically purged by the TSDB compactor).
+
+#### Where the Metrics Are Physically Stored:
+```text
+Container Path:  /prometheus
+     ▲
+     │ (Kubernetes PVC mount: prometheus-pvc)
+KinD Host Path:  /data/prometheus
+     ▲
+     │ (Host ext4 mount)
+AWS Block Disk:  /dev/nvme1n1 (100 GiB AWS EBS gp3 volume: vol-007928387cbe1370f)
+```
 
 ### Commands
 
@@ -271,11 +282,17 @@ kubectl -n opensandbox-system exec deploy/prometheus -- ls -lh /prometheus
 ```
 **Expected Output:**
 ```text
-drwxr-xr-x 3 nobody nogroup 4096 Oct 27 02:00 01JAX1G0S...   ← 2h compacted block
-drwxr-xr-x 3 nobody nogroup 4096 Oct 27 04:00 01JAX7M5F...   ← 2h compacted block
-drwxr-xr-x 3 nobody nogroup 4096 Oct 27 06:00 01JAXDZ8N...   ← 2h compacted block
-drwxr-xr-x 2 nobody nogroup 4096 Oct 27 06:20 wal             ← Active WAL
+drwxr-xr-x 3 nobody nogroup 4096 Oct 30 06:00 01JBY1ABC...   ← 2-hour compacted TSDB block
+drwxr-xr-x 3 nobody nogroup 4096 Oct 30 08:00 01JBY7DEF...   ← 2-hour compacted TSDB block
+drwxr-xr-x 3 nobody nogroup 4096 Oct 30 10:00 01JBYDXYZ...   ← 2-hour compacted TSDB block
+drwxr-xr-x 2 nobody nogroup 4096 Oct 30 10:20 chunks_head    ← In-memory samples staged to disk
+drwxr-xr-x 3 nobody nogroup 4096 Oct 30 10:20 wal            ← PrimaryHub active write-ahead log
 ```
+
+Inside each `01JBY...` block directory:
+- `chunks/` — Metric samples compressed with **Gorilla XOR encoding** (~1.37 bytes/sample, > 90% compression)
+- `index` — Inverted index mapping labels (`cluster="spoke1"`, `job="coredns"`) to series IDs for sub-3ms PromQL lookups
+- `meta.json` — Block time boundaries and total sample count
 
 ```bash
 # 5.4 — Prove 24 hours of continuous data is intact:
