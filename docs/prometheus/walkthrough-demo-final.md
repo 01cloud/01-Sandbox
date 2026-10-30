@@ -184,9 +184,14 @@ PrimaryHub ingests metric streams from all clusters simultaneously and stores th
 ### Commands
 
 ```bash
+# 4.0 — Fetch Basic Auth credentials dynamically from AWS SSM (zero hardcoding):
+RW_USER=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-username" --region "us-east-1" --query "Parameter.Value" --output text)
+RW_PASS=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-password" --region "us-east-1" --with-decryption --query "Parameter.Value" --output text)
+AUTH_HEADER="Authorization: Basic $(echo -n "${RW_USER}:${RW_PASS}" | base64)"
+
 # 4.1 — The "crown jewel" query: all 4 clusters in one TSDB:
 kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=count%20by%20(cluster)(up)" | jq .
+  wget -qO- --header="$AUTH_HEADER" "http://localhost:9090/api/v1/query?query=count%20by%20(cluster)(up)" | jq .
 ```
 **Expected Output:**
 ```json
@@ -202,6 +207,10 @@ kubectl -n opensandbox-system exec deploy/prometheus -- \
   }
 }
 ```
+
+> [!NOTE]
+> **Why is `--header="$AUTH_HEADER"` required?**
+> PrimaryHub Prometheus enforces HTTP Basic Authentication via `--web.config.file=/etc/prometheus-web/web.yml` across its HTTP endpoints. Queries without credentials return `HTTP/1.1 401 Unauthorized`. Passing `$AUTH_HEADER` authenticates the request.
 
 **What these 49 targets represent:**
 
@@ -259,7 +268,7 @@ drwxr-xr-x 2 nobody nogroup 4096 Oct 27 06:20 wal             ← Active WAL
 ```bash
 # 5.4 — Prove 24 hours of continuous data is intact:
 kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=up[24h]" | \
+  wget -qO- --header="$AUTH_HEADER" "http://localhost:9090/api/v1/query?query=up[24h]" | \
   jq '.data.result[0].values | length'
 ```
 **Expected Output:** `5760` *(5,760 × 15-second samples = exactly 24 hours)*
@@ -279,7 +288,7 @@ Grafana connects to the central TSDB via in-cluster DNS — a local Kubernetes D
 ```bash
 # 6.1 — Benchmark the round-trip from Grafana to Prometheus:
 time kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=up" > /dev/null
+  wget -qO- --header="$AUTH_HEADER" "http://localhost:9090/api/v1/query?query=up" > /dev/null
 ```
 **Expected Output:**
 ```text

@@ -503,13 +503,18 @@ The `--web.enable-remote-write-receiver` flag is what unlocks `POST /api/v1/writ
 #### 4.2 — Verify PrimaryHub is Actively Receiving Batches
 
 ```bash
+# Fetch Basic Auth credentials dynamically from AWS SSM (zero hardcoding):
+RW_USER=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-username" --region "us-east-1" --query "Parameter.Value" --output text)
+RW_PASS=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-password" --region "us-east-1" --with-decryption --query "Parameter.Value" --output text)
+AUTH_HEADER="Authorization: Basic $(echo -n "${RW_USER}:${RW_PASS}" | base64)"
+
 # Rate of remote write batches received per second:
 kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- 'http://localhost:9090/api/v1/query?query=rate(prometheus_http_requests_total{code="204"}[1m])' | jq .
+  wget -qO- --header="$AUTH_HEADER" 'http://localhost:9090/api/v1/query?query=rate(prometheus_http_requests_total{code="204"}[1m])' | jq .
 
 # Total cumulative batches received since startup:
 kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- 'http://localhost:9090/api/v1/query?query=prometheus_http_requests_total{handler="/write",code="204"}' | jq .
+  wget -qO- --header="$AUTH_HEADER" 'http://localhost:9090/api/v1/query?query=prometheus_http_requests_total{handler="/write",code="204"}' | jq .
 ```
 
 **Expected Output (cumulative batches):**
@@ -536,9 +541,18 @@ kubectl -n opensandbox-system exec deploy/prometheus -- \
 #### 4.3 — The Crown Jewel Query: All 4 Clusters in One TSDB
 
 ```bash
+# Fetch Basic Auth credentials dynamically from AWS SSM (zero hardcoding):
+RW_USER=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-username" --region "us-east-1" --query "Parameter.Value" --output text)
+RW_PASS=$(aws ssm get-parameter --name "/sandbox/monitoring/rw-password" --region "us-east-1" --with-decryption --query "Parameter.Value" --output text)
+AUTH_HEADER="Authorization: Basic $(echo -n "${RW_USER}:${RW_PASS}" | base64)"
+
 kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=count%20by%20(cluster)(up)" | jq .
+  wget -qO- --header="$AUTH_HEADER" "http://localhost:9090/api/v1/query?query=count%20by%20(cluster)(up)" | jq .
 ```
+
+> [!NOTE]
+> **Why is `--header="$AUTH_HEADER"` required?**
+> PrimaryHub Prometheus enforces HTTP Basic Authentication via `--web.config.file=/etc/prometheus-web/web.yml`. Query requests without this header receive `HTTP/1.1 401 Unauthorized` by design.
 
 **Live Cluster Output:**
 ```json
@@ -675,7 +689,7 @@ Each directory contains:
 
 ```bash
 kubectl -n opensandbox-system exec deploy/prometheus -- \
-  wget -qO- "http://localhost:9090/api/v1/query?query=up[24h]" | \
+  wget -qO- --header="$AUTH_HEADER" "http://localhost:9090/api/v1/query?query=up[24h]" | \
   jq '.data.result[0].values | length'
 ```
 **Expected Output:** `5760`
