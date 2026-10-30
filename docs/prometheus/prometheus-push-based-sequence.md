@@ -123,14 +123,43 @@ sequenceDiagram
 
 ---
 
-### Phase 4: Basic Auth Security Gate, TSDB Ingestion & 7-Day EBS Storage
+### Phase 4: Basic Auth Security Gate, In-Memory Head Chunks & Persistent AWS EBS Storage
 * **Steps 14–20**:
   1. **Security Gate**: The Prometheus server evaluates the incoming request against `--web.config.file=/etc/prometheus-web/web.yml`.
      * If credentials are valid (verified against bcrypt hash), the request passes.
      * If credentials are missing or wrong, Prometheus immediately returns **`HTTP 401 Unauthorized`**, blocking unauthorized access.
-  2. **Ingestion**: The payload is decompressed and incoming metrics are routed to in-memory Head Chunks, tagged by `cluster="spoke1"`.
-  3. PrimaryHub returns **`HTTP 204 No Content`** to acknowledge that the batch has been accepted and committed.
-  4. **Compaction & EBS Persistence**: Every 2 hours, Prometheus flushes in-memory samples into immutable 2-hour TSDB blocks on the **100 GiB AWS EBS volume** (`/dev/nvme1n1`). Metrics older than 7 days are automatically purged by the TSDB compactor.
+  2. **In-Memory Head Chunks**:
+     * The payload is decompressed from Google Snappy.
+     * The metrics are indexed by their origin tags (e.g., `cluster="spoke1"`, `job="coredns"`).
+     * Newly arrived samples are immediately committed into **in-memory Head Chunks (RAM)**. This allows Grafana to query live data with sub-3ms response times without waiting for disk writes.
+     * Simultaneously, samples append to PrimaryHub's local Write-Ahead Log (`/prometheus/wal/`) for crash recovery.
+  3. **Acknowledgement**: PrimaryHub returns **`HTTP 204 No Content`** to the spoke WAL Watcher to confirm that the batch has been accepted and committed.
+  4. **Where the Metrics Are Physically Stored on Disk**:
+     * In the Prometheus container, metrics reside at `/prometheus`.
+     * This path is backed by Kubernetes PVC `prometheus-pvc` (StorageClass `standard`), which maps through KinD directly to a dedicated **100 GiB AWS EBS (`gp3`) volume** mounted on the EC2 host:
+       ```text
+       Container Path:  /prometheus
+            ▲
+            │ (Kubernetes PVC mount: prometheus-pvc)
+       KinD Host Path:  /data/prometheus
+            ▲
+            │ (Host ext4 mount)
+       AWS Block Disk:  /dev/nvme1n1 (100 GiB AWS EBS gp3 volume: vol-007928387cbe1370f)
+       ```
+  5. **TSDB Block Layout on the EBS Disk**:
+     * Every **2 hours**, the TSDB engine flushes in-memory samples into immutable 2-hour TSDB block directories in `/prometheus/`:
+       ```text
+       /prometheus/
+       ├── 01JBY1ABC.../          ← 2-hour immutable block (e.g. 06:00–08:00)
+       │   ├── chunks/            ← Metric samples compressed via Gorilla XOR (~1.37 bytes/sample)
+       │   ├── index              ← Inverted index for label filtering (cluster="spoke1", etc.)
+       │   └── meta.json          ← Block boundaries and sample statistics
+       ├── chunks_head/           ← Staged memory chunks
+       └── wal/                   ← PrimaryHub active write-ahead log buffer
+       ```
+  6. **7-Day Retention & EC2 Survival**:
+     * The TSDB compactor enforces `--storage.tsdb.retention.time=7d`, automatically purging blocks older than 7 days.
+     * The AWS EBS volume has `DeleteOnTermination=false`. If the PrimaryHub EC2 instance is terminated or replaced, the volume survives in AWS and cloud-init re-attaches it on next boot, restoring the full 7-day metric history immediately.
 
 ---
 
