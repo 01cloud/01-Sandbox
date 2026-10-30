@@ -220,17 +220,23 @@ queue_config:
   max_backoff: 10s
 ```
 
-**What each setting does:**
+**What each parameter controls:**
 
-| Setting | Value | Effect |
+| Parameter | Value | What It Actually Does |
 | :--- | :--- | :--- |
-| `capacity` | 10,000 | Max samples buffered in RAM per shard before backpressure slows scraping |
-| `min_shards` / `max_shards` | 1–10 | Auto-scales parallel sender goroutines. 1 during normal flow; up to 10 during backlog recovery |
-| `max_samples_per_send` | 1,000 | Flush immediately when 1,000 samples accumulate |
-| `batch_send_deadline` | 5s | Flush whatever is ready after 5 seconds regardless of batch size |
-| `min_backoff` / `max_backoff` | 500ms–10s | Exponential retry delay during network errors |
+| `capacity` | `10000` | **RAM buffer limit per shard**. Backpressure halts disk WAL reads if RAM buffer exceeds 10,000 samples. |
+| `min_shards` | `1` | **Baseline concurrency**. Exactly 1 worker goroutine pushes metrics during normal healthy operation. |
+| `max_shards` | `10` | **Auto-scaling ceiling**. Spawns up to 10 parallel workers to flush accumulated backlogs 10x faster after network outages. |
+| `max_samples_per_send` | `1000` | **Batch size ceiling**. Flushes immediately as soon as 1,000 samples accumulate in memory. |
+| `batch_send_deadline` | `5s` | **Latency guarantee**. Flushes whatever is buffered every 5s even if the 1,000 sample ceiling hasn't been reached. |
+| `min_backoff` | `500ms` | **Initial retry delay**. Waits 500ms before the first retry attempt during connection drops. |
+| `max_backoff` | `10s` | **Exponential backoff cap**. Doubles delay on consecutive failures (`500ms → 1s → ... → 10s`) to prevent retry storms. |
 
-At ~60 samples/sec: 60 × 5 = **~300 samples flushed every 5 seconds** (the deadline fires before the 1,000-sample limit).
+**The math in action:**
+- Ingestion velocity: ~59 samples/sec.
+- Accumulation to 1,000 samples requires ~17 seconds.
+- Therefore, the **`batch_send_deadline: 5s` fires first**, flushing ~300 samples every 5 seconds.
+- Notice the timestamps in the tcpdump output below: `33.480` and `38.573` — exactly 5 seconds apart!
 
 #### 2.2 — Capture Live Wire Traffic (Indisputable Compression Proof)
 

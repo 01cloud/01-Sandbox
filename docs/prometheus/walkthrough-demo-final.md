@@ -91,6 +91,18 @@ queue_config:
   max_backoff: 10s
 ```
 
+**What each parameter controls:**
+
+| Parameter | Value | What It Actually Does |
+| :--- | :--- | :--- |
+| `capacity` | `10000` | **RAM buffer limit per shard**. Backpressure halts disk WAL reads if RAM buffer exceeds 10,000 samples. |
+| `min_shards` | `1` | **Baseline concurrency**. Exactly 1 worker goroutine pushes metrics during normal healthy operation. |
+| `max_shards` | `10` | **Auto-scaling ceiling**. Spawns up to 10 parallel workers to flush accumulated backlogs 10x faster after network outages. |
+| `max_samples_per_send` | `1000` | **Batch size ceiling**. Flushes immediately as soon as 1,000 samples accumulate in memory. |
+| `batch_send_deadline` | `5s` | **Latency guarantee**. Flushes whatever is buffered every 5s even if the 1,000 sample ceiling hasn't been reached. |
+| `min_backoff` | `500ms` | **Initial retry delay**. Waits 500ms before the first retry attempt during connection drops. |
+| `max_backoff` | `10s` | **Exponential backoff cap**. Doubles delay on consecutive failures (`500ms → 1s → ... → 10s`) to prevent retry storms. |
+
 ```bash
 # 2.2 — Capture live wire traffic crossing the WireGuard tunnel:
 #        (run on the PrimaryHub EC2 host via SSH/SSM)
