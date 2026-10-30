@@ -70,22 +70,31 @@ kubectl -n monitoring exec deploy/prometheus-scraper -- ls -la /prometheus/wal
 
 **Live Cluster Output:**
 ```text
-total 2208
-drwxr-xr-x 3 nobody nobody      81 Oct 27 05:45 .
--rw-r--r-- 1 nobody nobody 1179648 Oct 26 13:52 00000006
--rw-r--r-- 1 nobody nobody   32768 Oct 27 05:45 00000007
--rw-r--r-- 1 nobody nobody 1029818 Oct 27 06:33 00000008   ← Active WAL segment
-drwxr-xr-x 2 nobody nobody      22 Oct 27 05:45 checkpoint.00000005
+total 7552
+drwxr-xr-x 3 nobody nobody      81 Oct 30 07:00 .
+drwxrwxrwx 7 root   root       172 Oct 30 07:00 ..
+-rw-r--r-- 1 nobody nobody 2654208 Oct 30 05:00 00000014   ← Sealed past segment
+-rw-r--r-- 1 nobody nobody 2654208 Oct 30 07:00 00000015   ← Sealed past segment
+-rw-r--r-- 1 nobody nobody 1462998 Oct 30 08:06 00000016   ← Active live WAL segment
+drwxr-xr-x 2 nobody nobody      22 Oct 30 07:00 checkpoint.00000013
 ```
 
 **What each file represents:**
 
 | File | Type | Description |
 | :--- | :--- | :--- |
-| `00000006` (1.1 MB) | Past segment | A completed sequential segment from the previous day, sealed and immutable |
-| `00000007` (32 KB) | Startup segment | Created when the pod rebooted at 05:45; contains startup events |
-| `00000008` (2.4 MB+) | **Active segment** | **The live file being appended every 15 seconds right now** |
-| `checkpoint.00000005` | Compaction marker | Created every 2 hours during TSDB block compaction. Allows older WAL files (`00000000`–`00000005`) to be safely deleted |
+| `00000014` (2.6 MB) | Past segment | A completed sequential segment, sealed and immutable |
+| `00000015` (2.6 MB) | Past segment | A completed sequential segment from the previous window |
+| `00000016` (1.4 MB+) | **Active segment** | **The live file being appended every 15 seconds right now** |
+| `checkpoint.00000013` | Compaction checkpoint | Created every 2 hours during TSDB block compaction. Consolidates series references and safely prunes older raw WAL files |
+
+> [!NOTE]
+> **Understanding Automatic WAL Checkpointing & Segment Pruning:**
+> You might ask: *Why do segments 00000000 through 00000013 not appear on disk?*
+> 1. **WAL is a Crash-Safety Buffer, not Long-Term Storage**: The Write-Ahead Log exists solely to recover in-memory samples in the event of an abrupt pod crash or node reboot.
+> 2. **2-Hour TSDB Flushes**: Every 2 hours, Prometheus flushes in-memory samples into permanent, immutable TSDB blocks in `/prometheus/` (directories with 26-character ULID identifiers like `01JBY...`).
+> 3. **Checkpointing**: Once those samples are written into immutable TSDB blocks on disk, Prometheus creates a checkpoint (e.g. `checkpoint.00000013`).
+> 4. **Safe Deletion**: All raw WAL segments prior to that checkpoint (`00000000`–`00000013`) are automatically deleted. This bounds WAL disk usage to a few megabytes while preserving the entire historical metric timeline in TSDB blocks.
 
 #### 1.3 — Observe the WAL Growing in Real Time
 
@@ -774,6 +783,7 @@ cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 | Question | Answer |
 | :--- | :--- |
 | *"What if the WireGuard link drops between Mumbai and Virginia?"* | *"Step 1 showed it: the local WAL absorbs all samples. The pending counter spikes, but once WireGuard recovers, the Shard Controller auto-scales to 10 workers and flushes the entire backlog automatically. Zero samples lost."* |
+| *"Why do earlier WAL segments (e.g. 0–13) disappear on the scraper pod?"* | *"They were not lost—they were persisted! Every 2 hours, Prometheus flushes in-memory data to immutable TSDB blocks in `/prometheus/01J...`. Once written, Prometheus creates a checkpoint (e.g. `checkpoint.00000013`) and safely prunes older raw WAL files to prevent disk exhaustion while keeping the full historical timeline."* |
 | *"Doesn't sending metrics over the internet use too much bandwidth?"* | *"Step 2 proved it: only ~17.84 bytes per sample on the wire — 88% less than raw text format. The entire spoke cluster generates under 5 KB/s of outbound traffic."* |
 | *"Why are there no separate Grafana data sources per spoke?"* | *"All spokes push metrics into PrimaryHub's TSDB. Grafana queries that local TSDB in < 3ms. There's no reason to reach out to the spokes — everything is already here, tagged with `cluster=\"spoke1\"` etc."* |
 | *"If we terminate PrimaryHub's EC2 right now, do we lose all graphs?"* | *"No. The 100 GiB EBS volume has `DeleteOnTermination=false`. Terminate the EC2 and the volume survives in AWS. The Launch Template cloud-init re-attaches it on the next boot and Prometheus resumes the full 30-day history."* |

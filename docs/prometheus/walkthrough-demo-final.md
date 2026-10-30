@@ -41,11 +41,18 @@ kubectl -n monitoring exec deploy/prometheus-scraper -- ls -la /prometheus/wal
 ```
 **Expected Output:**
 ```text
--rw-r--r-- 1 nobody nobody 1179648 Oct 26 13:52 00000006
--rw-r--r-- 1 nobody nobody   32768 Oct 27 05:45 00000007
--rw-r--r-- 1 nobody nobody 2406999 Oct 27 07:39 00000008   ← Active WAL segment
-drwxr-xr-x 2 nobody nobody      22 Oct 27 05:45 checkpoint.00000005
+total 7552
+drwxr-xr-x 3 nobody nobody      81 Oct 30 07:00 .
+drwxrwxrwx 7 root   root       172 Oct 30 07:00 ..
+-rw-r--r-- 1 nobody nobody 2654208 Oct 30 05:00 00000014
+-rw-r--r-- 1 nobody nobody 2654208 Oct 30 07:00 00000015
+-rw-r--r-- 1 nobody nobody 1462998 Oct 30 08:06 00000016   ← Active WAL segment
+drwxr-xr-x 2 nobody nobody      22 Oct 30 07:00 checkpoint.00000013
 ```
+
+> [!NOTE]
+> **Why do older WAL segments (e.g., 00000000–00000013) disappear?**
+> This is automated WAL checkpointing in action. Every 2 hours, Prometheus cuts an immutable 2-hour TSDB block on disk (`/prometheus/01J...`). Once persisted, Prometheus creates a checkpoint (e.g., `checkpoint.00000013`) and safely deletes older raw WAL segments to prevent disk exhaustion. Historical data is completely safe in the TSDB blocks!
 
 ```bash
 # 1.2 — Show real-time local ingestion rate (samples/sec written to WAL):
@@ -56,7 +63,7 @@ kubectl -n monitoring exec deploy/prometheus-scraper -- \
 **Expected Output:** `"58.8"` *(~59 samples written to local disk every second)*
 
 ### Talking Point
-> *"File `00000008` is raw uncompressed binary. Every 15 seconds, ~882 new samples are appended to it — locally, at zero network cost. If the WireGuard tunnel to Virginia goes down right now, this number stays at 58.8. Not a single metric drops. All data safely accumulates here, ready to be flushed the moment connectivity returns."*
+> *"Notice the active WAL file `00000016` and the directory `checkpoint.00000013`. Older segments like 0 through 13 were already flushed to permanent 2-hour TSDB blocks on disk and automatically pruned. Every 15 seconds, ~882 new samples append locally at zero network cost. Even if the WireGuard tunnel drops, ingestion continues at 58.8 samples/sec without losing a single metric."*
 
 ---
 
@@ -317,6 +324,7 @@ cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 | Teammate Question | Winning Answer |
 | :--- | :--- |
 | *"What happens if the WireGuard link between Mumbai and Virginia drops?"* | *"Nothing is lost. Spoke 2's local scraper keeps appending to its WAL on disk. When WireGuard reconnects, the WAL Watcher replays from its last byte offset and the Shard Controller auto-scales to 10 workers to drain the backlog instantly."* |
+| *"Why do earlier WAL segments (e.g. 0–13) disappear on the scraper pod?"* | *"They were not lost—they were persisted! Every 2 hours, Prometheus cuts immutable TSDB blocks in `/prometheus/01J...`. Once written, Prometheus creates a checkpoint (e.g. `checkpoint.00000013`) and safely prunes older raw WAL files to prevent disk exhaustion while keeping the full historical timeline."* |
 | *"Doesn't sending metrics over the internet waste bandwidth?"* | *"We proved in Step 2 that Snappy compression reduces each metric to ~17.8 bytes. The entire spoke cluster generates under 5 KB/s of outbound traffic — negligible."* |
 | *"Why is there no separate data source per spoke in Grafana?"* | *"Because Grafana doesn't query spokes directly. Every spoke pushes into PrimaryHub's TSDB. All metrics carry `cluster=\"..\"` labels. Grafana queries the local TSDB in `< 3ms` and the `$cluster` variable filters dynamically."* |
 | *"If we terminate the PrimaryHub EC2 right now, do we lose everything?"* | *"No. Step 5 proved TSDB blocks live on a 100 GiB EBS volume with `DeleteOnTermination=false`. The Launch Template cloud-init re-attaches it on the next boot and Prometheus resumes the 7-day history immediately (auto-cleaning blocks older than 7d). "* |
