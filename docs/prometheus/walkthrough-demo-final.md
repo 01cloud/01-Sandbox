@@ -296,22 +296,42 @@ real    0m0.003s   ← 3 MILLISECONDS vs the old 4–8 seconds
 ```
 
 ```bash
-# 6.2 — Verify all cluster datasources point to the local central TSDB:
-kubectl -n monitoring exec deploy/grafana -- \
+# 6.2 — Verify provisioned Grafana datasources point to the local central TSDB:
+kubectl -n opensandbox-system exec deploy/grafana -- \
   curl -s -u admin:sandbox-admin "http://localhost:3000/api/datasources" | \
-  jq '.[] | {name: .name, url: .url}'
+  jq '.[] | {name: .name, uid: .uid, url: .url, isDefault: .isDefault}'
 ```
 **Expected Output:**
 ```json
-{ "name": "primaryhub",   "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090" }
-{ "name": "secondaryhub", "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090" }
-{ "name": "spoke1",       "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090" }
-{ "name": "spoke2",       "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090" }
+{ "name": "primaryhub",   "uid": "prometheus-primaryhub",   "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090", "isDefault": true }
+{ "name": "secondaryhub", "uid": "prometheus-secondaryhub", "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090", "isDefault": false }
 ```
-*All four datasources point to the **same** local URL. There is no separate data source per spoke because all spoke metrics are already inside PrimaryHub's TSDB.*
+*(Notice both point to the in-cluster central TSDB URL `http://prometheus-service.opensandbox-system.svc.cluster.local:9090`).*
 
 ```bash
-# 6.3 — Open Grafana (from your laptop):
+# 6.3 — Query active fleet spoke clusters dynamically discovered through Grafana's central TSDB proxy:
+kubectl -n opensandbox-system exec deploy/grafana -- \
+  curl -s -u admin:sandbox-admin "http://localhost:3000/api/datasources/proxy/uid/prometheus-primaryhub/api/v1/label/cluster/values" | jq .
+```
+**Expected Output:**
+```json
+{
+  "status": "success",
+  "data": [
+    "postgresql-primary",
+    "postgresql-secondary",
+    "secondaryhub",
+    "spoke1",
+    "spoke2",
+    "spoke3",
+    "spoke4"
+  ]
+}
+```
+*All regional spoke clusters are immediately accessible through the central TSDB data source without requiring a separate Grafana connection per spoke.*
+
+```bash
+# 6.4 — Open Grafana (from your laptop):
 cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 ./port-forward-grafana.sh
 # Open: http://localhost:3000  |  Login: admin / sandbox-admin

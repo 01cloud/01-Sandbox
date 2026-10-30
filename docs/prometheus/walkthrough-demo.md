@@ -740,7 +740,7 @@ Compare this to the old cross-WAN pull model:
 #### 6.2 — Verify Declarative Datasource Configuration
 
 ```bash
-kubectl -n monitoring exec deploy/grafana -- \
+kubectl -n opensandbox-system exec deploy/grafana -- \
   curl -s -u admin:sandbox-admin "http://localhost:3000/api/datasources" | \
   jq '.[] | {name: .name, uid: .uid, url: .url, isDefault: .isDefault}'
 ```
@@ -750,9 +750,30 @@ kubectl -n monitoring exec deploy/grafana -- \
 { "name": "secondaryhub", "uid": "prometheus-secondaryhub",  "url": "http://prometheus-service.opensandbox-system.svc.cluster.local:9090", "isDefault": false }
 ```
 
+```bash
+# Query active fleet spoke clusters dynamically discovered through Grafana's central TSDB proxy:
+kubectl -n opensandbox-system exec deploy/grafana -- \
+  curl -s -u admin:sandbox-admin "http://localhost:3000/api/datasources/proxy/uid/prometheus-primaryhub/api/v1/label/cluster/values" | jq .
+```
+**Expected Output:**
+```json
+{
+  "status": "success",
+  "data": [
+    "postgresql-primary",
+    "postgresql-secondary",
+    "secondaryhub",
+    "spoke1",
+    "spoke2",
+    "spoke3",
+    "spoke4"
+  ]
+}
+```
+
 **Why do all datasources point to the same URL?**
 
-All four cluster names (`primaryhub`, `secondaryhub`, `spoke1`, `spoke2`) point to the same local URL because all cluster metrics live in PrimaryHub's TSDB — there is no need to reach out to individual spokes. Grafana uses PromQL label filtering to scope results per cluster:
+Both datasources point to the same in-cluster URL (`http://prometheus-service.opensandbox-system.svc.cluster.local:9090`) because all cluster metrics live in PrimaryHub's central TSDB — there is no need to reach out to individual spokes across the WAN. Grafana uses PromQL label filtering to scope results per cluster:
 
 ```promql
 up{cluster="spoke1"}     → Frankfurt metrics only
