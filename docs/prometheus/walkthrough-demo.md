@@ -714,6 +714,31 @@ Grafana runs inside the PrimaryHub Kubernetes cluster and connects to the centra
 
 The result: dashboards that previously took 4–8 seconds to load now render in **< 300ms**.
 
+#### How Metrics Flow from Storage (RAM & EBS) into Grafana
+
+A critical architectural point: **Grafana never touches the EBS volume directly.** Grafana is an HTTP visualization client, while Prometheus serves as the underlying 2-tier storage engine:
+
+```text
+┌─────────────────┐       HTTP PromQL        ┌───────────────────────────────┐
+│     Grafana     │ ───────────────────────► │   Prometheus Query Engine     │
+│  (Port 3000)    │ ◄─────────────────────── │         (Port 9090)           │
+└─────────────────┘       JSON Response      └───────┬───────────────┬───────┘
+                                                     │               │
+                         Recent Data (< 2h)          │               │ Historical Data (2h - 7d)
+                         In-Memory Head Chunks       ▼               ▼ Gorilla 2h Blocks (mmap)
+                                              ┌─────────────┐ ┌─────────────────────────┐
+                                              │ RAM Memory  │ │ AWS EBS (/dev/nvme1n1)  │
+                                              │ (< 1ms read)│ │  mounted at /prometheus │
+                                              └─────────────┘ └─────────────────────────┘
+```
+
+1. **Grafana Issues PromQL**: When a user selects a dashboard or changes the time filter (e.g. `Last 6 Hours`), Grafana sends an HTTP query to `http://prometheus-service.opensandbox-system.svc.cluster.local:9090/api/v1/query_range`.
+2. **Prometheus 2-Tier Storage Resolution**:
+   - **Recent Data (< 2 hours)**: Prometheus reads directly from **RAM** (In-Memory Head Chunks) in `< 1ms` with zero disk I/O.
+   - **Historical Data (2 hours to 7 days)**: Prometheus reads from the **AWS EBS volume (`/dev/nvme1n1`)** mounted at `/prometheus`. It scans the block's `index` file and uses Linux POSIX `mmap` to fetch compressed chunk byte ranges from disk.
+3. **Merge & Return**: The Prometheus engine merges the RAM samples and EBS disk blocks into a unified vector and returns HTTP `200 OK` JSON to Grafana.
+4. **Instant Rendering**: Grafana parses the JSON payload and renders line charts, status badges, and gauges in `< 300ms`.
+
 **Code References:**
 - Datasource provisioning: [`codeInspector/charts/grafana/templates/configmap-datasources.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-datasources.yaml)
 - Dashboard definitions: [`codeInspector/charts/grafana/templates/configmap-dashboards.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/grafana/templates/configmap-dashboards.yaml)
@@ -828,4 +853,5 @@ cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 | *"Doesn't sending metrics over the internet use too much bandwidth?"* | *"Step 2 proved it: only ~17.84 bytes per sample on the wire — 88% less than raw text format. The entire spoke cluster generates under 5 KB/s of outbound traffic."* |
 | *"Why are there no separate Grafana data sources per spoke?"* | *"All spokes push metrics into PrimaryHub's TSDB. Grafana queries that local TSDB in < 3ms. There's no reason to reach out to the spokes — everything is already here, tagged with `cluster=\"spoke1\"` etc."* |
 | *"If we terminate PrimaryHub's EC2 right now, do we lose all graphs?"* | *"No. The 100 GiB EBS volume has `DeleteOnTermination=false`. Terminate the EC2 and the volume survives in AWS. The Launch Template cloud-init re-attaches it on the next boot and Prometheus resumes the full 30-day history."* |
+| *"Does Grafana fetch metrics directly from the AWS EBS volume?"* | *"No. Grafana has zero direct disk access. Grafana only issues HTTP PromQL requests to Prometheus. The Prometheus TSDB engine fetches live data (< 2h) directly from RAM and historical data (2h–7d) from the EBS volume (/dev/nvme1n1) via mmap, merges them into a single continuous time series, and returns JSON to Grafana."* |
 | *"Why is Grafana so much faster than before?"* | *"The old model issued 48 cross-WAN queries per dashboard refresh — 4–8 second load times. Now every query is a local DNS call in 2.8ms. The entire dashboard renders in < 300ms."* |

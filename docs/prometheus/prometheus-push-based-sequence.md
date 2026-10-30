@@ -163,12 +163,16 @@ sequenceDiagram
 
 ---
 
-### Phase 5: Instant Local Visualization in Grafana
+### Phase 5: Instant Local Visualization in Grafana (2-Tier RAM + EBS Read Engine)
 * **Steps 21–25**:
   1. The user opens Grafana and selects a dashboard (e.g. *Spoke Edge Fleet – Dynamic Multi-Cluster Observability*).
   2. Grafana issues a PromQL query (e.g., `up{cluster="spoke1"}`) to Prometheus via in-cluster DNS (`http://prometheus-service.opensandbox-system.svc.cluster.local:9090`).
-  3. Because all spoke metrics have already been pushed to PrimaryHub, **no cross-WAN request is needed**.
-  4. The query executes locally in **< 3ms**, and the dashboard renders in **< 0.3s** (compared to 4–8 second delays in traditional pull models).
+  3. **How Prometheus Queries Storage (Grafana Never Reads EBS Directly)**:
+     * **Recent Metrics (< 2 hours)**: Prometheus serves immediately from **RAM** (In-Memory Head Chunks) in `< 1ms` without touching the disk.
+     * **Historical Metrics (2 hours to 7 days)**: Prometheus queries the **AWS EBS volume (`/dev/nvme1n1`)** mounted at `/prometheus`. It scans the inverted `index` file and reads chunk byte ranges via Linux kernel memory mapping (`mmap`).
+     * **Unified Merge**: The Prometheus query engine merges the RAM samples and the EBS disk blocks into a continuous time-series stream and serializes it to JSON.
+  4. Because all spoke metrics have already been pushed to PrimaryHub, **no cross-WAN request is needed**.
+  5. The query executes locally in **< 3ms**, and Grafana renders dashboard panels in **< 0.3s** (compared to 4–8 second delays and 504 timeouts in traditional pull models).
 
 ---
 

@@ -312,6 +312,32 @@ kubectl -n opensandbox-system exec deploy/prometheus -- \
 ### What You Are Proving
 Grafana connects to the central TSDB via in-cluster DNS — a local Kubernetes DNS call inside the same cluster. Because all spoke metrics have already been pushed into PrimaryHub's TSDB, every dashboard query is **purely local**. There are zero cross-WAN requests on any dashboard panel refresh.
 
+#### How Metrics Flow from Storage (RAM & EBS) into Grafana
+
+A common question is: *Does Grafana read the EBS volume directly?*
+**No.** Grafana never touches the EBS volume. Instead, **Prometheus (Central TSDB)** acts as the query engine:
+
+```text
+┌─────────────────┐       HTTP PromQL        ┌───────────────────────────────┐
+│     Grafana     │ ───────────────────────► │   Prometheus Query Engine     │
+│  (Port 3000)    │ ◄─────────────────────── │         (Port 9090)           │
+└─────────────────┘       JSON Response      └───────┬───────────────┬───────┘
+                                                     │               │
+                         Recent Data (< 2h)          │               │ Historical Data (2h - 7d)
+                         In-Memory Head Chunks       ▼               ▼ Gorilla 2h Blocks (mmap)
+                                              ┌─────────────┐ ┌─────────────────────────┐
+                                              │ RAM Memory  │ │ AWS EBS (/dev/nvme1n1)  │
+                                              │ (< 1ms read)│ │  mounted at /prometheus │
+                                              └─────────────┘ └─────────────────────────┘
+```
+
+1. **Grafana Issues PromQL**: When a user selects a time range (e.g. `Last 6 Hours`), Grafana sends an HTTP query to `http://prometheus-service.opensandbox-system.svc.cluster.local:9090/api/v1/query_range`.
+2. **2-Tier Storage Resolution in Prometheus**:
+   - **Recent Data (< 2 hours)**: Prometheus reads directly from **RAM** (In-Memory Head Chunks) in `< 1ms` without any disk I/O.
+   - **Historical Data (2 hours to 7 days)**: Prometheus reads from the **AWS EBS volume (`/dev/nvme1n1`)** by scanning the block's `index` file and using POSIX `mmap` to fetch compressed chunk byte ranges.
+3. **Merge & Return**: The Prometheus engine merges the RAM samples and EBS disk blocks into a unified vector and returns HTTP `200 OK` JSON to Grafana.
+4. **Instant Rendering**: Grafana parses the JSON payload and renders line charts, status badges, and gauges in `< 300ms`.
+
 ### Commands
 
 ```bash
@@ -386,4 +412,5 @@ cd ~/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
 | *"Doesn't sending metrics over the internet waste bandwidth?"* | *"We proved in Step 2 that Snappy compression reduces each metric to ~17.8 bytes. The entire spoke cluster generates under 5 KB/s of outbound traffic — negligible."* |
 | *"Why is there no separate data source per spoke in Grafana?"* | *"Because Grafana doesn't query spokes directly. Every spoke pushes into PrimaryHub's TSDB. All metrics carry `cluster=\"..\"` labels. Grafana queries the local TSDB in `< 3ms` and the `$cluster` variable filters dynamically."* |
 | *"If we terminate the PrimaryHub EC2 right now, do we lose everything?"* | *"No. Step 5 proved TSDB blocks live on a 100 GiB EBS volume with `DeleteOnTermination=false`. The Launch Template cloud-init re-attaches it on the next boot and Prometheus resumes the 7-day history immediately (auto-cleaning blocks older than 7d). "* |
+| *"Does Grafana fetch metrics directly from the AWS EBS volume?"* | *"No. Grafana has zero direct disk access. Grafana only issues HTTP PromQL requests to Prometheus. The Prometheus TSDB engine fetches live data (< 2h) directly from RAM and historical data (2h–7d) from the EBS volume (/dev/nvme1n1) via mmap, merges them into a single continuous time series, and returns JSON to Grafana."* |
 | *"Why is Grafana so much faster than before?"* | *"The old model had Grafana issue 48 cross-WAN queries per dashboard refresh (~4–8 seconds). Now every query is a local DNS call inside the Kubernetes cluster: ~2.8ms per query, ~0.3s full dashboard render."* |
