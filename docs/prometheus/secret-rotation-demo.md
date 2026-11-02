@@ -109,3 +109,69 @@ kubectl -n opensandbox-system exec deploy/prometheus -- \
 Shows active targets from `spoke1` returning `value: [ <timestamp>, "1" ]`.
 
 > **Talking Point:** *"Throughout the entire rotation process, metric delivery never stopped. Zero HTTP 401 Unauthorized errors occurred, zero samples were dropped, and Grafana dashboards remain live."*
+
+---
+
+## 3. Cryptographic Deep-Dive: Plaintext vs. One-Way Bcrypt Verification
+
+### Why Can't the Password in `web.yml` Be Decrypted?
+* **On Edge Spokes (`prometheus-remote-write-auth`)**:
+  The spoke scraper requires the **plaintext password** to sign outbound HTTP requests with the standard `Authorization: Basic <base64(username:password)>` header. In Kubernetes, Secret `data` fields are merely base64-encoded, not encrypted. Decoding base64 yields the exact plaintext password.
+* **On PrimaryHub (`prometheus-web-config`)**:
+  Prometheus stores a **one-way cryptographic Bcrypt hash** (e.g. `$2b$12$ZBXxtlux1lwexuILj1wNhukCxmL0ZFzIZ/ltbSpoYn.wlxKmUPXFC`). By cryptographic design, hashing is irreversible—it **cannot be decrypted**. This prevents credential theft if the configuration is ever compromised.
+
+### How Prometheus Verifies the Password
+When Spoke 1 transmits metrics, Prometheus passes the incoming plaintext password through the Bcrypt algorithm using the salt embedded in the stored hash. If the computed hash matches the stored hash, authentication succeeds (`HTTP 204 No Content`).
+
+### How You Can Verify the Match Manually
+
+#### Method A: Python Bcrypt Salt Matching Test
+Extract the rotated password and stored hash directly from your cluster and verify the cryptographic match:
+
+```bash
+# 1. Dynamically read the username and password delivered to Spoke 1:
+PASSWORD=$(kubectl -n spoke1 get manifestwork spoke-prometheus-auth -o jsonpath='{.spec.workload.manifests[0].stringData.password}')
+USERNAME=$(kubectl -n spoke1 get manifestwork spoke-prometheus-auth -o jsonpath='{.spec.workload.manifests[0].stringData.username}')
+
+# 2. Run the Bcrypt verification using the salt stored in PrimaryHub:
+python3 -c "
+import crypt, subprocess
+
+password = '$PASSWORD'
+username = '$USERNAME'
+
+cmd = 'kubectl -n opensandbox-system get secret prometheus-web-config -o jsonpath=\"{.data.web\\\\.yml}\" | base64 -d'
+web_yml = subprocess.check_output(cmd, shell=True, text=True)
+stored_hash = [line.split(':', 1)[1].strip().strip('\"') for line in web_yml.splitlines() if username in line][0]
+
+computed_hash = crypt.crypt(password, stored_hash)
+
+print(f'User          : {username}')
+print(f'Computed Hash : {computed_hash}')
+print(f'Stored Hash   : {stored_hash}')
+print(f'Cryptographic Match: {computed_hash == stored_hash}')
+"
+```
+**Expected Output:**
+```text
+User          : prom-rw-...
+Computed Hash : $2b$12$...
+Stored Hash   : $2b$12$...
+Cryptographic Match: True
+```
+
+#### Method B: Direct API Validation Against PrimaryHub
+Encode the dynamically extracted credentials into an HTTP Basic Authorization header and query Prometheus directly:
+
+```bash
+PASSWORD=$(kubectl -n spoke1 get manifestwork spoke-prometheus-auth -o jsonpath='{.spec.workload.manifests[0].stringData.password}')
+USERNAME=$(kubectl -n spoke1 get manifestwork spoke-prometheus-auth -o jsonpath='{.spec.workload.manifests[0].stringData.username}')
+AUTH="Authorization: Basic $(echo -n "${USERNAME}:${PASSWORD}" | base64)"
+
+kubectl -n opensandbox-system exec deploy/prometheus -- \
+  wget -qO- --header="$AUTH" "http://localhost:9090/api/v1/query?query=up" | jq .status
+```
+**Expected Output:**
+```json
+"success"
+```

@@ -49,6 +49,19 @@ Prometheus `--web.config.file=/etc/prometheus-web/web.yml` natively supports mul
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### Cryptographic Security Model: One-Way Hashing vs. Plaintext Delivery
+
+A critical security principle governs the separation of credentials between the hub and the edges:
+
+1. **Why the Password Cannot Be "Decrypted" on PrimaryHub**:
+   PrimaryHub's `secret/prometheus-web-config` stores password hashes generated via standard Blowfish/Bcrypt (`$2b$12$...`). By cryptographic definition, Bcrypt is a **one-way hash function, not encryption**. It is mathematically irreversible. Even if an attacker gains full read access to PrimaryHub's `web.yml`, the plaintext password cannot be derived or decrypted.
+
+2. **Why Edge Spokes Store the Plaintext Password**:
+   The edge Prometheus scraper must transmit the `Authorization: Basic <base64(user:password)>` HTTP header on every remote write batch. Therefore, the edge secret `secret/prometheus-remote-write-auth` stores the plaintext password (base64-encoded according to Kubernetes Secret standards).
+
+3. **How Verification Works**:
+   When Spoke 1 transmits a batch, Prometheus extracts the incoming plaintext password and computes a test Bcrypt hash using the salt embedded in `web.yml`. If the resulting hash matches the stored hash, the request is authenticated (`HTTP 204 No Content`).
+
 ---
 
 ## 2. Components Implemented
