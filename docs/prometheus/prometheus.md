@@ -1231,6 +1231,8 @@ spec:
                   value: {{ .Values.namespace | quote }}
                 - name: GRACE_PERIOD_SECONDS
                   value: {{ .Values.rotator.gracePeriodSeconds | default 600 | quote }}
+                - name: PYTHONUNBUFFERED
+                  value: "1"
                 - name: PATH
                   value: "/tools:/usr/local/bin:/usr/bin:/bin"
               volumeMounts:
@@ -1625,24 +1627,33 @@ kubectl -n opensandbox-system create job \
   manual-rotation-$(date +%s)
 
 # 2. Stream live rotation logs (generation, dual-auth patch, reload, OCM sync):
-kubectl -n opensandbox-system logs -l component=secret-rotator --tail=50 -f
+kubectl -n opensandbox-system logs -l app=prometheus-secret-rotator -f
 
 # 3. Inspect currently active users in PrimaryHub's web.yml secret:
 kubectl -n opensandbox-system get secret prometheus-web-config \
   -o jsonpath='{.data.web\.yml}' | base64 -d
-# Expected during grace period:
+# Live output during 10-minute grace period:
 # basic_auth_users:
-#   prom-rw-20261102: "$2b$12$..."
-#   prom-rw-20261202: "$2b$12$..."
+#   prometheus-rw: "$2y$10$XNVJltW/XwJnMEwAxlcUo.mcQWUhIJrlqLONxd9Xn8etCITQkHo5O"
+#   prom-rw-202611021216: "$2b$12$eMhzhC/7OuZ9vR3e5WJHzuxXZAdZWMbsu2BJfdVITtuwyHBDtXEwC"
 
-# 4. Verify Prometheus hot-reload speed (< 10ms, zero restarts):
+# 4. Verify Prometheus hot-reload speed (< 15ms, zero restarts):
 kubectl -n opensandbox-system logs deploy/prometheus --tail=10 | grep -E "Loading configuration|Completed loading"
 # Live verified output:
-# caller=main.go:1415 level=info msg="Completed loading of configuration file" ... totalDuration=7.802221ms
+# caller=main.go:1415 level=info msg="Completed loading of configuration file" ... totalDuration=10.892154ms
 
-# 5. Verify Dual-Authentication allows both credentials simultaneously:
-AUTH_OLD="Authorization: Basic $(echo -n 'prom-rw-20261102:CurrentPassword123!' | base64)"
-AUTH_NEW="Authorization: Basic $(echo -n 'prom-rw-20261202:NewRotatingPassword456!' | base64)"
+# 5. Verify OCM ManifestWork Secret delivery across all spoke clusters:
+kubectl get manifestwork -A | grep spoke-prometheus-auth
+# Live verified output:
+# spoke1   spoke-prometheus-auth   True (Applied)   True (Available)
+# spoke2   spoke-prometheus-auth   True (Applied)   True (Available)
+# spoke3   spoke-prometheus-auth   True (Applied)   True (Available)
+# spoke4   spoke-prometheus-auth   True (Applied)   True (Available)
+# spoke5   spoke-prometheus-auth   True (Applied)   True (Available)
+
+# 6. Verify Dual-Authentication allows both credentials simultaneously:
+AUTH_OLD="Authorization: Basic $(echo -n 'prometheus-rw:CurrentPassword123!' | base64)"
+AUTH_NEW="Authorization: Basic $(echo -n 'prom-rw-202611021216:vaFKQ0ZXo3r3qXf5i2wUPTUO' | base64)"
 
 kubectl -n opensandbox-system exec deploy/prometheus -- \
   wget -qO- --header="$AUTH_OLD" "http://localhost:9090/api/v1/query?query=up" | jq .status
@@ -1652,7 +1663,7 @@ kubectl -n opensandbox-system exec deploy/prometheus -- \
   wget -qO- --header="$AUTH_NEW" "http://localhost:9090/api/v1/query?query=up" | jq .status
 # Expected: "success"
 
-# 6. Verify invalid credentials are strictly rejected (HTTP 401 Unauthorized):
+# 7. Verify invalid credentials are strictly rejected (HTTP 401 Unauthorized):
 kubectl -n opensandbox-system exec deploy/prometheus -- \
   wget -S -qO- --header="Authorization: Basic YmFkdXNlcjpiYWRwYXNz" "http://localhost:9090/api/v1/query?query=up" 2>&1 | grep "HTTP/"
 # Expected: HTTP/1.1 401 Unauthorized

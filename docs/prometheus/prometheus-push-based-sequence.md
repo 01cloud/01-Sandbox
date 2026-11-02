@@ -97,7 +97,7 @@ sequenceDiagram
   1. Every 30 days (or on demand), the Kubernetes-native `prometheus-secret-rotator` CronJob executes in PrimaryHub's `opensandbox-system` namespace.
   2. Generates a new credential pair (`User_B`, `Pass_B`) and computes a Blowfish/Bcrypt `$2b$` hash via Python's standard library `crypt.crypt(..., crypt.mksalt(crypt.METHOD_BLOWFISH))`, requiring zero pip dependencies.
   3. Patches `secret/prometheus-web-config` with **Dual-Auth (`[User_A + User_B]`)** under `basic_auth_users`.
-  4. Triggers hot-reload via `POST /-/reload` on PrimaryHub Prometheus (**7.8 milliseconds latency**, zero container restarts, zero dropped TCP connections). PrimaryHub now simultaneously accepts both credentials.
+  4. Triggers hot-reload via SIGHUP / `POST /-/reload` on PrimaryHub Prometheus (**sub-15ms latency**, zero container restarts, zero dropped TCP connections). PrimaryHub now simultaneously accepts both credentials.
   5. Creates or updates Open Cluster Management (OCM) `ManifestWork` in each spoke namespace (`spoke1`, `spoke2`).
   6. The spoke's local `klusterlet-work-agent` receives the payload across WireGuard and applies `secret/prometheus-remote-write-auth` into the `monitoring` namespace.
   7. Spoke's config-reloader sidecar detects the filesystem update and fires `POST /-/reload` on the edge scraper pod, cutting over to `User_B`.
