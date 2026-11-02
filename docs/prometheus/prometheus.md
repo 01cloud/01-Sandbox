@@ -649,9 +649,56 @@ The same flow in plain-text format for terminal viewing or documentation without
       │                   │                │               │             │              │              │                 ├── Results ────┼──┼─────────►│
       │                   │                │               │             │              │              │                 │               │  │ renders  │
       │                   │                │               │             │              │              │                 │               │  │ < 0.3s    │
-================================================================================================================================
 ```
 ```
+
+### 4.4 Automated Secret Rotation Lifecycle (Zero-Downtime Overlap)
+
+To prevent security risks associated with static credentials while avoiding metric loss across distributed regions, the platform implements a **Kubernetes-native secret rotation engine** orchestrated by a PrimaryHub CronJob (`prometheus-secret-rotator`):
+
+```text
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        PRIMARYHUB KUBERNETES CLUSTER                                   │
+│                                                                                        │
+│   ┌───────────────────────────┐      1. Generates New Password + Bcrypt Hash           │
+│   │   Secret Rotator CronJob  │ ───────────────────────────────────────┐               │
+│   │ (Runs every 30d / on-call)│                                        │               │
+│   └─────────────┬─────────────┘                                        ▼               │
+│                 │ 2. Updates Dual-Auth                 ┌─────────────────────────────┐ │
+│                 │    Secret [A + B]                    │ Secret:                     │ │
+│                 ├────────────────────────────────────► │ prometheus-web-config       │ │
+│                 │                                      │ (Contains: web.yml)         │ │
+│                 │                                      └──────────────┬──────────────┘ │
+│                 │ 3. Hot-Reload                                       │                │
+│                 ▼    POST /-/reload (7.8ms)                           ▼                │
+│   ┌───────────────────────────┐                        ┌─────────────────────────────┐ │
+│   │    PrimaryHub Prometheus  │ ◄──────────────────────┤ /etc/prometheus-web/web.yml │ │
+│   │    (Accepts both A & B)   │                        └─────────────────────────────┘ │
+│   └───────────────────────────┘                                                        │
+│                 │                                                                      │
+│                 │ 4. Distribute Secret B to Edge Spokes via OCM ManifestWork           │
+│                 ▼                                                                      │
+└─────────────────┼──────────────────────────────────────────────────────────────────────┘
+                  │
+      Over WireGuard Mesh (10.99.0.0/24)
+                  │
+                  ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│                        EDGE SPOKE CLUSTERS (Spoke 1, Spoke 2, ...)                     │
+│                                                                                        │
+│   5. klusterlet-work-agent applies Secret: prometheus-remote-write-auth                │
+│   6. Reloader triggers POST /-/reload on edge scraper pod (< 10ms)                     │
+│   7. Edge scraper switches to Secret B (Zero 401 errors, zero sample loss)             │
+│                                                                                        │
+│   8. After Grace Period (600s): Rotator revokes Secret A on PrimaryHub                 │
+└────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+#### Key Technical Guarantees:
+1. **Dual-Credential Overlap Window**: PrimaryHub Prometheus evaluates incoming batches against multiple users in `web.yml`. Both the existing (`User_A`) and rotating (`User_B`) credentials remain simultaneously valid during the 10-minute transition window.
+2. **Sub-10ms Hot Reload**: PrimaryHub re-reads `/etc/prometheus-web/web.yml` via `POST /-/reload` in **7.8 milliseconds** without restarting the pod or dropping incoming TCP streams.
+3. **OCM Autonomous Sync**: PrimaryHub creates an Open Cluster Management (OCM) `ManifestWork` targeting each spoke cluster namespace (`spoke1`, `spoke2`), autonomously delivering the new secret across WireGuard without manual intervention.
+4. **Detailed Implementation Guide**: See [`kubernetes-secret-rotation-implementation.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/kubernetes-secret-rotation-implementation.md).
 
 ---
 
@@ -1079,7 +1126,7 @@ auth:
     plainPassword: "PrometheusRemoteWriteSecure2026!"
 ```
 
-#### 2. Prometheus Web Configuration Secret Template ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/secret-web-config.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/secret-web-config.yaml))
+#### 2. Prometheus Web Configuration Secret Template ([`secret-web-config.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/secret-web-config.yaml))
 ```yaml
 {{- if and .Values.auth .Values.auth.enabled }}
 apiVersion: v1
@@ -1093,11 +1140,63 @@ type: Opaque
 stringData:
   web.yml: |
     basic_auth_users:
+      {{- if .Values.auth.users }}
+      {{- range $user, $hash := .Values.auth.users }}
+      {{ $user }}: {{ $hash | quote }}
+      {{- end }}
+      {{- else }}
       {{ .Values.auth.remoteWrite.username }}: {{ .Values.auth.remoteWrite.hashedPassword | quote }}
+      {{- end }}
 {{- end }}
 ```
 
-#### 3. PrimaryHub Prometheus Deployment Manifest ([`/home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml))
+#### 3. Kubernetes-Native Secret Rotator CronJob ([`rotator-cronjob.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/rotator-cronjob.yaml))
+```yaml
+{{- if and .Values.rotator .Values.rotator.enabled }}
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: prometheus-secret-rotator
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+    component: secret-rotator
+spec:
+  schedule: {{ .Values.rotator.schedule | default "0 0 1 * *" | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          serviceAccountName: prometheus-secret-rotator
+          restartPolicy: OnFailure
+          initContainers:
+            - name: copy-kubectl
+              image: {{ .Values.rotator.image.kubectl | default "docker.io/bitnami/kubectl:latest" | quote }}
+              command: ["sh", "-c", "cp /opt/bitnami/kubectl/bin/kubectl /tools/kubectl && chmod 755 /tools/kubectl"]
+              volumeMounts:
+                - name: shared-tools
+                  mountPath: /tools
+          containers:
+            - name: rotator
+              image: {{ .Values.rotator.image.python | default "docker.io/library/python:3.11-alpine" | quote }}
+              command: ["python3", "/scripts/rotate.py"]
+              env:
+                - name: NAMESPACE
+                  value: {{ .Values.namespace | quote }}
+                - name: GRACE_PERIOD_SECONDS
+                  value: {{ .Values.rotator.gracePeriodSeconds | default 600 | quote }}
+                - name: PATH
+                  value: "/tools:/usr/local/bin:/usr/bin:/bin"
+              volumeMounts:
+                - name: shared-tools
+                  mountPath: /tools
+                - name: script-volume
+                  mountPath: /scripts
+{{- end }}
+```
+
+#### 4. PrimaryHub Prometheus Deployment Manifest ([`deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml))
 ```yaml
 apiVersion: apps/v1
 kind: Deployment

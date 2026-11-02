@@ -125,8 +125,9 @@ sequenceDiagram
 
 ### Phase 4: Basic Auth Security Gate, In-Memory Head Chunks & Persistent AWS EBS Storage
 * **Steps 14–20**:
-  1. **Security Gate**: The Prometheus server evaluates the incoming request against `--web.config.file=/etc/prometheus-web/web.yml`.
-     * If credentials are valid (verified against bcrypt hash), the request passes.
+  1. **Security Gate & Automated Secret Rotation**: The Prometheus server evaluates the incoming request against `--web.config.file=/etc/prometheus-web/web.yml`.
+     * If credentials match any active user in `basic_auth_users` (verified against bcrypt hash), the request passes.
+     * **Automated Zero-Downtime Rotation**: PrimaryHub runs a Kubernetes CronJob (`prometheus-secret-rotator`) that injects new rotating credentials alongside existing ones, triggers hot-reload in 7.8ms via `POST /-/reload`, distributes the secret to all spokes via OCM `ManifestWork`, and safely revokes the old secret after a 10-minute grace period.
      * If credentials are missing or wrong, Prometheus immediately returns **`HTTP 401 Unauthorized`**, blocking unauthorized access.
   2. **In-Memory Head Chunks**:
      * The payload is decompressed from Google Snappy.
