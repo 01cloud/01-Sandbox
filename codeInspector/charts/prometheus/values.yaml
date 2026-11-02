@@ -51,3 +51,14 @@ auth:
     username: "prometheus-rw"
     hashedPassword: "$2y$10$XNVJltW/XwJnMEwAxlcUo.mcQWUhIJrlqLONxd9Xn8etCITQkHo5O"
     plainPassword: "PrometheusRemoteWriteSecure2026!"
+
+# Kubernetes-Native Secret Rotator CronJob
+rotator:
+  enabled: true
+  schedule: "0 0 1 * *" # Monthly rotation at midnight UTC
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  gracePeriodSeconds: 600 # 10-minute overlap window before pruning old credentials
+  image:
+    kubectl: "docker.io/bitnami/kubectl:latest"
+    python: "docker.io/library/python:3.11-alpine"

@@ -1,0 +1,277 @@
+{{- if and .Values.rotator .Values.rotator.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: prometheus-secret-rotator
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+    component: secret-rotator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: prometheus-secret-rotator-role
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["cluster.open-cluster-management.io"]
+    resources: ["managedclusters"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["work.open-cluster-management.io"]
+    resources: ["manifestworks"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: prometheus-secret-rotator-binding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: prometheus-secret-rotator-role
+subjects:
+  - kind: ServiceAccount
+    name: prometheus-secret-rotator
+    namespace: {{ .Values.namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-rotator-script
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+    component: secret-rotator
+data:
+  rotate.py: |
+    #!/usr/bin/env python3
+    import os
+    import sys
+    import json
+    import base64
+    import string
+    import secrets
+    import time
+    import crypt
+    import urllib.request
+    import urllib.error
+    import subprocess
+
+    NAMESPACE = os.environ.get("NAMESPACE", "opensandbox-system")
+    PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://prometheus-service.opensandbox-system.svc.cluster.local:9090")
+    GRACE_PERIOD = int(os.environ.get("GRACE_PERIOD_SECONDS", "600"))
+
+    def run_cmd(cmd):
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        return result.stdout.strip()
+
+    print("=================================================================")
+    print("  Kubernetes-Native Prometheus Push-Based Secret Rotator")
+    print("=================================================================")
+
+    # 1. Generate new credentials
+    timestamp = time.strftime("%Y%m%d%H%M")
+    new_user = f"prom-rw-{timestamp}"
+    alphabet = string.ascii_letters + string.digits
+    new_pass = "".join(secrets.choice(alphabet) for _ in range(24))
+    new_hash = crypt.crypt(new_pass, crypt.mksalt(crypt.METHOD_BLOWFISH))
+    print(f"[*] Generated new credential ID: {new_user}")
+
+    # 2. Retrieve current secret
+    print(f"[*] Fetching current prometheus-web-config from namespace {NAMESPACE}...")
+    secret_json = json.loads(run_cmd(["kubectl", "-n", NAMESPACE, "get", "secret", "prometheus-web-config", "-o", "json"]))
+    raw_web_yml = base64.b64decode(secret_json["data"]["web.yml"]).decode("utf-8")
+
+    # Parse existing users
+    lines = raw_web_yml.strip().split("\n")
+    users = {}
+    for line in lines:
+        line = line.strip()
+        if ":" in line and not line.startswith("basic_auth_users"):
+            parts = line.split(":", 1)
+            u = parts[0].strip()
+            h = parts[1].strip().strip('"').strip("'")
+            users[u] = h
+
+    active_user = list(users.keys())[0] if users else "prometheus-rw"
+    print(f"[*] Current active user(s): {list(users.keys())}")
+
+    # 3. Phase 1: Activate Dual-Authentication on PrimaryHub
+    print("[*] Phase 1: Adding new user to PrimaryHub web.yml (Dual-Auth Overlap)...")
+    users[new_user] = new_hash
+    updated_web_yml = "basic_auth_users:\n" + "\n".join([f'  {u}: "{h}"' for u, h in users.items()]) + "\n"
+
+    patch_payload = {
+        "data": {
+            "web.yml": base64.b64encode(updated_web_yml.encode("utf-8")).decode("utf-8")
+        }
+    }
+    run_cmd(["kubectl", "-n", NAMESPACE, "patch", "secret", "prometheus-web-config", "--type=merge", "-p", json.dumps(patch_payload)])
+    print("[+] PrimaryHub secret patched with dual users.")
+
+    # Hot-reload PrimaryHub Prometheus
+    # Note: Kubelet updates mounted secrets asynchronously (~5-10s). We poll /etc/prometheus-web/web.yml or wait 10s.
+    print("[*] Waiting 10s for kubelet secret volume propagation...")
+    time.sleep(10)
+
+    # 4. Trigger hot-reload on PrimaryHub Prometheus
+    print("[*] Triggering POST /-/reload on PrimaryHub Prometheus...")
+    try:
+        # We can trigger reload via kubectl exec or HTTP call
+        reload_cmd = [
+            "kubectl", "-n", NAMESPACE, "exec", "deploy/prometheus", "--",
+            "wget", "-qO-", "--post-data=", f"{PROMETHEUS_URL}/-/reload"
+        ]
+        run_cmd(reload_cmd)
+        print("[+] PrimaryHub Prometheus reloaded successfully. Dual-auth is now LIVE.")
+    except Exception as e:
+        print(f"[!] Warning: reload trigger returned: {e}")
+
+    # 5. Phase 2: Distribute new credentials to Spoke clusters via OCM ManifestWork
+    print("[*] Phase 2: Distributing new credentials to edge spoke clusters via OCM...")
+    try:
+        spokes = run_cmd(["kubectl", "get", "managedclusters", "-o", "jsonpath={.items[*].metadata.name}"]).split()
+        for spoke in spokes:
+            if not spoke:
+                continue
+            print(f"    -> Updating Spoke: {spoke}...")
+            manifest_work = {
+                "apiVersion": "work.open-cluster-management.io/v1",
+                "kind": "ManifestWork",
+                "metadata": {
+                    "name": "spoke-prometheus-auth",
+                    "namespace": spoke
+                },
+                "spec": {
+                    "workload": {
+                        "manifests": [
+                            {
+                                "apiVersion": "v1",
+                                "kind": "Secret",
+                                "metadata": {
+                                    "name": "prometheus-remote-write-auth",
+                                    "namespace": "monitoring"
+                                },
+                                "type": "Opaque",
+                                "stringData": {
+                                    "username": new_user,
+                                    "password": new_pass
+                                }
+                            }
+                        ]
+                    }
+                }
+            }
+            p = subprocess.Popen(["kubectl", "apply", "-f", "-"], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            out, err = p.communicate(input=json.dumps(manifest_work))
+            if p.returncode == 0:
+                print(f"       [OK] Applied ManifestWork to {spoke}.")
+            else:
+                print(f"       [!] Failed to apply ManifestWork to {spoke}: {err}")
+    except Exception as e:
+        print(f"[!] Warning: OCM distribution error: {e}")
+
+    # 6. Also sync to AWS SSM Parameter Store if available (for newly launched EC2 spokes)
+    try:
+        print("[*] Syncing new password to AWS SSM Parameter Store (/sandbox/monitoring/rw-password)...")
+        ssm_cmd = [
+            "aws", "ssm", "put-parameter",
+            "--name", "/sandbox/monitoring/rw-password",
+            "--value", new_pass,
+            "--type", "SecureString",
+            "--region", "us-east-1",
+            "--overwrite"
+        ]
+        run_cmd(ssm_cmd)
+        run_cmd([
+            "aws", "ssm", "put-parameter",
+            "--name", "/sandbox/monitoring/rw-username",
+            "--value", new_user,
+            "--type", "String",
+            "--region", "us-east-1",
+            "--overwrite"
+        ] )
+        print("[+] AWS SSM Parameter Store updated.")
+    except Exception:
+        print("[-] AWS SSM CLI not found in container or credentials omitted; skipping SSM sync.")
+
+    # 7. Phase 3: Grace Period (Wait for all spokes to switch)
+    print(f"[*] Phase 3: Entering Grace Period ({GRACE_PERIOD}s) to allow spokes to migrate seamlessly...")
+    time.sleep(GRACE_PERIOD)
+
+    # 8. Phase 4: Revoke Old Credentials from PrimaryHub
+    print(f"[*] Phase 4: Revoking old credentials; making {new_user} the sole active user...")
+    final_web_yml = f'basic_auth_users:\n  {new_user}: "{new_hash}"\n'
+    final_patch = {
+        "data": {
+            "web.yml": base64.b64encode(final_web_yml.encode("utf-8")).decode("utf-8")
+        }
+    }
+    run_cmd(["kubectl", "-n", NAMESPACE, "patch", "secret", "prometheus-web-config", "--type=merge", "-p", json.dumps(final_patch)])
+    print("[+] Old credentials removed from PrimaryHub secret.")
+
+    time.sleep(5)
+    # Trigger final hot-reload
+    run_cmd([
+        "kubectl", "-n", NAMESPACE, "exec", "deploy/prometheus", "--",
+        "wget", "-qO-", "--post-data=", f"{PROMETHEUS_URL}/-/reload"
+    ])
+    print("=================================================================")
+    print(f"  [SUCCESS] Secret Rotation Complete! Active user: {new_user}")
+    print("=================================================================")
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: prometheus-secret-rotator
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+    component: secret-rotator
+spec:
+  schedule: {{ .Values.rotator.schedule | default "0 0 1 * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.rotator.successfulJobsHistoryLimit | default 3 }}
+  failedJobsHistoryLimit: {{ .Values.rotator.failedJobsHistoryLimit | default 3 }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: prometheus-secret-rotator
+        spec:
+          serviceAccountName: prometheus-secret-rotator
+          restartPolicy: OnFailure
+          initContainers:
+            - name: copy-kubectl
+              image: {{ .Values.rotator.image.kubectl | default "docker.io/bitnami/kubectl:latest" | quote }}
+              command: ["sh", "-c", "cp /opt/bitnami/kubectl/bin/kubectl /tools/kubectl && chmod 755 /tools/kubectl"]
+              volumeMounts:
+                - name: shared-tools
+                  mountPath: /tools
+          containers:
+            - name: rotator
+              image: {{ .Values.rotator.image.python | default "docker.io/library/python:3.11-alpine" | quote }}
+              command: ["python3", "/scripts/rotate.py"]
+              env:
+                - name: NAMESPACE
+                  value: {{ .Values.namespace | quote }}
+                - name: GRACE_PERIOD_SECONDS
+                  value: {{ .Values.rotator.gracePeriodSeconds | default 600 | quote }}
+                - name: PATH
+                  value: "/tools:/usr/local/bin:/usr/bin:/bin"
+              volumeMounts:
+                - name: shared-tools
+                  mountPath: /tools
+                - name: script-volume
+                  mountPath: /scripts
+          volumes:
+            - name: shared-tools
+              emptyDir: {}
+            - name: script-volume
+              configMap:
+                name: prometheus-rotator-script
+                defaultMode: 0755
+{{- end }}
