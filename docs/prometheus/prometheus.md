@@ -522,6 +522,8 @@ sequenceDiagram
     autonumber
 
     actor User as Engineer / Browser
+    participant Rotator as Secret Rotator (CronJob)
+    participant OCM as OCM Hub (ManifestWork)
     participant Targets as K8s Targets (cAdvisor, OCM)
     participant Scraper as Spoke Prometheus (Edge)
     participant DiskWAL as Local Disk WAL (/prometheus/wal)
@@ -534,55 +536,65 @@ sequenceDiagram
     participant EBS as AWS EBS (7d Retention)
     participant Grafana as Central Grafana
 
-    %% PHASE 0: BOOTSTRAP & DYNAMIC CREDENTIALS
-    Note over Scraper, SSM: Phase 0 — Zero-Touch Bootstrap & Dynamic SSM Credentials
-    Scraper->>SSM: 1. EC2 boot: query /sandbox/monitoring/rw-username & rw-password
-    SSM-->>Scraper: 2. Return credentials dynamically via IAM instance profile
-    Scraper->>Scraper: 3. Configure basic_auth in remote_write block
+    %% PHASE 0: AUTOMATED SECRET ROTATION (KUBERNETES-NATIVE DUAL-AUTH)
+    Note over Rotator, CentralProm: Phase 0 — Automated Zero-Downtime Secret Rotation (Every 30d / On-Call)
+    Rotator->>Rotator: 1. Generate User_B, Pass_B & Blowfish/Bcrypt hash ($2b$)
+    Rotator->>WebAuth: 2. Patch secret/prometheus-web-config: [User_A + User_B] (Dual-Auth)
+    Rotator->>CentralProm: 3. Hot-reload via POST /-/reload (7.8ms, zero restarts)
+    Note over CentralProm: PrimaryHub now simultaneously accepts both User_A and User_B
+    Rotator->>OCM: 4. Create/Update ManifestWork in spoke namespaces (spoke1, spoke2)
+    OCM->>WireGuard: 5. Deliver Secret across encrypted WireGuard mesh
+    WireGuard->>Scraper: 6. klusterlet-work-agent applies Secret to monitoring namespace
+    Scraper->>Scraper: 7. Config-reloader detects secret change & calls POST /-/reload
+    Note over Scraper: Spoke switches to User_B with zero 401 errors or dropped samples
+    Rotator->>SSM: 8. Sync User_B to AWS SSM (/sandbox/monitoring/rw-*) for new EC2 joins
+    Note over Rotator: 9. Overlap grace period (600s) ensures all distributed spokes switch
+    Rotator->>WebAuth: 10. Prune User_A; commit final web.yml (only User_B)
+    Rotator->>CentralProm: 11. Final POST /-/reload; User_A is safely revoked
 
     %% PHASE 1: LOCAL SCRAPING & WAL COMMIT
     Note over Targets, DiskWAL: Phase 1 — Local Scrape & Crash-Safe WAL (Network-Independent)
-    Scraper->>Targets: 4. Poll metrics every 15s (localhost / in-cluster)
+    Scraper->>Targets: 12. Poll metrics every 15s (localhost / in-cluster)
     Targets-->>Scraper: Return ~60 samples/sec
-    Scraper->>DiskWAL: 5. Append to active segment (sync, uncompressed)
+    Scraper->>DiskWAL: 13. Append to active segment (sync, uncompressed)
     Note over DiskWAL: Scrapes continue appending uninterrupted even if WAN drops
 
     %% PHASE 2: WAL WATCHING, BATCHING & COMPRESSION
     Note over DiskWAL, WALWatcher: Phase 2 — WAL Watching, Batching & Snappy Compression
-    WALWatcher->>DiskWAL: 6. Tail committed samples (like 'tail -f')
+    WALWatcher->>DiskWAL: 14. Tail committed samples (like 'tail -f')
     DiskWAL-->>WALWatcher: Stream new sample bytes
-    WALWatcher->>WALWatcher: 7. Pool batches (<=1000 samples or 5s deadline)
-    WALWatcher->>WALWatcher: 8. Attach: cluster="spoke1", role="spoke", region="eu-central-1"
-    WALWatcher->>WALWatcher: 9. Serialize -> Protobuf (prompb.WriteRequest)
-    WALWatcher->>WALWatcher: 10. Google Snappy compress (~88% WAN reduction)
+    WALWatcher->>WALWatcher: 15. Pool batches (<=1000 samples or 5s deadline)
+    WALWatcher->>WALWatcher: 16. Attach: cluster="spoke1", role="spoke", region="eu-central-1"
+    WALWatcher->>WALWatcher: 17. Serialize -> Protobuf (prompb.WriteRequest)
+    WALWatcher->>WALWatcher: 18. Google Snappy compress (~88% WAN reduction)
 
     %% PHASE 3: AUTHENTICATED TRANSIT & KERNEL NAT
     Note over WALWatcher, WebAuth: Phase 3 — Authenticated Transit & Kernel NAT Ingress
-    WALWatcher->>WireGuard: 11. HTTP POST /api/v1/write + Authorization: Basic [credentials]
-    WireGuard->>Netfilter: 12. Arrives at 10.99.0.1:30900 (ChaCha20 decrypted)
-    Netfilter->>WebAuth: 13. Kernel DNAT -> KinD container (172.18.0.2:30900)
+    WALWatcher->>WireGuard: 19. HTTP POST /api/v1/write + Authorization: Basic [User_B]
+    WireGuard->>Netfilter: 20. Arrives at 10.99.0.1:30900 (ChaCha20 decrypted)
+    Netfilter->>WebAuth: 21. Kernel DNAT -> KinD container (172.18.0.2:30900)
 
     %% PHASE 4: AUTHENTICATION, INGESTION & PERSISTENCE
     Note over WebAuth, EBS: Phase 4 — Security Gate (Bcrypt), TSDB Ingest & 7-Day EBS Storage
-    WebAuth->>WebAuth: 14. Validate basic_auth against web.yml (bcrypt hash)
+    WebAuth->>WebAuth: 22. Validate basic_auth against web.yml (bcrypt hash)
     alt Credentials Valid
-        WebAuth->>CentralProm: 15. Forward payload to Remote Write Receiver
-        CentralProm->>CentralProm: 16. Decompress Snappy & index {cluster="spoke1"}
-        CentralProm->>CentralProm: 17. Append into in-memory Head Chunks
-        CentralProm-->>WALWatcher: 18. HTTP 204 No Content (batch committed)
+        WebAuth->>CentralProm: 23. Forward payload to Remote Write Receiver
+        CentralProm->>CentralProm: 24. Decompress Snappy & index {cluster="spoke1"}
+        CentralProm->>CentralProm: 25. Append into in-memory Head Chunks
+        CentralProm-->>WALWatcher: 26. HTTP 204 No Content (batch committed)
     else Invalid / Missing Credentials
-        WebAuth-->>WALWatcher: 19. HTTP 401 Unauthorized (Write Blocked)
+        WebAuth-->>WALWatcher: 27. HTTP 401 Unauthorized (Write Blocked)
     end
-    CentralProm->>EBS: 20. Every 2h: compact to immutable blocks on EBS
+    CentralProm->>EBS: 28. Every 2h: compact to immutable blocks on EBS
     Note over EBS: TSDB compactor auto-purges blocks older than 7 days
 
     %% PHASE 5: VISUALIZATION
     Note over User, Grafana: Phase 5 — Instant Visualization via Authenticated Datasource
-    User->>Grafana: 21. Select dashboard & pick "spoke1" in $cluster dropdown
-    Grafana->>WebAuth: 22. PromQL via local DNS (< 3ms) with Basic Auth
-    WebAuth->>CentralProm: 23. Pass authenticated query: up{cluster="spoke1"}
-    CentralProm-->>Grafana: 24. Return TSDB data instantly
-    Grafana-->>User: 25. Dashboard renders in < 0.3s
+    User->>Grafana: 29. Select dashboard & pick "spoke1" in $cluster dropdown
+    Grafana->>WebAuth: 30. PromQL via local DNS (< 3ms) with Basic Auth
+    WebAuth->>CentralProm: 31. Pass authenticated query: up{cluster="spoke1"}
+    CentralProm-->>Grafana: 32. Return TSDB data instantly
+    Grafana-->>User: 33. Dashboard renders in < 0.3s
 ```
 
 ---
@@ -593,63 +605,70 @@ The same flow in plain-text format for terminal viewing or documentation without
 
 ```text
 ================================================================================================================================
-                    PUSH-BASED PROMETHEUS REMOTE WRITE (PRW) – END-TO-END SEQUENCE WITH AUTHENTICATION
+                    PUSH-BASED PROMETHEUS REMOTE WRITE (PRW) – END-TO-END SEQUENCE WITH AUTOMATED SECRET ROTATION
 ================================================================================================================================
 
- [K8s Targets]   [Spoke Scraper]     [Disk WAL]    [WAL Watcher]   [AWS SSM]     [WireGuard]    [Kernel NAT]   [Web Auth / TSDB]   [EBS PVC]    [Grafana]
-(cAdvisor/OCM)  (Edge Prometheus)  (/prom/wal)    (Worker Pool)  (us-east-1)   (10.99.0.0/24)  (iptables)     (--web.config.file) (7d Retain)  (Dashboard)
-      │                │                │               │             │              │              │                 │              │           │
-      │  PHASE 0: ZERO-TOUCH BOOTSTRAP & DYNAMIC CREDENTIALS          │              │              │                 │              │           │
-      │  ───────────────────────────────────────────────────          │              │              │                 │              │           │
-      │                ├── Query /sandbox/monitoring/rw-* ───────────►│              │              │                 │              │           │
-      │                │◄── Dynamic credentials (IAM profile) ────────┤              │              │                 │              │           │
-      │                ├── Configure basic_auth in remote_write       │              │              │                 │              │           │
-      │                │                │               │             │              │              │                 │              │           │
-      │  PHASE 1: LOCAL SCRAPE & CRASH-SAFE DISK WAL (100% decoupled from internet health)          │                 │              │           │
-      │  ─────────────────────────────────────────────────────────────────────────────────          │                 │              │           │
-      │◄── Scrape (15s) ──┤                │               │             │              │              │                 │              │           │
-      │── Metrics (60/s) ─►                │               │             │              │              │                 │              │           │
-      │                   ├── Append Sample ─►             │             │              │              │                 │              │           │
-      │                   │   (raw binary, │               │             │              │              │                 │              │           │
-      │                   │   uncompressed)│               │             │              │              │                 │              │           │
-      │                   │                │               │             │              │              │                 │              │           │
-      │  PHASE 2: WAL WATCHING, BATCHING & IN-FLIGHT SNAPPY COMPRESSION                         │                 │              │           │
-      │  ───────────────────────────────────────────────────────                                │                 │              │           │
-      │                   │                │◄── Tail ──────┤             │              │              │                 │              │           │
-      │                   │                ├── Raw bytes ──►             │              │              │                 │              │           │
-      │                   │                │               ├── 1. Pool in RAM (≤1000 or 5s)             │                 │              │           │
-      │                   │                │               ├── 2. Tag: cluster="spoke1"                 │                 │              │           │
-      │                   │                │               ├── 3. Encode → Protobuf                     │                 │              │           │
-      │                   │                │               └── 4. Google Snappy (-88% WAN)              │                 │              │           │
-      │                   │                │               │             │              │              │                 │              │           │
-      │  PHASE 3: AUTHENTICATED TRANSIT & KERNEL INGRESS NAT                                    │                 │              │           │
-      │  ───────────────────────────────────────────────────                                    │                 │              │           │
-      │                   │                │               ├── HTTP POST (/api/v1/write) +              │                 │              │           │
-      │                   │                │               │   Authorization: Basic [credentials] ──►   │                 │              │           │
-      │                   │                │               │             │              ├──ChaCha20─────►                 │              │           │
-      │                   │                │               │             │              │  encrypted   ├──DNAT :30900─────►              │           │
-      │                   │                │               │             │              │              │  to KinD IP      │              │           │
-      │  PHASE 4: BASIC AUTH SECURITY GATE, TSDB INGESTION & 7-DAY EBS STORAGE                                            │              │           │
-      │  ─────────────────────────────────────────────────────────────────────                                            │              │           │
-      │                   │                │               │             │              │              │   1. Validate Bcrypt in web.yml     │           │
-      │                   │                │               │             │              │              │   ├─ [Fail]: Return HTTP 401 ────┐  │           │
-      │                   │                │               │             │              │              │   └─ [Pass]: Decompress Snappy   │  │           │
-      │                   │                │               │             │              │              │   2. Index: {cluster="spoke1"}   │  │           │
-      │                   │                │               │             │              │              │   3. Append → Head Chunks        │  │           │
-      │                   │                │               │◄────────────┼──────────────┼──────────────┼────── HTTP 204 No Content        │  │           │
-      │                   │                │               │             │              │              │   4. Every 2h: compact to disk   │  │           │
-      │                   │                │               │             │              │              │   5. TSDB auto-purges > 7d ─────┼──►          │
-      │                   │                │               │             │              │              │      (EBS survives EC2 replace) │  │          │
-      │                   │                │               │             │              │              │                                 │  │          │
-      │  PHASE 5: INSTANT LOCAL VISUALIZATION (AUTHENTICATED DATASOURCE)                                                                 │  │          │
-      │  ───────────────────────────────────────────────────────────────                                                                 │  │          │
-      │                   │                │               │             │              │              │                 │◄── PromQL ────┼──┼──────────┤
-      │                   │                │               │             │              │              │                 │    with Basic │  │          │
-      │                   │                │               │             │              │              │                 │    Auth (<3ms)│  │          │
-      │                   │                │               │             │              │              │                 ├── Results ────┼──┼─────────►│
-      │                   │                │               │             │              │              │                 │               │  │ renders  │
-      │                   │                │               │             │              │              │                 │               │  │ < 0.3s    │
-```
+ [Rotator Cron]   [OCM Hub]      [Spoke Scraper]     [Disk WAL]    [WAL Watcher]   [WireGuard]    [Kernel NAT]   [Web Auth / TSDB]   [EBS PVC]    [Grafana]
+(PrimaryHub Job) (ManifestWork) (Edge Prometheus)  (/prom/wal)    (Worker Pool)  (10.99.0.0/24)  (iptables)     (--web.config.file) (7d Retain)  (Dashboard)
+      │                │                │                │               │              │              │                 │              │           │
+      │  PHASE 0: AUTOMATED ZERO-DOWNTIME SECRET ROTATION (KUBERNETES-NATIVE DUAL-AUTH ENGINE)                           │              │           │
+      │  ────────────────────────────────────────────────────────────────────────────────────                           │              │           │
+      ├── 1. Generate User_B & Bcrypt ($2b$) ──────────────────────────────────────────────────────────────────────────►│ (web.yml patch│           │
+      ├── 2. POST /-/reload (7.8ms latency, zero restart) ─────────────────────────────────────────────────────────────►│ Dual-Auth LIVE │           │
+      ├── 3. Create ManifestWork ─────►│                 │               │              │              │                 │ (Accepts A&B)│           │
+      │                │               ├── 4. Distribute via WireGuard ──┼─────────────►│              │                 │              │           │
+      │                │               │◄── Apply Secret to monitoring ──┼──────────────┤              │                 │              │           │
+      │                │               ├── 5. Config-Reloader calls POST /-/reload ─────┤              │                 │              │           │
+      │                │               │      (Switches to User_B with zero 401 errors) │              │                 │              │           │
+      ├── 6. Sync AWS SSM /sandbox/monitoring/rw-* (for zero-touch boot of new EC2s)    │              │                 │              │           │
+      ├── 7. Wait 10-Minute Grace Period (600s) to guarantee all edge clusters switch   │              │                 │              │           │
+      ├── 8. Prune User_A; final POST /-/reload ───────────────────────────────────────────────────────────────────────►│ (Only User_B) │           │
+      │                │                │                │               │              │              │                 │              │           │
+      │  PHASE 1: LOCAL SCRAPE & CRASH-SAFE DISK WAL (100% decoupled from internet health)                             │              │           │
+      │  ─────────────────────────────────────────────────────────────────────────────────                             │              │           │
+      │                │◄── Scrape (15s) ──┤             │               │              │              │                 │              │           │
+      │                │── Metrics (60/s) ─►             │               │              │              │                 │              │           │
+      │                │                ├── Append Sample ─►             │              │              │                 │              │           │
+      │                │                │   (raw binary, │               │              │              │                 │              │           │
+      │                │                │   uncompressed)│               │              │              │                 │              │           │
+      │                │                │                │               │              │              │                 │              │           │
+      │  PHASE 2: WAL WATCHING, BATCHING & IN-FLIGHT SNAPPY COMPRESSION                                                │              │           │
+      │  ───────────────────────────────────────────────────────                                                       │              │           │
+      │                │                │                │◄── Tail ──────┤              │              │                 │              │           │
+      │                │                │                ├── Raw bytes ──►              │              │                 │              │           │
+      │                │                │                │               ├── 1. Pool in RAM (≤1000 or 5s)                │              │           │
+      │                │                │                │               ├── 2. Tag: cluster="spoke1"                    │              │           │
+      │                │                │                │               ├── 3. Encode → Protobuf                        │              │           │
+      │                │                │                │               └── 4. Google Snappy (-88% WAN)                 │              │           │
+      │                │                │                │               │              │              │                 │              │           │
+      │  PHASE 3: AUTHENTICATED TRANSIT & KERNEL INGRESS NAT                                                           │              │           │
+      │  ───────────────────────────────────────────────────                                                           │              │           │
+      │                │                │                │               ├── HTTP POST (/api/v1/write) +                 │              │           │
+      │                │                │                │               │   Authorization: Basic [User_B] ────────►     │              │           │
+      │                │                │                │               │              ├──ChaCha20─────────────────────►│              │           │
+      │                │                │                │               │              │  encrypted   ├──DNAT :30900────►              │           │
+      │                │                │                │               │              │              │  to KinD IP     │              │           │
+      │  PHASE 4: DUAL-AUTH SECURITY GATE, TSDB INGESTION & 7-DAY EBS STORAGE                                           │              │           │
+      │  ───────────────────────────────────────────────────────────────────                                           │              │           │
+      │                │                │                │               │              │              │  1. Validate Bcrypt in web.yml │           │
+      │                │                │                │               │              │              │  ├─ [Fail]: Return HTTP 401 ───┤           │
+      │                │                │                │               │              │              │  └─ [Pass]: Decompress Snappy  │           │
+      │                │                │                │               │              │              │  2. Index: {cluster="spoke1"}  │           │
+      │                │                │                │               │              │              │  3. Append → Head Chunks       │           │
+      │                │                │                │               │◄─────────────┼──────────────┼───── HTTP 204 No Content       │           │
+      │                │                │                │               │              │              │  4. Every 2h: compact to disk  │           │
+      │                │                │                │               │              │              │  5. TSDB auto-purges > 7d ─────┼──►        │
+      │                │                │                │               │              │              │     (EBS survives EC2 replace) │  │        │
+      │                │                │                │               │              │              │                                │  │        │
+      │  PHASE 5: INSTANT LOCAL VISUALIZATION (AUTHENTICATED DATASOURCE)                                                                │  │        │
+      │  ───────────────────────────────────────────────────────────────                                                                │  │        │
+      │                │                │                │               │              │              │                 │◄── PromQL ───┼──┼────────┤
+      │                │                │                │               │              │              │                 │    with Basic│  │        │
+      │                │                │                │               │              │              │                 │    Auth(<3ms)│  │        │
+      │                │                │                │               │              │              │                 ├── Results ───┼──┼───────►│
+      │                │                │                │               │              │              │                 │              │  │ renders│
+      │                │                │                │               │              │              │                 │              │  │ < 0.3s  │
+================================================================================================================================
 ```
 
 ### 4.4 Automated Secret Rotation Lifecycle (Zero-Downtime Overlap)
@@ -694,11 +713,37 @@ To prevent security risks associated with static credentials while avoiding metr
 └────────────────────────────────────────────────────────────────────────────────────────┘
 ```
 
-#### Key Technical Guarantees:
-1. **Dual-Credential Overlap Window**: PrimaryHub Prometheus evaluates incoming batches against multiple users in `web.yml`. Both the existing (`User_A`) and rotating (`User_B`) credentials remain simultaneously valid during the 10-minute transition window.
-2. **Sub-10ms Hot Reload**: PrimaryHub re-reads `/etc/prometheus-web/web.yml` via `POST /-/reload` in **7.8 milliseconds** without restarting the pod or dropping incoming TCP streams.
-3. **OCM Autonomous Sync**: PrimaryHub creates an Open Cluster Management (OCM) `ManifestWork` targeting each spoke cluster namespace (`spoke1`, `spoke2`), autonomously delivering the new secret across WireGuard without manual intervention.
-4. **Detailed Implementation Guide**: See [`kubernetes-secret-rotation-implementation.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/kubernetes-secret-rotation-implementation.md).
+#### The 4-Phase Zero-Downtime Rotation Process:
+
+1. **Phase 1: Generation & Dual-Auth Activation (PrimaryHub)**
+   * Every 30 days (or when triggered on demand), the `prometheus-secret-rotator` CronJob executes.
+   * Generates a unique user ID `prom-rw-<timestamp>` and a cryptographically secure 24-character random password.
+   * Computes the standard Blowfish/Bcrypt `$2b$` hash using Python standard library `crypt.crypt(new_pass, crypt.mksalt(crypt.METHOD_BLOWFISH))`, avoiding external pip dependencies.
+   * Patches `secret/prometheus-web-config` to include **both the active user and the new user** under `basic_auth_users`.
+   * Waits 10 seconds for kubelet volume propagation, then sends `POST /-/reload` to PrimaryHub Prometheus.
+   * **Live Benchmark Result:** Prometheus reloads in **7.8 milliseconds** without dropping TCP connections or restarting the pod. Dual-auth is now live.
+
+2. **Phase 2: Autonomous Edge Distribution via OCM ManifestWork**
+   * PrimaryHub queries Open Cluster Management for all registered spoke clusters (`kubectl get managedclusters`).
+   * For each active spoke (e.g. `spoke1`, `spoke2`), the Rotator creates or patches an OCM `ManifestWork` resource (`spoke-prometheus-auth`).
+   * The spoke's local `klusterlet-work-agent` receives the payload over the WireGuard mesh (`10.99.0.0/24`) and applies `secret/prometheus-remote-write-auth` into the spoke's `monitoring` namespace.
+   * Simultaneously, the Rotator updates AWS SSM Parameter Store (`/sandbox/monitoring/rw-password` and `rw-username`) so that newly launched EC2 spoke instances automatically receive the latest credentials during boot.
+
+3. **Phase 3: Edge Scraper Hot-Reload & Seamless Cutover**
+   * The spoke's config-reloader sidecar detects the filesystem update and triggers `POST http://localhost:9090/-/reload` on the local scraper.
+   * The scraper begins transmitting remote write batches signed with the new credentials.
+   * Because PrimaryHub is operating in Dual-Auth mode, all batches from the new credentials are accepted immediately with `HTTP 204 No Content`—guaranteeing **zero 401 errors and zero dropped metrics**.
+
+4. **Phase 4: Grace Period & Safe Revocation**
+   * The Rotator enters a configurable **10-minute grace period (`GRACE_PERIOD_SECONDS=600`)** to ensure all geographically distributed spokes (Frankfurt, Mumbai, Ireland) have completed their sync.
+   * Once the grace period expires, the Rotator removes the deprecated user from `prometheus-web-config`.
+   * Fires a final `POST /-/reload` to PrimaryHub Prometheus. The old credentials are now completely revoked, and only the new credentials remain valid.
+
+#### Helm Chart Manifests:
+- **[`rotator-cronjob.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/rotator-cronjob.yaml)**: Deploys `ServiceAccount`, scoped `ClusterRole`, `ConfigMap` (`rotate.py`), and the `CronJob` with an initContainer that supplies `kubectl` from `bitnami/kubectl:latest` to a `python:3.11-alpine` container.
+- **[`secret-web-config.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/secret-web-config.yaml)**: Supports dynamic templating of multiple credentials in `basic_auth_users`.
+- **[`values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml)**: Configurable schedule (`0 0 1 * *`), grace period (600s), and history limits.
+- **Detailed Implementation Guide**: See [`kubernetes-secret-rotation-implementation.md`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/docs/prometheus/kubernetes-secret-rotation-implementation.md).
 
 ---
 
@@ -1558,7 +1603,7 @@ kubectl -n opensandbox-system exec deploy/prometheus -- \
 # Expected: 5760  (5,760 × 15s = 24 hours of continuous data)
 ```
 
-### 9.6 Metric Discovery
+### 9.7 Metric Discovery
 
 ```bash
 # List all available metric names:
@@ -1571,7 +1616,49 @@ kubectl exec -n opensandbox-system deploy/prometheus -- \
   jq -r '.data[]' | grep -i "replication"
 ```
 
-### 9.7 Automated End-to-End Verification
+### 9.8 Secret Rotation Operations & Live Validation Suite
+
+```bash
+# 1. Trigger an immediate manual rotation on PrimaryHub:
+kubectl -n opensandbox-system create job \
+  --from=cronjob/prometheus-secret-rotator \
+  manual-rotation-$(date +%s)
+
+# 2. Stream live rotation logs (generation, dual-auth patch, reload, OCM sync):
+kubectl -n opensandbox-system logs -l component=secret-rotator --tail=50 -f
+
+# 3. Inspect currently active users in PrimaryHub's web.yml secret:
+kubectl -n opensandbox-system get secret prometheus-web-config \
+  -o jsonpath='{.data.web\.yml}' | base64 -d
+# Expected during grace period:
+# basic_auth_users:
+#   prom-rw-20261102: "$2b$12$..."
+#   prom-rw-20261202: "$2b$12$..."
+
+# 4. Verify Prometheus hot-reload speed (< 10ms, zero restarts):
+kubectl -n opensandbox-system logs deploy/prometheus --tail=10 | grep -E "Loading configuration|Completed loading"
+# Live verified output:
+# caller=main.go:1415 level=info msg="Completed loading of configuration file" ... totalDuration=7.802221ms
+
+# 5. Verify Dual-Authentication allows both credentials simultaneously:
+AUTH_OLD="Authorization: Basic $(echo -n 'prom-rw-20261102:CurrentPassword123!' | base64)"
+AUTH_NEW="Authorization: Basic $(echo -n 'prom-rw-20261202:NewRotatingPassword456!' | base64)"
+
+kubectl -n opensandbox-system exec deploy/prometheus -- \
+  wget -qO- --header="$AUTH_OLD" "http://localhost:9090/api/v1/query?query=up" | jq .status
+# Expected: "success"
+
+kubectl -n opensandbox-system exec deploy/prometheus -- \
+  wget -qO- --header="$AUTH_NEW" "http://localhost:9090/api/v1/query?query=up" | jq .status
+# Expected: "success"
+
+# 6. Verify invalid credentials are strictly rejected (HTTP 401 Unauthorized):
+kubectl -n opensandbox-system exec deploy/prometheus -- \
+  wget -S -qO- --header="Authorization: Basic YmFkdXNlcjpiYWRwYXNz" "http://localhost:9090/api/v1/query?query=up" 2>&1 | grep "HTTP/"
+# Expected: HTTP/1.1 401 Unauthorized
+```
+
+### 9.9 Automated End-to-End Verification
 
 ```bash
 # Run the multi-cluster verification suite:
