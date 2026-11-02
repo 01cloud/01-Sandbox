@@ -14,8 +14,11 @@ metadata:
   name: prometheus-secret-rotator-role
 rules:
   - apiGroups: [""]
-    resources: ["secrets", "configmaps"]
+    resources: ["secrets", "configmaps", "pods", "pods/exec"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
   - apiGroups: ["cluster.open-cluster-management.io"]
     resources: ["managedclusters"]
     verbs: ["get", "list", "watch"]
@@ -117,12 +120,12 @@ data:
     time.sleep(10)
 
     # 4. Trigger hot-reload on PrimaryHub Prometheus
-    print("[*] Triggering POST /-/reload on PrimaryHub Prometheus...")
+    print("[*] Triggering hot-reload on PrimaryHub Prometheus via SIGHUP...")
     try:
-        # We can trigger reload via kubectl exec or HTTP call
+        # SIGHUP reloads Prometheus instantaneously (<30ms) without container restart or auth overhead
         reload_cmd = [
             "kubectl", "-n", NAMESPACE, "exec", "deploy/prometheus", "--",
-            "wget", "-qO-", "--post-data=", f"{PROMETHEUS_URL}/-/reload"
+            "kill", "-HUP", "1"
         ]
         run_cmd(reload_cmd)
         print("[+] PrimaryHub Prometheus reloaded successfully. Dual-auth is now LIVE.")
@@ -213,10 +216,10 @@ data:
     print("[+] Old credentials removed from PrimaryHub secret.")
 
     time.sleep(5)
-    # Trigger final hot-reload
+    # Trigger final hot-reload via SIGHUP
     run_cmd([
         "kubectl", "-n", NAMESPACE, "exec", "deploy/prometheus", "--",
-        "wget", "-qO-", "--post-data=", f"{PROMETHEUS_URL}/-/reload"
+        "kill", "-HUP", "1"
     ])
     print("=================================================================")
     print(f"  [SUCCESS] Secret Rotation Complete! Active user: {new_user}")
@@ -260,6 +263,8 @@ spec:
                   value: {{ .Values.namespace | quote }}
                 - name: GRACE_PERIOD_SECONDS
                   value: {{ .Values.rotator.gracePeriodSeconds | default 600 | quote }}
+                - name: PYTHONUNBUFFERED
+                  value: "1"
                 - name: PATH
                   value: "/tools:/usr/local/bin:/usr/bin:/bin"
               volumeMounts:
