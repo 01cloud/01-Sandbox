@@ -1,0 +1,113 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cortex
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: cortex
+    tier: monitoring
+spec:
+  replicas: {{ .Values.replicaCount }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: cortex
+  template:
+    metadata:
+      labels:
+        app: cortex
+        tier: monitoring
+    spec:
+      containers:
+        # ── 1. Cortex Monolithic Daemon ───────────────────────────────────────
+        - name: cortex
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - -config.file=/etc/cortex/cortex.yaml
+          ports:
+            - name: http-internal
+              containerPort: 9009
+            - name: grpc-internal
+              containerPort: 9095
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+          volumeMounts:
+            - name: cortex-storage
+              mountPath: /var/lib/cortex
+            - name: cortex-config
+              mountPath: /etc/cortex/cortex.yaml
+              subPath: cortex.yaml
+          readinessProbe:
+            exec:
+              command:
+                - /usr/bin/wget
+                - -q
+                - -O
+                - "-"
+                - http://127.0.0.1:9009/ready
+            initialDelaySeconds: 15
+            periodSeconds: 10
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command:
+                - /usr/bin/wget
+                - -q
+                - -O
+                - "-"
+                - http://127.0.0.1:9009/ready
+            initialDelaySeconds: 30
+            periodSeconds: 20
+            timeoutSeconds: 5
+
+        # ── 2. NGINX Hardened TLS & Auth Proxy Sidecar ────────────────────────
+        - name: nginx-proxy
+          image: "{{ .Values.nginx.image.repository }}:{{ .Values.nginx.image.tag }}"
+          imagePullPolicy: {{ .Values.nginx.image.pullPolicy }}
+          ports:
+            - name: https-gate
+              containerPort: {{ .Values.nginx.port }}
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+            - name: tls-certs
+              mountPath: /etc/nginx/certs
+              readOnly: true
+            - name: auth-secret
+              mountPath: /etc/nginx/auth
+              readOnly: true
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: {{ .Values.nginx.port }}
+              scheme: HTTPS
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+
+      volumes:
+        - name: cortex-storage
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.pvcName }}
+        - name: cortex-config
+          configMap:
+            name: cortex-config
+        - name: nginx-config
+          configMap:
+            name: cortex-config
+        - name: tls-certs
+          secret:
+            secretName: cortex-tls-secret
+        - name: auth-secret
+          secret:
+            secretName: cortex-auth-secret

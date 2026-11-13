@@ -1,0 +1,98 @@
+# ==============================================================================
+# values-cortex.yaml
+# Dedicated Cortex Long-Term S3 Storage Cluster Configuration
+# ==============================================================================
+# This values file is applied to the dedicated Cortex EC2 node (kind-cortex).
+# It completely disables all standard sandbox workloads and activates ONLY the
+# secured Cortex TSDB monolithic engine and NGINX auth/TLS proxy gate.
+
+# ── Activate ONLY Cortex ──────────────────────────────────────────────────────
+cortex:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: cortexproject/cortex
+    tag: "v1.18.0"
+  nginx:
+    enabled: true
+    port: 8443
+    nodePort: 30443
+  auth:
+    enabled: true
+    orgId: "sandbox-metrics"
+    writerUsername: "cortex-writer"
+    readerUsername: "grafana-reader"
+    writerPassword: "CortexWriterSecret2026!"
+    readerPassword: "GrafanaReaderSecret2026!"
+  limits:
+    # Timestamp bounds
+    rejectOldSamples: true
+    rejectOldSamplesMaxAge: "168h"
+    creationGracePeriod: "10m"
+
+    # Label limits
+    maxLabelNamesPerSeries: 30
+    maxLabelNameLength: 1024
+    maxLabelValueLength: 2048
+
+    # Ingestion rate and volume limits
+    ingestionRate: 25000
+    ingestionBurstSize: 50000
+    maxSeriesPerUser: 5000000
+  s3:
+    bucket: "01-sandbox-cortex-storage"
+    endpoint: "s3.us-east-1.amazonaws.com"
+    region: "us-east-1"
+    insecure: false
+  persistence:
+    enabled: true
+    storageClass: "standard"
+    size: "30Gi"
+  resources:
+    requests:
+      cpu: "300m"
+      memory: "1024Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2048Mi"
+
+# ── Disable all standard sandbox microservices ────────────────────────────────
+global:
+  ocm:
+    enabled: false
+
+apiServer:
+  enabled: false
+
+cloudnative-pg:
+  enabled: false
+
+grafana:
+  enabled: false
+
+prometheus:
+  enabled: false
+
+agentgateway:
+  enabled: false
+
+agentgateway-controller:
+  enabled: false
+
+metallb:
+  enabled: false
+
+opensandbox:
+  enabled: false
+
+opensandboxResourcePool:
+  enabled: false
+
+sealed-secrets:
+  enabled: false
+
+kindCluster:
+  enabled: false
+
+nodeNetworkAgent:
+  enabled: false

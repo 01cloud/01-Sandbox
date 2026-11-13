@@ -57,10 +57,17 @@ data:
     import string
     import secrets
     import time
-    import crypt
+    import hmac
+    import hashlib
+    import datetime
     import urllib.request
     import urllib.error
     import subprocess
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        import crypt
 
     NAMESPACE = os.environ.get("NAMESPACE", "opensandbox-system")
     PROMETHEUS_URL = os.environ.get("PROMETHEUS_URL", "http://prometheus-service.opensandbox-system.svc.cluster.local:9090")
@@ -69,6 +76,75 @@ data:
     def run_cmd(cmd):
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
         return result.stdout.strip()
+
+    def put_ssm_parameter(name, value, param_type="String", region="us-east-1"):
+        access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+        secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        session_token = os.environ.get("AWS_SESSION_TOKEN")
+        if not access_key or not secret_key:
+            print("[-] AWS credentials not configured in environment; skipping SSM sync.")
+            return False
+
+        def sign(key, msg):
+            return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+        def get_signature_key(key, date_stamp, region_name, service_name):
+            k_date = sign(("AWS4" + key).encode("utf-8"), date_stamp)
+            k_region = sign(k_date, region_name)
+            k_service = sign(k_region, service_name)
+            k_signing = sign(k_service, "aws4_request")
+            return k_signing
+
+        t = datetime.datetime.now(datetime.timezone.utc)
+        amz_date = t.strftime("%Y%m%dT%H%M%SZ")
+        date_stamp = t.strftime("%Y%m%d")
+        host = f"ssm.{region}.amazonaws.com"
+        endpoint = f"https://{host}/"
+
+        payload = json.dumps({
+            "Name": name,
+            "Value": value,
+            "Type": param_type,
+            "Overwrite": True
+        })
+
+        target = "AmazonSSM.PutParameter"
+        canonical_headers = f"content-type:application/x-amz-json-1.1\nhost:{host}\nx-amz-date:{amz_date}\n"
+        signed_headers = "content-type;host;x-amz-date"
+        if session_token:
+            canonical_headers += f"x-amz-security-token:{session_token}\n"
+            signed_headers += ";x-amz-security-token"
+        canonical_headers += f"x-amz-target:{target}\n"
+        signed_headers += ";x-amz-target"
+
+        payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        canonical_request = f"POST\n/\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
+
+        algorithm = "AWS4-HMAC-SHA256"
+        credential_scope = f"{date_stamp}/{region}/ssm/aws4_request"
+        string_to_sign = f"{algorithm}\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
+
+        signing_key = get_signature_key(secret_key, date_stamp, region, "ssm")
+        signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+
+        authorization_header = f"{algorithm} Credential={access_key}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}"
+
+        req = urllib.request.Request(endpoint, data=payload.encode("utf-8"))
+        req.add_header("Content-Type", "application/x-amz-json-1.1")
+        req.add_header("X-Amz-Target", target)
+        req.add_header("X-Amz-Date", amz_date)
+        if session_token:
+            req.add_header("X-Amz-Security-Token", session_token)
+        req.add_header("Authorization", authorization_header)
+
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                print(f"[+] Synced {name} ({param_type}) to AWS SSM Parameter Store (version {data.get('Version')}).")
+                return True
+        except Exception as e:
+            print(f"[!] Failed to sync {name} to AWS SSM Parameter Store: {e}")
+            return False
 
     print("=================================================================")
     print("  Kubernetes-Native Prometheus Push-Based Secret Rotator")
@@ -98,7 +174,6 @@ data:
             h = parts[1].strip().strip('"').strip("'")
             users[u] = h
 
-    active_user = list(users.keys())[0] if users else "prometheus-rw"
     print(f"[*] Current active user(s): {list(users.keys())}")
 
     # 3. Phase 1: Activate Dual-Authentication on PrimaryHub
@@ -176,44 +251,56 @@ data:
     except Exception as e:
         print(f"[!] Warning: OCM distribution error: {e}")
 
-    # 6. Also sync to AWS SSM Parameter Store if available (for newly launched EC2 spokes)
+    # 6. Also sync to AWS SSM Parameter Store (for newly launched EC2 spokes)
     try:
-        print("[*] Syncing new password to AWS SSM Parameter Store (/sandbox/monitoring/rw-password)...")
-        ssm_cmd = [
-            "aws", "ssm", "put-parameter",
-            "--name", "/sandbox/monitoring/rw-password",
-            "--value", new_pass,
-            "--type", "SecureString",
-            "--region", "us-east-1",
-            "--overwrite"
-        ]
-        run_cmd(ssm_cmd)
-        run_cmd([
-            "aws", "ssm", "put-parameter",
-            "--name", "/sandbox/monitoring/rw-username",
-            "--value", new_user,
-            "--type", "String",
-            "--region", "us-east-1",
-            "--overwrite"
-        ] )
-        print("[+] AWS SSM Parameter Store updated.")
-    except Exception:
-        print("[-] AWS SSM CLI not found in container or credentials omitted; skipping SSM sync.")
+        print("[*] Syncing new credentials to AWS SSM Parameter Store (/sandbox/monitoring/rw-*)...")
+        reg = os.environ.get("AWS_REGION", "us-east-1")
+        ok_user = put_ssm_parameter("/sandbox/monitoring/rw-username", new_user, "String", region=reg)
+        ok_pass = put_ssm_parameter("/sandbox/monitoring/rw-password", new_pass, "SecureString", region=reg)
+        if ok_user and ok_pass:
+            print("[+] AWS SSM Parameter Store updated successfully.")
+        else:
+            print("[-] AWS SSM sync partial or skipped.")
+    except Exception as e:
+        print(f"[!] Warning: AWS SSM Parameter Store update failed: {e}")
 
     # 7. Phase 3: Grace Period (Wait for all spokes to switch)
     print(f"[*] Phase 3: Entering Grace Period ({GRACE_PERIOD}s) to allow spokes to migrate seamlessly...")
     time.sleep(GRACE_PERIOD)
 
-    # 8. Phase 4: Revoke Old Credentials from PrimaryHub
-    print(f"[*] Phase 4: Revoking old credentials; making {new_user} the sole active user...")
-    final_web_yml = f'basic_auth_users:\n  {new_user}: "{new_hash}"\n'
+    # 8. Phase 4: Revoke Deprecated Rotated Credentials from PrimaryHub
+    print(f"[*] Phase 4: Revoking old rotated credentials while preserving system users...")
+    latest_secret = json.loads(run_cmd(["kubectl", "-n", NAMESPACE, "get", "secret", "prometheus-web-config", "-o", "json"]))
+    latest_raw = base64.b64decode(latest_secret["data"]["web.yml"]).decode("utf-8")
+
+    current_map = {}
+    for line in latest_raw.strip().split("\n"):
+        line = line.strip()
+        if ":" in line and not line.startswith("basic_auth_users"):
+            parts = line.split(":", 1)
+            u = parts[0].strip()
+            h = parts[1].strip().strip('"').strip("'")
+            current_map[u] = h
+
+    pruned_users = {}
+    for u, h in current_map.items():
+        if u.startswith("prom-rw-"):
+            if u == new_user:
+                pruned_users[u] = h
+            else:
+                print(f"[-] Pruned deprecated rotating user: {u}")
+        else:
+            # Preserve system users (e.g. prometheus-rw, grafana)
+            pruned_users[u] = h
+
+    final_web_yml = "basic_auth_users:\n" + "\n".join([f'  {u}: "{h}"' for u, h in pruned_users.items()]) + "\n"
     final_patch = {
         "data": {
             "web.yml": base64.b64encode(final_web_yml.encode("utf-8")).decode("utf-8")
         }
     }
     run_cmd(["kubectl", "-n", NAMESPACE, "patch", "secret", "prometheus-web-config", "--type=merge", "-p", json.dumps(final_patch)])
-    print("[+] Old credentials removed from PrimaryHub secret.")
+    print("[+] Old rotating credentials removed from PrimaryHub secret. System users preserved.")
 
     time.sleep(5)
     # Trigger final hot-reload via SIGHUP
@@ -222,7 +309,8 @@ data:
         "kill", "-HUP", "1"
     ])
     print("=================================================================")
-    print(f"  [SUCCESS] Secret Rotation Complete! Active user: {new_user}")
+    print(f"  [SUCCESS] Secret Rotation Complete! Active rotating user: {new_user}")
+    print(f"  Active user list: {list(pruned_users.keys())}")
     print("=================================================================")
 ---
 apiVersion: batch/v1
@@ -267,6 +355,26 @@ spec:
                   value: "1"
                 - name: PATH
                   value: "/tools:/usr/local/bin:/usr/bin:/bin"
+                - name: AWS_ACCESS_KEY_ID
+                  valueFrom:
+                    secretKeyRef:
+                      name: aws-ssm-credentials
+                      key: AWS_ACCESS_KEY_ID
+                      optional: true
+                - name: AWS_SECRET_ACCESS_KEY
+                  valueFrom:
+                    secretKeyRef:
+                      name: aws-ssm-credentials
+                      key: AWS_SECRET_ACCESS_KEY
+                      optional: true
+                - name: AWS_SESSION_TOKEN
+                  valueFrom:
+                    secretKeyRef:
+                      name: aws-ssm-credentials
+                      key: AWS_SESSION_TOKEN
+                      optional: true
+                - name: AWS_REGION
+                  value: "us-east-1"
               volumeMounts:
                 - name: shared-tools
                   mountPath: /tools

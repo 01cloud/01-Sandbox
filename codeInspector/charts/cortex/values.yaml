@@ -1,0 +1,64 @@
+# ==============================================================================
+# Cortex Sub-Chart Default Values
+# ==============================================================================
+
+enabled: true
+
+image:
+  repository: cortexproject/cortex
+  tag: "v1.18.0"
+  pullPolicy: IfNotPresent
+
+nginx:
+  enabled: true
+  image:
+    repository: nginx
+    tag: "alpine"
+    pullPolicy: IfNotPresent
+  port: 8443
+  nodePort: 30443
+
+auth:
+  enabled: true
+  orgId: "sandbox-metrics"
+  writerUsername: "cortex-writer"
+  readerUsername: "grafana-reader"
+  writerPassword: "CortexWriterSecret2026!"
+  readerPassword: "GrafanaReaderSecret2026!"
+
+# Sample validation, bounds, and rate limits (Distributor & Ingester limits)
+limits:
+  # Timestamp bounds
+  rejectOldSamples: true
+  rejectOldSamplesMaxAge: "168h"
+  creationGracePeriod: "10m"
+
+  # Label limits
+  maxLabelNamesPerSeries: 30
+  maxLabelNameLength: 1024
+  maxLabelValueLength: 2048
+
+  # Ingestion rate and volume limits
+  ingestionRate: 25000
+  ingestionBurstSize: 50000
+  maxSeriesPerUser: 5000000
+
+s3:
+  bucket: "01-sandbox-cortex-storage"
+  endpoint: "s3.us-east-1.amazonaws.com"
+  region: "us-east-1"
+  insecure: false
+
+persistence:
+  enabled: true
+  pvcName: "cortex-data-pvc"
+  storageClass: "standard"
+  size: "30Gi"
+
+resources:
+  requests:
+    cpu: "300m"
+    memory: "1024Mi"
+  limits:
+    cpu: "1000m"
+    memory: "2048Mi"

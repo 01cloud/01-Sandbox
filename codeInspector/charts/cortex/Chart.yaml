@@ -1,0 +1,6 @@
+apiVersion: v2
+name: cortex
+description: Highly secured Cortex TSDB sub-chart for CodeInspector long-term S3 storage
+type: application
+version: 0.1.0
+appVersion: "1.18.0"

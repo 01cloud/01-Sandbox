@@ -451,3 +451,15 @@ nodeNetworkAgent:
   enabled: true
   namespace: kube-system
   image: "alpine:3.19"
+
+###############################################################
+# Cortex TSDB Long-Term S3 Storage subchart values
+###############################################################
+cortex:
+  enabled: false
+  persistence:
+    enabled: true
+    size: "30Gi"
+  s3:
+    bucket: "01-sandbox-cortex-storage"
+    region: "us-east-1"

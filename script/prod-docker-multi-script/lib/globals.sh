@@ -249,6 +249,8 @@ _get_target_for_node() {
       echo "${SPOKE1_TARGET:-${SPOKE1_INSTANCE_ID:-$SPOKE1_HOST}}" ;;
     "$SPOKE2_HOST"|"spoke2"|"${SPOKE2_INSTANCE_ID:-}")
       echo "${SPOKE2_TARGET:-${SPOKE2_INSTANCE_ID:-$SPOKE2_HOST}}" ;;
+    "${CORTEX_HOST:-}"|"cortex"|"${CORTEX_INSTANCE_ID:-}")
+      echo "${CORTEX_TARGET:-${CORTEX_INSTANCE_ID:-${CORTEX_HOST:-}}}" ;;
     *)
       echo "$host" ;;
   esac
@@ -265,6 +267,8 @@ _get_region_for_host() {
       echo "${SPOKE1_REGION:-eu-central-1}" ;;
     "$SPOKE2_HOST"|"spoke2"|"${SPOKE2_TARGET:-}"|"${SPOKE2_INSTANCE_ID:-}")
       echo "${SPOKE2_REGION:-ap-south-1}" ;;
+    "${CORTEX_HOST:-}"|"cortex"|"${CORTEX_TARGET:-}"|"${CORTEX_INSTANCE_ID:-}")
+      echo "${CORTEX_REGION:-us-east-1}" ;;
     *)
       if [ -f "${STATE_DIR}/primaryhub.instance_id" ] && [ "$host" == "$(cat "${STATE_DIR}/primaryhub.instance_id" 2>/dev/null)" ]; then
         echo "${PRIMARYHUB_REGION:-us-east-1}"
@@ -294,6 +298,7 @@ _resolve_node_instance_id() {
     "$SECONDARYHUB_HOST"|"secondaryhub") cluster_role="secondaryhub" ;;
     "$SPOKE1_HOST"|"spoke1") cluster_role="spoke1" ;;
     "$SPOKE2_HOST"|"spoke2") cluster_role="spoke2" ;;
+    "${CORTEX_HOST:-}"|"cortex") cluster_role="cortex" ;;
     *) cluster_role="" ;;
   esac
 
@@ -440,6 +445,12 @@ _resolve_node_private_ip() {
     "$SPOKE2_HOST"|"spoke2"|"${SPOKE2_TARGET:-}")
       if [[ "${SPOKE2_PRIVATE_IP:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
         echo "$SPOKE2_PRIVATE_IP"
+        return 0
+      fi
+      ;;
+    "${CORTEX_HOST:-}"|"cortex"|"${CORTEX_TARGET:-}")
+      if [[ "${CORTEX_PRIVATE_IP:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        echo "$CORTEX_PRIVATE_IP"
         return 0
       fi
       ;;
@@ -738,6 +749,7 @@ _get_tunnel_port_for_cluster() {
     secondaryhub) echo "26443" ;;
     spoke1)       echo "36443" ;;
     spoke2)       echo "46443" ;;
+    cortex)       echo "56443" ;;
     *)            echo "16443" ;;
   esac
 }

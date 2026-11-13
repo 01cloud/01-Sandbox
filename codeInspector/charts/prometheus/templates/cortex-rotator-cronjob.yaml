@@ -1,0 +1,375 @@
+{{- if and .Values.cortexRotator .Values.cortexRotator.enabled }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: cortex-secret-rotator
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+    component: cortex-secret-rotator
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: cortex-secret-rotator-role
+  namespace: {{ .Values.namespace }}
+rules:
+  - apiGroups: [""]
+    resources: ["secrets", "configmaps", "pods", "pods/exec"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: cortex-secret-rotator-binding
+  namespace: {{ .Values.namespace }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: cortex-secret-rotator-role
+subjects:
+  - kind: ServiceAccount
+    name: cortex-secret-rotator
+    namespace: {{ .Values.namespace }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cortex-rotator-script
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+    component: cortex-secret-rotator
+data:
+  rotate_cortex.py: |
+    #!/usr/bin/env python3
+    import os
+    import sys
+    import json
+    import base64
+    import string
+    import secrets
+    import time
+    import hmac
+    import hashlib
+    import datetime
+    import urllib.request
+    import urllib.error
+    import subprocess
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        import crypt
+
+    NAMESPACE = os.environ.get("NAMESPACE", "opensandbox-system")
+    CORTEX_KUBECONFIG = os.environ.get("CORTEX_KUBECONFIG", "/etc/cortex-kubeconfig/kubeconfig")
+    GRACE_PERIOD = int(os.environ.get("GRACE_PERIOD_SECONDS", "600"))
+
+    def run_cmd(cmd):
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        return result.stdout.strip()
+
+    def run_cortex_cmd(cmd):
+        full_cmd = ["kubectl", "--kubeconfig", CORTEX_KUBECONFIG, "-n", NAMESPACE] + cmd
+        result = subprocess.run(full_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        return result.stdout.strip()
+
+    def put_ssm_parameter(name, value, param_type="String", region="us-east-1"):
+        access_key = os.environ.get("AWS_ACCESS_KEY_ID")
+        secret_key = os.environ.get("AWS_SECRET_ACCESS_KEY")
+        session_token = os.environ.get("AWS_SESSION_TOKEN")
+        if not access_key or not secret_key:
+            return False
+
+        def sign(key, msg):
+            return hmac.new(key, msg.encode("utf-8"), hashlib.sha256).digest()
+
+        def get_signature_key(key, date_stamp, region_name, service_name):
+            k_date = sign(("AWS4" + key).encode("utf-8"), date_stamp)
+            k_region = sign(k_date, region_name)
+            k_service = sign(k_region, service_name)
+            k_signing = sign(k_service, "aws4_request")
+            return k_signing
+
+        t = datetime.datetime.now(datetime.timezone.utc)
+        amz_date = t.strftime("%Y%m%dT%H%M%SZ")
+        date_stamp = t.strftime("%Y%m%d")
+
+        host = f"ssm.{region}.amazonaws.com"
+        endpoint = f"https://{host}/"
+
+        payload = json.dumps({
+            "Name": name,
+            "Value": value,
+            "Type": param_type,
+            "Overwrite": True
+        })
+
+        target = "AmazonSSM.PutParameter"
+        canonical_headers = f"content-type:application/x-amz-json-1.1\nhost:{host}\nx-amz-date:{amz_date}\n"
+        signed_headers = "content-type;host;x-amz-date"
+        if session_token:
+            canonical_headers += f"x-amz-security-token:{session_token}\n"
+            signed_headers += ";x-amz-security-token"
+        canonical_headers += f"x-amz-target:{target}\n"
+        signed_headers += ";x-amz-target"
+
+        payload_hash = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        canonical_request = f"POST\n/\n\n{canonical_headers}\n{signed_headers}\n{payload_hash}"
+
+        algorithm = "AWS4-HMAC-SHA256"
+        credential_scope = f"{date_stamp}/{region}/ssm/aws4_request"
+        string_to_sign = f"{algorithm}\n{amz_date}\n{credential_scope}\n{hashlib.sha256(canonical_request.encode('utf-8')).hexdigest()}"
+
+        signing_key = get_signature_key(secret_key, date_stamp, region, "ssm")
+        signature = hmac.new(signing_key, string_to_sign.encode("utf-8"), hashlib.sha256).hexdigest()
+
+        authorization_header = f"{algorithm} Credential={access_key}/{credential_scope}, SignedHeaders={signed_headers}, Signature={signature}"
+
+        req = urllib.request.Request(endpoint, data=payload.encode("utf-8"))
+        req.add_header("Content-Type", "application/x-amz-json-1.1")
+        req.add_header("X-Amz-Target", target)
+        req.add_header("X-Amz-Date", amz_date)
+        if session_token:
+            req.add_header("X-Amz-Security-Token", session_token)
+        req.add_header("Authorization", authorization_header)
+
+        try:
+            with urllib.request.urlopen(req, timeout=15) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                print(f"[+] Synced {name} ({param_type}) to AWS SSM Parameter Store (version {data.get('Version')}).")
+                return True
+        except Exception as e:
+            print(f"[!] Warning: SSM sync for {name} skipped: {e}")
+            return False
+
+    print("=================================================================")
+    print("  Kubernetes-Native Cortex Long-Term Storage Secret Rotator")
+    print("=================================================================")
+
+    # 1. Generate new credentials
+    timestamp = time.strftime("%Y%m%d%H%M")
+    alphabet = string.ascii_letters + string.digits
+
+    new_writer_user = f"cortex-writer-{timestamp}"
+    new_writer_pass = "".join(secrets.choice(alphabet) for _ in range(24))
+    new_writer_hash = crypt.crypt(new_writer_pass, crypt.mksalt(crypt.METHOD_BLOWFISH))
+    print(f"[*] Generated new Cortex Writer: {new_writer_user}")
+
+    new_reader_user = f"grafana-reader-{timestamp}"
+    new_reader_pass = "".join(secrets.choice(alphabet) for _ in range(24))
+    new_reader_hash = crypt.crypt(new_reader_pass, crypt.mksalt(crypt.METHOD_BLOWFISH))
+    print(f"[*] Generated new Grafana Reader: {new_reader_user}")
+
+    # 2. Phase 1: Activate Dual-Authentication on Cortex Cluster
+    print(f"[*] Phase 1: Fetching cortex-auth-secret from Cortex cluster via WireGuard...")
+    cortex_secret = json.loads(run_cortex_cmd(["get", "secret", "cortex-auth-secret", "-o", "json"]))
+    raw_htpasswd = base64.b64decode(cortex_secret["data"][".htpasswd"]).decode("utf-8")
+
+    users = {}
+    for line in raw_htpasswd.strip().split("\n"):
+        line = line.strip()
+        if ":" in line:
+            parts = line.split(":", 1)
+            users[parts[0].strip()] = parts[1].strip()
+
+    print(f"[*] Current active users on Cortex: {list(users.keys())}")
+    users[new_writer_user] = new_writer_hash
+    users[new_reader_user] = new_reader_hash
+
+    updated_htpasswd = "\n".join([f"{u}:{h}" for u, h in users.items()]) + "\n"
+    cortex_patch = {
+        "data": {
+            ".htpasswd": base64.b64encode(updated_htpasswd.encode("utf-8")).decode("utf-8"),
+            "writer-password": base64.b64encode(new_writer_pass.encode("utf-8")).decode("utf-8"),
+            "reader-password": base64.b64encode(new_reader_pass.encode("utf-8")).decode("utf-8")
+        }
+    }
+    run_cortex_cmd(["patch", "secret", "cortex-auth-secret", "--type=merge", "-p", json.dumps(cortex_patch)])
+    print("[+] Cortex secret patched with dual users. NGINX dynamic auth is now accepting both.")
+
+    # 3. Phase 2: Distribute new credentials to PrimaryHub Clients (Prometheus & Grafana)
+    print("[*] Phase 2: Updating PrimaryHub Prometheus remote_write configuration...")
+    prom_cm = json.loads(run_cmd(["kubectl", "-n", NAMESPACE, "get", "cm", "prometheus-config", "-o", "json"]))
+    prom_yaml = prom_cm["data"]["prometheus.yml"]
+
+    # Safely replace basic_auth under remote_write
+    import re
+    # Match remote_write username and password
+    prom_yaml = re.sub(
+        r'(remote_write:[\s\S]*?basic_auth:[\s\S]*?username:\s*)\S+',
+        f'\\g<1>{new_writer_user}',
+        prom_yaml,
+        count=1
+    )
+    prom_yaml = re.sub(
+        r'(remote_write:[\s\S]*?basic_auth:[\s\S]*?password:\s*)\S+',
+        f'\\g<1>{new_writer_pass}',
+        prom_yaml,
+        count=1
+    )
+    prom_cm_patch = {
+        "data": {
+            "prometheus.yml": prom_yaml
+        }
+    }
+    run_cmd(["kubectl", "-n", NAMESPACE, "patch", "cm", "prometheus-config", "--type=merge", "-p", json.dumps(prom_cm_patch)])
+    print("[+] PrimaryHub prometheus-config ConfigMap patched with new writer credentials.")
+
+    # Hot-reload Prometheus via SIGHUP (<20ms, zero restarts)
+    time.sleep(5)
+    print("[*] Triggering hot-reload on PrimaryHub Prometheus via SIGHUP...")
+    try:
+        run_cmd(["kubectl", "-n", NAMESPACE, "exec", "deploy/prometheus", "--", "kill", "-HUP", "1"])
+        print("[+] PrimaryHub Prometheus reloaded successfully. Now pushing metrics with new credentials.")
+    except Exception as e:
+        print(f"[!] Warning: Prometheus SIGHUP reload returned: {e}")
+
+    # Update Grafana datasources ConfigMap
+    print("[*] Updating PrimaryHub Grafana datasources ConfigMap...")
+    try:
+        grafana_cm = json.loads(run_cmd(["kubectl", "-n", NAMESPACE, "get", "cm", "grafana-datasources", "-o", "json"]))
+        ds_yaml = grafana_cm["data"]["datasources.yaml"]
+        ds_yaml = re.sub(
+            r'(name:\s*"cortex-s3-longterm"[\s\S]*?basicAuthUser:\s*)\S+',
+            f'\\g<1>"{new_reader_user}"',
+            ds_yaml,
+            count=1
+        )
+        ds_yaml = re.sub(
+            r'(name:\s*"cortex-s3-longterm"[\s\S]*?basicAuthPassword:\s*)\S+',
+            f'\\g<1>"{new_reader_pass}"',
+            ds_yaml,
+            count=1
+        )
+        grafana_patch = {
+            "data": {
+                "datasources.yaml": ds_yaml
+            }
+        }
+        run_cmd(["kubectl", "-n", NAMESPACE, "patch", "cm", "grafana-datasources", "--type=merge", "-p", json.dumps(grafana_patch)])
+        print("[+] PrimaryHub grafana-datasources ConfigMap updated.")
+    except Exception as e:
+        print(f"[!] Warning: Grafana datasource patch returned: {e}")
+
+    # Sync to AWS SSM Parameter Store for disaster recovery
+    try:
+        reg = os.environ.get("AWS_REGION", "us-east-1")
+        put_ssm_parameter("/sandbox/cortex/writer-username", new_writer_user, "String", region=reg)
+        put_ssm_parameter("/sandbox/cortex/writer-password", new_writer_pass, "SecureString", region=reg)
+        put_ssm_parameter("/sandbox/cortex/reader-username", new_reader_user, "String", region=reg)
+        put_ssm_parameter("/sandbox/cortex/reader-password", new_reader_pass, "SecureString", region=reg)
+    except Exception as e:
+        print(f"[!] Warning: SSM sync failed: {e}")
+
+    # 4. Phase 3: Transition & Overlap Grace Period
+    print(f"[*] Phase 3: Entering Grace Period ({GRACE_PERIOD}s) for seamless continuous ingestion...")
+    time.sleep(GRACE_PERIOD)
+
+    # 5. Phase 4: Revoke Deprecated Rotated Credentials from Cortex
+    print(f"[*] Phase 4: Revoking older rotated credentials from Cortex .htpasswd...")
+    latest_cortex_secret = json.loads(run_cortex_cmd(["get", "secret", "cortex-auth-secret", "-o", "json"]))
+    latest_htpasswd = base64.b64decode(latest_cortex_secret["data"][".htpasswd"]).decode("utf-8")
+
+    current_users = {}
+    for line in latest_htpasswd.strip().split("\n"):
+        line = line.strip()
+        if ":" in line:
+            parts = line.split(":", 1)
+            current_users[parts[0].strip()] = parts[1].strip()
+
+    pruned = {}
+    for u, h in current_users.items():
+        if u.startswith("cortex-writer-"):
+            if u == new_writer_user:
+                pruned[u] = h
+            else:
+                print(f"[-] Pruned deprecated Cortex writer: {u}")
+        elif u.startswith("grafana-reader-"):
+            if u == new_reader_user:
+                pruned[u] = h
+            else:
+                print(f"[-] Pruned deprecated Grafana reader: {u}")
+        else:
+            # Preserve system / baseline users (cortex-writer, grafana-reader)
+            pruned[u] = h
+
+    final_ht = "\n".join([f"{u}:{h}" for u, h in pruned.items()]) + "\n"
+    final_patch = {
+        "data": {
+            ".htpasswd": base64.b64encode(final_ht.encode("utf-8")).decode("utf-8")
+        }
+    }
+    run_cortex_cmd(["patch", "secret", "cortex-auth-secret", "--type=merge", "-p", json.dumps(final_patch)])
+    print("=================================================================")
+    print(f"  [SUCCESS] Cortex Secret Rotation Complete!")
+    print(f"  Active Writer: {new_writer_user}")
+    print(f"  Active Reader: {new_reader_user}")
+    print(f"  Active Cortex Users: {list(pruned.keys())}")
+    print("=================================================================")
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: cortex-secret-rotator
+  namespace: {{ .Values.namespace }}
+  labels:
+    app: prometheus
+    component: cortex-secret-rotator
+spec:
+  schedule: {{ .Values.cortexRotator.schedule | default "0 2 1 * *" | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: {{ .Values.cortexRotator.successfulJobsHistoryLimit | default 3 }}
+  failedJobsHistoryLimit: {{ .Values.cortexRotator.failedJobsHistoryLimit | default 3 }}
+  jobTemplate:
+    spec:
+      template:
+        metadata:
+          labels:
+            app: cortex-secret-rotator
+        spec:
+          serviceAccountName: cortex-secret-rotator
+          restartPolicy: OnFailure
+          initContainers:
+            - name: copy-kubectl
+              image: {{ .Values.cortexRotator.image.kubectl | default "docker.io/bitnami/kubectl:latest" | quote }}
+              command: ["sh", "-c", "cp /opt/bitnami/kubectl/bin/kubectl /tools/kubectl && chmod 755 /tools/kubectl"]
+              volumeMounts:
+                - name: shared-tools
+                  mountPath: /tools
+          containers:
+            - name: rotator
+              image: {{ .Values.cortexRotator.image.python | default "docker.io/library/python:3.11-alpine" | quote }}
+              command: ["python3", "/scripts/rotate_cortex.py"]
+              env:
+                - name: NAMESPACE
+                  value: {{ .Values.namespace | quote }}
+                - name: GRACE_PERIOD_SECONDS
+                  value: {{ .Values.cortexRotator.gracePeriodSeconds | default 600 | quote }}
+                - name: CORTEX_KUBECONFIG
+                  value: "/etc/cortex-kubeconfig/kubeconfig"
+                - name: PATH
+                  value: "/tools:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+              volumeMounts:
+                - name: shared-tools
+                  mountPath: /tools
+                - name: script-vol
+                  mountPath: /scripts
+                - name: cortex-kubeconfig-vol
+                  mountPath: /etc/cortex-kubeconfig
+                  readOnly: true
+          volumes:
+            - name: shared-tools
+              emptyDir: {}
+            - name: script-vol
+              configMap:
+                name: cortex-rotator-script
+                defaultMode: 0755
+            - name: cortex-kubeconfig-vol
+              secret:
+                secretName: cortex-rotator-kubeconfig
+{{- end }}

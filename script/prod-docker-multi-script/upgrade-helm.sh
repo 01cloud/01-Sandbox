@@ -14,6 +14,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="${SCRIPT_DIR}/lib"
 
 source "${LIB_DIR}/globals.sh"
+source "${LIB_DIR}/clusters.sh"
 
 echo -e "\n${CYAN}${BOLD}=== Safe Helm Upgrade (Metrics & Configs) ===${NC}"
 echo -e "Chart path: ${BOLD}${CODE_INSPECTOR_DIR}${NC}"
@@ -76,6 +77,37 @@ upgrade_secondary() {
   log_success "SecondaryHub Helm upgrade complete!"
 }
 
+upgrade_cortex() {
+  log_step "Upgrading Helm release on Cortex node..."
+  local cortex_target="${CORTEX_TARGET:-${CORTEX_HOST:-}}"
+  if [ -z "$cortex_target" ]; then
+    log_warn "Cortex host/target not configured in prod.env. Skipping Cortex upgrade."
+    return 0
+  fi
+
+  ensure_node_ssm_access "$cortex_target"
+  _sync_remote_kubeconfig "cortex" "$cortex_target" "${WG_IPS[cortex]:-10.99.0.50}"
+  ensure_cluster_ssh_tunnel "cortex" "$cortex_target"
+
+  if ! kubectl --kubeconfig "$KUBECONFIG" --context kind-cortex cluster-info >/dev/null 2>&1; then
+    log_warn "Cannot reach kind-cortex. Skipping Cortex Helm upgrade."
+    return 0
+  fi
+
+  log_info "Running helm upgrade for cortex on kind-cortex..."
+  helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
+    --skip-crds \
+    --kubeconfig "$KUBECONFIG" \
+    --kube-context kind-cortex \
+    --namespace opensandbox-system \
+    --create-namespace \
+    --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --values "${CODE_INSPECTOR_DIR}/values-cortex.yaml" \
+    --timeout 5m
+
+  log_success "Cortex Helm upgrade complete!"
+}
+
 case "$TARGET_HUB" in
   primary|primaryhub)
     upgrade_primary
@@ -83,12 +115,16 @@ case "$TARGET_HUB" in
   secondary|secondaryhub)
     upgrade_secondary
     ;;
+  cortex)
+    upgrade_cortex
+    ;;
   all)
     upgrade_primary
     upgrade_secondary
+    upgrade_cortex
     ;;
   *)
-    echo "Unknown target: $TARGET_HUB (valid options: primaryhub, secondaryhub, all)"
+    echo "Unknown target: $TARGET_HUB (valid options: primaryhub, secondaryhub, cortex, all)"
     exit 1
     ;;
 esac

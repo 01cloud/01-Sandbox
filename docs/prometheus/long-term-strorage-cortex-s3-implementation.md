@@ -1,127 +1,239 @@
-# Prometheus Long-Term Storage: Implementation Plan & Architectural Decision Record
+# Highly Secured Dedicated EC2 Cortex Node with AWS S3 Long-Term Storage
 
-**Document:** Implementation Plan & Production Deployment Guide
+**Document:** Production Implementation Plan & Security Architecture
 **File:** `docs/prometheus/long-term-strorage-cortex-s3-implementation.md`
-**Author:** Kamal Tamang
-**Reviewers:** Sarose Joshi, Umesh Khatiwada
 **Target Environment:** 01-Sandbox Multi-Cluster Infrastructure (`PrimaryHub`, `SecondaryHub`, `Spoke1`, `Spoke2`)
-**Scope:** Self-Provisioned Long-Term Storage inside 01-Sandbox (No External Cloud Forwarding)
-**Status:** Approved Architectural Decision & Execution Plan
-**Date:** October 2026
+**Deployment Model:** Dedicated, Hardened EC2 Instance (`cortex-dedicated-node`)
+**Storage Backend:** AWS S3 (`01-sandbox-cortex-storage`)
+**Security Posture:** Zero Public IP, IMDSv2 Enforced, TLS/HTTPS, NGINX Auth Proxy, Multi-Tenant RBAC, WireGuard/Private VPC Only, AWS KMS Encryption
+**Status:** Approved for Execution
 
 ---
 
-## 1. Executive Summary & Clarification
+## Table of Contents
 
-This document details the architectural evaluation and complete implementation plan for replacing Prometheus's current local EBS storage in the **01-Sandbox multi-cluster infrastructure** with an **S3-backed long-term storage solution**.
-
-### Scope Clarification
-Following discussions between Sarose Joshi, Umesh Khatiwada, and Kamal Tamang:
-- **No external forwarding**: All metric data, ingestion pipelines, and query engines remain **100% self-contained and sovereign within the 01-Sandbox infrastructure**. We do not forward metrics to an external cluster.
-- **The Core Architectural Choice**:
-  - **Option A: Provisioning our own dedicated Cortex cluster inside 01-Sandbox** (utilizing Cortex's TSDB block engine backed by our own AWS S3 bucket, drawing from the team's operational familiarity with Cortex).
-  - **Option B: Prometheus Native S3 Integration via Thanos Sidecar / Store Gateway** (extending our existing Prometheus deployment to ship 2-hour TSDB blocks directly to our own AWS S3 bucket).
-
----
-
-## 2. Decision Record: Which Option is Best and Recommended?
-
-### The Verdict: **Option B (Prometheus S3 via Thanos Sidecar) is the Best & Recommended Approach for 01-Sandbox**
-
-While self-provisioned Cortex is a formidable multi-tenant platform, **Option B is the superior engineering choice for 01-Sandbox**. Below is the rationale:
-
-| Evaluation Dimension | Option A: Self-Provisioned Cortex (Monolithic) | Option B: Prometheus + Thanos S3 Sidecar (Recommended) | Why Option B Wins for 01-Sandbox |
-| :--- | :--- | :--- | :--- |
-| **Compute Overhead** | **High** (~1.5–2.0 vCPU, 2–4 GiB RAM minimum) | **Minimal** (< 50m CPU, < 64 MiB RAM) | 01-Sandbox PrimaryHub runs inside KinD on EC2 alongside PostgreSQL, Valkey, RabbitMQ, and API servers. Option B leaves maximum RAM for security analysis pipelines. |
-| **Storage Architecture** | AWS S3 Bucket (`cortex-tsdb-blocks`) | AWS S3 Bucket (`01-sandbox-prometheus-longterm`) | Both achieve **infinite retention** and **71%–93% cost savings** over EBS. |
-| **Local EBS Requirement** | 5 GiB (Temporary WAL buffer) | 10 GiB (Downsized from 25 GiB, 6h local retention) | Both solve the EBS scaling bottleneck and eliminate disk-fill crash risks. |
-| **Operational Simplicity** | Requires managing Cortex deployment, memberlist gossip ring, and internal block compactor. | **Zero new server components**. A single sidecar container added to the existing Prometheus pod in Helm. | Near-zero maintenance overhead; no distributed consensus ring to troubleshoot. |
-| **Multi-Tenancy** | Native multi-tenant headers (`X-Scope-OrgID`) | Soft multi-tenancy via cluster label filters | 01-Sandbox uses cluster-origin labels (`cluster="spoke1"`, `cluster="primaryhub"`), which Thanos handles natively. |
-| **Disaster Recovery** | S3 bucket backup + memberlist rebuild | Standard TSDB blocks in S3 readable by any standard Prometheus tooling | Immutable TSDB format in S3; zero vendor lock-in. |
+1. [Executive Summary & Security Objectives](#1-executive-summary--security-objectives)
+2. [End-to-End Architecture & Data Flow](#2-end-to-end-architecture--data-flow)
+3. [Comprehensive Security Architecture (Defense-in-Depth)](#3-comprehensive-security-architecture-defense-in-depth)
+   * [3.1 Network Isolation & Zero Public Exposure](#31-network-isolation--zero-public-exposure)
+   * [3.2 Authentication & Authorization (NGINX Security Gate)](#32-authentication--authorization-nginx-security-gate)
+   * [3.3 Role-Based Access Control (RBAC: Write vs Read)](#33-role-based-access-control-rbac-write-vs-read)
+   * [3.4 Data-at-Rest & In-Transit Cryptography](#34-data-at-rest--in-transit-cryptography)
+   * [3.5 AWS IAM Least-Privilege Policy](#35-aws-iam-least-privilege-policy)
+4. [Detailed Implementation Sequence Diagram](#4-detailed-implementation-sequence-diagram)
+5. [AWS Infrastructure Provisioning (Terraform & IAM)](#5-aws-infrastructure-provisioning-terraform--iam)
+   * [5.1 AWS S3 Bucket Configuration](#51-aws-s3-bucket-configuration)
+   * [5.2 Dedicated IAM Role & Policy](#52-dedicated-iam-role--policy)
+   * [5.3 EC2 Security Group & Instance Provisioning](#53-ec2-security-group--instance-provisioning)
+6. [Cortex & NGINX Auth Proxy Configuration](#6-cortex--nginx-auth-proxy-configuration)
+   * [6.1 Hardened Cortex Configuration (`cortex.yaml`)](#61-hardened-cortex-configuration-cortexyaml)
+   * [6.2 NGINX Auth & Reverse Proxy Configuration (`nginx.conf`)](#62-nginx-auth--reverse-proxy-configuration-nginxconf)
+   * [6.3 Systemd Service & Automated Bootstrapping](#63-systemd-service--automated-bootstrapping)
+7. [Prometheus & Grafana Integration](#7-prometheus--grafana-integration)
+   * [7.1 Prometheus Remote-Write Configuration](#71-prometheus-remote-write-configuration)
+   * [7.2 Central Grafana Secure Datasource Configuration](#72-central-grafana-secure-datasource-configuration)
+8. [Verification, Testing & Operational Runbook](#8-verification-testing--operational-runbook)
 
 ---
 
-## 3. Architecture Diagrams
+## 1. Executive Summary & Security Objectives
 
-### 3.1 Recommended Architecture: Prometheus S3 via Thanos Sidecar
+To establish long-term, scalable observability for 01-Sandbox with **zero impact on PrimaryHub's memory and CPU**, Cortex will be provisioned on a **dedicated, highly secured EC2 instance** (`t3.medium` or `t3.large`) in `us-east-1`.
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│                        01-SANDBOX MULTI-CLUSTER INFRASTRUCTURE                         │
-│                                                                                        │
-│   [Spoke 1 (eu-central-1)]    [Spoke 2 (ap-south-1)]    [SecondaryHub (us-west-2)]     │
-│   gVisor / Kata Pods          gVisor / Kata Pods        Standby Workloads              │
-└──────────────┬──────────────────────────┬──────────────────────────┬───────────────────┘
-               │                          │                          │
-               │ WireGuard (10.99.0.0/24) │                          │
-               └──────────────────────────┼──────────────────────────┘
-                                          ▼
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ PrimaryHub EC2 (us-east-1) - KinD Cluster (`primaryhub-control-plane`)                 │
-│                                                                                        │
-│  ┌──────────────────────────────────────────────────────────────────────────────────┐  │
-│  │ Prometheus Pod (`opensandbox-system`)                                            │  │
-│  │                                                                                  │  │
-│  │  ┌─────────────────────────┐               ┌──────────────────────────────────┐  │  │
-│  │  │ Prometheus (v2.54.1)    │               │ Thanos Sidecar (v0.36.1)         │  │  │
-│  │  │ - Scrapes Hub & Spokes  │               │ - Reads closed 2h TSDB blocks    │  │  │
-│  │  │ - 6h local retention    │               │ - CPU: < 50m, RAM: < 64Mi        │  │  │
-│  │  │ - Downsized EBS: 10 GiB │──────────────►│ - Uploads immutable blocks to S3 │  │  │
-│  │  └───────────┬─────────────┘ (shared volume│ - Acts as gRPC StoreAPI           │  │  │
-│  │              │               /prometheus)  └─────────────────┬────────────────┘  │  │
-│  └──────────────┼───────────────────────────────────────────────┼───────────────────┘  │
-│                 │                                               │                      │
-│                 ▼                                               ▼                      │
-│        ┌─────────────────┐                             ┌──────────────────┐            │
-│        │ Local Grafana   │                             │ AWS S3 Bucket    │            │
-│        │ (Live Queries)  │                             │ (01-sandbox-     │            │
-│        └─────────────────┘                             │  prometheus-     │            │
-│                                                        │  longterm)       │            │
-│                                                        └──────────────────┘            │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-```
+### Key Security & Operational Guarantees:
+* **Zero Host Resource Contention**: Cortex runs isolated from PrimaryHub, eliminating any risk of starving PostgreSQL, Valkey, or microVM security pipelines of RAM.
+* **Zero Public Attack Surface**: The Cortex node has **no public IPv4 address**, no internet ingress, and no open SSH port (22). Administration is strictly conducted via AWS Systems Manager (SSM) Session Manager.
+* **Encrypted In-Transit & at Rest**: All network traffic between PrimaryHub/Grafana and Cortex is encrypted via TLS 1.3 / WireGuard VPN. Local EBS volumes are encrypted with AWS KMS (`aws/ebs`), and S3 storage uses AES-256 server-side encryption with lifecycle transitions.
+* **Strict Authentication & Authorization (RBAC)**: An NGINX reverse proxy terminates TLS and enforces HTTP Basic Authentication with Bcrypt (`$2b$`) hashing. Write requests (`/api/v1/push`) and Read requests (`/prometheus/api/v1/query*`) are cryptographically segregated with separate service credentials.
+* **Tenant Isolation**: Cortex multi-tenancy (`auth_enabled: true`) guarantees metric data is strictly partitioned inside S3 by tenant namespace (`X-Scope-OrgID: sandbox-metrics`).
 
-### 3.2 Alternative Architecture: Self-Provisioned Cortex (Monolithic Mode)
+---
 
-```
-┌────────────────────────────────────────────────────────────────────────────────────────┐
-│ PrimaryHub EC2 (us-east-1) - KinD Cluster (`primaryhub-control-plane`)                 │
-│                                                                                        │
-│  ┌───────────────────────────┐                         ┌────────────────────────────┐  │
-│  │ Prometheus (Scraper Pod)  │─── remote_write ───────►│ Cortex Single-Binary Pod   │  │
-│  │ - Scrapes Hub & Spokes    │    (http://cortex:9009) │ - Ingester (TSDB engine)   │  │
-│  │ - Local buffer: 2 hours   │                         │ - Distributor & Querier    │  │
-│  └───────────────────────────┘                         │ - Store-Gateway & Compactor│  │
-│                                                        │ - RAM: 2–4 GiB             │  │
-│                                                        └─────────────┬──────────────┘  │
-│                                                                      │                 │
-│                                                                      ▼                 │
-│                                                        ┌────────────────────────────┐  │
-│                                                        │ AWS S3 Bucket              │  │
-│                                                        │ (cortex-tsdb-blocks)       │  │
-│                                                        └────────────────────────────┘  │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+## 2. End-to-End Architecture & Data Flow
+
+```text
+┌─────────────────────────────────────────────────────────────────────────────────────────────────────────────────┐
+│                                             PRIMARYHUB EC2 (us-east-1)                                          │
+│                                                                                                                 │
+│   [Edge Spoke Clusters]                                                                                         │
+│   Spoke 1 (eu-central-1), Spoke 2 (ap-south-1), SecondaryHub (eu-west-1)                                        │
+│            │                                                                                                    │
+│            │ (HTTP Basic Auth over WireGuard 10.99.0.0/24)                                                      │
+│            ▼                                                                                                    │
+│   ┌───────────────────────────────────┐               ┌─────────────────────────────────────────────────────┐   │
+│   │ PrimaryHub Prometheus             │               │ Central Grafana                                     │   │
+│   │  - Scrapes local cluster targets  │               │  - Visualizes real-time and multi-year metrics      │   │
+│   │  - Downsized retention: 6 hours   │               │  - Read Creds: Basic Auth + X-Scope-OrgID           │   │
+│   └─────────────────┬─────────────────┘               └──────────────────────────▲──────────────────────────┘   │
+└─────────────────────┼────────────────────────────────────────────────────────────┼──────────────────────────────┘
+                      │                                                            │
+                      │ Remote-Write: Basic Auth (cortex-writer)                   │ Query: Basic Auth (grafana-reader)
+                      │ HTTPS over Private VPC / WireGuard (10.99.0.50:8443)       │ HTTPS over Private VPC / WireGuard
+                      ▼                                                            │
+┌──────────────────────────────────────────────────────────────────────────────────┴──────────────────────────────┐
+│                                     DEDICATED CORTEX EC2 NODE (10.99.0.50)                                       │
+│                                                                                                                 │
+│  ┌───────────────────────────────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ NGINX Security & Auth Reverse Proxy (Listening on Port 8443, Private IP Only)                            │  │
+│  │  - Terminates TLS 1.3 (Self-Signed / Internal CA Certificate)                                             │  │
+│  │  - Enforces HTTP Basic Auth (.htpasswd with Bcrypt hashes)                                                │  │
+│  │  - Restricts POST /api/v1/push to "cortex-writer" (Write-Only RBAC)                                       │  │
+│  │  - Restricts GET /prometheus/* to "grafana-reader" (Read-Only RBAC)                                       │  │
+│  │  - Automatically injects "X-Scope-OrgID: sandbox-metrics" header                                          │  │
+│  │  - Blocks Admin & Internal Endpoints (/ring, /compactor) from external networks                           │  │
+│  └──────────────────────────────────────────────────┬────────────────────────────────────────────────────────┘  │
+│                                                     │ http://127.0.0.1:9009                                     │
+│                                                     ▼                                                           │
+│  ┌───────────────────────────────────────────────────────────────────────────────────────────────────────────┐  │
+│  │ Cortex Monolithic Engine (target=all, listening on 127.0.0.1:9009)                                        │  │
+│  │  - Distributor & Ingester (Validates schema, buffers to in-memory WAL, flushes 2h blocks)                  │  │
+│  │  - Store-Gateway (Indexes and queries historical blocks directly from S3)                                 │  │
+│  │  - Compactor (Deduplicates and merges blocks across time windows)                                         │  │
+│  │  - Local EBS Working Volume: /var/lib/cortex (20 GiB gp3, AWS KMS Encrypted)                              │  │
+│  └──────────────────────────────────────────────────┬────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────┼───────────────────────────────────────────────────────────┘
+                                                      │
+                                                      │ AWS SigV4 HTTPS (VPC S3 Gateway / NAT)
+                                                      ▼
+                                       ┌─────────────────────────────┐
+                                       │ AWS S3 Bucket               │
+                                       │ 01-sandbox-cortex-storage   │
+                                       │  - SSE-S3 AES-256 Encrypted │
+                                       │  - Public Access Blocked    │
+                                       │  - 30d IA / 90d Glacier     │
+                                       └─────────────────────────────┘
 ```
 
 ---
 
-## 4. Implementation Plan for Recommended Option: Prometheus + S3 (Thanos Sidecar)
+## 3. Comprehensive Security Architecture (Defense-in-Depth)
 
-### Phase 1: AWS Infrastructure Setup (S3 & IAM)
+### 3.1 Network Isolation & Zero Public Exposure
+1. **Private Subnet Placement**: The EC2 instance resides in the private VPC subnet with **no public IP address assigned** (`associate_public_ip_address = false`).
+2. **Strict Security Group Ingress Rules**:
+   - **Ingress Port 8443 (HTTPS)**: Only permitted from the PrimaryHub private IP (`10.20.133.217/32`) and the WireGuard subnet (`10.99.0.0/24`). All other traffic is dropped by the AWS stateful firewall.
+   - **Port 22 (SSH) Completely Disabled**: No SSH key pair is deployed and port 22 is closed. Host access is strictly performed via AWS Systems Manager (SSM) Session Manager, providing complete audit logging in AWS CloudTrail.
+3. **IMDSv2 Enforcement**:
+   - Instance Metadata Service version 2 (IMDSv2) is strictly required (`HttpTokens=required`).
+   - Hop limit is configured to `2` to prevent SSRF vulnerabilities while allowing authorized host services to query metadata.
 
-#### Step 1.1: Create Dedicated S3 Bucket
-Run on your administrative workstation or via AWS CLI:
+### 3.2 Authentication & Authorization (NGINX Security Gate)
+Because Cortex relies on HTTP headers for tenant separation, an **NGINX Reverse Proxy** is deployed locally on the Cortex node as a hardened security gatekeeper:
+* **Mutual Authentication Barrier**: Every incoming HTTP request must provide an `Authorization: Basic <base64>` header matching credentials in `/etc/nginx/.htpasswd`.
+* **Tenant Tag Injection**: NGINX automatically enforces and injects the tenant header `X-Scope-OrgID: sandbox-metrics`, preventing external clients from tampering with multi-tenant data boundaries.
+* **Internal Port Binding**: The Cortex daemon binds strictly to `127.0.0.1:9009` and `127.0.0.1:9095`. Direct access bypassing NGINX is physically impossible over the network.
+
+### 3.3 Role-Based Access Control (RBAC: Write vs Read)
+NGINX enforces strict role separation between writers (Prometheus) and readers (Grafana):
+
+| Identity | Permitted Endpoints | HTTP Methods | Blocked Endpoints | RBAC Role |
+| :--- | :--- | :--- | :--- | :--- |
+| **`cortex-writer`** | `/api/v1/push` | `POST` | `/prometheus/*`, `/ring`, `/all_user_stats` | **Write-Only** |
+| **`grafana-reader`** | `/prometheus/api/v1/query*`, `/prometheus/api/v1/labels` | `GET`, `POST` | `/api/v1/push`, `/ring`, `/flush` | **Read-Only** |
+| **Anonymous / Unknown** | None | None | All routes return `401 Unauthorized` | **Blocked** |
+
+### 3.4 Data-at-Rest & In-Transit Cryptography
+1. **In-Transit**: TLS 1.3 encryption is enforced on port 8443 with modern forward-secret ciphers (`TLS_AES_256_GCM_SHA384`, `TLS_CHACHA20_POLY1305_SHA256`).
+2. **EBS Volume Encryption**: The root volume and Cortex data volume (`/var/lib/cortex`) are formatted with `ext4` on top of AWS EBS gp3 encrypted with AWS KMS (`alias/aws/ebs`).
+3. **S3 Bucket Encryption**: Server-Side Encryption with AES-256 (`SSE-S3`) is enforced on all objects. Requests without encryption headers are automatically encrypted by the bucket default policy.
+
+### 3.5 AWS IAM Least-Privilege Policy
+The Cortex EC2 node is assigned an IAM Instance Profile (`cortex-dedicated-node-profile`) granting only the exact permissions needed to upload and read TSDB blocks:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CortexS3BlockStorageAccess",
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:GetBucketLocation",
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:DeleteObject"
+      ],
+      "Resource": [
+        "arn:aws:s3:::01-sandbox-cortex-storage",
+        "arn:aws:s3:::01-sandbox-cortex-storage/*"
+      ]
+    }
+  ]
+}
+```
+*(Combined with the AWS-managed policy `AmazonSSMManagedInstanceCore` for secure shell access).*
+
+---
+
+## 4. Detailed Implementation Sequence Diagram
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor Admin as DevOps Engineer
+    participant AWS as AWS Cloud (S3 / IAM / EC2)
+    participant CortexNode as Dedicated Cortex Node (10.99.0.50)
+    participant Nginx as NGINX Auth Proxy (Port 8443)
+    participant Cortex as Cortex Daemon (127.0.0.1:9009)
+    participant S3 as AWS S3 (01-sandbox-cortex-storage)
+    participant Prom as PrimaryHub Prometheus
+    participant Grafana as Central Grafana
+
+    Note over Admin,AWS: Phase 1: Cloud Infrastructure & Storage Setup
+    Admin->>AWS: Create S3 Bucket (01-sandbox-cortex-storage) + SSE-S3 + Public Block
+    Admin->>AWS: Attach Lifecycle Rules (30d Standard-IA -> 90d Glacier)
+    Admin->>AWS: Create IAM Role with scoped S3 & SSM permissions
+    Admin->>AWS: Launch EC2 Instance (No Public IP, IMDSv2, EBS Encrypted)
+
+    Note over CortexNode,Cortex: Phase 2: Node Hardening & Service Bootstrapping
+    CortexNode->>CortexNode: Generate self-signed TLS 1.3 certificates
+    CortexNode->>CortexNode: Generate .htpasswd with Bcrypt credentials (writer & reader)
+    CortexNode->>CortexNode: Bind Cortex service to 127.0.0.1:9009 (PVC: /var/lib/cortex)
+    CortexNode->>Nginx: Start NGINX reverse proxy on 0.0.0.0:8443
+    Nginx->>Cortex: Verify internal connectivity (HTTP 200 on /ready)
+
+    Note over Prom,S3: Phase 3: Secure Metric Ingestion (Write Path)
+    Prom->>Nginx: POST /api/v1/push [Auth: Basic cortex-writer] (TLS encrypted)
+    Nginx->>Nginx: Verify credentials against .htpasswd [RBAC: Write allowed]
+    Nginx->>Nginx: Inject Header: "X-Scope-OrgID: sandbox-metrics"
+    Nginx->>Cortex: Forward payload to 127.0.0.1:9009/api/v1/push
+    Cortex->>Cortex: Write sample to Ingester WAL (/var/lib/cortex/tsdb/wal)
+    Cortex-->>Nginx: HTTP 200 OK
+    Nginx-->>Prom: HTTP 200 OK (Remote Write Success)
+    Note over Cortex,S3: Every 2 Hours: Cortex flushes closed TSDB block
+    Cortex->>S3: PutObject: sandbox-metrics/01HXYZ.../chunks (SigV4 via IAM Profile)
+    S3-->>Cortex: HTTP 200 OK (Block stored permanently in S3)
+
+    Note over Grafana,S3: Phase 4: Long-Term Historical Queries (Read Path)
+    Grafana->>Nginx: GET /prometheus/api/v1/query?range=30d [Auth: Basic grafana-reader]
+    Nginx->>Nginx: Verify credentials against .htpasswd [RBAC: Read allowed]
+    Nginx->>Nginx: Inject Header: "X-Scope-OrgID: sandbox-metrics"
+    Nginx->>Cortex: Forward query to 127.0.0.1:9009/prometheus/api/v1/query
+    Cortex->>Cortex: Check Ingester (Recent memory samples)
+    Cortex->>S3: GetObject: sandbox-metrics/01HXYZ.../index via Store-Gateway
+    S3-->>Cortex: Return TSDB index & chunks
+    Cortex-->>Nginx: Unified query response (Live + S3 historical metrics)
+    Nginx-->>Grafana: Return JSON query results
+```
+
+---
+
+## 5. AWS Infrastructure Provisioning (Terraform & IAM)
+
+### 5.1 AWS S3 Bucket Configuration
+Execute the following provisioning script using the AWS CLI or Terraform:
 
 ```bash
-BUCKET_NAME="01-sandbox-prometheus-longterm"
+BUCKET_NAME="01-sandbox-cortex-storage"
 REGION="us-east-1"
 
-# 1. Create Bucket
+# 1. Create S3 Bucket (us-east-1 default location)
 aws s3api create-bucket \
   --bucket "$BUCKET_NAME" \
   --region "$REGION"
 
-# 2. Enable Server-Side Encryption (SSE-S3)
+# 2. Enforce AES-256 Server-Side Encryption
 aws s3api put-bucket-encryption \
   --bucket "$BUCKET_NAME" \
   --server-side-encryption-configuration '{
@@ -141,34 +253,25 @@ aws s3api put-public-access-block \
     "BlockPublicPolicy": true,
     "RestrictPublicBuckets": true
   }'
-```
 
-#### Step 1.2: Apply Automated Tiering Lifecycle Policy
-Configure S3 lifecycle transitions to optimize costs over 2 years:
+# 4. Enforce Bucket Owner Object Ownership
+aws s3api put-bucket-ownership-controls \
+  --bucket "$BUCKET_NAME" \
+  --ownership-controls="Rules=[{ObjectOwnership=BucketOwnerEnforced}]"
 
-```bash
-cat << 'EOF' > /tmp/s3-lifecycle.json
+# 5. Apply Automated 2-Year Cost Optimization Lifecycle
+cat << 'EOF' > /tmp/cortex-lifecycle.json
 {
   "Rules": [
     {
-      "ID": "PrometheusTSDBLifecycle",
+      "ID": "CortexTSDBLifecycle",
       "Status": "Enabled",
-      "Filter": {
-        "Prefix": ""
-      },
+      "Filter": { "Prefix": "" },
       "Transitions": [
-        {
-          "Days": 30,
-          "StorageClass": "STANDARD_IA"
-        },
-        {
-          "Days": 90,
-          "StorageClass": "GLACIER_IR"
-        }
+        { "Days": 30, "StorageClass": "STANDARD_IA" },
+        { "Days": 90, "StorageClass": "GLACIER_IR" }
       ],
-      "Expiration": {
-        "Days": 730
-      }
+      "Expiration": { "Days": 730 }
     }
   ]
 }
@@ -176,300 +279,463 @@ EOF
 
 aws s3api put-bucket-lifecycle-configuration \
   --bucket "$BUCKET_NAME" \
-  --lifecycle-configuration file:///tmp/s3-lifecycle.json
-rm -f /tmp/s3-lifecycle.json
+  --lifecycle-configuration file:///tmp/cortex-lifecycle.json
+rm -f /tmp/cortex-lifecycle.json
 ```
 
-#### Step 1.3: IAM Permissions for PrimaryHub EC2 Host
-Attach the following IAM policy statement to the PrimaryHub instance profile (`i-04ae5b1c88149436a`):
+### 5.2 Dedicated IAM Role & Policy
+Create the IAM Role and attach the least-privilege policy:
 
-```json
+```bash
+# 1. Create IAM Role with EC2 trust policy
+cat << 'EOF' > /tmp/cortex-trust-policy.json
 {
   "Version": "2012-10-17",
   "Statement": [
     {
-      "Sid": "AllowPrometheusS3BlockShipping",
+      "Effect": "Allow",
+      "Principal": { "Service": "ec2.amazonaws.com" },
+      "Action": "sts:AssumeRole"
+    }
+  ]
+}
+EOF
+
+aws iam create-role \
+  --role-name cortex-dedicated-node-role \
+  --assume-role-policy-document file:///tmp/cortex-trust-policy.json
+
+# 2. Attach AWS SSM Core Policy (For zero-SSH management)
+aws iam attach-role-policy \
+  --role-name cortex-dedicated-node-role \
+  --policy-arn arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+# 3. Create and attach S3 Scoped Access Policy
+cat << 'EOF' > /tmp/cortex-s3-policy.json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "CortexS3BlockStorageAccess",
       "Effect": "Allow",
       "Action": [
         "s3:ListBucket",
+        "s3:GetBucketLocation",
         "s3:GetObject",
         "s3:PutObject",
         "s3:DeleteObject"
       ],
       "Resource": [
-        "arn:aws:s3:::01-sandbox-prometheus-longterm",
-        "arn:aws:s3:::01-sandbox-prometheus-longterm/*"
+        "arn:aws:s3:::01-sandbox-cortex-storage",
+        "arn:aws:s3:::01-sandbox-cortex-storage/*"
       ]
     }
   ]
+}
+EOF
+
+aws iam put-role-policy \
+  --role-name cortex-dedicated-node-role \
+  --policy-name CortexS3Access \
+  --policy-document file:///tmp/cortex-s3-policy.json
+
+# 4. Create Instance Profile
+aws iam create-instance-profile --instance-profile-name cortex-dedicated-node-profile
+aws iam add-role-to-instance-profile \
+  --instance-profile-name cortex-dedicated-node-profile \
+  --role-name cortex-dedicated-node-role
+
+rm -f /tmp/cortex-trust-policy.json /tmp/cortex-s3-policy.json
+```
+
+### 5.3 EC2 Security Group & Instance Provisioning
+Defined in Terraform under [`/home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/us-east-1/compute`](file:///home/berrybytes/Desktop/bb-aws-infrastructure/accounts/sandbox/us-east-1/compute):
+
+```hcl
+# Security Group: Zero Public Ingress, Only Hub/WireGuard Access
+resource "aws_security_group" "cortex" {
+  name        = "sandbox-cortex-node-sg"
+  description = "Security group for dedicated Cortex TSDB long-term storage node"
+  vpc_id      = local.vpc_id
+
+  # Ingress: Port 8443 (HTTPS) only from PrimaryHub private IP and WireGuard
+  ingress {
+    description = "HTTPS metric ingestion and queries from PrimaryHub and WireGuard"
+    from_port   = 8443
+    to_port     = 8443
+    protocol    = "tcp"
+    cidr_blocks = [
+      "10.20.0.0/16",    # VPC Subnets
+      "10.99.0.0/24"     # WireGuard VPN Mesh
+    ]
+  }
+
+  # Egress: Full outbound access for S3 and SSM Agent over HTTPS
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = merge(local.common_tags, { Name = "sandbox-cortex-sg" })
+}
+
+# Dedicated EC2 Instance
+resource "aws_instance" "cortex_node" {
+  ami                  = local.ami_id
+  instance_type        = "t3.medium" # 2 vCPU, 4 GiB RAM (Optimized for Cortex Monolithic)
+  subnet_id            = local.private_subnet_ids[0]
+  iam_instance_profile = "cortex-dedicated-node-profile"
+  vpc_security_group_ids = [aws_security_group.cortex.id]
+
+  associate_public_ip_address = false # NO PUBLIC IP
+
+  metadata_options {
+    http_endpoint               = "enabled"
+    http_tokens                 = "required" # Enforce IMDSv2
+    http_put_response_hop_limit = 2
+  }
+
+  root_block_device {
+    volume_type = "gp3"
+    volume_size = 30
+    encrypted   = true
+    tags        = merge(local.common_tags, { Name = "cortex-root-volume" })
+  }
+
+  user_data = file("${path.module}/templates/cortex_bootstrap.sh")
+
+  tags = merge(local.common_tags, {
+    Name = "sandbox-cortex-dedicated-node"
+    Role = "cortex-longterm-storage"
+  })
 }
 ```
 
 ---
 
-### Phase 2: Helm Chart Configuration Updates
+## 6. Cortex & NGINX Auth Proxy Configuration
 
-#### Step 2.1: Update `codeInspector/charts/prometheus/values.yaml`
-Modify [`codeInspector/charts/prometheus/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/values.yaml) to configure local retention, downsize EBS, and enable Thanos:
-
-```yaml
-namespace: opensandbox-system
-clusterName: "primaryhub"
-clusterRole: "hub"
-
-# ── Retention & Storage Configuration ──────────────────────────────────────────
-# Local disk only retains 6 hours of recent samples.
-# Thanos Sidecar flushes 2-hour TSDB blocks directly to S3.
-retention: "6h"
-
-# ── EBS PVC Downsizing ────────────────────────────────────────────────────────
-# Reduced from 25Gi to 10Gi because historical metrics are persisted in S3
-persistence:
-  enabled: true
-  pvcName: "prometheus-pvc"
-  storageClass: "standard"
-  size: "10Gi"
-
-# ── Thanos S3 Sidecar Configuration ───────────────────────────────────────────
-thanos:
-  enabled: true
-  image:
-    repository: quay.io/thanos/thanos
-    tag: "v0.36.1"
-    pullPolicy: IfNotPresent
-  objstoreSecretName: "thanos-objstore-secret"
-  bucket: "01-sandbox-prometheus-longterm"
-  region: "us-east-1"
-  resources:
-    requests:
-      cpu: "30m"
-      memory: "64Mi"
-    limits:
-      cpu: "100m"
-      memory: "128Mi"
-```
-
-#### Step 2.2: Add Object Storage Secret Template
-Create file `codeInspector/charts/prometheus/templates/secret-thanos-objstore.yaml`:
+### 6.1 Hardened Cortex Configuration (`cortex.yaml`)
+Path on host: `/etc/cortex/cortex.yaml`
 
 ```yaml
-{{- if .Values.thanos.enabled }}
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ .Values.thanos.objstoreSecretName }}
-  namespace: {{ .Values.namespace }}
-  labels:
-    app: prometheus
-    tier: monitoring
-type: Opaque
-stringData:
-  thanos.yaml: |
-    type: S3
-    config:
-      bucket: {{ .Values.thanos.bucket }}
-      endpoint: s3.{{ .Values.thanos.region }}.amazonaws.com
-      region: {{ .Values.thanos.region }}
-      insecure: false
-      sse_config:
-        type: "SSE-S3"
-{{- end }}
+# Target monolithic mode: all components in a single lightweight process
+target: all
+
+# Enforce multi-tenancy requirement (X-Scope-OrgID required)
+auth_enabled: true
+
+server:
+  http_listen_address: 127.0.0.1
+  http_listen_port: 9009
+  grpc_listen_address: 127.0.0.1
+  grpc_listen_port: 9095
+  log_level: info
+
+# Distributor & Ingester Configuration
+distributor:
+  ring:
+    kvstore:
+      store: memberlist
+
+ingester:
+  lifecycler:
+    ring:
+      kvstore:
+        store: memberlist
+      replication_factor: 1
+    final_sleep: 0s
+  max_transfer_retries: 0
+
+# Memberlist Gossip Ring (bound to local loopback)
+memberlist:
+  bind_addr: ["127.0.0.1"]
+  bind_port: 7946
+
+# TSDB S3 Block Storage Engine
+blocks_storage:
+  backend: s3
+  s3:
+    bucket_name: 01-sandbox-cortex-storage
+    endpoint: s3.us-east-1.amazonaws.com
+    region: us-east-1
+    insecure: false
+  tsdb:
+    dir: /var/lib/cortex/tsdb
+    block_ranges_period: [2h]
+    retention_period: 6h
+    ship_concurrency: 4
+
+# Store-Gateway (Enables Querier to read blocks back from S3)
+store_gateway:
+  sharding_ring:
+    replication_factor: 1
+    kvstore:
+      store: memberlist
+
+# Compactor (Compacts and deduplicates TSDB blocks in S3)
+compactor:
+  data_dir: /var/lib/cortex/compactor
+  compaction_interval: 10m
+  block_ranges_period: [2h, 12h, 24h]
 ```
 
-#### Step 2.3: Update Deployment Template
-In [`codeInspector/charts/prometheus/templates/deployment.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/deployment.yaml):
+### 6.2 NGINX Auth & Reverse Proxy Configuration (`nginx.conf`)
+Path on host: `/etc/nginx/conf.d/cortex.conf`
 
-1. **Add TSDB block duration flags** to the Prometheus container args:
-   ```yaml
-   args:
-     - --config.file=/etc/prometheus/prometheus.yml
-     - --storage.tsdb.path=/prometheus
-     - --storage.tsdb.retention.time={{ .Values.retention | default "6h" }}
-     - --storage.tsdb.min-block-duration=2h
-     - --storage.tsdb.max-block-duration=2h
-     - --web.enable-lifecycle
-     - --web.enable-remote-write-receiver
-     - --web.config.file=/etc/prometheus/web.yml
-   ```
-2. **Inject the `thanos-sidecar` container**:
-   ```yaml
-   {{- if .Values.thanos.enabled }}
-   - name: thanos-sidecar
-     image: "{{ .Values.thanos.image.repository }}:{{ .Values.thanos.image.tag }}"
-     imagePullPolicy: {{ .Values.thanos.image.pullPolicy }}
-     args:
-       - sidecar
-       - --tsdb.path=/prometheus
-       - --prometheus.url=http://127.0.0.1:9090
-       - --objstore.config-file=/etc/thanos/thanos.yaml
-       - --http-address=0.0.0.0:10902
-       - --grpc-address=0.0.0.0:10901
-     ports:
-       - name: http-sidecar
-         containerPort: 10902
-       - name: grpc-sidecar
-         containerPort: 10901
-     resources:
-       {{- toYaml .Values.thanos.resources | nindent 6 }}
-     volumeMounts:
-       - name: storage
-         mountPath: /prometheus
-       - name: thanos-objstore
-         mountPath: /etc/thanos
-         readOnly: true
-   {{- end }}
-   ```
-3. **Add the Secret Volume** to pod volumes:
-   ```yaml
-   volumes:
-     - name: storage
-       persistentVolumeClaim:
-         claimName: {{ .Values.persistence.pvcName }}
-     {{- if .Values.thanos.enabled }}
-     - name: thanos-objstore
-       secret:
-         secretName: {{ .Values.thanos.objstoreSecretName }}
-     {{- end }}
-   ```
+```nginx
+# Map incoming Basic Auth usernames to permitted HTTP methods (RBAC)
+map $remote_user $is_authorized {
+    default           0;
+    "cortex-writer"   1; # Write-Only account
+    "grafana-reader"  2; # Read-Only account
+}
+
+server {
+    listen 8443 ssl http2;
+    server_name cortex.sandbox.internal;
+
+    # TLS 1.3 Hardened Encryption
+    ssl_certificate           /etc/nginx/certs/cortex.crt;
+    ssl_certificate_key       /etc/nginx/certs/cortex.key;
+    ssl_protocols             TLSv1.2 TLSv1.3;
+    ssl_ciphers               ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305;
+    ssl_prefer_server_ciphers on;
+    ssl_session_cache         shared:SSL:10m;
+    ssl_session_timeout       1d;
+
+    # Global Authentication Gatekeeper
+    auth_basic           "01-Sandbox Cortex Long-Term Storage Gate";
+    auth_basic_user_file /etc/nginx/.htpasswd;
+
+    # Automatically Inject Multi-Tenant Header
+    proxy_set_header X-Scope-OrgID "sandbox-metrics";
+    proxy_set_header Host $host;
+    proxy_set_header X-Real-IP $remote_addr;
+
+    # ── Write Path (Prometheus Remote-Write Ingestion) ────────────────────────
+    location /api/v1/push {
+        # RBAC: Only cortex-writer can push
+        if ($is_authorized != 1) {
+            return 403 "Forbidden: User is not authorized to write metrics\n";
+        }
+
+        limit_except POST {
+            deny all;
+        }
+
+        proxy_pass http://127.0.0.1:9009/api/v1/push;
+        proxy_http_version 1.1;
+        proxy_buffering off;
+    }
+
+    # ── Read Path (Central Grafana PromQL Queries) ────────────────────────────
+    location /prometheus/ {
+        # RBAC: Only grafana-reader can query
+        if ($is_authorized != 2) {
+            return 403 "Forbidden: User is not authorized to query metrics\n";
+        }
+
+        proxy_pass http://127.0.0.1:9009/prometheus/;
+        proxy_http_version 1.1;
+        proxy_read_timeout 120s;
+    }
+
+    # ── Security: Block Administrative Endpoints from Network ─────────────────
+    location ~* ^/(ring|compactor|all_user_stats) {
+        deny all;
+        return 403 "Forbidden: Admin endpoints are disabled\n";
+    }
+
+    # ── Health Check (Unauthenticated localhost only) ─────────────────────────
+    location /ready {
+        auth_basic off;
+        allow 127.0.0.1;
+        deny all;
+        proxy_pass http://127.0.0.1:9009/ready;
+    }
+}
+```
+
+### 6.3 Systemd Service & Automated Bootstrapping
+When the EC2 instance launches, `cortex_bootstrap.sh` performs automated self-provisioning:
+
+```bash
+#!/usr/bin/env bash
+set -euo pipefail
+
+# 1. Update system & install dependencies
+apt-get update -y
+apt-get install -y apache2-utils nginx wget curl jq
+
+# 2. Download official Cortex binary (v1.18.0)
+CORTEX_VERSION="v1.18.0"
+wget -q "https://github.com/cortexproject/cortex/releases/download/${CORTEX_VERSION}/cortex-linux-amd64" -O /usr/local/bin/cortex
+chmod +x /usr/local/bin/cortex
+
+# 3. Create unprivileged system user
+useradd --system --no-create-home --shell /bin/false cortex || true
+mkdir -p /var/lib/cortex /etc/cortex /etc/nginx/certs
+chown -R cortex:cortex /var/lib/cortex /etc/cortex
+
+# 4. Generate TLS Certificates
+openssl req -x509 -nodes -days 730 -newkey rsa:4096 \
+  -keyout /etc/nginx/certs/cortex.key \
+  -out /etc/nginx/certs/cortex.crt \
+  -subj "/CN=cortex.sandbox.internal/O=01-Sandbox/C=US"
+
+# 5. Generate .htpasswd with high-entropy Bcrypt passwords
+WRITER_PASS=$(openssl rand -base64 24)
+READER_PASS=$(openssl rand -base64 24)
+
+htpasswd -B -b -c /etc/nginx/.htpasswd "cortex-writer" "$WRITER_PASS"
+htpasswd -B -b /etc/nginx/.htpasswd "grafana-reader" "$READER_PASS"
+chmod 600 /etc/nginx/.htpasswd
+chown www-data:www-data /etc/nginx/.htpasswd
+
+# 6. Publish generated credentials to AWS SSM Parameter Store for zero-touch discovery
+aws ssm put-parameter --name "/sandbox/cortex/writer-password" --value "$WRITER_PASS" --type "SecureString" --region us-east-1 --overwrite
+aws ssm put-parameter --name "/sandbox/cortex/reader-password" --value "$READER_PASS" --type "SecureString" --region us-east-1 --overwrite
+
+# 7. Create Systemd Service for Cortex
+cat << 'EOF' > /etc/systemd/system/cortex.service
+[Unit]
+Description=Cortex Long-Term Storage Daemon
+After=network.target
+
+[Service]
+Type=simple
+User=cortex
+Group=cortex
+ExecStart=/usr/local/bin/cortex -config.file=/etc/cortex/cortex.yaml
+Restart=always
+RestartSec=5s
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now cortex
+systemctl restart nginx
+```
 
 ---
 
-### Phase 3: Rollout & Verification
+## 7. Prometheus & Grafana Integration
 
-#### Step 3.1: Apply Upgrades via Repository Script
-Execute from your local machine:
-```bash
-cd /home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script
-
-export AWS_ACCESS_KEY_ID="..."
-export AWS_SECRET_ACCESS_KEY="..."
-export AWS_SESSION_TOKEN="..."
-
-./upgrade-helm.sh primaryhub
-```
-
-#### Step 3.2: Verify Pod & Sidecar Execution
-```bash
-# Verify both containers (prometheus + thanos-sidecar) are Ready:
-docker exec primaryhub-control-plane kubectl -n opensandbox-system get pod -l app=prometheus
-
-# Check Thanos Sidecar initialization logs:
-docker exec primaryhub-control-plane kubectl -n opensandbox-system logs -l app=prometheus -c thanos-sidecar --tail=30
-```
-Expected output:
-```
-level=info msg="sidecar started"
-level=info msg="successfully verified bucket connectivity" bucket=01-sandbox-prometheus-longterm
-```
-
-#### Step 3.3: Verify S3 Block Shipments
-After the first 2-hour TSDB block closes:
-```bash
-aws s3 ls s3://01-sandbox-prometheus-longterm/ --recursive
-```
-Expected output:
-```
-2026-10-29 15:00:00   01HXYZ123456789ABCDEFGH/meta.json
-2026-10-29 15:00:00   01HXYZ123456789ABCDEFGH/chunks/000001
-2026-10-29 15:00:00   01HXYZ123456789ABCDEFGH/index
-```
-
----
-
-## 5. Alternative Implementation: Self-Provisioned Cortex (Monolithic Mode)
-
-If the engineering team decides to proceed with **provisioning self-hosted Cortex directly inside 01-Sandbox**:
-
-### Step 5.1: Create Cortex S3 Bucket
-```bash
-aws s3api create-bucket --bucket "01-sandbox-cortex-storage" --region us-east-1
-```
-
-### Step 5.2: Create Cortex Helm Chart Values (`cortex-values.yaml`)
-Deploy Cortex in **Single-Binary (Monolithic) mode** to minimize pod count inside the KinD cluster:
-
-```yaml
-# Deploy as a single monolithic workload target
-cortex:
-  target: all
-  image:
-    repository: cortexproject/cortex
-    tag: "v1.16.0"
-
-  config:
-    auth_enabled: false # Single-tenant internal deployment
-
-    server:
-      http_listen_port: 9009
-      grpc_listen_port: 9095
-
-    # Ingestion & Ring Configuration
-    distributor:
-      ring:
-        kvstore:
-          store: memberlist
-
-    ingester:
-      lifecycler:
-        ring:
-          kvstore:
-            store: memberlist
-          replication_factor: 1 # Single replica to fit KinD memory constraints
-      max_transfer_retries: 0
-
-    # TSDB S3 Block Storage Engine
-    blocks_storage:
-      backend: s3
-      s3:
-        bucket_name: 01-sandbox-cortex-storage
-        endpoint: s3.us-east-1.amazonaws.com
-        region: us-east-1
-      tsdb:
-        dir: /data/tsdb
-        retention_period: 6h # Ingester flushes to S3 after 2h
-
-    # Compactor
-    compactor:
-      data_dir: /data/compactor
-
-  resources:
-    requests:
-      cpu: "500m"
-      memory: "2048Mi"
-    limits:
-      cpu: "1500m"
-      memory: "4096Mi"
-```
-
-### Step 5.3: Point Prometheus to Self-Hosted Cortex
-In [`codeInspector/charts/prometheus/templates/configmap.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml), stream metrics to the local Cortex service:
+### 7.1 Prometheus Remote-Write Configuration
+In [`codeInspector/charts/prometheus/templates/configmap.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/prometheus/templates/configmap.yaml), stream scraped metrics directly to the dedicated Cortex node:
 
 ```yaml
 remote_write:
-  - url: "http://cortex.opensandbox-system.svc.cluster.local:9009/api/v1/push"
+  - url: "https://10.99.0.50:8443/api/v1/push"
+    tls_config:
+      insecure_skip_verify: true # Set to false if root CA is added
+    basic_auth:
+      username: "cortex-writer"
+      password: "<PULLED_FROM_SSM_OR_SECRET>"
     queue_config:
+      capacity: 10000
+      max_shards: 10
+      min_shards: 1
       max_samples_per_send: 1000
       batch_send_deadline: 5s
+      min_backoff: 500ms
+```
+
+### 7.2 Central Grafana Secure Datasource Configuration
+In Central Grafana, register Cortex as the long-term Prometheus datasource:
+
+```yaml
+apiVersion: 1
+datasources:
+  - name: "Cortex-S3-LongTerm"
+    type: "prometheus"
+    access: "proxy"
+    url: "https://10.99.0.50:8443/prometheus"
+    basicAuth: true
+    basicAuthUser: "grafana-reader"
+    basicAuthPassword: "<PULLED_FROM_SSM_OR_SECRET>"
+    jsonData:
+      tlsSkipVerify: true
+      timeInterval: "15s"
+      queryTimeout: "60s"
+      httpMethod: "POST"
+    isDefault: false
 ```
 
 ---
 
-## 6. Financial Summary: Self-Hosted Cortex vs. Prometheus S3
+## 8. Verification, Testing & Operational Runbook
 
-| Cost Component | Current Setup (EBS gp3) | Self-Provisioned Cortex (Monolithic) | Prometheus + S3 Sidecar (Recommended) |
-| :--- | :--- | :--- | :--- |
-| **S3 Storage (1 TB / mo)** | $0.00 | ~$23.00 | ~$23.00 |
-| **Local EBS Storage** | **$2.50** (25 GiB EBS) | **$1.00** (10 GiB buffer) | **$1.00** (10 GiB buffer) |
-| **Compute Overhead (RAM/CPU)**| $0.00 | **+$35 – $70 / mo** (Requires upgrading EC2 instance for 4GB RAM) | **$0.00** (Fits in existing pod limits) |
-| **Operational Maintenance** | Low | Moderate/High (Ring, compactor) | Low |
-| **Total Monthly Sizing** | **High as data grows** | **Moderate** | **Lowest** |
+### Test 1: Verify Unauthorized Ingress Rejection (Security Gate)
+Run from any machine on the network:
+```bash
+# Missing credentials -> Must return HTTP 401 Unauthorized
+curl -k -i -X POST https://10.99.0.50:8443/api/v1/push
+```
+*Expected Output:*
+```text
+HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Basic realm="01-Sandbox Cortex Long-Term Storage Gate"
+```
+
+### Test 2: Verify RBAC Write Authorization
+```bash
+# Writer account attempting push -> Accepted by NGINX
+curl -k -i -u "cortex-writer:<WRITER_PASS>" -X POST https://10.99.0.50:8443/api/v1/push
+```
+*Expected Output:*
+```text
+HTTP/1.1 200 OK (or 400 Bad Request on empty snappy body; Passed 401/403 Security Barrier)
+```
+
+### Test 3: Verify RBAC Read Rejection on Write Path
+```bash
+# Reader account attempting to write metrics -> Must be strictly blocked with HTTP 403
+curl -k -i -u "grafana-reader:<READER_PASS>" -X POST https://10.99.0.50:8443/api/v1/push
+```
+*Expected Output:*
+```text
+HTTP/1.1 403 Forbidden
+Forbidden: User is not authorized to write metrics
+```
+
+### Test 4: Verify TSDB Block Shipments into S3
+After Cortex runs for 2 hours, verify TSDB blocks in S3:
+```bash
+aws s3 ls s3://01-sandbox-cortex-storage/sandbox-metrics/ --recursive
+```
+*Expected Output:*
+```text
+2026-11-03 16:00:00   01HABCXYZ123456789/meta.json
+2026-11-03 16:00:00   01HABCXYZ123456789/chunks/000001
+2026-11-03 16:00:00   01HABCXYZ123456789/index
+```
+
+### Test 5: Verify Historical PromQL Query via Grafana
+In Central Grafana, select the **Cortex-S3-LongTerm** datasource and execute:
+```promql
+count by (cluster)(up)
+```
+Verify that both real-time metrics and historical multi-day metrics render with zero latency degradation.
 
 ---
 
-## 7. Conclusion
+### Maintenance & On-Call Commands
+To inspect Cortex without SSH via AWS SSM:
+```bash
+# Start an interactive shell session via SSM
+aws ssm start-session --target <instance-id> --region us-east-1
 
-By deploying **Option B (Prometheus S3 via Thanos Sidecar)** inside 01-Sandbox:
-1. **Full Sovereignty**: All metrics remain strictly within the 01-Sandbox AWS account and S3 bucket.
-2. **EBS Problem Solved**: Eliminates the 25 GiB EBS disk bottleneck and downsizes local disk usage to 10 GiB.
-3. **Infinite Retention**: Historical data scales indefinitely on S3 at **71%–93% lower cost** than block storage.
-4. **Zero KinD Resource Contention**: Unlike a self-hosted Cortex cluster (which requires 2–4 GB RAM), the Thanos Sidecar runs on < 64 MB RAM, ensuring maximum host resources remain available for microVM/gVisor code execution.
+# View live Cortex logs
+journalctl -u cortex -f
+
+# View NGINX access and security rejection logs
+tail -f /var/log/nginx/access.log
+tail -f /var/log/nginx/error.log
+```

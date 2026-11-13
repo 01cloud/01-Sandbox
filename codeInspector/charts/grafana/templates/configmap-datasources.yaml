@@ -47,4 +47,21 @@ data:
           basicAuthPassword: {{ .Values.prometheusAuth.password | quote }}
         {{- end }}
         editable: false
+
+      # ── Long-Term: Cortex AWS S3 TSDB (Historical Metrics) ──────────────────
+      - name: "cortex-s3-longterm"
+        uid: "cortex-s3-longterm"
+        type: prometheus
+        access: proxy
+        url: "https://10.99.0.50:8443/prometheus"
+        isDefault: false
+        basicAuth: true
+        basicAuthUser: "grafana-reader"
+        secureJsonData:
+          basicAuthPassword: "GrafanaReaderSecret2026!"
+        jsonData:
+          tlsSkipVerify: true
+          timeInterval: "15s"
+          httpMethod: POST
+        editable: false
       {{- end }}

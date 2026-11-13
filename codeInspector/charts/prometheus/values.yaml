@@ -52,13 +52,39 @@ auth:
     hashedPassword: "$2y$10$XNVJltW/XwJnMEwAxlcUo.mcQWUhIJrlqLONxd9Xn8etCITQkHo5O"
     plainPassword: "PrometheusRemoteWriteSecure2026!"
 
-# Kubernetes-Native Secret Rotator CronJob
+# Forward all ingested metrics to dedicated Cortex S3 Long-Term Storage node
+remoteWrite:
+  - url: "https://10.99.0.50:8443/api/v1/push"
+    tls_config:
+      insecure_skip_verify: true
+    basic_auth:
+      username: "cortex-writer"
+      password: "CortexWriterSecret2026!"
+    queue_config:
+      capacity: 10000
+      max_shards: 10
+      min_shards: 1
+      max_samples_per_send: 1000
+      batch_send_deadline: 5s
+
+# Kubernetes-Native Secret Rotator CronJob (Spokes -> PrimaryHub)
 rotator:
   enabled: true
   schedule: "0 0 1 * *" # Monthly rotation at midnight UTC
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
   gracePeriodSeconds: 600 # 10-minute overlap window before pruning old credentials
+  image:
+    kubectl: "docker.io/bitnami/kubectl:latest"
+    python: "docker.io/library/python:3.11-alpine"
+
+# Kubernetes-Native Cortex Secret Rotator CronJob (PrimaryHub -> Cortex)
+cortexRotator:
+  enabled: true
+  schedule: "0 2 1 * *" # Monthly rotation at 02:00 UTC
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+  gracePeriodSeconds: 600
   image:
     kubectl: "docker.io/bitnami/kubectl:latest"
     python: "docker.io/library/python:3.11-alpine"
