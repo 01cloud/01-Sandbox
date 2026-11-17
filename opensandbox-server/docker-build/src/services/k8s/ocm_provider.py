@@ -256,7 +256,7 @@ class OcmWorkloadProvider(WorkloadProvider):
             elif region in ("eu-central-1", "eu"):
                 return "spoke2"
 
-        # Dynamic query of OCM PlacementDecision
+        # Dynamic query of OCM PlacementDecision and capacity-aware scheduling
         try:
             decisions = self.k8s_client.custom_api.list_namespaced_custom_object(
                 group="cluster.open-cluster-management.io",
@@ -266,13 +266,21 @@ class OcmWorkloadProvider(WorkloadProvider):
                 label_selector=f"cluster.open-cluster-management.io/placement={self.placement_name}",
             )
             items = decisions.get("items", [])
+            candidate_clusters: List[str] = []
             if items:
                 status_decisions = items[0].get("status", {}).get("decisions", [])
-                if status_decisions and status_decisions[0].get("clusterName"):
-                    selected = status_decisions[0]["clusterName"]
+                for d in status_decisions:
+                    cname = d.get("clusterName")
+                    if cname and cname not in candidate_clusters:
+                        candidate_clusters.append(cname)
+
+            if candidate_clusters:
+                selected = self._select_spoke_by_capacity(candidate_clusters)
+                if selected:
                     logger.info(
-                        "Resolved spoke cluster '%s' from OCM PlacementDecision",
+                        "Capacity-aware scheduler selected spoke cluster '%s' from candidates %s",
                         selected,
+                        candidate_clusters,
                     )
                     return selected
         except Exception as e:
@@ -282,6 +290,93 @@ class OcmWorkloadProvider(WorkloadProvider):
 
         # Default fallback spoke cluster
         return DEFAULT_FALLBACK_SPOKE
+
+    def _select_spoke_by_capacity(self, candidate_clusters: List[str]) -> str:
+        """
+        Intelligently choose the best spoke cluster based on real-time capacity and active workload count.
+
+        1. Queries each candidate's ManagedCluster resource to confirm availability and allocatable pod capacity.
+        2. Counts active ManifestWork resources targeting that spoke cluster namespace.
+        3. Computes utilization ratio = active_manifestworks / allocatable_pods.
+        4. Selects candidate cluster with lowest utilization (highest available headroom).
+        """
+        if not candidate_clusters:
+            return DEFAULT_FALLBACK_SPOKE
+        if len(candidate_clusters) == 1:
+            return candidate_clusters[0]
+
+        cluster_stats: List[tuple] = []
+        for cluster_name in candidate_clusters:
+            try:
+                # Query ManagedCluster for availability and capacity
+                mc = self.k8s_client.custom_api.get_cluster_custom_object(
+                    group="cluster.open-cluster-management.io",
+                    version="v1",
+                    plural="managedclusters",
+                    name=cluster_name,
+                )
+                status = mc.get("status", {})
+                conditions = status.get("conditions", [])
+
+                # Verify cluster is available
+                is_available = any(
+                    c.get("type") == "ManagedClusterConditionAvailable"
+                    and str(c.get("status")).lower() == "true"
+                    for c in conditions
+                )
+                if not is_available:
+                    logger.warning(
+                        "Spoke cluster '%s' is not available in OCM conditions; skipping.",
+                        cluster_name,
+                    )
+                    continue
+
+                # Get allocatable pods capacity (default 110 per node standard in k8s)
+                allocatable = status.get("allocatable", {})
+                alloc_pods_str = allocatable.get("pods", "110")
+                try:
+                    alloc_pods = int(alloc_pods_str)
+                except (ValueError, TypeError):
+                    alloc_pods = 110
+
+                # Count active sandbox ManifestWorks in spoke namespace
+                active_works = self.list_workloads(
+                    namespace=cluster_name,
+                    label_selector="app.kubernetes.io/part-of=01sandbox",
+                )
+                active_count = len(active_works)
+
+                utilization = active_count / max(alloc_pods, 1)
+                logger.info(
+                    "Spoke cluster '%s' capacity metrics: active_sandboxes=%d, allocatable_pods=%d, utilization=%.4f",
+                    cluster_name,
+                    active_count,
+                    alloc_pods,
+                    utilization,
+                )
+                cluster_stats.append((utilization, active_count, cluster_name))
+            except Exception as e:
+                logger.warning(
+                    "Error querying capacity for spoke cluster '%s': %s",
+                    cluster_name,
+                    e,
+                )
+                # Penalize candidates with errors so healthy spokes are prioritized
+                cluster_stats.append((0.99, 999, cluster_name))
+
+        if not cluster_stats:
+            return candidate_clusters[0]
+
+        # Sort by utilization ascending, then active_count ascending
+        cluster_stats.sort(key=lambda x: (x[0], x[1]))
+        chosen = cluster_stats[0][2]
+        logger.info(
+            "Capacity scheduler chose optimal spoke cluster '%s' (utilization: %.2f%%, active sandboxes: %d)",
+            chosen,
+            cluster_stats[0][0] * 100,
+            cluster_stats[0][1],
+        )
+        return chosen
 
     def _build_sandbox_pod_manifest(
         self,

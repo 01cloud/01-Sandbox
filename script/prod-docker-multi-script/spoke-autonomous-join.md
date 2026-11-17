@@ -832,6 +832,11 @@ CONF="/etc/wireguard/wg0.conf"
 SELF_NAME="${cluster_name}"
 SELF_REGION="${region}"
 
+# Restrict exposed database / control-plane ports to WireGuard overlay & localhost
+iptables -C DOCKER-USER -i wg0 -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER 1 -i wg0 -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || true
+iptables -C DOCKER-USER -i lo -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || iptables -I DOCKER-USER 2 -i lo -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || true
+iptables -C DOCKER-USER -p tcp -m multiport --dports 30432,30379,30900 -j DROP 2>/dev/null || iptables -I DOCKER-USER 3 -p tcp -m multiport --dports 30432,30379,30900 -j DROP 2>/dev/null || true
+
 cluster_params=$(aws ssm get-parameters-by-path --path "/sandbox/clusters" --region "us-east-1" --query "Parameters[*].Value" --output json 2>/dev/null || echo "[]")
 [ -z "$cluster_params" ] || [ "$cluster_params" == "[]" ] && exit 0
 
@@ -894,9 +899,10 @@ export KUBECONFIG=/etc/kubernetes/admin.conf
 ROLE="${role}"
 HUB_PRIORITY="${hub_priority}"
 
-# 1. Auto-accept pending managed clusters
+# 1. Auto-accept pending managed clusters & ensure clusterSet and capability labels
 for mc in $(kubectl get managedclusters -o jsonpath="{range .items[?(@.status.conditions[?(@.type==\"HubAcceptedManagedCluster\")].status!=\"True\")]}{.metadata.name}{\"\n\"}{end}" 2>/dev/null || true); do
   [ -n "$mc" ] && clusteradm accept --clusters "$mc" 2>/dev/null || true
+  kubectl label managedcluster "$mc" cluster.open-cluster-management.io/clusterset=sandbox-spokes sandbox-workload-capable=true runtime.gvisor=true runtime.kata=true --overwrite 2>/dev/null || true
 done
 
 # 2. Auto-approve pending CSRs

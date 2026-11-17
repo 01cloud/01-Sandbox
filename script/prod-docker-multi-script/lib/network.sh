@@ -154,6 +154,10 @@ sudo cp /tmp/wg0.conf /etc/wireguard/wg0.conf
 sudo chmod 600 /etc/wireguard/wg0.conf
 sudo systemctl enable wg-quick@wg0 2>/dev/null || true
 sudo systemctl restart wg-quick@wg0 2>/dev/null || sudo wg-quick up wg0 2>/dev/null || true
+# Enforce DOCKER-USER firewall to restrict database and internal NodePort services to wg0 and loopback
+sudo iptables -C DOCKER-USER -i wg0 -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || sudo iptables -I DOCKER-USER 1 -i wg0 -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || true
+sudo iptables -C DOCKER-USER -i lo -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || sudo iptables -I DOCKER-USER 2 -i lo -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || true
+sudo iptables -C DOCKER-USER -p tcp -m multiport --dports 30432,30379,30900 -j DROP 2>/dev/null || sudo iptables -I DOCKER-USER 3 -p tcp -m multiport --dports 30432,30379,30900 -j DROP 2>/dev/null || true
 APPLY_WG_EOF
     done
 
@@ -346,6 +350,10 @@ sudo cp /tmp/wg0.conf /etc/wireguard/wg0.conf
 sudo chmod 600 /etc/wireguard/wg0.conf
 sudo systemctl enable wg-quick@wg0 2>/dev/null || true
 sudo systemctl restart wg-quick@wg0 2>/dev/null || sudo wg-quick up wg0 2>/dev/null || true
+# Enforce DOCKER-USER firewall to restrict database and internal NodePort services to wg0 and loopback
+sudo iptables -C DOCKER-USER -i wg0 -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || sudo iptables -I DOCKER-USER 1 -i wg0 -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || true
+sudo iptables -C DOCKER-USER -i lo -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || sudo iptables -I DOCKER-USER 2 -i lo -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || true
+sudo iptables -C DOCKER-USER -p tcp -m multiport --dports 30432,30379,30900 -j DROP 2>/dev/null || sudo iptables -I DOCKER-USER 3 -p tcp -m multiport --dports 30432,30379,30900 -j DROP 2>/dev/null || true
 APPLY_WG_EOF
     done
 

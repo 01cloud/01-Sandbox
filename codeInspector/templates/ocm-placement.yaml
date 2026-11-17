@@ -9,7 +9,6 @@ metadata:
 spec:
   clusterSets:
     - {{ default "sandbox-spokes" .Values.global.ocm.clusterSet }}
-  numberOfClusters: 1
   predicates:
     - requiredClusterSelector:
         labelSelector:
@@ -17,4 +16,19 @@ spec:
             sandbox-workload-capable: "true"
             runtime.gvisor: "true"
             runtime.kata: "true"
+  prioritizerPolicy:
+    mode: Exact
+    configurations:
+      - scoreCoordinate:
+          type: BuiltIn
+          builtIn: ResourceAllocatableCPU
+        weight: 3
+      - scoreCoordinate:
+          type: BuiltIn
+          builtIn: ResourceAllocatableMemory
+        weight: 3
+      - scoreCoordinate:
+          type: BuiltIn
+          builtIn: Balance
+        weight: 4
 {{- end }}

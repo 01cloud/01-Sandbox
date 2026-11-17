@@ -215,6 +215,13 @@ EOF
     fi
     _ensure_systemwide_kubeconfig "$name" "$target_host"
     _sync_remote_kubeconfig "$name" "$target_host" "$wg_ip"
+
+    # Restrict exposed NodePort / database ports: allow only WireGuard (wg0) and loopback (lo) in DOCKER-USER chain
+    remote_exec "$target_host" bash -s << 'FIREWALL_EOF'
+sudo iptables -C DOCKER-USER -i wg0 -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || sudo iptables -I DOCKER-USER 1 -i wg0 -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || true
+sudo iptables -C DOCKER-USER -i lo -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || sudo iptables -I DOCKER-USER 2 -i lo -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || true
+sudo iptables -C DOCKER-USER -p tcp -m multiport --dports 30432,30379,30900 -j DROP 2>/dev/null || sudo iptables -I DOCKER-USER 3 -p tcp -m multiport --dports 30432,30379,30900 -j DROP 2>/dev/null || true
+FIREWALL_EOF
   else
     if ! kind create cluster --name "$name" --config "$config_file"; then
       log_error "Failed to create KinD cluster '$name'!"

@@ -151,7 +151,7 @@ ensure_sandbox_repo() {
   local clone_target="${ROOT_DIR}/01-Sandbox"
   [ -d "$clone_target" ] && clone_target="${STATE_DIR}/01-Sandbox"
 
-  local repo_url="${REPO_URL:-git@github.com:01cloud/01-Sandbox.git}"
+  local repo_url="${REPO_URL:-https://github.com/01cloud/01-Sandbox.git}"
   local repo_branch="${REPO_BRANCH:-feat/production}"
 
   log_info "Cloning 01-Sandbox via SSH (${repo_url}, branch: ${repo_branch}) into: ${clone_target}..."
@@ -171,7 +171,7 @@ ensure_sandbox_repo() {
   else
     log_error "Unable to locate or clone 01-Sandbox repository via SSH into ${clone_target}."
     log_error "Please ensure your SSH key is added to GitHub (ssh -T git@github.com) or clone manually:"
-    log_error "  git clone git@github.com:01cloud/01-Sandbox.git ${clone_target}"
+    log_error "  git clone https://github.com/01cloud/01-Sandbox.git ${clone_target}"
     return 1
   fi
 }
