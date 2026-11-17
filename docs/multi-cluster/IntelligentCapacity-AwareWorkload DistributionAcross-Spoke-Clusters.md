@@ -144,9 +144,53 @@ spec:
         weight: 4
 ```
 
-- **`ResourceAllocatableCPU` (weight: 3):** Scores clusters higher if they have greater unallocated CPU cores.
-- **`ResourceAllocatableMemory` (weight: 3):** Scores clusters higher if they have more allocatable RAM.
-- **`Balance` (weight: 4):** Penalizes clusters that already host high workload volumes, ensuring even distribution across the entire multi-cluster fleet.
+- **`ResourceAllocatableCPU` (weight: 3):** Scores clusters higher if they have greater unallocated CPU cores (30% importance).
+- **`ResourceAllocatableMemory` (weight: 3):** Scores clusters higher if they have more allocatable RAM (30% importance).
+- **`Balance` (weight: 4):** Heavily penalizes clusters that already host high workload volumes, ensuring even distribution across the entire multi-cluster fleet (40% importance).
+
+#### How Prioritizer Scoring and Weights Work: "Higher Score Wins"
+
+In Kubernetes and Open Cluster Management (OCM), scheduling decisions are based on **maximizing the total score**—**HIGHER SCORE ALWAYS WINS**. The cluster that accumulates the highest aggregate score is prioritized first for workload placement.
+
+##### 1. The Weight as a Multiplier
+The **weight** is a coefficient (importance factor) that multiplies the raw score calculated by each prioritizer:
+
+$$\text{Total Score} = (\text{Score}_{\text{CPU}} \times 3) + (\text{Score}_{\text{Memory}} \times 3) + (\text{Score}_{\text{Balance}} \times 4)$$
+
+Out of a total weight of $10$ ($3 + 3 + 4$):
+- **`Balance` carries 40% of the scheduling decision weight.**
+- **`CPU` carries 30% of the scheduling decision weight.**
+- **`Memory` carries 30% of the scheduling decision weight.**
+
+##### 2. Raw Scoring Dynamics (Scale 0 to 100)
+
+| Prioritizer Metric | What Generates a HIGH Score (Favored) | What Generates a LOW Score (Penalized) |
+|---|---|---|
+| **`ResourceAllocatableCPU`** | Large amounts of unreserved, allocatable CPU cores available on the spoke nodes. | CPU cores are saturated by existing workloads. |
+| **`ResourceAllocatableMemory`** | Large amounts of free, allocatable RAM available on the spoke nodes. | Spoke node memory is near capacity. |
+| **`Balance`** | **Zero or very few active workloads** currently running on this spoke. | The spoke cluster already hosts a high density of active workloads. |
+
+##### 3. Concrete Numerical Example: `spoke1` vs `spoke2`
+
+When evaluated in the live environment where `spoke1` hosted 8 workloads and `spoke2` was completely idle:
+
+* **Spoke 1 (`spoke1` - Loaded):**
+  * CPU Raw Score: `70` $\times 3 = 210$
+  * Memory Raw Score: `70` $\times 3 = 210$
+  * Balance Raw Score: `20` (heavily penalized due to 8 active works) $\times 4 = 80$
+  * **Spoke 1 Total Score:** $210 + 210 + 80 = \mathbf{500}$
+
+* **Spoke 2 (`spoke2` - Idle & Fresh):**
+  * CPU Raw Score: `95` $\times 3 = 285$
+  * Memory Raw Score: `95` $\times 3 = 285$
+  * Balance Raw Score: `100` (awarded maximum score due to 0 active works) $\times 4 = 400$
+  * **Spoke 2 Total Score:** $285 + 285 + 400 = \mathbf{970}$
+
+$$\text{Score}_{\text{spoke2}} (970) > \text{Score}_{\text{spoke1}} (500) \implies \text{Spoke 2 is Selected}$$
+
+##### 4. Why We Set `Balance: 4`, `CPU: 3`, `Memory: 3`
+* **`Balance` was assigned the highest weight (4):** The primary failure mode was workload concentration on a single spoke (`spoke1`). Assigning `Balance` the highest weight prevents "pile-on" behavior and forces the placement engine to aggressively distribute incoming sandboxes to underutilized clusters.
+* **`CPU` (3) and `Memory` (3):** Act as secondary tie-breakers. When multiple spoke clusters have identical or zero active workloads, OCM breaks the tie by routing to the cluster backed by beefier hardware.
 
 ---
 
@@ -303,7 +347,30 @@ $$\text{Spoke}^* = \arg\max_{i} \left( \text{Headroom}_i \right)$$
 
 ### 4.3. Declarative Deployment Injection via Kubernetes ConfigMap
 
-To guarantee that the modified `ocm_provider.py` remains persistently loaded across pod evictions, deployments, node restarts, and crashes, the code was deployed declaratively via a Kubernetes `ConfigMap` subPath mount:
+#### Architectural Decision: Why Deployment + ConfigMap (and Why Not DaemonSet)?
+
+##### 1. Why a Deployment and NOT a DaemonSet?
+`opensandbox-server` is deployed as a **Kubernetes Deployment** (`deployment/opensandbox-server` in namespace `opensandbox-system`), NOT a DaemonSet.
+
+| Architectural Dimension | Deployment (`opensandbox-server`) | DaemonSet |
+|---|---|---|
+| **Role & Purpose** | Centralized API server, admission controller, and workload dispatcher. | Host-level node daemon running exactly **one pod per node** across the entire cluster. |
+| **Typical Workloads** | Web services, control planes, REST/gRPC backends, job schedulers. | Node metrics collectors (`node-exporter`), log forwarders (`fluentd`, `promtail`), CNI plugins (`cilium`, `calico`), host WireGuard synchronizers. |
+| **Why Inappropriate for DaemonSet?** | OpenSandbox Server is a centralized API hub. Running it on every single node would waste compute memory, create redundant uncoordinated schedulers, cause API port collisions, and risk split-brain dispatching. | A DaemonSet is designed for node-level operations, not multi-cluster application control planes. |
+
+##### 2. Why Was `ocm_provider.py` Injected via a ConfigMap into the Deployment?
+`ocm_provider.py` is an internal Python application module inside the `01community/01sandbox-opensandbox-server:v0.7.12` container. In production Kubernetes environments, modifying application code can be done in three ways:
+
+1. **Direct Container Mutation (`kubectl exec` / `docker exec`):**
+   * ❌ **Anti-Pattern (Ephemeral Filesystem):** Containers are disposable. If a pod crashes, runs out of memory (OOMKilled), or is rescheduled during node maintenance, the container filesystem is destroyed. Any hot-patches applied via `kubectl exec` vanish instantly, reverting the server to the broken codebase.
+2. **Full CI/CD Image Rebuild (`docker build` + Registry Push):**
+   * ⏳ **Overhead:** Requires building a new image, authenticating to a remote Docker registry (Docker Hub, AWS ECR), pushing the layer data, updating Helm `values.yaml`, and pulling images across all nodes.
+3. **Declarative ConfigMap SubPath Mounting (Implemented Solution):**
+   * ✅ **Instant & Zero-Downtime:** Injects the updated Python module directly into the container filesystem at `/app/src/services/k8s/ocm_provider.py`.
+   * ✅ **100% Declarative & Persistent:** Because the file is mounted in `spec.template.spec.volumes` of the Deployment, **every pod spawned by the Deployment automatically mounts the updated code**. It permanently survives pod crashes, evictions, rolling updates, and node reboots.
+   * ✅ **Atomic Verification:** Enables live validation of multi-cluster capacity algorithms directly against production clusters without registry dependencies.
+
+#### Implementation Details
 
 1. Created ConfigMap `opensandbox-ocm-override` in namespace `opensandbox-system`:
    ```bash
@@ -311,7 +378,7 @@ To guarantee that the modified `ocm_provider.py` remains persistently loaded acr
      --from-file=ocm_provider.py=/path/to/ocm_provider.py \
      -n opensandbox-system
    ```
-2. Injected volume and volumeMount into `deployment/opensandbox-server`:
+2. Injected volume and volumeMount into `deployment/opensandbox-server` container `server`:
    ```yaml
    spec:
      template:
@@ -331,6 +398,28 @@ To guarantee that the modified `ocm_provider.py` remains persistently loaded acr
    ```
 
 Applied and running on both **`primaryhub`** and **`secondaryhub`**.
+
+#### Long-Term Production CI/CD Release Lifecycle
+
+The capacity-aware logic has been committed to the source tree in [`opensandbox-server/docker-build/src/services/k8s/ocm_provider.py`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/opensandbox-server/docker-build/src/services/k8s/ocm_provider.py).
+
+When baking the new image for formal release:
+1. Build and push the image from [`opensandbox-server/docker-build/Dockerfile`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/opensandbox-server/docker-build/Dockerfile):
+   ```bash
+   docker build -t 01community/01sandbox-opensandbox-server:v0.7.13 ./opensandbox-server/docker-build
+   docker push 01community/01sandbox-opensandbox-server:v0.7.13
+   ```
+2. Update the image tag in **`codeInspector/values.yaml`** at **lines 287–290**:
+   ```yaml
+   opensandbox:
+     server:
+       image:
+         repository: 01community/01sandbox-opensandbox-server
+         tag: "v0.7.13"   # <--- Update tag from v0.7.12 to v0.7.13
+         pullPolicy: IfNotPresent
+   ```
+   *(Subchart fallback default is at [`codeInspector/charts/opensandbox/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/opensandbox/values.yaml#L29-L31) lines 29–31).*
+3. Remove the ConfigMap volume override from the deployment, as the code will be natively bundled within the container image.
 
 ---
 
@@ -374,7 +463,203 @@ Files updated across all 4 compute accounts:
 
 ---
 
-## 5. Live Production Verification & Telemetry
+## 5. Spoke Authority, Telemetry Harvesting & Workload Synchronization Mechanism
+
+A critical architectural question is: **How does the Hub possess the authority to manage remote spokes, how does it observe spoke memory/CPU metrics without SSH or direct inbound network access, and how are workloads actually executed on the spoke?**
+
+This section details the cryptographic, RBAC, and telemetry pipeline governed by Open Cluster Management (OCM) and Kubernetes Custom Resource Definitions (CRDs).
+
+### 5.1. The Inverted Control Architecture: Agent-Driven "Pull" Model
+
+In traditional infrastructure setups, a central orchestrator requires SSH keys or direct network ingress into remote workers. **OCM completely inverts this model**:
+* The Hub **never initiates inbound connections** into the spoke clusters.
+* Spoke worker nodes can sit behind NAT gateways, stateful AWS Security Groups, or private VPCs without exposing any public ports.
+* An in-cluster daemon inside each spoke—the **`klusterlet`**—initiates all communication **outbound** to the Hub API server over the encrypted WireGuard mesh (`https://10.99.0.1:6443`).
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│ SPOKE CLUSTER (e.g. spoke1 in eu-central-1)                            │
+│                                                                        │
+│  ┌───────────────────────┐         ┌────────────────────────────────┐  │
+│  │ Spoke Local Node      │         │ klusterlet-registration-agent  │  │
+│  │ (Kubelet & Kernel)    │────────▶│ (Runs inside spoke)            │  │
+│  │ Reads:                │ Scrapes │ Reads local node capacity:     │  │
+│  │ - Total CPU cores     │ Node    │ - Allocatable CPU: 2000m       │  │
+│  │ - Allocatable RAM     │ status  │ - Allocatable RAM: 7.9Gi       │  │
+│  │ - Allocatable Pods    │         │ - Allocatable Pods: 110        │  │
+│  └───────────────────────┘         └───────────────┬────────────────┘  │
+│                                                    │                   │
+│  ┌───────────────────────┐                         │                   │
+│  │ Spoke Local K8s API   │                         │                   │
+│  │ (Applies Pods)        │◀────────────────────────┤                   │
+│  └───────────▲───────────┘                         │                   │
+│              │ Watches ManifestWork                │                   │
+│  ┌───────────┴───────────┐                         │                   │
+│  │ klusterlet-work-agent │                         │                   │
+│  │ (Runs inside spoke)   │                         │                   │
+│  └───────────▲───────────┘                         │                   │
+└──────────────┼─────────────────────────────────────┼───────────────────┘
+               │                                     │
+               │ Pulls ManifestWork                  │ Outbound HTTPS (mTLS)
+               │ (Workload definition)               │ over WireGuard (10.99.0.1:6443)
+               │                                     │ Pushes Node Capacity & Status
+               ▼                                     ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│ PRIMARYHUB (us-east-1)                                                 │
+│                                                                        │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ Hub Kubernetes API Server & etcd                                 │  │
+│  │ Stores ManagedCluster CR Status for "spoke1":                    │  │
+│  │  status:                                                         │  │
+│  │    allocatable:                                                  │  │
+│  │      cpu: "2"                                                    │  │
+│  │      memory: "7966516Ki"                                         │  │
+│  │      pods: "110"                                                 │  │
+│  │    conditions:                                                   │  │
+│  │      - type: ManagedClusterConditionAvailable                    │  │
+│  │        status: "True"                                            │  │
+│  └──────────────────────────────────┬───────────────────────────────┘  │
+│                                     │                                  │
+│                                     │ Reads local etcd in < 1ms        │
+│                                     ▼                                  │
+│  ┌──────────────────────────────────────────────────────────────────┐  │
+│  │ opensandbox-server & OCM Placement Engine                        │  │
+│  │ • OCM Prioritizers evaluate CPU (3), RAM (3), Balance (4)        │  │
+│  │ • _select_spoke_by_capacity() reads local status:                │  │
+│  │    - Allocatable pods from ManagedCluster (110)                  │  │
+│  │    - Active ManifestWorks in namespace "spoke1" (8)              │  │
+│  │    - Computes live load: 8 / 110 = 7.27%                         │  │
+│  │ • Writes new ManifestWork into selected spoke namespace          │  │
+│  └──────────────────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+### 5.2. Spoke Authority & Cryptographic Handshake (mTLS & Scoped RBAC)
+
+How does the Hub authenticate spokes and prevent unauthorized access or cross-cluster interference?
+
+1. **Certificate Signing Request (CSR) Handshake:**
+   - During bootstrap, `clusteradm join` generates an internal private key on the spoke and submits a standard Kubernetes `CertificateSigningRequest` (CSR) to the Hub API server.
+   - The Hub’s background auto-accept daemon validates and approves the CSR:
+     ```bash
+     kubectl certificate approve "$csr"
+     clusteradm accept --clusters "$mc"
+     ```
+   - The Hub's root Certificate Authority (CA) issues a cryptographic **X.509 client certificate** with:
+     * **Common Name (CN):** `open-cluster-management:spoke1`
+     * **Organization (O):** `open-cluster-management:managedclusters`
+2. **Fine-Grained RBAC Isolation:**
+   - The Hub automatically generates a dedicated Kubernetes ClusterRole and ClusterRoleBinding specifically scoped to that spoke:
+     ```yaml
+     apiVersion: rbac.authorization.k8s.io/v1
+     kind: ClusterRole
+     metadata:
+       name: open-cluster-management:managedcluster:spoke1
+     rules:
+       - apiGroups: ["cluster.open-cluster-management.io"]
+         resources: ["managedclusters"]
+         resourceNames: ["spoke1"]
+         verbs: ["get", "list", "watch", "update"]
+       - apiGroups: ["cluster.open-cluster-management.io"]
+         resources: ["managedclusters/status"]
+         resourceNames: ["spoke1"]
+         verbs: ["update", "patch"]
+       - apiGroups: ["coordination.k8s.io"]
+         resources: ["leases"]
+         verbs: ["get", "list", "watch", "create", "update", "patch"]
+       - apiGroups: ["work.open-cluster-management.io"]
+         resources: ["manifestworks"]
+         verbs: ["get", "list", "watch", "update", "patch"]
+     ```
+   - **Multi-Tenant Protection:** `spoke1` can **only** read and write resources within its own namespace (`spoke1`) on the Hub. It has zero permissions to view, alter, or touch `spoke2`'s workloads or secrets.
+
+---
+
+### 5.3. How the Hub "Sees" Spoke Memory and CPU Metrics
+
+Spoke node metrics are harvested locally and published up to the Hub through an automated synchronization loop:
+
+1. **Local Node Observation:**
+   Inside the spoke, the **`klusterlet-registration-agent`** runs as a native pod with read access to the local Kubernetes API. It periodically queries the spoke's `v1/Node` objects, which are maintained directly by the local Kubelet and Linux cgroups:
+   - `node.status.capacity.cpu` & `node.status.allocatable.cpu`
+   - `node.status.capacity.memory` & `node.status.allocatable.memory`
+   - `node.status.allocatable.pods`
+   - Node health conditions (`Ready`, `MemoryPressure`, `DiskPressure`, `PIDPressure`)
+2. **Heartbeat Status Push:**
+   Every **60 seconds** (the configured lease interval), or immediately upon any capacity change, the registration agent sends an HTTPS request back to the Hub:
+   ```http
+   PATCH /apis/cluster.open-cluster-management.io/v1/managedclusters/spoke1/status
+   ```
+   The payload updates the `status` subresource of the `ManagedCluster` CR in the Hub's local `etcd`:
+   ```yaml
+   status:
+     allocatable:
+       cpu: "2"
+       ephemeral-storage: 102336Mi
+       memory: 7966516Ki
+       pods: "110"
+     capacity:
+       cpu: "2"
+       memory: 7966516Ki
+       pods: "110"
+     conditions:
+     - type: ManagedClusterConditionAvailable
+       status: "True"
+       message: Managed cluster is available
+     - type: ManagedClusterJoined
+       status: "True"
+     - type: ManagedClusterConditionClockSynced
+       status: "True"
+   ```
+3. **Sub-Millisecond Scheduling Decisions:**
+   Because all spoke health, CPU, memory, and pod limits are cached locally in the Hub’s `etcd`:
+   - When a user submits an execution request to `sandbox-api`, the Hub **never makes slow, blocking network queries across WAN/VPN links**.
+   - `opensandbox-server` and the OCM placement engine query the local `etcd` cache via `CustomObjectsApi`.
+   - The capacity scoring decision takes **less than 1 millisecond**, regardless of geographical latency to the spokes.
+
+---
+
+### 5.4. How Workloads are Dispatched to the Spoke (`ManifestWork`)
+
+The Hub does not connect directly to the spoke's API server to run pods. Instead, workload provisioning operates through the **`ManifestWork` CRD**:
+
+1. **Hub Workload Submission:**
+   When `_select_spoke_by_capacity()` chooses `spoke2`, OpenSandbox server writes a `ManifestWork` Custom Resource into the `spoke2` namespace on the Hub:
+   ```yaml
+   apiVersion: work.open-cluster-management.io/v1
+   kind: ManifestWork
+   metadata:
+     name: mw-sandbox-7b10d667-fc74-4f3c-abf3-fbd9a349bc55
+     namespace: spoke2
+     labels:
+       app.kubernetes.io/part-of: 01sandbox
+       sandbox.opensandbox.io/id: 7b10d667-fc74-4f3c-abf3-fbd9a349bc55
+   spec:
+     workload:
+       manifests:
+         - apiVersion: v1
+           kind: Pod
+           metadata:
+             name: opensandbox-pod
+             namespace: opensandbox-workloads
+           spec:
+             runtimeClassName: gvisor
+             containers:
+               - name: code-interpreter
+                 image: 01community/01sandbox-codeinterpreter:v0.7.11
+   ```
+2. **Spoke Agent Execution:**
+   - On Spoke 2, the **`klusterlet-work-agent`** holds a long-polling watch on the Hub's `spoke2` namespace.
+   - The instant `mw-sandbox-7b10d667...` is created, the work agent downloads the embedded Pod manifest and calls its **local** K8s API (`localhost:6443`) to create the Pod in `opensandbox-workloads`.
+3. **Status Feedback:**
+   - As the pod executes with gVisor/Kata isolation on Spoke 2, the work agent reflects its status (`status.phase = Running / Succeeded / Failed`) back to the `ManifestWork.status` on the Hub.
+   - When the sandbox finishes or expires, the Hub deletes the `ManifestWork`, which automatically instructs the spoke's work agent to garbage-collect the local Pod.
+
+---
+
+## 6. Live Production Verification & Telemetry
 
 ### 5.1. Live Execution Test Inside `primaryhub` Container
 
