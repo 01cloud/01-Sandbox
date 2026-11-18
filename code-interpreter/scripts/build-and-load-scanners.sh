@@ -98,6 +98,19 @@ else
   SELECTED_LANGUAGES=("${ALL_LANGUAGES[@]}")
 fi
 
+check_and_reclaim_disk() {
+  local min_mb="${1:-5120}" # default 5GB
+  local avail_mb
+  avail_mb=$(df -BM "$CODE_INTERPRETER_DIR" 2>/dev/null | awk 'NR==2 {gsub(/M/,"",$4); print $4}')
+  if [ -n "$avail_mb" ] && [ "$avail_mb" -lt "$min_mb" ]; then
+    log_warn "Low disk space (${avail_mb}MB available, threshold: ${min_mb}MB). Running docker builder prune..."
+    docker builder prune -f >/dev/null 2>&1 || true
+    local new_mb
+    new_mb=$(df -BM "$CODE_INTERPRETER_DIR" 2>/dev/null | awk 'NR==2 {gsub(/M/,"",$4); print $4}')
+    log_info "Disk space after pruning: ${new_mb}MB available."
+  fi
+}
+
 # Detect running KinD clusters
 RUNNING_CLUSTERS=()
 if [ -n "$TARGET_CLUSTERS" ]; then
@@ -139,6 +152,7 @@ if [ "$DO_BUILD" = true ]; then
     if docker image inspect "$tag_dev" >/dev/null 2>&1 && docker image inspect "$tag_release" >/dev/null 2>&1; then
       log_success "Images ${tag_dev} and ${tag_release} already exist locally – skipping build."
     else
+      check_and_reclaim_disk 5120
       log_info "Building scanner image for '${lang}' (${df})..."
       if docker build -f "$dockerfile_path" \
         -t "$tag_dev" \
@@ -151,6 +165,8 @@ if [ "$DO_BUILD" = true ]; then
       fi
     fi
   done
+  # Clean up dangling builder cache after all builds
+  docker builder prune -f >/dev/null 2>&1 || true
 fi
 
 # 2. Load into KinD clusters

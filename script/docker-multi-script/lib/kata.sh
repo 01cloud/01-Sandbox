@@ -38,6 +38,9 @@ _ensure_kata_host_assets() {
 
   # 0. Copy bundled devmapper-enabled containerd toolchain from repo bin/kata
   local repo_kata_bin="${ROOT_DIR}/bin/kata"
+  [ ! -d "$repo_kata_bin" ] && repo_kata_bin="${SANDBOX_REPO_DIR}/script/prod-docker-multi-script/bin/kata"
+  [ ! -d "$repo_kata_bin" ] && repo_kata_bin="${SANDBOX_REPO_DIR}/bin/kata"
+  [ ! -d "$repo_kata_bin" ] && repo_kata_bin="${SCRIPT_DIR}/../prod-docker-multi-script/bin/kata"
   if [ -d "$repo_kata_bin" ]; then
     cp -u "${repo_kata_bin}"/* "${KATA_CACHE_DIR}/" 2>/dev/null || cp "${repo_kata_bin}"/* "${KATA_CACHE_DIR}/" 2>/dev/null || true
   fi

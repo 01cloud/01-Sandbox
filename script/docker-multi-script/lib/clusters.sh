@@ -763,10 +763,21 @@ _do_phase_15d_load_scanner_images() {
     return 0
   fi
   log_info "Ensuring all language-specific scanner images are built and loaded on spokes..."
+
+  # Proactively prune dangling builder cache if disk space is low to prevent buildx "no space left on device"
+  local avail_mb
+  avail_mb=$(df -BM / 2>/dev/null | awk 'NR==2 {gsub(/M/,"",$4); print $4}')
+  if [ -n "$avail_mb" ] && [ "$avail_mb" -lt 15360 ]; then
+    log_info "Low host disk space (${avail_mb}MB free). Pruning Docker builder cache before scanner builds..."
+    docker builder prune -f >/dev/null 2>&1 || true
+  fi
+
   local build_script="${SANDBOX_REPO_DIR}/code-interpreter/scripts/build-and-load-scanners.sh"
   [ ! -f "$build_script" ] && build_script="${ROOT_DIR}/code-interpreter/scripts/build-and-load-scanners.sh"
   if [ -f "$build_script" ]; then
     bash "$build_script" --clusters "spoke1,spoke2"
+    # Clean up builder cache after all images have been built and loaded
+    docker builder prune -f >/dev/null 2>&1 || true
   else
     log_warn "build-and-load-scanners.sh not found at ${build_script}"
   fi

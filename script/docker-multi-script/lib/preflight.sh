@@ -48,6 +48,48 @@ ensure_kernel_inotify_limits() {
   fi
 }
 
+# Ensure host storage has sufficient capacity for multi-cluster KinD and image builds.
+# Extends root filesystem if unallocated LVM space is available, and prunes builder cache if low.
+ensure_disk_capacity() {
+  local SUDO=""
+  if [ "$EUID" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+  fi
+
+  # 1. Expand LVM root logical volume if volume group has unallocated capacity
+  if command -v vgs >/dev/null 2>&1 && command -v lvs >/dev/null 2>&1; then
+    local root_dev
+    root_dev=$(df --output=source / 2>/dev/null | tail -1)
+    if [[ "$root_dev" =~ ^/dev/mapper/ ]] || [[ "$root_dev" =~ ^/dev/.*-vg/ ]]; then
+      local vg_free_raw
+      vg_free_raw=$(vgs --noheadings -o vg_free --units g 2>/dev/null | tr -d ' ' | sed 's/[^0-9.]//g' | head -1 || echo "0")
+      if [ -n "$vg_free_raw" ] && [ "$(awk "BEGIN {print ($vg_free_raw > 1.0) ? 1 : 0}")" -eq 1 ]; then
+        log_info "Detected ${vg_free_raw}GB unallocated LVM storage. Expanding root filesystem..."
+        $SUDO lvextend -l +100%FREE -r "$root_dev" >/dev/null 2>&1 || true
+        log_success "Root volume resized successfully."
+      fi
+    fi
+  fi
+
+  # 2. Check available disk space and prune builder cache if tight
+  local avail_mb
+  avail_mb=$(df -BM / 2>/dev/null | awk 'NR==2 {gsub(/M/,"",$4); print $4}')
+  if [ -n "$avail_mb" ]; then
+    if [ "$avail_mb" -lt 15360 ]; then # less than 15GB
+      log_warn "Host available disk space is low (${avail_mb}MB free). Pruning Docker build cache..."
+      docker builder prune -f >/dev/null 2>&1 || true
+      avail_mb=$(df -BM / 2>/dev/null | awk 'NR==2 {gsub(/M/,"",$4); print $4}')
+      if [ "$avail_mb" -lt 10240 ]; then
+        log_warn "Host storage is below 10GB (${avail_mb}MB free). Building multiple large scanner images may require additional disk."
+      else
+        log_success "Disk space reclaimed: ${avail_mb}MB available."
+      fi
+    else
+      log_info "Host disk capacity: $(( avail_mb / 1024 ))GB available."
+    fi
+  fi
+}
+
 # Ensure Docker daemon is active and socket is accessible to the current user.
 ensure_docker_access() {
   command -v docker >/dev/null 2>&1 || return 0
@@ -456,6 +498,8 @@ https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" | \
     exit 1
   fi
   log_success "Docker daemon is running and accessible."
+
+  ensure_disk_capacity
 
   ensure_sandbox_repo || log_warn "Repository clone pending; will retry in Phase 10."
 

@@ -135,6 +135,7 @@ log_info()    { echo -e "${BLUE}${BOLD}[INFO]${NC}    $*"; }
 log_success() { echo -e "${GREEN}${BOLD}[OK]${NC}      $*"; }
 log_warn()    { echo -e "${YELLOW}${BOLD}[WARN]${NC}    $*" >&2; }
 log_error()   { echo -e "${RED}${BOLD}[ERROR]${NC}   $*" >&2; }
+log_fatal()   { echo -e "${RED}${BOLD}[FATAL]${NC}   $*" >&2; exit 1; }
 log_step() {
   echo -e "\n${CYAN}${BOLD}══════════════════════════════════════════════════════════════════════${NC}"
   echo -e "${CYAN}${BOLD}  $*${NC}"
