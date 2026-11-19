@@ -59,6 +59,15 @@ This document tracks all security vulnerabilities, Kubernetes-native architectur
 │  - Deduplicate Sealed-Secrets Controllers (kube-system vs opensandbox)     │
 │  - Pre-bake WireGuard & runsc into KinD node image (Stop runtime apt-get)  │
 │  - Secure File Permissions on .sandbox-state/wg/ (chmod 600)               │
+└─────────────────────────────────────┬──────────────────────────────────────┘
+                                      │
+┌─────────────────────────────────────▼──────────────────────────────────────┐
+│ Phase 6: P1 - Kubernetes-Native Spoke & Workload Evolution (In Progress)   │
+│  - Introduce values-spoke.yaml (First-Class Helm Spoke Target)             │
+│  - Package Kata & gVisor RuntimeClasses into Declarative Helm Templates    │
+│  - Declarative OCM Klusterlet MultipleHubs Custom Resource in Helm         │
+│  - Declarative Scanner Image Pre-Warming DaemonSet                         │
+│  - Zero-Trust Workload NetworkPolicies & PSA Restricted Enforcement        │
 └────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -228,12 +237,30 @@ This document tracks all security vulnerabilities, Kubernetes-native architectur
     - Automatically discovers peer topology from AWS SSM `/sandbox/clusters`, applies WireGuard host interface synchronization (`wg syncconf`), enforces kernel forwarding (`net.ipv4.ip_forward = 1`), and reconciles peer state into Kubernetes Custom Resources auditable via `kubectl get wireguardpeers -o wide`.
     - Live verified on Cortex: `node-network-agent` running cleanly (`1/1 Running`), all 8 cluster peers reconciled into `WireGuardPeer` resources, and active mesh traffic established without requiring host cron jobs.
 
+- [x] **4.3. Deploy Envoy Gateway as a Kubernetes-Native Subchart on Cortex** *(Completed Nov 19, 2026)*
+  - **Previous State:** Envoy Gateway ran as an ad-hoc Docker container on PrimaryHub's EC2 host (`docker run -d --name envoy-gateway`), meaning a failure or shutdown of PrimaryHub terminated the gateway itself.
+  - **Kubernetes-Native Target Implemented:**
+    - Packaged Envoy Gateway as an independent subchart: [`codeInspector/charts/envoy-gateway/`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/charts/envoy-gateway/).
+    - Deployed on dedicated Cortex cluster via [`codeInspector/values-cortex.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-cortex.yaml) exposing NodePort 30080 -> Host 80.
+    - Implemented L7 failover routing: PrimaryHub (Priority 0) and SecondaryHub (Priority 1) over cross-region WireGuard overlay.
+
 - [ ] **4.2. Long-Term Evaluation: Cilium ClusterMesh with Transparent WireGuard**
   - **Recommendation:** Evaluate replacing `kindnet` + host WireGuard bash scripts with **Cilium CNI**. Cilium supports native multi-cluster ClusterMesh with kernel-level WireGuard encryption, native Kubernetes NetworkPolicies (L3/L4/L7), and integrated Cilium Tetragon eBPF security observability out of the box.
 
 ---
 
 ### Phase 5: P3 — Codebase Hygiene, Image Pre-Baking & Deduplication
+
+- [x] **5.4. Script Codebase Deduplication & Dead Code Removal** *(Completed Nov 19, 2026)*
+  - Removed 478 lines of redundant/dead code from `script/prod-docker-multi-script/lib/`:
+    - Cleaned up shadowed duplicate `phase_02_transit_network_and_wg_keys()` in `lib/network.sh` (-196 lines).
+    - Cleaned up shadowed duplicate `phase_16_join_spokes_to_ocm()` in `lib/ocm.sh` (-238 lines).
+    - Cleaned up shadowed duplicate `phase_13_create_spoke_clusters()` in `lib/clusters.sh` (-44 lines).
+    - Fixed cluster classification in `lib/globals.sh` so `cortex` is not misclassified as an OCM spoke.
+
+- [x] **5.5. Native Integration of Cortex Cluster Deployment in `docker-multi-cluster.sh`** *(Completed Nov 19, 2026)*
+  - Added `phase_12c_cortex_deploy` in [`lib/deploy.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/deploy.sh) and hooked into [`lib/main.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/main.sh).
+  - Provisioning completely fresh EC2 instances from `prod.env` now configures all 5 clusters (PrimaryHub, SecondaryHub, Spoke1, Spoke2, Cortex) end-to-end in one single execution.
 
 - [ ] **5.1. Deduplicate Sealed-Secrets Controllers on PrimaryHub**
   - **Finding:** PrimaryHub has two SealedSecrets controllers running simultaneously:
@@ -261,7 +288,33 @@ This document tracks all security vulnerabilities, Kubernetes-native architectur
 
 ---
 
-## 4. Verification & Validation Recipes
+### Phase 6: P1 — Kubernetes-Native Spoke & Workload Evolution (`values-spoke.yaml`)
+
+- [x] **6.1. Introduce `values-spoke.yaml` for Spoke Clusters** *(Completed Nov 19, 2026)*
+  - **Objective:** Enable Spoke clusters to be first-class Helm release targets (`helm upgrade --install codeinspector ./codeInspector -f values-spoke.yaml`).
+  - **Configuration:**
+    - Created [`codeInspector/values-spoke.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-spoke.yaml).
+    - Disables Hub-only subcharts (`cloudnative-pg`, `cortex`, `apiServer`, `rabbitmq`, `envoy-gateway`, `agentgateway`, `agentgateway-controller`, `grafana`, `metallb`, `opensandbox`).
+    - Enables Spoke workload resources: `nodeNetworkAgent` (WireGuard peer sync DaemonSet), `sealed-secrets`, `RuntimeClass` (`gvisor`, `kata-fc`), and `prometheus` scraping with Cortex S3 `remote_write` (`https://10.99.0.50:8443/api/v1/push`).
+    - Updated [`script/prod-docker-multi-script/upgrade-helm.sh`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/upgrade-helm.sh) with `upgrade_spoke()` supporting targets `spoke1`, `spoke2`, `spokes`, and `all`.
+    - Verified with `helm template test-spoke codeInspector/ -f codeInspector/values.yaml -f codeInspector/values-spoke.yaml`.
+
+- [ ] **6.2. Package Kata Containers & gVisor Runtime Classes into Helm Templates**
+  - **Objective:** Move procedural bash installs (`docker run golang build containerd`, `apt-get install lvm2`, `curl runsc`) into declarative Helm templates / DaemonSets.
+  - **Components:**
+    - Move [`kata-fc-daemonset.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/script/prod-docker-multi-script/lib/kata-fc-daemonset.yaml) into `codeInspector/templates/runtimes/kata-fc-daemonset.yaml`.
+    - Package gVisor installer DaemonSet and declare `RuntimeClass` for `gvisor` and `kata-fc`.
+    - Enable conditionally via `runtimes.kata.enabled` and `runtimes.gvisor.enabled`.
+
+- [ ] **6.3. Declarative OCM Klusterlet MultipleHubs Custom Resource**
+  - **Objective:** Manage Spoke OCM Klusterlet registration via declarative Helm template (`codeInspector/templates/ocm-klusterlet.yaml`).
+  - **Configuration:** Includes `featureGates: [MultipleHubs: Enable]` and local secrets failover chain (`primaryhub-kubeconfig`, `secondaryhub-kubeconfig`).
+
+- [ ] **6.4. Declarative Language Scanner Preloader DaemonSet**
+  - **Objective:** Replace bash loop `crictl pull` with a Kubernetes DaemonSet caching the 10 language scanner images onto spoke disks.
+
+- [ ] **6.5. Zero-Trust Network Policies & Pod Security Standards (PSA: restricted)**
+  - **Objective:** Deploy default-deny NetworkPolicies for `opensandbox-workloads` and label namespaces with `pod-security.kubernetes.io/enforce: restricted`.
 
 Use these one-line commands to audit and verify completion of the action items above:
 

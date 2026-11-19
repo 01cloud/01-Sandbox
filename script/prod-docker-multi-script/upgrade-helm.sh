@@ -124,6 +124,50 @@ upgrade_cortex() {
   log_success "Cortex Helm upgrade complete!"
 }
 
+upgrade_spoke() {
+  local spoke="$1"
+  local target_host="${NODE_HOSTS[$spoke]:-$spoke}"
+  local wg_ip="${WG_IPS[$spoke]:-}"
+  log_step "Upgrading Helm release on Spoke [${spoke}]..."
+
+  ensure_node_ssm_access "$target_host"
+  _sync_remote_kubeconfig "$spoke" "$target_host" "$wg_ip"
+  ensure_cluster_ssh_tunnel "$spoke" "$target_host"
+
+  local ctx="kind-${spoke}"
+  if ! kubectl --kubeconfig "$KUBECONFIG" --context "$ctx" cluster-info >/dev/null 2>&1; then
+    log_warn "Cannot reach ${ctx}. Skipping ${spoke} Helm upgrade."
+    return 0
+  fi
+
+  _apply_chart_crds "$ctx"
+
+  # Adopt any pre-existing RuntimeClasses if created prior to Helm release
+  for rc in gvisor kata-fc; do
+    if kubectl --kubeconfig "$KUBECONFIG" --context "$ctx" get runtimeclass "$rc" >/dev/null 2>&1; then
+      kubectl --kubeconfig "$KUBECONFIG" --context "$ctx" annotate --overwrite runtimeclass "$rc" \
+        meta.helm.sh/release-name=codeinspector \
+        meta.helm.sh/release-namespace=opensandbox-system >/dev/null 2>&1 || true
+      kubectl --kubeconfig "$KUBECONFIG" --context "$ctx" label --overwrite runtimeclass "$rc" \
+        app.kubernetes.io/managed-by=Helm >/dev/null 2>&1 || true
+    fi
+  done
+
+  log_info "Running helm upgrade for codeinspector on ${ctx}..."
+  helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
+    --skip-crds \
+    --kubeconfig "$KUBECONFIG" \
+    --kube-context "$ctx" \
+    --namespace opensandbox-system \
+    --create-namespace \
+    --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --values "${CODE_INSPECTOR_DIR}/values-spoke.yaml" \
+    --set prometheus.clusterName="${spoke}" \
+    --timeout 5m
+
+  log_success "Spoke [${spoke}] Helm upgrade complete!"
+}
+
 case "$TARGET_HUB" in
   primary|primaryhub)
     upgrade_primary
@@ -134,13 +178,27 @@ case "$TARGET_HUB" in
   cortex)
     upgrade_cortex
     ;;
+  spoke1)
+    upgrade_spoke "spoke1"
+    ;;
+  spoke2)
+    upgrade_spoke "spoke2"
+    ;;
+  spokes)
+    for s in "${SPOKE_LIST[@]}"; do
+      upgrade_spoke "$s"
+    done
+    ;;
   all)
     upgrade_primary
     upgrade_secondary
     upgrade_cortex
+    for s in "${SPOKE_LIST[@]}"; do
+      upgrade_spoke "$s"
+    done
     ;;
   *)
-    echo "Unknown target: $TARGET_HUB (valid options: primaryhub, secondaryhub, cortex, all)"
+    echo "Unknown target: $TARGET_HUB (valid options: primaryhub, secondaryhub, cortex, spoke1, spoke2, spokes, all)"
     exit 1
     ;;
 esac

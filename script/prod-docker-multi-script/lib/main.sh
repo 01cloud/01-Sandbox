@@ -173,6 +173,7 @@ main() {
   phase_15d_load_scanner_images
   phase_16_join_spokes_to_ocm
   phase_17_sync_spokes_to_secondaryhub
+  phase_18_deploy_spokes_helm
 
   run_verification
   _print_summary

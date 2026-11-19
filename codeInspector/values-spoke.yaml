@@ -1,0 +1,108 @@
+################################################################
+# Spoke Workload Cluster Values Profile
+################################################################
+# This profile configures an autonomous Spoke cluster (e.g. spoke1, spoke2).
+# It completely disables all Hub-level management components (PostgreSQL,
+# Valkey, apiServer, Cortex, Envoy Gateway, Grafana) and activates:
+#   1. Kubernetes-Native Node Network Agent (WireGuard mesh sync)
+#   2. Local Prometheus Scraper with Cortex S3 remote_write
+#   3. Workload RuntimeClasses (gVisor & Kata Containers)
+#   4. Sealed Secrets Decryption
+################################################################
+
+global:
+  clusterRole: "spoke"
+  ocm:
+    enabled: true
+    role: "spoke"
+    clusterSet: "sandbox-spokes"
+
+# ── Disable Hub-Only Ingress & Management Gateways ───────────
+agentgateway:
+  enabled: false
+
+agentgateway-controller:
+  enabled: false
+
+# ── Disable Hub API Server & Storage Backends ─────────────────
+apiServer:
+  enabled: false
+
+cloudnative-pg:
+  enabled: false
+
+# ── Disable Hub-Level Ingress Routing & Storage Engine ────────
+cortex:
+  enabled: false
+
+envoy-gateway:
+  enabled: false
+
+grafana:
+  enabled: false
+
+metallb:
+  enabled: false
+
+# OpenSandbox Server/Controller run on Hubs; Spokes receive ManifestWorks
+opensandbox:
+  enabled: false
+
+opensandboxResourcePool:
+  enabled: false
+
+# ── Enable Local Decryption for Spoke Workloads ───────────────
+sealed-secrets:
+  enabled: true
+
+# ── Kubernetes-Native Node Network Agent (WireGuard Mesh) ─────
+nodeNetworkAgent:
+  enabled: true
+  namespace: kube-system
+  image: "alpine:3.19"
+  syncInterval: 60
+  awsRegion: "us-east-1"
+  autoDisableHostCron: true
+
+# ── Spoke Prometheus Scraper (Metrics Forwarding to Cortex) ───
+prometheus:
+  enabled: true
+  namespace: opensandbox-system
+  clusterRole: "spoke"
+  clusterName: "spoke"
+  retention: "2d"
+  ingressRoute:
+    enabled: false
+  cnpgMetrics:
+    enabled: false
+  cortexRotator:
+    enabled: false
+  persistence:
+    enabled: true
+    pvcName: "prometheus-pvc"
+    storageClass: "standard"
+    size: "5Gi"
+  service:
+    type: ClusterIP
+    port: 9090
+    nodePort:
+      enabled: true
+      port: 30900
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "256Mi"
+  remoteWrite:
+    - url: "https://10.99.0.50:8443/api/v1/push"
+      tls_config:
+        insecure_skip_verify: true
+      basic_auth:
+        username: "cortex-writer"
+        password: "CortexWriterSecret2026!"
+      queue_config:
+        capacity: 2500
+        max_samples_per_send: 500
+        batch_send_deadline: "5s"

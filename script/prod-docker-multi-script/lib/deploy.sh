@@ -422,3 +422,67 @@ _do_phase_12c_cortex_deploy() {
 phase_12c_cortex_deploy() {
   run_phase "12c" "Cortex – Observability Engine & Envoy Gateway Deployment" _check_phase_12c _do_phase_12c_cortex_deploy
 }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Phase 18: Deploy Helm Release on All Spoke Clusters (values-spoke.yaml)
+# ──────────────────────────────────────────────────────────────────────────────
+
+_check_phase_18() {
+  for spoke in "${SPOKE_LIST[@]}"; do
+    local ctx="kind-${spoke}"
+    helm status codeinspector --kubeconfig "$KUBECONFIG" --kube-context "$ctx" -n opensandbox-system >/dev/null 2>&1 || return 1
+  done
+  return 0
+}
+
+_do_phase_18_deploy_spokes_helm() {
+  for spoke in "${SPOKE_LIST[@]}"; do
+    local target_host="${NODE_HOSTS[$spoke]:-$spoke}"
+    local wg_ip="${WG_IPS[$spoke]:-}"
+    log_step "Deploying Helm release on Spoke [${spoke}] via values-spoke.yaml..."
+
+    ensure_node_ssm_access "$target_host"
+    _sync_remote_kubeconfig "$spoke" "$target_host" "$wg_ip"
+    ensure_cluster_ssh_tunnel "$spoke" "$target_host"
+
+    local ctx="kind-${spoke}"
+    if ! kubectl --kubeconfig "$KUBECONFIG" --context "$ctx" cluster-info >/dev/null 2>&1; then
+      log_warn "Cannot reach ${ctx}. Skipping ${spoke} Helm deployment."
+      continue
+    fi
+
+    # Ensure WireGuardPeer CRD is up-to-date
+    if [ -f "${CODE_INSPECTOR_DIR}/crds/wireguard-peer-crd.yaml" ]; then
+      kubectl --kubeconfig "$KUBECONFIG" --context "$ctx" apply -f "${CODE_INSPECTOR_DIR}/crds/wireguard-peer-crd.yaml" >/dev/null 2>&1 || true
+    fi
+
+    # Adopt any pre-existing RuntimeClasses if created prior to Helm release
+    for rc in gvisor kata-fc; do
+      if kubectl --kubeconfig "$KUBECONFIG" --context "$ctx" get runtimeclass "$rc" >/dev/null 2>&1; then
+        kubectl --kubeconfig "$KUBECONFIG" --context "$ctx" annotate --overwrite runtimeclass "$rc" \
+          meta.helm.sh/release-name=codeinspector \
+          meta.helm.sh/release-namespace=opensandbox-system >/dev/null 2>&1 || true
+        kubectl --kubeconfig "$KUBECONFIG" --context "$ctx" label --overwrite runtimeclass "$rc" \
+          app.kubernetes.io/managed-by=Helm >/dev/null 2>&1 || true
+      fi
+    done
+
+    log_info "Running helm upgrade --install for codeinspector on ${ctx}..."
+    helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
+      --skip-crds \
+      --kubeconfig "$KUBECONFIG" \
+      --kube-context "$ctx" \
+      --namespace opensandbox-system \
+      --create-namespace \
+      --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+      --values "${CODE_INSPECTOR_DIR}/values-spoke.yaml" \
+      --set prometheus.clusterName="${spoke}" \
+      --timeout 5m
+
+    log_success "Spoke [${spoke}] Helm deployment complete!"
+  done
+}
+
+phase_18_deploy_spokes_helm() {
+  run_phase "18" "Deploying Helm Release on All Spoke Clusters (values-spoke.yaml)" _check_phase_18 _do_phase_18_deploy_spokes_helm
+}
