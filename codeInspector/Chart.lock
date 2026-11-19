@@ -2,12 +2,18 @@ dependencies:
 - name: agentgateway
   repository: ""
   version: 0.1.0
+- name: agentgateway-controller
+  repository: ""
+  version: v1.0.1
 - name: apiServer
   repository: ""
   version: 0.1.0
-- name: z1sandbox-website
+- name: prometheus
   repository: ""
-  version: 2.0.0
+  version: 0.1.0
+- name: grafana
+  repository: ""
+  version: 0.1.0
 - name: metallb
   repository: ""
   version: 0.1.0
@@ -20,5 +26,17 @@ dependencies:
 - name: opensandbox
   repository: ""
   version: 0.1.0
-digest: sha256:63d1c6718aeddb31ddc48072503f83252b61c4e7931d55dc4a260c959542ea46
-generated: "2026-04-29T12:31:31.134027768+05:45"
+- name: sealed-secrets
+  repository: ""
+  version: 2.5.19
+- name: cloudnative-pg
+  repository: ""
+  version: 0.29.0
+- name: cortex
+  repository: ""
+  version: 0.1.0
+- name: envoy-gateway
+  repository: ""
+  version: 0.1.0
+digest: sha256:198af0be4f0ebc2ff9b13ac59aec2a3c73f16b04958a29b2dc7daaf449553c5a
+generated: "2026-11-18T18:03:49.160437099+05:45"

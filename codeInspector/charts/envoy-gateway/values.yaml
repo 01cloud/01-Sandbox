@@ -1,0 +1,43 @@
+replicaCount: 1
+
+image:
+  repository: envoyproxy/envoy
+  tag: v1.31-latest
+  pullPolicy: IfNotPresent
+
+namespace: opensandbox-system
+
+primaryHub:
+  host: "10.99.0.1"
+  port: 80
+  priority: 0
+
+secondaryHub:
+  host: "10.99.0.2"
+  port: 80
+  priority: 1
+
+healthCheck:
+  interval: "1s"
+  timeout: "1s"
+  unhealthyThreshold: 2
+  healthyThreshold: 2
+
+service:
+  type: NodePort
+  httpPort: 80
+  nodePort: 30080
+  adminPort: 9901
+  adminNodePort: 30901
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

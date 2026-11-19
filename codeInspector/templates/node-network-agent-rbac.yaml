@@ -1,0 +1,44 @@
+{{- if and .Values.nodeNetworkAgent (default false .Values.nodeNetworkAgent.enabled) }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: node-network-agent
+  namespace: {{ default "kube-system" .Values.nodeNetworkAgent.namespace }}
+  labels:
+    app.kubernetes.io/name: node-network-agent
+    app.kubernetes.io/component: node-network-agent
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: node-network-agent
+  labels:
+    app.kubernetes.io/name: node-network-agent
+    app.kubernetes.io/component: node-network-agent
+rules:
+  - apiGroups: ["networking.opensandbox.io"]
+    resources: ["wireguardpeers", "wireguardpeers/status"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["nodes", "nodes/status"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["configmaps", "events"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: node-network-agent
+  labels:
+    app.kubernetes.io/name: node-network-agent
+    app.kubernetes.io/component: node-network-agent
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: node-network-agent
+subjects:
+  - kind: ServiceAccount
+    name: node-network-agent
+    namespace: {{ default "kube-system" .Values.nodeNetworkAgent.namespace }}
+{{- end }}

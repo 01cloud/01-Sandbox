@@ -125,7 +125,7 @@ _load_cluster_registry() {
         if [ "$c_role" == "hub" ]; then
           HUB_PRIORITIES["$c_name"]="${c_prio:-0}"
           raw_hubs+=("${c_prio}:${c_name}")
-        else
+        elif [ "$c_role" == "spoke" ]; then
           SPOKE_LIST+=("$c_name")
         fi
       done < <(echo "$cluster_params" | jq -c '.[]' 2>/dev/null || true)
@@ -136,8 +136,7 @@ _load_cluster_registry() {
         if [ "${#raw_hubs[@]}" -gt 0 ]; then
           while IFS= read -r item; do
             [ -n "$item" ] && HUB_LIST+=("${item#*:}")
-          done < <(printf '%s
-' "${raw_hubs[@]}" | sort -n -t: -k1)
+          done < <(printf '%s\n' "${raw_hubs[@]}" | sort -n -t: -k1)
         fi
       fi
     fi
@@ -145,7 +144,7 @@ _load_cluster_registry() {
 
   # 2. Fallback to prod.env / environment / static defaults
   if [ "$ssm_loaded" = false ]; then
-    ALL_NODES=("primaryhub" "secondaryhub" "spoke1" "spoke2")
+    ALL_NODES=("primaryhub" "secondaryhub" "spoke1" "spoke2" "cortex")
     HUB_LIST=("primaryhub" "secondaryhub")
     SPOKE_LIST=("spoke1" "spoke2")
 
@@ -153,26 +152,31 @@ _load_cluster_registry() {
     NODE_ROLES["secondaryhub"]="hub"; HUB_PRIORITIES["secondaryhub"]="2"
     NODE_ROLES["spoke1"]="spoke"
     NODE_ROLES["spoke2"]="spoke"
+    NODE_ROLES["cortex"]="cortex"
 
     NODE_REGIONS["primaryhub"]="${PRIMARYHUB_REGION:-us-east-1}"
     NODE_REGIONS["secondaryhub"]="${SECONDARYHUB_REGION:-eu-west-1}"
     NODE_REGIONS["spoke1"]="${SPOKE1_REGION:-eu-central-1}"
     NODE_REGIONS["spoke2"]="${SPOKE2_REGION:-ap-south-1}"
+    NODE_REGIONS["cortex"]="${CORTEX_REGION:-us-east-1}"
 
     NODE_TARGETS["primaryhub"]="${PRIMARYHUB_TARGET:-${PRIMARYHUB_HOST:-127.0.0.1}}"
     NODE_TARGETS["secondaryhub"]="${SECONDARYHUB_TARGET:-${SECONDARYHUB_HOST:-127.0.0.1}}"
     NODE_TARGETS["spoke1"]="${SPOKE1_TARGET:-${SPOKE1_HOST:-127.0.0.1}}"
     NODE_TARGETS["spoke2"]="${SPOKE2_TARGET:-${SPOKE2_HOST:-127.0.0.1}}"
+    NODE_TARGETS["cortex"]="${CORTEX_TARGET:-${CORTEX_HOST:-127.0.0.1}}"
 
     NODE_HOSTS["primaryhub"]="${PRIMARYHUB_HOST:-127.0.0.1}"
     NODE_HOSTS["secondaryhub"]="${SECONDARYHUB_HOST:-127.0.0.1}"
     NODE_HOSTS["spoke1"]="${SPOKE1_HOST:-127.0.0.1}"
     NODE_HOSTS["spoke2"]="${SPOKE2_HOST:-127.0.0.1}"
+    NODE_HOSTS["cortex"]="${CORTEX_HOST:-127.0.0.1}"
 
     WG_IPS["primaryhub"]="${WG_HUB1_IP:-10.99.0.1}"
     WG_IPS["secondaryhub"]="${WG_HUB2_IP:-10.99.0.2}"
     WG_IPS["spoke1"]="${WG_SPOKE1_IP:-10.99.0.3}"
     WG_IPS["spoke2"]="${WG_SPOKE2_IP:-10.99.0.4}"
+    WG_IPS["cortex"]="${WG_IPS[cortex]:-10.99.0.50}"
   fi
 
   # 3. Synchronize legacy single-variable bindings for backward compatibility

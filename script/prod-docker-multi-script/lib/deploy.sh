@@ -372,3 +372,53 @@ ROUTE_EOF
 phase_12_secondaryhub_deploy() {
   run_phase "12" "SecondaryHub – PostgreSQL First, then Full Stack + Failover Controller" _check_phase_12 _do_phase_12_secondaryhub_deploy
 }
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Phase 12c: Deploy Cortex Observability & Envoy Gateway Stack
+# ──────────────────────────────────────────────────────────────────────────────
+
+_check_phase_12c() {
+  local cortex_target="${CORTEX_TARGET:-${CORTEX_HOST:-}}"
+  [ -z "$cortex_target" ] && return 0
+  kubectl --kubeconfig "$KUBECONFIG" --context kind-cortex get deployment cortex -n opensandbox-system >/dev/null 2>&1 || return 1
+  return 0
+}
+
+_do_phase_12c_cortex_deploy() {
+  local cortex_target="${CORTEX_TARGET:-${CORTEX_HOST:-}}"
+  if [ -z "$cortex_target" ]; then
+    log_info "Cortex target not configured in prod.env – skipping Cortex deployment."
+    return 0
+  fi
+
+  log_step "Deploying Cortex Observability & Envoy Gateway Stack..."
+  ensure_node_ssm_access "$cortex_target"
+  _sync_remote_kubeconfig "cortex" "$cortex_target" "${WG_IPS[cortex]:-10.99.0.50}"
+  ensure_cluster_ssh_tunnel "cortex" "$cortex_target"
+
+  if ! kubectl --kubeconfig "$KUBECONFIG" --context kind-cortex cluster-info >/dev/null 2>&1; then
+    log_warn "Cannot reach kind-cortex. Skipping Cortex deployment."
+    return 0
+  fi
+
+  if [ -f "${CODE_INSPECTOR_DIR}/crds/wireguard-peer-crd.yaml" ]; then
+    kubectl --kubeconfig "$KUBECONFIG" --context kind-cortex apply -f "${CODE_INSPECTOR_DIR}/crds/wireguard-peer-crd.yaml" >/dev/null 2>&1 || true
+  fi
+
+  log_info "Running helm upgrade --install for codeinspector on kind-cortex..."
+  helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \
+    --skip-crds \
+    --kubeconfig "$KUBECONFIG" \
+    --kube-context kind-cortex \
+    --namespace opensandbox-system \
+    --create-namespace \
+    --values "${CODE_INSPECTOR_DIR}/values.yaml" \
+    --values "${CODE_INSPECTOR_DIR}/values-cortex.yaml" \
+    --timeout 5m
+
+  log_success "Cortex Observability & Envoy Gateway deployed successfully."
+}
+
+phase_12c_cortex_deploy() {
+  run_phase "12c" "Cortex – Observability Engine & Envoy Gateway Deployment" _check_phase_12c _do_phase_12c_cortex_deploy
+}

@@ -53,3 +53,6 @@ dependencies:
   - name: cortex
     version: 0.1.0
     condition: cortex.enabled
+  - name: envoy-gateway
+    version: 0.1.0
+    condition: envoy-gateway.enabled

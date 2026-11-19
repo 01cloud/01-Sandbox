@@ -177,196 +177,6 @@ APPLY_WG_EOF
 }
 
 phase_02_transit_network_and_wg_keys() {
-  local is_remote=false
-  if [ "$PRIMARYHUB_HOST" != "127.0.0.1" ] && [ "$PRIMARYHUB_HOST" != "localhost" ]; then
-    is_remote=true
-  fi
-
-  if ! $is_remote; then
-    if ! docker network ls --format '{{.Name}}' | grep -q "^${TRANSIT_NET_NAME}$"; then
-      log_info "Creating local Docker transit network ($TRANSIT_SUBNET)..."
-      docker network create \
-        --driver bridge \
-        --subnet "$TRANSIT_SUBNET" \
-        --opt "com.docker.network.bridge.name"="br-01transit" \
-        "$TRANSIT_NET_NAME"
-    fi
-  else
-    log_info "Operating in remote multi-region mode across EC2 nodes: ${PRIMARYHUB_HOST}, ${SECONDARYHUB_HOST}, ${SPOKE1_HOST}, ${SPOKE2_HOST}."
-  fi
-
-  # 1. Generate WireGuard keypairs for all 5 entities
-  for entity in gateway primaryhub secondaryhub spoke1 spoke2; do
-    if [ ! -s "${WG_DIR}/${entity}.key" ] || [ ! -s "${WG_DIR}/${entity}.pub" ]; then
-      log_info "Generating WireGuard keypair for $entity..."
-      read -r priv pub < <(python3 -c "
-from cryptography.hazmat.primitives.asymmetric import x25519
-import base64
-k = x25519.X25519PrivateKey.generate()
-print(f'{base64.b64encode(k.private_bytes_raw()).decode()} {base64.b64encode(k.public_key().public_bytes_raw()).decode()}')
-")
-      echo "$priv" > "${WG_DIR}/${entity}.key"
-      echo "$pub"  > "${WG_DIR}/${entity}.pub"
-    fi
-    WG_PRIV[$entity]=$(tr -d '\r\n' < "${WG_DIR}/${entity}.key")
-    WG_PUB[$entity]=$(tr -d '\r\n'  < "${WG_DIR}/${entity}.pub")
-  done
-
-  log_success "WireGuard keypairs ready for all 5 entities."
-
-  # 2. In remote mode, generate and deploy wg0.conf to each EC2 instance
-  if $is_remote; then
-    init_node_private_ips
-    log_info "Configuring cross-region WireGuard mesh on all 4 EC2 instances over VPC Peering (Private IPs)..."
-
-    # Config for PrimaryHub (includes VIP 10.99.0.100)
-    cat > "${WG_DIR}/wg0-primaryhub.conf" <<EOF
-[Interface]
-Address = ${WG_HUB1_IP}/24, ${WG_VIP}/32
-ListenPort = ${WG_PORT}
-PrivateKey = ${WG_PRIV["primaryhub"]}
-
-[Peer]
-# SecondaryHub
-PublicKey = ${WG_PUB["secondaryhub"]}
-AllowedIPs = ${WG_HUB2_IP}/32
-Endpoint = ${SECONDARYHUB_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-
-[Peer]
-# Spoke1
-PublicKey = ${WG_PUB["spoke1"]}
-AllowedIPs = ${WG_SPOKE1_IP}/32
-Endpoint = ${SPOKE1_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-
-[Peer]
-# Spoke2
-PublicKey = ${WG_PUB["spoke2"]}
-AllowedIPs = ${WG_SPOKE2_IP}/32
-Endpoint = ${SPOKE2_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-EOF
-
-    # Config for SecondaryHub
-    cat > "${WG_DIR}/wg0-secondaryhub.conf" <<EOF
-[Interface]
-Address = ${WG_HUB2_IP}/24
-ListenPort = ${WG_PORT}
-PrivateKey = ${WG_PRIV["secondaryhub"]}
-
-[Peer]
-# PrimaryHub + VIP
-PublicKey = ${WG_PUB["primaryhub"]}
-AllowedIPs = ${WG_HUB1_IP}/32, ${WG_VIP}/32
-Endpoint = ${PRIMARYHUB_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-
-[Peer]
-# Spoke1
-PublicKey = ${WG_PUB["spoke1"]}
-AllowedIPs = ${WG_SPOKE1_IP}/32
-Endpoint = ${SPOKE1_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-
-[Peer]
-# Spoke2
-PublicKey = ${WG_PUB["spoke2"]}
-AllowedIPs = ${WG_SPOKE2_IP}/32
-Endpoint = ${SPOKE2_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-EOF
-
-    # Config for Spoke1
-    cat > "${WG_DIR}/wg0-spoke1.conf" <<EOF
-[Interface]
-Address = ${WG_SPOKE1_IP}/24
-ListenPort = ${WG_PORT}
-PrivateKey = ${WG_PRIV["spoke1"]}
-
-[Peer]
-# PrimaryHub + VIP
-PublicKey = ${WG_PUB["primaryhub"]}
-AllowedIPs = ${WG_HUB1_IP}/32, ${WG_VIP}/32
-Endpoint = ${PRIMARYHUB_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-
-[Peer]
-# SecondaryHub
-PublicKey = ${WG_PUB["secondaryhub"]}
-AllowedIPs = ${WG_HUB2_IP}/32
-Endpoint = ${SECONDARYHUB_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-
-[Peer]
-# Spoke2
-PublicKey = ${WG_PUB["spoke2"]}
-AllowedIPs = ${WG_SPOKE2_IP}/32
-Endpoint = ${SPOKE2_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-EOF
-
-    # Config for Spoke2
-    cat > "${WG_DIR}/wg0-spoke2.conf" <<EOF
-[Interface]
-Address = ${WG_SPOKE2_IP}/24
-ListenPort = ${WG_PORT}
-PrivateKey = ${WG_PRIV["spoke2"]}
-
-[Peer]
-# PrimaryHub + VIP
-PublicKey = ${WG_PUB["primaryhub"]}
-AllowedIPs = ${WG_HUB1_IP}/32, ${WG_VIP}/32
-Endpoint = ${PRIMARYHUB_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-
-[Peer]
-# SecondaryHub
-PublicKey = ${WG_PUB["secondaryhub"]}
-AllowedIPs = ${WG_HUB2_IP}/32
-Endpoint = ${SECONDARYHUB_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-
-[Peer]
-# Spoke1
-PublicKey = ${WG_PUB["spoke1"]}
-AllowedIPs = ${WG_SPOKE1_IP}/32
-Endpoint = ${SPOKE1_PRIVATE_IP}:${WG_PORT}
-PersistentKeepalive = 25
-EOF
-
-    # Push and activate wg0 on each remote EC2 node
-    local remote_nodes=("primaryhub:$PRIMARYHUB_HOST" "secondaryhub:$SECONDARYHUB_HOST" "spoke1:$SPOKE1_HOST" "spoke2:$SPOKE2_HOST")
-    for r_entry in "${remote_nodes[@]}"; do
-      local r_name="${r_entry%%:*}"
-      local r_host="${r_entry##*:}"
-      log_info "Deploying WireGuard wg0 on ${r_name} (${r_host})..."
-
-      remote_copy_to "$r_host" "${WG_DIR}/wg0-${r_name}.conf" "/tmp/wg0.conf"
-      remote_exec "$r_host" bash -s << 'APPLY_WG_EOF'
-set -e
-sudo mkdir -p /etc/wireguard
-sudo cp /tmp/wg0.conf /etc/wireguard/wg0.conf
-sudo chmod 600 /etc/wireguard/wg0.conf
-sudo systemctl enable wg-quick@wg0 2>/dev/null || true
-sudo systemctl restart wg-quick@wg0 2>/dev/null || sudo wg-quick up wg0 2>/dev/null || true
-# Enforce DOCKER-USER firewall to restrict database and internal NodePort services to wg0 and loopback
-sudo iptables -C DOCKER-USER -i wg0 -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || sudo iptables -I DOCKER-USER 1 -i wg0 -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || true
-sudo iptables -C DOCKER-USER -i lo -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || sudo iptables -I DOCKER-USER 2 -i lo -p tcp -m multiport --dports 30432,30379,30900 -j ACCEPT 2>/dev/null || true
-sudo iptables -C DOCKER-USER -p tcp -m multiport --dports 30432,30379,30900 -j DROP 2>/dev/null || sudo iptables -I DOCKER-USER 3 -p tcp -m multiport --dports 30432,30379,30900 -j DROP 2>/dev/null || true
-APPLY_WG_EOF
-    done
-
-    # Verify cross-region overlay ping connectivity from PrimaryHub
-    log_info "Testing cross-region WireGuard mesh connectivity..."
-    sleep 3
-    remote_exec "$PRIMARYHUB_HOST" "ping -c 2 -W 2 ${WG_HUB2_IP} >/dev/null 2>&1" && log_success "Mesh: PrimaryHub <-> SecondaryHub reachable over ${WG_HUB2_IP}!" || log_warn "PrimaryHub <-> SecondaryHub ping pending..."
-    remote_exec "$PRIMARYHUB_HOST" "ping -c 2 -W 2 ${WG_SPOKE1_IP} >/dev/null 2>&1" && log_success "Mesh: PrimaryHub <-> Spoke1 reachable over ${WG_SPOKE1_IP}!" || log_warn "PrimaryHub <-> Spoke1 ping pending..."
-    remote_exec "$PRIMARYHUB_HOST" "ping -c 2 -W 2 ${WG_SPOKE2_IP} >/dev/null 2>&1" && log_success "Mesh: PrimaryHub <-> Spoke2 reachable over ${WG_SPOKE2_IP}!" || log_warn "PrimaryHub <-> Spoke2 ping pending..."
-  fi
-}
-
-phase_02_transit_network_and_wg_keys() {
   run_phase "02" "Transit Network & WireGuard Mesh Generation" _check_phase_02 _do_phase_02_transit_network_and_wg_keys
 }
 
@@ -624,8 +434,10 @@ static_resources:
                 address: 10.99.0.2
                 port_value: 80
 ENVOY_REMOTE_EOF
-    remote_copy_to "$PRIMARYHUB_HOST" "${ENVOY_DIR}/envoy.yaml" "/tmp/envoy.yaml"
+    remote_exec "$PRIMARYHUB_HOST" "sudo mkdir -p /etc/envoy && sudo rm -rf /tmp/envoy.yaml"
+    remote_copy_to "$PRIMARYHUB_HOST" "${ENVOY_DIR}/envoy.yaml" "/etc/envoy/envoy.yaml"
     remote_exec "$PRIMARYHUB_HOST" bash -s << REMOTE_ENVOY_EOF
+sudo ln -sf /etc/envoy/envoy.yaml /tmp/envoy.yaml
 local_kind_ip=\$(docker inspect primaryhub-control-plane -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' 2>/dev/null || true)
 if [ -n "\$local_kind_ip" ]; then
   sudo ip route replace 172.30.0.200/32 via "\$local_kind_ip" 2>/dev/null || true
@@ -636,7 +448,7 @@ docker run -d --name envoy-gateway \
   -e ENVOY_UID=0 \
   --restart unless-stopped \
   --net host \
-  -v /tmp/envoy.yaml:/etc/envoy/envoy.yaml:ro \
+  -v /etc/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro \
   $envoy_image -c /etc/envoy/envoy.yaml
 REMOTE_ENVOY_EOF
     log_success "Envoy Gateway deployed on PrimaryHub EC2 host (Port 80)."

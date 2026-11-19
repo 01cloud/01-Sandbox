@@ -1,0 +1,115 @@
+{{- if and .Values.nodeNetworkAgent (default false .Values.nodeNetworkAgent.enabled) }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: node-network-agent-scripts
+  namespace: {{ default "kube-system" .Values.nodeNetworkAgent.namespace }}
+  labels:
+    app.kubernetes.io/name: node-network-agent
+    app.kubernetes.io/component: node-network-agent
+data:
+  sync-wireguard.sh: |
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    echo "=== Node Network Agent: Initializing WireGuard Mesh & Kernel Forwarding ==="
+
+    # 1. Enable kernel forwarding on host
+    sysctl -w net.ipv4.ip_forward=1 2>/dev/null || true
+    sysctl -w net.ipv4.conf.all.forwarding=1 2>/dev/null || true
+
+    # 2. Ensure iptables FORWARD and MASQUERADE rules for wg0
+    iptables -C FORWARD -i wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -i wg0 -j ACCEPT 2>/dev/null || true
+    iptables -C FORWARD -o wg0 -j ACCEPT 2>/dev/null || iptables -A FORWARD -o wg0 -j ACCEPT 2>/dev/null || true
+    iptables -t nat -C POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || iptables -t nat -A POSTROUTING -o wg0 -j MASQUERADE 2>/dev/null || true
+
+    # 3. Disable legacy host cron if requested
+    if [ "${AUTO_DISABLE_HOST_CRON:-true}" = "true" ] && [ -f /host/etc/cron.d/wireguard-sync ]; then
+      echo "Disabling legacy host cron /etc/cron.d/wireguard-sync..."
+      rm -f /host/etc/cron.d/wireguard-sync 2>/dev/null || true
+    fi
+
+    # In-cluster Kubernetes API access
+    TOKEN=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token 2>/dev/null || true)
+    CACERT="/var/run/secrets/kubernetes.io/serviceaccount/ca.crt"
+    APISERVER="${KUBERNETES_API_URL:-https://127.0.0.1:6443}"
+
+    sync_mesh() {
+      local region="${AWS_REGION:-us-east-1}"
+      local self_name="${NODE_NAME:-$(hostname)}"
+      local conf="/etc/wireguard/wg0.conf"
+      [ -f "/host/etc/wireguard/wg0.conf" ] && conf="/host/etc/wireguard/wg0.conf"
+
+      # Fetch all registered clusters from AWS SSM
+      cluster_params=$(aws ssm get-parameters-by-path --path "/sandbox/clusters" --region "$region" --query "Parameters[*].Value" --output json 2>/dev/null || echo "[]")
+      if [ -z "$cluster_params" ] || [ "$cluster_params" = "[]" ]; then
+        return 0
+      fi
+
+      # Prepare temporary WireGuard config if interface exists
+      local has_wg_conf=false
+      local tmp_conf=""
+      if [ -f "$conf" ] && grep -q "\[Interface\]" "$conf"; then
+        has_wg_conf=true
+        tmp_conf="/tmp/wg0.conf.tmp.$$"
+        awk '/^\[Interface\]/{flag=1} /^\[Peer\]/{flag=0} flag {print}' "$conf" > "$tmp_conf"
+      fi
+
+      # Process each cluster entry
+      while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        peer_cluster=$(echo "$entry" | jq -r ".cluster_name // empty" 2>/dev/null || true)
+        peer_region=$(echo "$entry" | jq -r ".region // empty" 2>/dev/null || true)
+        peer_wg_ip=$(echo "$entry" | jq -r ".wg_ip // empty" 2>/dev/null || true)
+        peer_priv_ip=$(echo "$entry" | jq -r ".private_ip // empty" 2>/dev/null || true)
+        [ -z "$peer_cluster" ] && continue
+
+        peer_pubkey=$(aws ssm get-parameter --name "/sandbox/wireguard/${peer_cluster}/public-key" --region "$region" --query "Parameter.Value" --output text 2>/dev/null || true)
+        [ -z "$peer_pubkey" ] || [ "$peer_pubkey" = "None" ] && continue
+        [[ "$peer_pubkey" =~ ^[A-Za-z0-9+/=]{44}$ ]] || continue
+        [[ "$peer_wg_ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] || continue
+
+        endpoint="${peer_priv_ip}:51820"
+
+        # Reconcile WireGuardPeer CRD in Kubernetes
+        if [ -n "$TOKEN" ]; then
+          cat <<EOF_CRD | curl -k -s -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/apply-patch+yaml" -X PATCH "$APISERVER/apis/networking.opensandbox.io/v1alpha1/wireguardpeers/${peer_cluster}?fieldManager=node-network-agent" --data-binary @- >/dev/null 2>&1 || true
+    apiVersion: networking.opensandbox.io/v1alpha1
+    kind: WireGuardPeer
+    metadata:
+      name: "${peer_cluster}"
+    spec:
+      clusterName: "${peer_cluster}"
+      region: "${peer_region}"
+      wireGuardIP: "${peer_wg_ip}"
+      endpoint: "${endpoint}"
+      publicKey: "${peer_pubkey}"
+      persistentKeepalive: 25
+    status:
+      phase: "Active"
+      lastSynchronized: "$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+    EOF_CRD
+        fi
+
+        # Append to local WireGuard conf if not self
+        if [ "$has_wg_conf" = "true" ] && [ "$peer_cluster" != "$self_name" ]; then
+          echo -e "\n[Peer]\n# ${peer_cluster} (${peer_region})\nPublicKey = ${peer_pubkey}\nEndpoint = ${endpoint}\nAllowedIPs = ${peer_wg_ip}/32\nPersistentKeepalive = 25" >> "$tmp_conf"
+        fi
+      done <<< "$(echo "$cluster_params" | jq -c '.[] | if type=="string" then fromjson else . end' 2>/dev/null || true)"
+
+      if [ "$has_wg_conf" = "true" ] && [ -n "$tmp_conf" ] && [ -f "$tmp_conf" ]; then
+        mv "$tmp_conf" "$conf"
+        chmod 600 "$conf"
+        if command -v wg >/dev/null 2>&1; then
+          wg syncconf wg0 <(wg-quick strip wg0 2>/dev/null) 2>/dev/null || true
+        fi
+      fi
+      echo "[$(date -u +"%Y-%m-%dT%H:%M:%SZ")] Successfully synchronized WireGuard mesh peers and CRDs"
+    }
+
+    # Main loop
+    while true; do
+      sync_mesh || echo "Sync iteration completed with warning"
+      sleep "${SYNC_INTERVAL:-60}"
+    done
+{{- end }}

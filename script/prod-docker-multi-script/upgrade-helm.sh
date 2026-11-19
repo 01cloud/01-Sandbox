@@ -16,6 +16,14 @@ LIB_DIR="${SCRIPT_DIR}/lib"
 source "${LIB_DIR}/globals.sh"
 source "${LIB_DIR}/clusters.sh"
 
+_apply_chart_crds() {
+  local ctx="$1"
+  log_info "Ensuring WireGuardPeer CRD is up-to-date on [${ctx}]..."
+  if [ -f "${CODE_INSPECTOR_DIR}/crds/wireguard-peer-crd.yaml" ]; then
+    kubectl --kubeconfig "$KUBECONFIG" --context "$ctx" apply -f "${CODE_INSPECTOR_DIR}/crds/wireguard-peer-crd.yaml" >/dev/null 2>&1 || true
+  fi
+}
+
 echo -e "\n${CYAN}${BOLD}=== Safe Helm Upgrade (Metrics & Configs) ===${NC}"
 echo -e "Chart path: ${BOLD}${CODE_INSPECTOR_DIR}${NC}"
 echo -e "Target:     ${BOLD}${TARGET_HUB}${NC}\n"
@@ -23,12 +31,15 @@ echo -e "Target:     ${BOLD}${TARGET_HUB}${NC}\n"
 upgrade_primary() {
   log_step "Upgrading Helm release on PrimaryHub..."
   ensure_node_ssm_access "$PRIMARYHUB_HOST"
+  _sync_remote_kubeconfig "primaryhub" "$PRIMARYHUB_HOST" "${WG_HUB1_IP:-10.99.0.1}"
   ensure_cluster_ssh_tunnel "primaryhub" "$PRIMARYHUB_HOST"
 
   if ! kubectl --kubeconfig "$KUBECONFIG" --context kind-primaryhub cluster-info >/dev/null 2>&1; then
     log_error "Cannot reach kind-primaryhub. Please verify AWS credentials or SSM tunnel."
     return 1
   fi
+
+  _apply_chart_crds "kind-primaryhub"
 
   log_info "Running helm upgrade for codeinspector on kind-primaryhub..."
   helm upgrade codeinspector "${CODE_INSPECTOR_DIR}" \
@@ -48,12 +59,15 @@ upgrade_primary() {
 upgrade_secondary() {
   log_step "Upgrading Helm release on SecondaryHub..."
   ensure_node_ssm_access "$SECONDARYHUB_HOST"
+  _sync_remote_kubeconfig "secondaryhub" "$SECONDARYHUB_HOST" "${WG_HUB2_IP:-10.99.0.2}"
   ensure_cluster_ssh_tunnel "secondaryhub" "$SECONDARYHUB_HOST"
 
   if ! kubectl --kubeconfig "$KUBECONFIG" --context kind-secondaryhub cluster-info >/dev/null 2>&1; then
     log_warn "Cannot reach kind-secondaryhub. Skipping SecondaryHub."
     return 0
   fi
+
+  _apply_chart_crds "kind-secondaryhub"
 
   log_info "Running helm upgrade for codeinspector on kind-secondaryhub..."
   helm upgrade codeinspector "${CODE_INSPECTOR_DIR}" \
@@ -93,6 +107,8 @@ upgrade_cortex() {
     log_warn "Cannot reach kind-cortex. Skipping Cortex Helm upgrade."
     return 0
   fi
+
+  _apply_chart_crds "kind-cortex"
 
   log_info "Running helm upgrade for cortex on kind-cortex..."
   helm upgrade --install codeinspector "${CODE_INSPECTOR_DIR}" \

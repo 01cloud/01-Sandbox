@@ -13,7 +13,8 @@ This document provides a comprehensive post-mortem and reference guide for the o
 5. [Issue 5: Kubeconfig Port Stale Pollution & AWS Security Group Restrictions (`127.0.0.1:35085 Connection Refused`)](#issue-5-kubeconfig-port-stale-pollution--aws-security-group-restrictions-12700135085-connection-refused)
 6. [Issue 6: Docker Image Streaming Authentication Failures](#issue-6-docker-image-streaming-authentication-failures)
 7. [Issue 7: Pods in ErrImagePull Due to 8 GiB EBS Volume Exhaustion ("no space left on device")](#issue-7-pods-in-errimagepull-due-to-8-gib-ebs-volume-exhaustion-no-space-left-on-device)
-8. [Architecture Reference: SSH Tunnel & Port Mapping Matrix](#architecture-reference-ssh-tunnel--port-mapping-matrix)
+8. [Issue 8: Cortex Pod CrashLoopBackOff Due to IMDSv2 Hop Limit in KinD/Docker](#issue-8-cortex-pod-crashloopbackoff-due-to-imdsv2-hop-limit-in-kinddocker)
+9. [Architecture Reference: SSH Tunnel & Port Mapping Matrix](#architecture-reference-ssh-tunnel--port-mapping-matrix)
 
 ---
 
@@ -212,15 +213,49 @@ failed to extract layer ... no space left on device
 
 ---
 
+## Issue 8: Cortex Pod CrashLoopBackOff Due to IMDSv2 Hop Limit in KinD/Docker
+
+### Symptom
+On the Cortex EC2 instance (`10.20.156.119`), the `cortex` pod in namespace `opensandbox-system` repeatedly crashes (`CrashLoopBackOff`):
+```text
+caller=blocks_finder_bucket_scan.go:161 level=error msg="unable to run the initial blocks scan" err="Access Denied"
+caller=cortex.go:447 level=error msg="module failed" module=store-queryable err="unable to run the initial blocks scan: Access Denied"
+```
+
+### Root Cause
+1. Cortex uses the AWS SDK to query the long-term metrics storage bucket (`s3://01-sandbox-cortex-storage`) using IAM role credentials retrieved from the EC2 Instance Metadata Service (`http://169.254.169.254/latest/api/token`).
+2. EC2 instances configured with IMDSv2 require a session token retrieved via HTTP PUT. By default, AWS sets `HttpPutResponseHopLimit = 1`.
+3. Because Kubernetes runs inside a Docker container (KinD), and the pod runs inside a nested network namespace (veth + bridge), network packets pass through multiple network hops (decrementing IP TTL by 2+ hops).
+4. The IMDS service discards the response packet when the hop count limit is exceeded, causing the token request to timeout and fail. Cortex then falls back to unauthenticated S3 queries, resulting in `Access Denied` and crashing during initial TSDB bucket sync.
+
+### Solution
+1. **Increase IMDSv2 Hop Limit on EC2**:
+   ```bash
+   aws ec2 modify-instance-metadata-options \
+     --instance-id <cortex-instance-id> \
+     --http-put-response-hop-limit 3 \
+     --http-endpoint enabled \
+     --region us-east-1
+   ```
+2. **Restart Cortex Pod**:
+   ```bash
+   kubectl -n opensandbox-system delete pod -l app.kubernetes.io/name=cortex
+   ```
+3. **Verification**:
+   The new pod immediately acquires IAM credentials via IMDSv2, synchronizes TSDB blocks from S3, and transitions to `2/2 Running`.
+
+---
+
 ## Architecture Reference: SSH Tunnel & Port Mapping Matrix
 
-| Cluster Name | Role | Region | Host Public IP | Tunnel Port (Local) | Target Node Port | Overlay IP (WireGuard) |
+| Cluster Name | Role | Region | Host Private IP | Tunnel Port (Local) | Target Node Port | Overlay IP (WireGuard) |
 |---|---|---|---|---|---|---|
-| **`primaryhub`** | Active OCM Hub & DB Primary | `us-east-1` / `eu-west-1` | `52.213.158.85` | **`16443`** | `6443` | `10.99.0.1` |
-| **`secondaryhub`** | Standby OCM Hub & DB Standby | `ap-south-1` | `13.234.240.239` | **`26443`** | `6443` | `10.99.0.2` |
-| **`spoke1`** | Managed Workload Cluster | `eu-central-1` | `18.197.200.4` | **`36443`** | `6443` | `10.99.0.3` |
-| **`spoke2`** | Managed Workload Cluster | `us-east-1` | `34.235.149.38` | **`46443`** | `6443` | `10.99.0.4` |
-| **`Envoy Gateway`** | Reverse Proxy / VIP Entry | Co-located on PrimaryHub | `52.213.158.85` | N/A | `80`, `443` | `10.99.0.100` |
+| **`primaryhub`** | Active OCM Hub & DB Primary | `us-east-1` | `10.20.134.82` | **`16443`** | `6443` | `10.99.0.1` |
+| **`secondaryhub`** | Standby OCM Hub & DB Standby | `ap-south-1` | `10.20.141.229` | **`26443`** | `6443` | `10.99.0.2` |
+| **`spoke1`** | Managed Workload Cluster | `eu-central-1` | `10.20.138.163` | **`36443`** | `6443` | `10.99.0.3` |
+| **`spoke2`** | Managed Workload Cluster | `us-east-1` | `10.20.158.172` | **`46443`** | `6443` | `10.99.0.4` |
+| **`cortex`** | Metrics & Storage Engine | `us-east-1` | `10.20.156.119` | **`56443`** | `6443` | `10.99.0.50` |
+| **`Envoy Gateway`** | Reverse Proxy / Failover VIP | Co-located on Cortex | `10.20.156.119` | N/A | `80` (NodePort 30080) | `10.99.0.50` |
 
 ---
 

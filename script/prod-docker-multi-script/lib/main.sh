@@ -164,6 +164,7 @@ main() {
   phase_10_load_custom_image
   phase_11_primaryhub_deploy
   phase_12_secondaryhub_deploy
+  phase_12c_cortex_deploy
   phase_13_create_spoke_clusters
   phase_14_wireguard_on_all_clusters
   phase_15_install_crds_on_spokes

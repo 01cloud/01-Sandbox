@@ -6,7 +6,7 @@
 # It completely disables all standard sandbox workloads and activates ONLY the
 # secured Cortex TSDB monolithic engine and NGINX auth/TLS proxy gate.
 
-# ── Activate ONLY Cortex ──────────────────────────────────────────────────────
+# ── Activate Cortex & Envoy Failover Gateway ──────────────────────────────────
 cortex:
   enabled: true
   replicaCount: 1
@@ -56,6 +56,23 @@ cortex:
       cpu: "1000m"
       memory: "2048Mi"
 
+envoy-gateway:
+  enabled: true
+  primaryHub:
+    host: "10.99.0.1"
+    port: 80
+    priority: 0
+  secondaryHub:
+    host: "10.99.0.2"
+    port: 80
+    priority: 1
+  service:
+    type: NodePort
+    httpPort: 80
+    nodePort: 30080
+    adminPort: 9901
+    adminNodePort: 30901
+
 # ── Disable all standard sandbox microservices ────────────────────────────────
 global:
   ocm:
@@ -95,4 +112,9 @@ kindCluster:
   enabled: false
 
 nodeNetworkAgent:
-  enabled: false
+  enabled: true
+  namespace: kube-system
+  image: "alpine:3.19"
+  syncInterval: 60
+  awsRegion: "us-east-1"
+  autoDisableHostCron: true

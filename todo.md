@@ -216,12 +216,17 @@ This document tracks all security vulnerabilities, Kubernetes-native architectur
 
 ### Phase 4: P2 — Kubernetes-Native Networking Evolution
 
-- [ ] **4.1. Replace Host Cron WireGuard Synchronization with a Kubernetes-Native DaemonSet**
-  - **Current State:** A host-level root cron job (`/etc/cron.d/wireguard-sync`) executes `/usr/local/bin/sync-wireguard-peers.sh` every minute. It parses `/sandbox/clusters` from AWS SSM, executes AWS CLI commands on the host, and calls `wg syncconf`.
-  - **Kubernetes-Native Target State:**
-    - Package the sync logic into a Kubernetes **DaemonSet** or custom Operator.
-    - Store WireGuard peer states as Kubernetes Custom Resources (`WireGuardPeer`).
-    - The controller watches the CRDs and applies WireGuard configurations via Netlink directly, making peer discovery and key rotation fully declarative and auditable via `kubectl`.
+- [x] **4.1. Replace Host Cron WireGuard Synchronization with a Kubernetes-Native DaemonSet** *(Completed Nov 19, 2026)*
+  - **Previous State:** A host-level root cron job (`/etc/cron.d/wireguard-sync` / systemd timer) executed `/usr/local/bin/sync-wireguard-peers.sh` every minute.
+  - **Kubernetes-Native Target Implemented:**
+    - Created CustomResourceDefinition: [`codeInspector/crds/wireguard-peer-crd.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/crds/wireguard-peer-crd.yaml) (`WireGuardPeer` / `networking.opensandbox.io/v1alpha1`).
+    - Packaged sync agent into `nodeNetworkAgent` DaemonSet and ConfigMap in the umbrella Helm chart:
+      - [`codeInspector/templates/node-network-agent.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/templates/node-network-agent.yaml)
+      - [`codeInspector/templates/node-network-agent-configmap.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/templates/node-network-agent-configmap.yaml)
+      - [`codeInspector/templates/node-network-agent-rbac.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/templates/node-network-agent-rbac.yaml)
+    - Enabled by default in [`codeInspector/values.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values.yaml) and [`codeInspector/values-cortex.yaml`](file:///home/berrybytes/Desktop/Kamal/01-Sandbox/codeInspector/values-cortex.yaml).
+    - Automatically discovers peer topology from AWS SSM `/sandbox/clusters`, applies WireGuard host interface synchronization (`wg syncconf`), enforces kernel forwarding (`net.ipv4.ip_forward = 1`), and reconciles peer state into Kubernetes Custom Resources auditable via `kubectl get wireguardpeers -o wide`.
+    - Live verified on Cortex: `node-network-agent` running cleanly (`1/1 Running`), all 8 cluster peers reconciled into `WireGuardPeer` resources, and active mesh traffic established without requiring host cron jobs.
 
 - [ ] **4.2. Long-Term Evaluation: Cilium ClusterMesh with Transparent WireGuard**
   - **Recommendation:** Evaluate replacing `kindnet` + host WireGuard bash scripts with **Cilium CNI**. Cilium supports native multi-cluster ClusterMesh with kernel-level WireGuard encryption, native Kubernetes NetworkPolicies (L3/L4/L7), and integrated Cilium Tetragon eBPF security observability out of the box.

@@ -451,6 +451,9 @@ nodeNetworkAgent:
   enabled: true
   namespace: kube-system
   image: "alpine:3.19"
+  syncInterval: 60
+  awsRegion: "us-east-1"
+  autoDisableHostCron: true
 
 ###############################################################
 # Cortex TSDB Long-Term S3 Storage subchart values
@@ -463,3 +466,24 @@ cortex:
   s3:
     bucket: "01-sandbox-cortex-storage"
     region: "us-east-1"
+
+###############################################################
+# Envoy Gateway Multi-Cluster Failover Ingress subchart values
+###############################################################
+envoy-gateway:
+  enabled: false
+  replicaCount: 1
+  service:
+    type: NodePort
+    httpPort: 80
+    nodePort: 30080
+    adminPort: 9901
+    adminNodePort: 30901
+  primaryHub:
+    host: "10.99.0.1"
+    port: 80
+    priority: 0
+  secondaryHub:
+    host: "10.99.0.2"
+    port: 80
+    priority: 1

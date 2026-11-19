@@ -949,50 +949,6 @@ _do_phase_13_create_spoke_clusters() {
 }
 
 phase_13_create_spoke_clusters() {
-  local is_remote=false
-  [ "$SPOKE1_HOST" != "127.0.0.1" ] && [ "$SPOKE1_HOST" != "localhost" ] && is_remote=true
-
-  _create_kind_cluster "spoke1" "10.246.0.0/16" "10.98.0.0/16"  "$SPOKE1_TRANSIT_IP" "false" "$SPOKE1_HOST" "$WG_SPOKE1_IP" || return 1
-  _create_kind_cluster "spoke2" "10.247.0.0/16" "10.100.0.0/16" "$SPOKE2_TRANSIT_IP" "false" "$SPOKE2_HOST" "$WG_SPOKE2_IP" || return 1
-
-  # KinD single-node clusters taint the control-plane node with NoSchedule by default.
-  # Since there are no worker nodes on spokes, klusterlet (and all user workloads)
-  # would be permanently stuck in Pending / FailedScheduling.
-  # Remove the taint so pods can schedule on the sole control-plane node.
-  log_info "Ensuring control-plane NoSchedule taint is absent from spoke nodes..."
-  for spoke in spoke1 spoke2; do
-    if ! kubectl --context "kind-${spoke}" get node "${spoke}-control-plane" -o jsonpath='{.spec.taints}' 2>/dev/null | grep -q 'NoSchedule'; then
-      log_info "  ${spoke}: control-plane NoSchedule taint already absent – skipping."
-    else
-      kubectl --context "kind-${spoke}" taint node "${spoke}-control-plane" \
-        node-role.kubernetes.io/control-plane:NoSchedule- 2>/dev/null || true
-      kubectl --context "kind-${spoke}" taint node "${spoke}-control-plane" \
-        node-role.kubernetes.io/master:NoSchedule- 2>/dev/null || true
-      log_info "  ${spoke}: control-plane taint removed."
-    fi
-  done
-
-  # Verify both spoke containers exist before completing Phase 13
-  for spoke in spoke1 spoke2; do
-    local target_host="$SPOKE1_HOST"
-    [ "$spoke" == "spoke2" ] && target_host="$SPOKE2_HOST"
-    if $is_remote; then
-      if ! remote_exec "$target_host" "docker inspect ${spoke}-control-plane" >/dev/null 2>&1; then
-        log_error "Critical: ${spoke}-control-plane container does not exist on ${target_host} after Phase 13!"
-        return 1
-      fi
-    else
-      if ! docker inspect "${spoke}-control-plane" >/dev/null 2>&1; then
-        log_error "Critical: ${spoke}-control-plane container does not exist after Phase 13!"
-        return 1
-      fi
-    fi
-  done
-
-  log_success "Spoke clusters created."
-}
-
-phase_13_create_spoke_clusters() {
   run_phase "13" "Creating Spoke Clusters" _check_phase_13 _do_phase_13_create_spoke_clusters
 }
 #
